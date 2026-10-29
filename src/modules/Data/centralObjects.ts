@@ -1,0 +1,160 @@
+// ============================================
+// CENTRAL OBJECTS - Центральные гравитационные объекты
+// ============================================
+
+import type { CentralObjectOption } from '../../types';
+
+const centralObjects: CentralObjectOption[] = [
+  {
+    id: 'orange_dwarf',
+    name: 'Оранжевый карлик',
+    objectClass: 'star',
+    role: 'primary_star',
+    potentialEnergySources: ['stellar_radiation', 'geothermal'],
+    characteristicConstraints: ['Moderate luminosity', 'Long lifespan (15-30 billion years)'],
+    potentialThreats: ['Solar flares', 'UV radiation'],
+    compatibleOrbits: ['circular', 'elliptical', 'habitable_zone'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['star', 'main_sequence', 'stable'],
+    minAge: 0.1,
+    maxAge: 13.8
+  },
+  {
+    id: 'red_dwarf',
+    name: 'Красный карлик',
+    objectClass: 'star',
+    role: 'primary_star',
+    potentialEnergySources: ['stellar_radiation', 'geothermal'],
+    characteristicConstraints: ['Low luminosity', 'Very long lifespan (trillions of years)', 'High flare activity'],
+    potentialThreats: ['Intense solar flares', 'Tidal locking', 'Low energy output'],
+    compatibleOrbits: ['close_orbit', 'tidal_locked', 'habitable_zone'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['star', 'main_sequence', 'long_lived', 'active'],
+    minAge: 0.1,
+    maxAge: 13.8
+  },
+  {
+    id: 'yellow_dwarf',
+    name: 'Жёлтый карлик',
+    objectClass: 'star',
+    role: 'primary_star',
+    potentialEnergySources: ['stellar_radiation', 'geothermal'],
+    characteristicConstraints: ['Moderate luminosity', 'Lifespan ~10 billion years'],
+    potentialThreats: ['Solar flares', 'Gradual luminosity increase'],
+    compatibleOrbits: ['circular', 'elliptical', 'habitable_zone'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['star', 'main_sequence', 'sun_like'],
+    minAge: 0.1,
+    maxAge: 13.8
+  },
+  {
+    id: 'blue_giant',
+    name: 'Голубой гигант',
+    objectClass: 'star',
+    role: 'primary_star',
+    potentialEnergySources: ['stellar_radiation', 'UV_radiation'],
+    characteristicConstraints: ['Very high luminosity', 'Short lifespan (millions of years)', 'High temperature'],
+    potentialThreats: ['Intense UV radiation', 'Rapid evolution', 'Supernova potential'],
+    compatibleOrbits: ['distant_orbit', 'wide_orbit'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['star', 'giant', 'hot', 'short_lived'],
+    minAge: 0.01,
+    maxAge: 0.5
+  },
+  {
+    id: 'white_dwarf',
+    name: 'Белый карлик',
+    objectClass: 'stellar_remnant',
+    role: 'gravitational_anchor',
+    potentialEnergySources: ['thermal_radiation', 'geothermal'],
+    characteristicConstraints: ['Very dense', 'Small size', 'Cooling over time'],
+    potentialThreats: ['Tidal forces', 'Low energy output'],
+    compatibleOrbits: ['close_orbit', 'wide_orbit'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['stellar_remnant', 'dense', 'cooling'],
+    minAge: 0.1,
+    maxAge: 13.8
+  },
+  {
+    id: 'pulsar',
+    name: 'Пульсар',
+    objectClass: 'stellar_remnant',
+    role: 'energy_source',
+    potentialEnergySources: ['electromagnetic_radiation', 'particle_radiation'],
+    characteristicConstraints: ['Extremely dense', 'Rapid rotation', 'Strong magnetic field'],
+    potentialThreats: ['Intense radiation', 'Magnetic field effects', 'Pulsed energy output'],
+    compatibleOrbits: ['distant_orbit', 'polar_orbit'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['stellar_remnant', 'neutron_star', 'pulsing', 'high_energy'],
+    minAge: 0.01,
+    maxAge: 13.8
+  },
+  {
+    id: 'black_hole',
+    name: 'Чёрная дыра',
+    objectClass: 'compact_object',
+    role: 'gravitational_anchor',
+    potentialEnergySources: ['accretion_disk_radiation', 'hawking_radiation'],
+    characteristicConstraints: ['Extreme gravity', 'Event horizon', 'Time dilation effects'],
+    potentialThreats: ['Tidal disruption', 'Spaghettification', 'Extreme radiation'],
+    compatibleOrbits: ['distant_orbit', 'stable_orbit', 'accretion_disk'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['compact_object', 'gravity_well', 'exotic'],
+    minAge: 0.01,
+    maxAge: 13.8
+  },
+  {
+    id: 'brown_dwarf',
+    name: 'Коричневый карлик',
+    objectClass: 'substellar_object',
+    role: 'gravitational_anchor',
+    potentialEnergySources: ['infrared_radiation', 'geothermal'],
+    characteristicConstraints: ['Intermediate between star and planet', 'Low luminosity', 'Cool temperature'],
+    potentialThreats: ['Low energy output', 'Atmospheric instability'],
+    compatibleOrbits: ['close_orbit', 'wide_orbit'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['substellar', 'failed_star', 'cool'],
+    minAge: 0.01,
+    maxAge: 13.8
+  },
+  {
+    id: 'lone_gas_giant',
+    name: 'Одинокий газовый гигант',
+    objectClass: 'substellar_object',
+    role: 'gravitational_anchor',
+    potentialEnergySources: ['internal_heat', 'geothermal'],
+    characteristicConstraints: ['Large size', 'Gaseous composition', 'Strong gravity'],
+    potentialThreats: ['Extreme weather', 'High pressure', 'Strong winds'],
+    compatibleOrbits: ['moon_orbit', 'free_floating'],
+    scientificStatus: 'physically_plausible',
+    baseWeight: 1,
+    tags: ['planet', 'gas_giant', 'isolated'],
+    minAge: 0.01,
+    maxAge: 13.8
+  },
+  {
+    id: 'relativistic_jet',
+    name: 'Релятивистский джет',
+    objectClass: 'jet',
+    role: 'energy_source',
+    potentialEnergySources: ['particle_radiation', 'gamma_radiation', 'magnetic_fields'],
+    characteristicConstraints: ['Highly collimated', 'Relativistic speeds', 'Extreme energy'],
+    potentialThreats: ['Intense radiation', 'Particle bombardment', 'Magnetic field effects'],
+    compatibleOrbits: ['perpendicular_orbit', 'distant_observation'],
+    scientificStatus: 'established_fact',
+    baseWeight: 1,
+    tags: ['jet', 'high_energy', 'relativistic', 'exotic'],
+    minAge: 0.01,
+    maxAge: 13.8
+  }
+];
+
+export default centralObjects;
