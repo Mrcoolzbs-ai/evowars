@@ -327,3 +327,73 @@ describe('Stage 4.1.1.2 Reservoir: обязательность properties и я
     expect(junk.errors.some((e) => e.includes('materialApplicability'))).toBe(true);
   });
 });
+
+// ============================================
+// STAGE 4.1.1.3 — СЛОВАРИ, А НЕ МАССИВЫ (ISSUE B)
+// ============================================
+
+describe('Stage 4.1.1.3 Reservoir: словари — не массивы (ISSUE B)', () => {
+  it('properties: [] — невалидная запись (массив не словарь)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: [] });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('properties'))).toBe(true);
+    expect(check.errors.some((e) => e.includes('массив'))).toBe(true);
+  });
+
+  it('properties: {} — валидная запись', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {} });
+    expect(check.valid).toBe(true);
+    expect(check.errors).toEqual([]);
+  });
+
+  it('material.entries: [] — невалидная запись (пустой массив ≠ известная пустота)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: [] } });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('material.entries'))).toBe(true);
+  });
+
+  it('material.entries: {} — валидная запись (известный пустой инвентарь)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: {} } });
+    expect(check.valid).toBe(true);
+    expect(check.errors).toEqual([]);
+  });
+
+  it('массив числовых значений не принимается как species-словарь', () => {
+    const record = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: [5, 10] } });
+    expect(record.valid).toBe(false);
+    expect(record.errors.some((e) => e.includes('material.entries'))).toBe(true);
+    const direct = validateMaterialInventory({ basis: 'amount', entries: [5, 10] } as unknown as never);
+    expect(direct.valid).toBe(false);
+  });
+
+  it('известный ноль { co2: 0 } остаётся валидным', () => {
+    const record = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: { co2: 0 } } });
+    expect(record.valid).toBe(true);
+    const direct = validateMaterialInventory({ basis: 'amount', entries: { co2: 0 } });
+    expect(direct.valid).toBe(true);
+  });
+
+  it('корректный словарь { co2: 5, h2o: 10 } остаётся валидным', () => {
+    const record = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: { co2: 5, h2o: 10 } } });
+    expect(record.valid).toBe(true);
+    const direct = validateMaterialInventory({ basis: 'amount', entries: { co2: 5, h2o: 10 } });
+    expect(direct.valid).toBe(true);
+  });
+
+  it('validateMaterialInventory: entries = null и entries = [] — невалидны, {} — валиден', () => {
+    expect(validateMaterialInventory({ basis: 'amount', entries: null } as unknown as never).valid).toBe(false);
+    expect(validateMaterialInventory({ basis: 'amount', entries: [] } as unknown as never).valid).toBe(false);
+    expect(validateMaterialInventory({ basis: 'amount', entries: {} }).valid).toBe(true);
+  });
+
+  it('setMaterialInventory отвергает массив entries с ReservoirError', () => {
+    expect(() => setMaterialInventory(createReservoir('r', 'test'), 'amount', [] as unknown as Record<string, number>)).toThrow(ReservoirError);
+  });
+
+  it('material: [] и energy: [] — невалидные записи', () => {
+    const material = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: [] });
+    expect(material.valid).toBe(false);
+    const energy = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, energy: [] });
+    expect(energy.valid).toBe(false);
+  });
+});

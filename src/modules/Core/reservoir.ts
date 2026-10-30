@@ -90,6 +90,18 @@ export function isKnownBasis(basis: string): basis is InventoryBasis {
 }
 
 /**
+ * Проверка значения как объекта-записи (именованного словаря) для
+ * runtime-данных (Stage 4.1.1.3, ISSUE B): у массива typeof тоже
+ * 'object', поэтому массивы исключаются ЯВНО. properties и
+ * material.entries — словари (speciesId → значение), а не массивы:
+ * пустой массив не равен пустому словарю и не принимается за
+ * «известную пустоту». Пустой обычный объект {} остаётся допустимым.
+ */
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * Проверка молярной массы перед преобразованием (Stage 4.1.1):
  * null/NaN/∞/отрицательная масса не пригодны для перевода
  * моль ↔ кг и не «зануляются».
@@ -175,14 +187,25 @@ export interface MaterialInventoryValidation {
  * - основание известно реестру (данные из JSON могут содержать мусор);
  * - числа конечны и неотрицательны (отрицательный запас невозможен);
  * - для долей дополнительно: сумма долей не обязана быть 1
- *   (инвентарь может быть частичным), это не ошибка, а контракт поля.
+ *   (инвентарь может быть частичным), это не ошибка, а контракт поля;
+ * - Stage 4.1.1.3 (ISSUE B): entries — объект-запись
+ *   (speciesId → количество), НЕ массив: пустой массив не является
+ *   «известным пустым инвентарём» и отвергается явно.
  */
 export function validateMaterialInventory(inv: MaterialInventory): MaterialInventoryValidation {
   const errors: string[] = [];
   if (!isKnownBasis(inv.basis)) {
     errors.push(`неизвестное основание инвентаря «${String(inv.basis)}»`);
   }
-  for (const [id, amount] of Object.entries(inv.entries)) {
+  if (!isPlainRecord(inv.entries)) {
+    errors.push(
+      `material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null: получено ${
+        inv.entries === null ? 'null' : Array.isArray(inv.entries) ? 'массив' : typeof inv.entries
+      }`
+    );
+    return { valid: false, errors };
+  }
+  for (const [id, amount] of Object.entries(inv.entries as Record<string, number>)) {
     if (!Number.isFinite(amount)) {
       errors.push(`количество вида «${id}» должно быть конечным числом, получено ${amount}`);
     } else if (amount < 0) {
@@ -422,6 +445,11 @@ export interface ReservoirRecordValidation {
  * Валидация записи резервуара произвольной формы (Stage 4.1.1).
  * Проверяет запись из JSON или внешнего кода ДО регистрации
  * в состоянии мира. Диагностика точнее общей проверки объектов.
+ *
+ * Stage 4.1.1.3 (ISSUE B): properties и material.entries обязаны
+ * быть объектами-записями: у массива typeof тоже 'object', поэтому
+ * массив (включая пустой) отвергается явно — пустой массив НЕ
+ * равен пустому словарю и не принимается за «известную пустоту».
  */
 export function validateReservoirRecord(reservoir: unknown): ReservoirRecordValidation {
   const errors: string[] = [];
@@ -439,15 +467,15 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
     errors.push('bodyId резервуара должен быть строкой, если задан');
   }
   if (rec.material !== undefined) {
-    if (typeof rec.material !== 'object' || rec.material === null) {
+    if (!isPlainRecord(rec.material)) {
       errors.push('material резервуара должен быть объектом (basis + entries)');
     } else {
       const material = rec.material as Record<string, unknown>;
       if (typeof material.basis !== 'string' || !isKnownBasis(material.basis)) {
         errors.push(`material.basis должен быть известным основанием, получено «${String(material.basis)}»`);
       }
-      if (typeof material.entries !== 'object' || material.entries === null) {
-        errors.push('material.entries должен быть объектом');
+      if (!isPlainRecord(material.entries)) {
+        errors.push('material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null');
       } else {
         for (const [id, amount] of Object.entries(material.entries as Record<string, unknown>)) {
           if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
@@ -458,8 +486,8 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
     }
   }
   if (rec.energy !== undefined && rec.energy !== null) {
-    if (typeof rec.energy !== 'object') {
-      errors.push('energy резервуара должен быть объектом или null');
+    if (!isPlainRecord(rec.energy)) {
+      errors.push('energy резервуара должен быть объектом-записью (не массивом) или null');
     } else {
       const energy = rec.energy as Record<string, unknown>;
       const storedJ = energy.storedJ;
@@ -490,8 +518,10 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
     // условной); пустой объект {} допустим — «характеристик нет»
     // отличается от «характеристики не заданы структурно».
     errors.push('properties резервуара обязателен (объект ScientificValue; пустой объект допустим)');
-  } else if (typeof rec.properties !== 'object' || rec.properties === null) {
-    errors.push('properties резервуара должен быть объектом');
+  } else if (!isPlainRecord(rec.properties)) {
+    // Stage 4.1.1.3 (ISSUE B): properties — именованный словарь
+    // ScientificValue; массив (включая пустой []) — не словарь.
+    errors.push('properties резервуара должен быть объектом-словарём (именованные ScientificValue), а не массивом');
   } else {
     for (const [key, value] of Object.entries(rec.properties as Record<string, unknown>)) {
       const issues = validateScientificValueShape(value);

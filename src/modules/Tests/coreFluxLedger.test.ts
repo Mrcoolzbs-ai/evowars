@@ -16,6 +16,7 @@ import {
   integratePower,
   totalInventory,
   netExternalTransfers,
+  reservoirsToMolarCounts,
   auditSubstanceConservation,
   auditElementConservation,
   auditChargeConservation,
@@ -32,7 +33,7 @@ import {
   getAmount,
   setEnergyInventory
 } from '../Core/reservoir';
-import type { ReservoirRecord } from '../Core/reservoir';
+import type { MaterialInventory, ReservoirRecord } from '../Core/reservoir';
 import { createSpeciesCatalog } from '../Core/species';
 import type { SpeciesCatalog } from '../Core/species';
 
@@ -73,10 +74,14 @@ function speciesFixture(): SpeciesCatalog {
 }
 
 function energyFixture(storedJ1: number, storedJ2: number): Record<string, ReservoirRecord> {
-  return {
-    r1: setEnergyInventory(createReservoir('r1', 'test'), { storedJ: storedJ1, netPowerW: null, fluxW_m2: null }),
-    r2: setEnergyInventory(createReservoir('r2', 'test'), { storedJ: storedJ2, netPowerW: null, fluxW_m2: null })
-  };
+  // Stage 4.1.1.3 (ISSUE A): чисто энергетические буферы ОБЯЗАНЫ явно
+  // объявлять нематериальность — отсутствие material больше НЕ
+  // трактуется пофазовым аудитом как автоматическая неприменимость.
+  const buffer = (id: string, storedJ: number): ReservoirRecord => ({
+    ...setEnergyInventory(createReservoir(id, 'test'), { storedJ, netPowerW: null, fluxW_m2: null }),
+    materialApplicability: 'not_applicable'
+  });
+  return { r1: buffer('r1', storedJ1), r2: buffer('r2', storedJ2) };
 }
 
 describe('Stage 4.1 FluxLedger: регистрация потоков', () => {
@@ -1228,5 +1233,141 @@ describe('Stage 4.1.1.2 FluxLedger: untimed-записи не маскируют
     expect(audit.exclusions.length).toBeGreaterThan(0);
     expect(audit.status).toBe('not_verifiable');
     expect(audit.balanced).toBe(false);
+  });
+});
+
+// ============================================
+// STAGE 4.1.1.3 — MATERIAL APPLICABILITY В ПОФАЗОВОМ АУДИТЕ (ISSUE A)
+// ============================================
+
+describe('Stage 4.1.1.3 FluxLedger: materialApplicability в пофазовом аудите (ISSUE A)', () => {
+  it('резервуар без material в обоих состояниях и без маркера — not_verifiable, а не balanced', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: createReservoir('b', 'test') };
+    const after: Record<string, ReservoirRecord> = { b: createReservoir('b', 'test') };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.exclusions.some((e) => e.key === 'b')).toBe(true);
+    expect(audit.exclusions.some((e) => e.reason.includes('запас неизвестен'))).toBe(true);
+  });
+
+  it('неизвестный материальный запас не маскируется известной неизменной энергией', () => {
+    const ledger: FluxLedger = { records: [] };
+    const energy = () => setEnergyInventory(createReservoir('b', 'test'), { storedJ: 100, netPowerW: null, fluxW_m2: null });
+    const before: Record<string, ReservoirRecord> = { b: energy() };
+    const after: Record<string, ReservoirRecord> = { b: energy() };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.discrepancies).toEqual([]);
+    expect(audit.exclusions.some((e) => e.key === 'b' && e.reason.includes('запас неизвестен'))).toBe(true);
+  });
+
+  it('materialApplicability = not_applicable в обоих состояниях — законное исключение, итог balanced', () => {
+    const ledger: FluxLedger = { records: [] };
+    const buffer = (): ReservoirRecord => ({ ...createReservoir('b', 'test'), materialApplicability: 'not_applicable' });
+    const before: Record<string, ReservoirRecord> = { b: buffer() };
+    const after: Record<string, ReservoirRecord> = { b: buffer() };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
+    expect(audit.exclusions).toEqual([]);
+  });
+
+  it('явно нематериальный энергетический буфер с корректным энергетическим потоком — balanced', () => {
+    const ledger: FluxLedger = {
+      records: [
+        {
+          id: 'e1', kind: 'internal_transfer', from: 'r1', to: 'r2',
+          subject: { subjectType: 'energy', quantityKind: 'integrated', energyJ: 30 },
+          time: null, status: 'applied'
+        }
+      ]
+    };
+    const before = energyFixture(100, 50);
+    const after = energyFixture(70, 80);
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
+    expect(audit.discrepancies).toEqual([]);
+    expect(audit.exclusions).toEqual([]);
+  });
+
+  it('маркер только в одном состоянии — переход неприменимости не подтверждён', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: { ...createReservoir('b', 'test'), materialApplicability: 'not_applicable' } };
+    const after: Record<string, ReservoirRecord> = { b: createReservoir('b', 'test') };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.exclusions.some((e) => e.key === 'b' && e.reason.includes('переход неприменимости не подтверждён'))).toBe(true);
+    // симметричный случай: маркер только в состоянии «после»
+    const mirror = auditReservoirFluxes(ledger, after, before);
+    expect(mirror.status).toBe('not_verifiable');
+    expect(mirror.exclusions.some((e) => e.key === 'b' && e.reason.includes('переход неприменимости не подтверждён'))).toBe(true);
+  });
+
+  it('известный пустой инвентарь entries = {} проверяется как известное отсутствие вещества', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', {}) };
+    const after: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', {}) };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('balanced');
+    expect(audit.exclusions).toEqual([]);
+  });
+
+  it('известный ноль entries[speciesId] = 0 остаётся известным нулём', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', { co2: 0 }) };
+    const after: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', { co2: 0 }) };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('balanced');
+    expect(audit.exclusions).toEqual([]);
+  });
+
+  it('изменение известного инвентаря без потока обнаруживается', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { a: setMaterialInventory(createReservoir('a', 'test'), 'amount', { co2: 5 }) };
+    const after: Record<string, ReservoirRecord> = { a: setMaterialInventory(createReservoir('a', 'test'), 'amount', { co2: 6 }) };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('imbalanced');
+    const d = audit.discrepancies.find((x) => x.key === 'a:co2');
+    expect(d).toBeDefined();
+    expect(d?.expected).toBe(5);
+    expect(d?.actual).toBe(6);
+  });
+
+  it('неизвестный инвентарь в одном состоянии и известный в другом не приравнивается к нулю', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', { co2: 10 }) };
+    const after: Record<string, ReservoirRecord> = { b: createReservoir('b', 'test') };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.exclusions.some((e) => e.key === 'b' && e.reason.includes('после'))).toBe(true);
+  });
+
+  it('глобальный и пофазовый аудиты согласованы: неизвестный запас — not_verifiable в обоих', () => {
+    const catalog = speciesFixture();
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: createReservoir('b', 'test') };
+    const globalAudit = auditSubstanceConservation(catalog, ledger, before, before);
+    const phaseAudit = auditReservoirFluxes(ledger, before, before);
+    expect(globalAudit.status).toBe('not_verifiable');
+    expect(phaseAudit.status).toBe('not_verifiable');
+    expect(phaseAudit.exclusions.some((e) => e.key === 'b')).toBe(true);
+  });
+
+  it('reservoirsToMolarCounts не принимает массив entries за известный пустой инвентарь (ISSUE B)', () => {
+    const catalog = speciesFixture();
+    const bad = {
+      ...createReservoir('bad', 'test'),
+      material: { basis: 'amount', entries: [] } as unknown as MaterialInventory
+    };
+    const result = reservoirsToMolarCounts(catalog, { bad });
+    expect(result.status).toBe('not_verifiable');
+    expect(result.counts).toEqual({});
+    expect(result.exclusions.length).toBeGreaterThan(0);
   });
 });

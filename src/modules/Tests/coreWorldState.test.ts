@@ -400,3 +400,27 @@ describe('Stage 4.1.1.2 WorldState: обязательные поля ReservoirR
     expect(validateWorldState(conflictState).some((i) => i.code === 'invalid_reservoir' && i.message.includes('противоречат'))).toBe(true);
   });
 });
+
+// ============================================
+// STAGE 4.1.1.3 — WORLDSTATE: СЛОВАРИ-ПОЛЯ НЕ ПРИНИМАЮТ МАССИВЫ (ISSUE B)
+// ============================================
+
+describe('Stage 4.1.1.3 WorldState: словари-поля не принимают массивы (ISSUE B)', () => {
+  it('резервуар с properties = [] — invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({ id: 'arr-props', kind: 'ocean', properties: [] } as unknown as ReservoirRecord);
+    expect(validateWorldState(state).some((i) => i.code === 'invalid_reservoir' && i.message.includes('properties'))).toBe(true);
+  });
+
+  it('резервуар с material.entries = [] — invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({ id: 'arr-entries', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: [] } } as unknown as ReservoirRecord);
+    expect(validateWorldState(state).some((i) => i.code === 'invalid_reservoir' && i.message.includes('material.entries'))).toBe(true);
+  });
+
+  it('корректные словари properties/material.entries проходят полностью', () => {
+    const state = validState();
+    state.reservoirs.push({ id: 'dict-ok', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: {} } } as unknown as ReservoirRecord);
+    expect(validateWorldState(state)).toEqual([]);
+  });
+});

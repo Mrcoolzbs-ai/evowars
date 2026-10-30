@@ -45,12 +45,21 @@
 // - отсутствие знания (unknown storedJ, неизвестная молярная масса,
 //   исключённые виды) никогда не трактуется как успешный баланс.
 //
+// Stage 4.1.1.3 (materialApplicability и форма записей):
+// - пофазовый аудит (auditReservoirFluxes) соблюдает ЯВНУЮ семантику
+//   materialApplicability: отсутствие material без маркера
+//   'not_applicable' — неизвестный запас (not_verifiable), а не
+//   автоматическая нематериальность; законное исключение материального
+//   измерения требует маркер в ОБОИХ состояниях;
+// - material.entries и properties — объекты-записи: массив не
+//   принимается за словарь и не трактуется как «известная пустота».
+//
 // Материя не создаётся и не уничтожается «внутри системы»:
 // изменение суммарного инвентаря допустимо ТОЛЬКО за счёт
 // внешних потоков; внутренние переносы сохраняют итог.
 
 import type { InventoryBasis, MaterialInventory, ReservoirRecord } from './reservoir';
-import { addMaterial, isKnownBasis, removeMaterial, validateMaterialInventory } from './reservoir';
+import { addMaterial, isKnownBasis, isPlainRecord, removeMaterial, validateMaterialInventory } from './reservoir';
 import type { SpeciesCatalog } from './species';
 import { chargeTotal, elementTotals as speciesElementTotals } from './species';
 import { comparePoints } from './simulationClock';
@@ -646,6 +655,14 @@ function auditFrame(
  * аудит сравнивает резервуары с ОДНИМ основанием).
  * Референс-агрегат в сырых единицах основания; basis-aware аудиты
  * используют reservoirsToMolarCounts.
+ *
+ * ВАЖНО (Stage 4.1.1.3): это СПРАВОЧНЫЙ агрегат заданных инвентарей,
+ * а НЕ доказательство сохранения материи. Резервуары БЕЗ
+ * материального инвентаря в сумму не входят — их запас НЕИВЕСТЕН
+ * (не ноль), поэтому «постоянство» итога totalInventory ничего не
+ * доказывает о полноте баланса. Доказательство сохранения —
+ * auditSubstanceConservation и reservoirsToMolarCounts, дающие
+ * not_verifiable при неизвестных запасах.
  */
 export function totalInventory(reservoirs: Record<string, ReservoirRecord>): { basis: InventoryBasis | null; totals: Record<string, number> } {
   let basis: InventoryBasis | null = null;
@@ -656,6 +673,12 @@ export function totalInventory(reservoirs: Record<string, ReservoirRecord>): { b
       basis = res.material.basis;
     } else if (basis !== res.material.basis) {
       throw new FluxLedgerError('invalid_flux', `аудит объединяет резервуары с одним основанием: «${basis}» против «${res.material.basis}» (${res.id})`, null);
+    }
+    // Stage 4.1.1.3 (ISSUE B): entries — объект-запись; массив не
+    // принимается за словарь (Object.entries по массиву дал бы
+    // мусорные «виды» с числовыми индексными ключами).
+    if (!isPlainRecord(res.material.entries)) {
+      throw new FluxLedgerError('invalid_flux', `резервуар «${res.id}»: material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null`, null);
     }
     for (const [id, amount] of Object.entries(res.material.entries)) {
       totals[id] = (totals[id] ?? 0) + amount;
@@ -734,6 +757,23 @@ function molarMassOf(catalog: SpeciesCatalog, speciesId: string): { status: 'exa
  * - arbitrary_units → непроверяемо (нет калибровки).
  */
 export function inventoryToMolarCounts(catalog: SpeciesCatalog, inv: { basis: string; entries: Record<string, number> }): MolarCountResult {
+  // Stage 4.1.1.3 (ISSUE B): entries — объект-запись (speciesId →
+  // количество). Массив (typeof 'object') за словарь не принимается:
+  // пустой массив НЕ является известным пустым инвентарём — подсчёт
+  // честно непроверяем, а не «успешен без вида».
+  if (!isPlainRecord(inv.entries)) {
+    return {
+      status: 'not_verifiable',
+      counts: {},
+      exclusions: [{
+        key: 'inventory',
+        reason: `material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null: получено ${
+          inv.entries === null ? 'null' : Array.isArray(inv.entries) ? 'массив' : typeof inv.entries
+        }`
+      }],
+      scope: null
+    };
+  }
   const basis = inv.basis;
   if (basis === 'amount') {
     return { status: 'exact', counts: { ...inv.entries }, exclusions: [], scope: 'amount' };
@@ -1241,6 +1281,18 @@ export interface ReservoirFluxAuditResult {
  * причиной и ДЕЛАЮТ итог непроверяемым: balanced при наличии
  * исключений невозможен (ISSUE B). Исключённые untimed-записи
  * (ISSUE C) также не позволяют объявить полный успех.
+ *
+ * Stage 4.1.1.3 (ISSUE A): материальное измерение без инвентаря в
+ * ОБОИХ состояниях — НЕ автоматическая нематериальность. Единственное
+ * законное основание пропустить его — materialApplicability =
+ * 'not_applicable' в ОБОИХ состояниях (явная неприменимость по
+ * природе резервуара). Отсутствие material без маркера — неизвестный
+ * запас: исключение с ключом reservoirId и итог not_verifiable —
+ * согласованно с reservoirsToMolarCounts. Маркер только в одном
+ * состоянии — переход неприменимости не подтверждён, тоже
+ * not_verifiable. Материальная и энергетическая применимость НЕ
+ * смешиваются: materialApplicability ничего не говорит об известности
+ * энергетического инвентаря.
  */
 export function auditReservoirFluxes(
   ledger: FluxLedger,
@@ -1320,18 +1372,26 @@ export function auditReservoirFluxes(
     // --- МАТЕРИАЛЬНОЕ ИЗМЕРЕНИЕ ---
     // Обязательно, если инвентарь задан хотя бы в одном состоянии
     // (явное наличие материи) или резервуар затронут вещественным
-    // потоком. Отсутствие инвентаря в ОБОИХ состояниях без потоков —
-    // материальное измерение неприменимо к этому резервуару в данном
-    // аудите (например, чисто энергетический буфер): оно не создаёт
-    // ни расхождения, ни исключения. Неизвестность запаса при этом
-    // честно проверяется ГЛОБАЛЬНЫМ аудитом (reservoirsToMolarCounts).
+    // потоком (Stage 4.1.1.3, ISSUE A): если инвентаря нет в ОБОИХ
+    // состояниях и материальных потоков нет, единственное законное
+    // основание пропустить измерение — materialApplicability =
+    // 'not_applicable' в ОБОИХ состояниях. Отсутствие material без
+    // маркера — неизвестный запас (не ноль и не нематериальность):
+    // явное исключение и not_verifiable, согласованно с
+    // reservoirsToMolarCounts.
     const beforeInv = beforeRes.material;
     const afterInv = afterRes.material;
+    const beforeNotApplicable = beforeRes.materialApplicability === 'not_applicable';
+    const afterNotApplicable = afterRes.materialApplicability === 'not_applicable';
     const materialMandatory =
       beforeInv !== undefined || afterInv !== undefined || Object.keys(fluxSpecies).length > 0;
     if (materialMandatory) {
       if (!beforeInv || !afterInv) {
         exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: материальный инвентарь не задан в состоянии «${!beforeInv ? 'до' : 'после'}» — пофазовая проверка невозможна (запас неизвестен, а не ноль)` });
+      } else if (!isPlainRecord(beforeInv.entries) || !isPlainRecord(afterInv.entries)) {
+        // Stage 4.1.1.3 (ISSUE B): массив — не словарь; пофазовая
+        // сверка по индексным «видам» невозможна и не имитируется.
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: material.entries не является объектом-словарём (speciesId → количество) — пофазовая проверка невозможна` });
       } else if (beforeInv.basis !== afterInv.basis) {
         exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: основание инвентаря изменилось («${beforeInv.basis}» → «${afterInv.basis}») — пофазовая проверка невозможна` });
       } else {
@@ -1363,6 +1423,27 @@ export function auditReservoirFluxes(
             });
           }
         }
+      }
+    } else {
+      // Stage 4.1.1.3 (ISSUE A): инвентарь отсутствует в ОБОИХ
+      // состояниях и материальных потоков нет. Единственное законное
+      // основание пропустить материальное измерение — ЯВНАЯ
+      // неприменимость в обоих состояниях. Во всех остальных случаях
+      // запас неизвестен или неприменимость не подтверждена — итог
+      // обязан быть not_verifiable, а не «balanced без проверки».
+      if (beforeNotApplicable && afterNotApplicable) {
+        // законное явное исключение — резервуар по своей природе
+        // не содержит материю; оно не диагностируется как проблема
+      } else if (beforeNotApplicable !== afterNotApplicable) {
+        exclusions.push({
+          key: reservoirId,
+          reason: `резервуар «${reservoirId}»: materialApplicability = 'not_applicable' задан только в состоянии «${beforeNotApplicable ? 'до' : 'после'}» — переход неприменимости не подтверждён, материальное измерение непроверяемо`
+        });
+      } else {
+        exclusions.push({
+          key: reservoirId,
+          reason: `резервуар «${reservoirId}»: материальный инвентарь не задан ни в одном состоянии и неприменимость не объявлена (materialApplicability) — запас неизвестен и не приравнивается к нулю или отсутствию материи`
+        });
       }
     }
 
