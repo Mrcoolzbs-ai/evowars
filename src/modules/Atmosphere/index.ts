@@ -322,6 +322,18 @@ export function createAtmosphere(presetId: string, rng?: any): AtmosphereState {
  * следовые компоненты варьируются в пределах ±10%.
  */
 function addRandomVariations(atmosphere: AtmosphereState, rng: any): AtmosphereState {
+  // Основные компоненты (не следовые, > 5%) не изменяются: их сумма
+  // задаёт бюджет для вариаций следовых и минорных компонентов.
+  const majorSum = atmosphere.components
+    .filter(component => !component.isTrace && component.percentage > 5)
+    .reduce((sum, component) => sum + component.percentage, 0);
+
+  // Вариации не могут вывести сумму известных компонентов за 100%:
+  // в противном случае строгая нормализация ниже обоснованно отклонила бы
+  // состав. Бюджет гарантирует, что исходные концентрации сохраняются,
+  // а неучтённый остаток обозначается как неизвестные минорные компоненты.
+  let budget = Math.max(0, 100 - majorSum);
+
   const result: AtmosphereState = {
     ...atmosphere,
     components: atmosphere.components.map(component => {
@@ -332,7 +344,13 @@ function addRandomVariations(atmosphere: AtmosphereState, rng: any): AtmosphereS
 
       // Добавляем небольшие вариации к следовым и минорным компонентам
       const variation = (rng.next() - 0.5) * 0.2; // ±10%
-      const newPercentage = component.percentage * (1 + variation);
+      let newPercentage = component.percentage * (1 + variation);
+
+      // Ограничиваем вариацию доступным остатком до 100%
+      if (newPercentage > budget) {
+        newPercentage = budget;
+      }
+      budget -= Math.max(0, newPercentage);
 
       return {
         ...component,

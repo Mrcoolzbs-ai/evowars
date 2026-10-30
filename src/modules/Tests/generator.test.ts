@@ -43,7 +43,11 @@ function worldSignature(world: { cosmology: { id: string }; epoch: { id: string 
 describe('Generator Module', () => {
   describe('generateWorld', () => {
     it('should generate a valid world object', () => {
-      const world = generateWorld(baseSettings());
+      // Фиксируем реалистичную космологию: без фиксации случайный выбор
+      // может выбрать аномальную космологию, что законно переключит режим.
+      const world = generateWorld(baseSettings({
+        fixedCategories: { cosmology: 'big_bang' }
+      }));
 
       expect(world).toBeDefined();
       expect(world.id).toBeDefined();
