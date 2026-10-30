@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { generateWorld } from '../Generator/generator';
 import type { GenerationSettings, GeneratedWorld } from '../../types';
 import { atmToPa, G_EARTH_MS2 } from '../Units';
+import { getRepresentativeRadiusM } from '../Data/starPhysical';
 
 function baseSettings(overrides: Partial<GenerationSettings> = {}): GenerationSettings {
   return {
@@ -93,6 +94,7 @@ describe('Generator: физическая модель (этап 3)', () => {
         seed: 'physics_fixed_moon',
         fixedCategories: {
           cosmology: 'big_bang',
+          centralObject: 'lone_gas_giant',
           celestialBody: 'gas_giant_moon'
         }
       }));
@@ -101,9 +103,48 @@ describe('Generator: физическая модель (этап 3)', () => {
       expect(world.celestialBody.id).toBe('gas_giant_moon');
       // Спутник газового гиганта: орбита вокруг РОДИТЕЛЬСКОЙ планеты
       expect(world.orbit!.frame).toBe('around_parent_body');
+      // Орбита масштабируется радиусом РОДИТЕЛЬСКОГО гиганта
+      // (данные класса каталога), а не радиусом самой луны.
       expect(world.orbit!.semiMajorAxis.value).not.toBeNull();
+      const representativeParentRadius = getRepresentativeRadiusM('lone_gas_giant') as number;
+      const radii = (world.orbit!.semiMajorAxis.value as number) / representativeParentRadius;
+      expect(radii).toBeGreaterThanOrEqual(5);
+      expect(radii).toBeLessThanOrEqual(60);
+      // Период рассчитан по массе РОДИТЕЛЬСКОЙ планеты (класс гиганта).
+      expect(world.orbit!.orbitalPeriod.value).not.toBeNull();
+      // Параметры самой луны остаются её собственными: радиус луны
+      // (0.3–1.5 R⊕ по каталогу) не подменён родительскими значениями
+      // и много меньше орбиты.
+      const moonRadiusEarth = (world.bodyPhysics!.radiusM.value as number) / 6.371e6;
+      expect(moonRadiusEarth).toBeGreaterThanOrEqual(0.3);
+      expect(moonRadiusEarth).toBeLessThanOrEqual(1.5);
+      expect((world.orbit!.semiMajorAxis.value as number)).toBeGreaterThan(
+        world.bodyPhysics!.radiusM.value as number
+      );
       // Структурированная система центрального объекта построена
       expect(world.centralObjectSystem).not.toBeNull();
+    });
+
+    it('спутник в системе звезды: родительская планета не моделируется — орбита не выдумывается', () => {
+      // Звезда (синий гигант) освещает систему, но родительская
+      // планета луны в модели не создаётся: масса и радиус родителя
+      // неизвестны → параметры орбиты честно null.
+      const world = generateWorld(baseSettings({
+        seed: 'physics_star_moon',
+        fixedCategories: {
+          centralObject: 'blue_giant',
+          celestialBody: 'gas_giant_moon'
+        }
+      }));
+      expect(world.orbit!.frame).toBe('around_parent_body');
+      expect(world.orbit!.semiMajorAxis.value).toBeNull();
+      expect(world.orbit!.orbitalPeriod.value).toBeNull();
+      // Параметры самой луны определены и не подменены:
+      expect(world.bodyPhysics!.radiusM.value).not.toBeNull();
+      expect(world.bodyPhysics!.surfaceGravityMs2.value).not.toBeNull();
+      // Поток от звезды не рассчитывается из спутниковой полуоси:
+      expect(world.energyBudget!.incidentFlux.value).toBeNull();
+      expect(world.energyBudget!.equilibriumTemperature.value).toBeNull();
     });
 
     it('гравитация и плотность тела согласованы: g = G·M/R²', () => {

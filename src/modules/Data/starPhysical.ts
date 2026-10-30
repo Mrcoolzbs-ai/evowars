@@ -260,6 +260,16 @@ const loneGasGiant: GasGiantSystemModel = {
     uncertainty: 'объект представляет класс; конкретная масса не задана',
     source: STANDARD_SOURCE
   },
+  radiusM: {
+    value: null,
+    unit: 'м',
+    range: { min: 5.8e7, max: 7.2e7 },
+    confidence: 'estimated',
+    method: 'диапазон радиусов известных газовых гигантов Солнечной системы (Сатурн ~58 232 км — Юпитер ~69 911 км, средние радиусы)',
+    parameters: { 'R/R♃ (min)': 0.83, 'R/R♃ (max)': 1.03 },
+    uncertainty: 'радиус класса, а не конкретной планеты; используется как масштаб орбит спутников родительского гиганта',
+    source: STANDARD_SOURCE
+  },
   internalHeatW: {
     value: null,
     unit: 'Вт',
@@ -402,6 +412,21 @@ export function getRepresentativeMassKg(objectId: string): number | null {
   }
   if (model.kind === 'gas_giant_system' && model.massKg.range) {
     return (model.massKg.range.min + model.massKg.range.max) / 2;
+  }
+  return null;
+}
+
+/**
+ * Репрезентативный радиус класса, м: середина диапазона каталога.
+ * Возвращается только для классов с известным диапазоном радиусов,
+ * иначе null. Масштаб орбит спутников вокруг РОДИТЕЛЬСКОЙ планеты;
+ * не подменяет параметры самой луны и не выдумывает значений.
+ */
+export function getRepresentativeRadiusM(objectId: string): number | null {
+  const model = centralObjectPhysics[objectId];
+  if (!model) return null;
+  if (model.kind === 'gas_giant_system' && model.radiusM?.range) {
+    return (model.radiusM.range.min + model.radiusM.range.max) / 2;
   }
   return null;
 }

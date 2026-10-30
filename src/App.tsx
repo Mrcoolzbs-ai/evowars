@@ -497,6 +497,11 @@ function WorldDisplay(props: {
             {world.chemicalState.surfacePressurePa !== null && (
               <div><span>Давление:</span> {world.chemicalState.surfacePressurePa.toExponential(4)} Па</div>
             )}
+            <div>
+              <span>Баланс O₂:</span> производство {world.chemicalState.oxygenBalance.production.toExponential(2)},
+              потребление {world.chemicalState.oxygenBalance.consumption.toExponential(2)},
+              итог {world.chemicalState.oxygenBalance.net.toExponential(2)}
+            </div>
           </div>
           <p className="model-note">ℹ {world.chemicalState.unitsNote}</p>
           {world.chemicalState.history.length > 0 && (

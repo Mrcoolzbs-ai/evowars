@@ -48,7 +48,14 @@ export function computeEnergyBudget(input: EnergyBudgetInput): EnergyBudgetModel
   const { centralObjectId, orbit, geologyAnalysis } = input;
 
   const luminosityW = getRepresentativeLuminosityW(centralObjectId);
-  const semiMajorAxisM = orbit?.semiMajorAxis?.value ?? null;
+  // Освещение луны рассчитывается отдельно от её орбиты: большая
+  // полуось спутниковой орбиты — это расстояние до РОДИТЕЛЬСКОЙ
+  // планеты, а не до звезды, и подставлять её в F = L/(4πa²)
+  // физически неверно. Расстояние от звезды до системы
+  // «родительская планета — спутник» в текущей модели неизвестно,
+  // поэтому поток не определяется (null), а не выдумывается.
+  const isMoonSystem = orbit?.frame === 'around_parent_body';
+  const semiMajorAxisM = isMoonSystem ? null : (orbit?.semiMajorAxis?.value ?? null);
   const flux = incidentFlux(luminosityW, semiMajorAxisM);
 
   const incidentFluxValue: PhysValue =
@@ -61,7 +68,9 @@ export function computeEnergyBudget(input: EnergyBudgetInput): EnergyBudgetModel
           note:
             luminosityW === null
               ? 'светимость класса недоступна (аккреция/джет/свободное плавание) — поток не рассчитан, а не приравнен к нулю'
-              : 'орбитальное расстояние неизвестно — поток не рассчитан'
+              : isMoonSystem
+                ? 'спутниковая орбита задана вокруг родительской планеты: расстояние системы от звезды не моделируется — поток не рассчитан'
+                : 'орбитальное расстояние неизвестно — поток не рассчитан'
         }
       : {
           value: flux,

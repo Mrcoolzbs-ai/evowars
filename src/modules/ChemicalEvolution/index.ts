@@ -371,16 +371,10 @@ export function applyReaction(
 
   recomputeFractions(next);
 
-  // 7. Кислородный баланс за шаг: потребление O₂ реакцией.
-  const o2Change = changes['o2'] ?? 0;
-  if (o2Change < 0) {
-    next.oxygenBalance = {
-      production: 0,
-      consumption: -o2Change,
-      net: o2Change,
-      note: `потребление O₂ реакцией ${reaction.id}; производство за шаг равно нулю (биологические источники не подключены)`
-    };
-  }
+  // 7. Кислородный баланс пересчитывается по всей истории шагов:
+  // после каждой реакции состояние содержит консистентный баланс,
+  // а не результат только последней выполненной реакции.
+  next.oxygenBalance = computeOxygenBalance(next);
 
   const record: ChemicalStepRecord = {
     ...baseRecord,
@@ -393,7 +387,10 @@ export function applyReaction(
   };
 
   next.history = [...next.history, record];
-  next.modelTimeYears = state.modelTimeYears + state.stepDurationYears;
+  // Глобальное модельное время здесь НЕ продвигается: одиночная
+  // реакция — не отдельный шаг симуляции. Время продвигает ровно
+  // один раз runChemicalEvolutionStep, независимо от того, сколько
+  // реакций применилось в рамках общего шага.
 
   return { state: next, record };
 }
@@ -601,7 +598,20 @@ export function runChemicalEvolutionStep(
     log.push(`[${reaction.id}] ${result.record.reason}`);
   }
 
+  // Один вызов = ровно один глобальный шаг модельного времени
+  // независимо от числа применённых реакций (ни одной, одна или
+  // несколько): количество реакций не влияет на продолжительность
+  // шага симуляции.
+  state = {
+    ...state,
+    modelTimeYears: state.modelTimeYears + state.stepDurationYears
+  };
+
+  // Кислородный баланс вычисляется по окончательному состоянию шага
+  // и сохраняется в состоянии мира (актуален для UI, а не только
+  // для промежуточной реакции).
   const oxygen = computeOxygenBalance(state);
+  state = { ...state, oxygenBalance: oxygen };
   log.push(
     `кислородный баланс: производство ${oxygen.production.toFixed(6)}, потребление ${oxygen.consumption.toFixed(6)}, итог ${oxygen.net.toFixed(6)}`
   );

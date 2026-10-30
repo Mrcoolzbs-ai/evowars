@@ -38,7 +38,7 @@ const methaneEthanePreset: AtmosphereState = {
   ],
   totalPressure: 1.5, // atm (игровое допущение, см. presetNotes)
   temperature: 95, // K (игровое допущение, см. presetNotes)
-  notes: 'Метаново-этановая атмосфера, аналогичная атмосфере Титана',
+  notes: 'Исторический игровой сценарий с метаново-этановой атмосферой',
   presetKind: 'historical_game',
   presetNotes:
     'Исторический игровой сценарий (исходная ВПИ). Параметры 1.5 atm и 95 K — ' +

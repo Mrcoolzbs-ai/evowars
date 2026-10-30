@@ -13,7 +13,13 @@ import {
   ORBIT_BANDS
 } from '../OrbitalMechanics';
 import { checkCompatibility } from '../Compatibility';
-import { getTypicalLifetimeGyr, getRepresentativeLuminosityW } from '../Data/starPhysical';
+import {
+  getTypicalLifetimeGyr,
+  getRepresentativeLuminosityW,
+  getRepresentativeMassKg,
+  getRepresentativeRadiusM
+} from '../Data/starPhysical';
+import { computeEnergyBudget } from '../EnergyBalance';
 import { createRandom } from '../Generator/random';
 import { L_SUN_W, AU_M, M_EARTH_KG } from '../Units';
 import { epochs, centralObjects, celestialBodies, cosmologies } from '../Data';
@@ -142,6 +148,70 @@ describe('OrbitalMechanics (поток энергии и орбиты, этап 
       const radii = (orbit.semiMajorAxis.value as number) / 6.9911e7;
       expect(radii).toBeGreaterThanOrEqual(5);
       expect(radii).toBeLessThanOrEqual(60);
+    });
+
+    it('спутник: период рассчитан по массе РОДИТЕЛЬСКОЙ планеты, а не звезды', () => {
+      // Звезда освещает систему, но родителем луны является газовый гигант.
+      const parent = centralObjects.find(o => o.id === 'lone_gas_giant')!;
+      const moon = celestialBodies.find(b => b.id === 'gas_giant_moon')!;
+      const orbit = sampleOrbit(createRandom('moon_parent_mass'), {
+        centralObject: parent,
+        celestialBody: moon,
+        parentBodyRadiusM: 6.9911e7
+      });
+      const a = orbit.semiMajorAxis.value as number;
+      const giantMass = getRepresentativeMassKg('lone_gas_giant') as number;
+      const expectedPeriod = orbitalPeriodFromElements(a, giantMass) as number;
+      expect(orbit.orbitalPeriod.value).not.toBeNull();
+      expect(orbit.orbitalPeriod.value).toBeCloseTo(expectedPeriod, 6);
+    });
+
+    it('спутник вокруг звезды: масса звезды НЕ используется как масса родителя', () => {
+      const star = centralObjects.find(o => o.id === 'blue_giant')!;
+      const moon = celestialBodies.find(b => b.id === 'gas_giant_moon')!;
+      const orbit = sampleOrbit(createRandom('moon_no_parent'), {
+        centralObject: star,
+        celestialBody: moon
+      });
+      expect(orbit.frame).toBe('around_parent_body');
+      // Масса звезды в каталоге есть…
+      expect(getRepresentativeMassKg('blue_giant')).not.toBeNull();
+      // …но родительская планета не моделируется: параметры орбиты
+      // честно неизвестны (null), а не подменяются массой звезды
+      // или радиусом самой луны.
+      expect(orbit.semiMajorAxis.value).toBeNull();
+      expect(orbit.orbitalPeriod.value).toBeNull();
+    });
+
+    it('спутник без явных параметров: радиус родителя берётся из данных класса гиганта', () => {
+      const parent = centralObjects.find(o => o.id === 'lone_gas_giant')!;
+      const moon = celestialBodies.find(b => b.id === 'gas_giant_moon')!;
+      const orbit = sampleOrbit(createRandom('moon_catalog_parent'), {
+        centralObject: parent,
+        celestialBody: moon
+      });
+      const representativeRadius = getRepresentativeRadiusM('lone_gas_giant') as number;
+      expect(representativeRadius).toBeGreaterThan(0);
+      const radii = (orbit.semiMajorAxis.value as number) / representativeRadius;
+      expect(radii).toBeGreaterThanOrEqual(5);
+      expect(radii).toBeLessThanOrEqual(60);
+      expect(orbit.orbitalPeriod.value).not.toBeNull();
+    });
+
+    it('звезда освещает газовый гигант, луна обращается вокруг него: поток не рассчитывается из спутниковой полуоси', () => {
+      // Геометрия: звезда → родительская планета → луна. Спутниковая
+      // полуось — расстояние до РОДИТЕЛЯ, а не до звезды: расстояние
+      // системы от звезды не моделируется, поток = null (не выдуман).
+      const star = centralObjects.find(o => o.id === 'blue_giant')!;
+      const moon = celestialBodies.find(b => b.id === 'gas_giant_moon')!;
+      const orbit = sampleOrbit(createRandom('moon_lighting'), {
+        centralObject: star,
+        celestialBody: moon
+      });
+      const budget = computeEnergyBudget({ centralObjectId: 'blue_giant', orbit });
+      expect(budget.incidentFlux.value).toBeNull();
+      expect(budget.equilibriumTemperature.value).toBeNull();
+      expect(budget.incidentFlux.note ?? '').toContain('родительской планеты');
     });
 
     it('динамическая устойчивость не заявляется без проверки', () => {

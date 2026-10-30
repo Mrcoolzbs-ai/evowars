@@ -11,12 +11,13 @@ import {
   computeOxygenBalance,
   createDefaultProcessRegistry,
   elementTotalsOf,
-  substanceTotalsOf
+  substanceTotalsOf,
+  runChemicalEvolutionStep
 } from '../ChemicalEvolution';
 import chemicalReactions from '../Data/chemicalReactions';
 import { computeAtmospherePhysicalModel, getAllPresets } from '../Atmosphere';
 import { G_EARTH_MS2 } from '../Units';
-import type { AtmospherePhysicalModel } from '../../types';
+import type { AtmospherePhysicalModel, GeneratedWorld } from '../../types';
 import type { ChemicalReaction } from '../../types';
 
 // ============================================
@@ -251,7 +252,7 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       expect(state.inventory['n2']).toBeCloseTo(columnMol * model.molarFractions['n2'], 6);
     });
 
-    it('время моделирования продвигается на длительность шага', () => {
+    it('применение одиночной реакции НЕ продвигает модельное время', () => {
       const state = createChemicalState({
         atmospherePhysicalModel: makeModel({ ch4: 0.6, o2: 0.4 }),
         stepDurationYears: 1e6
@@ -261,8 +262,94 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
         temperatureK: 500,
         pressureAtm: 1
       });
-      expect(next.modelTimeYears).toBeCloseTo(1e6, 6);
+      // Время продвигает ТОЛЬКО глобальный шаг runChemicalEvolutionStep
+      // (ровно один раз за вызов): одиночная реакция — не шаг симуляции.
+      expect(next.modelTimeYears).toBe(0);
       expect(next.stepDurationYears).toBeCloseTo(1e6, 6);
+    });
+  });
+
+  describe('глобальный шаг: время и кислородный баланс', () => {
+    /** Синтетический мир с химическим состоянием (unit-уровень, без генератора). */
+    function makeWorld(fractions: Record<string, number>): GeneratedWorld {
+      const model = makeModel(fractions);
+      const chemicalState = createChemicalState({ atmospherePhysicalModel: model });
+      return {
+        chemicalState,
+        atmospherePhysics: model,
+        atmosphere: { temperature: 600 },
+        phaseAnalysis: { temperatureK: 600 },
+        energyBudget: { incidentFlux: { value: 1361 } },
+        energySources: { primary: [], secondary: [] }
+      } as unknown as GeneratedWorld;
+    }
+
+    it('сценарий A: применилась одна реакция — время растёт ровно на один шаг', () => {
+      const world = makeWorld({ ch4: 0.6, o2: 0.4 });
+      const result = runChemicalEvolutionStep(world);
+      const applied = result.world.chemicalState?.history.filter(r => r.applied).length ?? 0;
+      expect(applied).toBe(1); // доступна только реакция окисления метана
+      expect(result.world.chemicalState?.modelTimeYears).toBeCloseTo(1e6, 6);
+    });
+
+    it('сценарий B: применилось несколько реакций — время всё равно растёт ровно на один шаг', () => {
+      // При 600 K все четыре окислительные реакции каталога проходят
+      // свои температурные диапазоны; кислорода достаточно для каждой.
+      const world = makeWorld({ ch4: 0.15, c2h6: 0.15, h2: 0.15, co: 0.15, o2: 0.4 });
+      const result = runChemicalEvolutionStep(world);
+      const applied = result.world.chemicalState?.history.filter(r => r.applied).length ?? 0;
+      expect(applied).toBeGreaterThanOrEqual(3);
+      expect(result.world.chemicalState?.modelTimeYears).toBeCloseTo(1e6, 6);
+    });
+
+    it('сценарий C: ни одна реакция не применилась — время всё равно растёт на один шаг', () => {
+      // Инертный азот: реагентов каталога нет.
+      const world = makeWorld({ n2: 1 });
+      const result = runChemicalEvolutionStep(world);
+      const applied = result.world.chemicalState?.history.filter(r => r.applied).length ?? 0;
+      expect(applied).toBe(0);
+      expect(result.world.chemicalState?.modelTimeYears).toBeCloseTo(1e6, 6);
+    });
+
+    it('сценарий D: последовательные шаги накапливают время кумулятивно', () => {
+      let world = makeWorld({ n2: 1 });
+      for (let step = 1; step <= 3; step++) {
+        world = runChemicalEvolutionStep(world).world;
+        expect(world.chemicalState?.modelTimeYears).toBeCloseTo(step * 1e6, 6);
+      }
+    });
+
+    it('oxygenBalance состояния синхронизирован с финальным балансом шага', () => {
+      const world = makeWorld({ ch4: 0.6, o2: 0.4 });
+      const result = runChemicalEvolutionStep(world);
+      const state = result.world.chemicalState!;
+      const balance = computeOxygenBalance(state);
+      expect(state.oxygenBalance.production).toBe(balance.production);
+      expect(state.oxygenBalance.consumption).toBeCloseTo(balance.consumption, 12);
+      expect(state.oxygenBalance.net).toBeCloseTo(balance.net, 12);
+      // Расход кислорода зафиксирован, искусственного производства нет.
+      expect(balance.consumption).toBeGreaterThan(0);
+      expect(balance.production).toBe(0);
+    });
+
+    it('баланс отражает все реакции шага, а не только последнюю', () => {
+      const world = makeWorld({ ch4: 0.15, c2h6: 0.15, h2: 0.15, co: 0.15, o2: 0.4 });
+      const result = runChemicalEvolutionStep(world);
+      const state = result.world.chemicalState!;
+      const balance = computeOxygenBalance(state);
+      expect(state.oxygenBalance.consumption).toBeCloseTo(balance.consumption, 12);
+      expect(balance.consumption).toBeGreaterThan(0);
+    });
+
+    it('элементный состав сохраняется на последовательных шагах (повторного применения нет)', () => {
+      let world = makeWorld({ ch4: 0.15, c2h6: 0.15, h2: 0.15, co: 0.15, o2: 0.4 });
+      const before = elementTotalsOf(world.chemicalState!);
+      world = runChemicalEvolutionStep(world).world;
+      world = runChemicalEvolutionStep(world).world;
+      const after = elementTotalsOf(world.chemicalState!);
+      for (const element of Object.keys(before)) {
+        expect(after[element] ?? 0).toBeCloseTo(before[element], 6);
+      }
     });
   });
 

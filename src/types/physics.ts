@@ -134,6 +134,13 @@ export interface SubstellarModel {
 export interface GasGiantSystemModel {
   kind: 'gas_giant_system';
   massKg: PhysValue;
+  /**
+   * Радиус класса газовых гигантов, м (value = null, задан диапазон).
+   * Поле опционально для обратной совместимости старых сохранений.
+   * Используется как масштаб орбит спутников РОДИТЕЛЬСКОЙ планеты,
+   * а не как параметр самой луны.
+   */
+  radiusM?: PhysValue;
   /** Внутреннее тепловыделение в Вт: конкретное значение неизвестно (value = null) */
   internalHeatW: PhysValue | null;
   moonSystem: {

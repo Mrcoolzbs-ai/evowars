@@ -25,14 +25,17 @@ import type {
   CentralObjectSystem,
   PhysValue
 } from '../../types';
-import { getCentralObjectPhysics, getRepresentativeMassKg } from '../Data/starPhysical';
+import {
+  getCentralObjectPhysics,
+  getRepresentativeMassKg,
+  getRepresentativeRadiusM
+} from '../Data/starPhysical';
 import {
   G,
   STEFAN_BOLTZMANN,
   AU_M,
   auToM,
-  secondsToYears,
-  earthRadiiToM
+  secondsToYears
 } from '../Units';
 import type { DeterministicRandom } from '../Generator/random';
 
@@ -161,6 +164,8 @@ export interface SampleOrbitInput {
   celestialBody: CelestialBodyOption;
   /** Радиус родительской планеты для спутниковых орбит (м); null — неизвестен */
   parentBodyRadiusM?: number | null;
+  /** Масса родительской планеты для периода спутника (кг); null — неизвестна */
+  parentBodyMassKg?: number | null;
 }
 
 /**
@@ -182,13 +187,29 @@ export function sampleOrbit(rng: DeterministicRandom, input: SampleOrbitInput): 
   const cid = centralObject.id;
 
   // --- Спутниковая орбита вокруг родительской планеты ---
+  // Иерархия системы: звезда → родительская планета (газовый гигант)
+  // → луна. Масса и радиус САМОЙ луны никогда не подменяют параметры
+  // родителя, а масса центральной звезды не используется как масса
+  // родителя. В текущей модели родительская планета является
+  // центральным объектом только для системы одинокого газового
+  // гиганта: тогда используются данные класса каталога (масса и
+  // радиус гиганта). Для звёздных систем родительская планета не
+  // моделируется: её масса и радиус неизвестны, орбита честно не
+  // определяется (null), а не заменяется произвольным значением.
   if (celestialBody.bodyType === 'moon') {
-    const parentRadiusM = input.parentBodyRadiusM ?? earthRadiiToM(1);
+    const isParentTheCentralObject = cid === 'lone_gas_giant';
+    const parentRadiusM =
+      input.parentBodyRadiusM ?? (isParentTheCentralObject ? getRepresentativeRadiusM(cid) : null);
+    const parentMassKg =
+      input.parentBodyMassKg ?? (isParentTheCentralObject ? getRepresentativeMassKg(cid) : null);
     const radii = sampleLogUniform(rng, MOON_ORBIT_BAND_PARENT_RADII.min, MOON_ORBIT_BAND_PARENT_RADII.max);
-    const semiMajorM = parentRadiusM * radii;
+    const semiMajorM = parentRadiusM !== null ? parentRadiusM * radii : null;
     const eccentricity = rng.nextFloatRange(0, 0.4);
-    const parentMassKg = getRepresentativeMassKg(cid); // родительский объект каталога
-    const periodS = parentMassKg !== null ? orbitalPeriodFromElements(semiMajorM, parentMassKg) : null;
+    // Период — III закон Кеплера строго с массой РОДИТЕЛЬСКОЙ планеты.
+    const periodS =
+      semiMajorM !== null && parentMassKg !== null
+        ? orbitalPeriodFromElements(semiMajorM, parentMassKg)
+        : null;
     return {
       frame: 'around_parent_body',
       orbitalBasis: orbitBasisLabels[cid] ?? 'орбита вокруг родительской планеты',
@@ -209,8 +230,12 @@ export function sampleOrbit(rng: DeterministicRandom, input: SampleOrbitInput): 
       radiativeConditions:
         'спутник освещается звездой (если она есть) и проходит через тень родительской планеты; поток в тени не моделируется',
       notes: [
-        `большая полуось ≈ ${radii.toFixed(1)} радиусов родительской планеты`,
-        'орбита спутника считается вокруг родительской планеты, а не вокруг звезды'
+        parentRadiusM !== null
+          ? `большая полуось ≈ ${radii.toFixed(1)} радиусов родительской планеты`
+          : 'большая полуось не определена: радиус родительской планеты неизвестен',
+        parentMassKg !== null
+          ? 'орбита спутника считается вокруг родительской планеты, а не вокруг звезды; период рассчитан по массе родителя'
+          : 'орбита спутника считается вокруг родительской планеты, а не вокруг звезды; период не рассчитан: масса родительской планеты не моделируется'
       ]
     };
   }
@@ -404,7 +429,13 @@ export function existsInEpoch(epoch: EpochOption, earliestUniverseAgeGyr: number
 // 7. ВСПОМОГАТЕЛЬНЫЕ ОБОЛОЧКИ PHYSVALUE
 // ============================================
 
-function semiMajorAxisValue(m: number): PhysValue {
+function semiMajorAxisValue(m: number | null): PhysValue {
+  if (m === null) {
+    return unknownValue(
+      'большая полуось не определена: параметры родительского тела неизвестны',
+      'm'
+    );
+  }
   return {
     value: m,
     unit: 'm',
