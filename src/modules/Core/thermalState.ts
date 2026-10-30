@@ -391,6 +391,14 @@ function resolvePlaceKind(place: LocalReactionTemperaturePlace): 'reservoir' | '
   return hasReservoir ? 'reservoir' : 'atmosphere_layer';
 }
 
+/** Provenance есть только у статусов, которые его несут (not_applicable и not_implemented поля не имеют). */
+function provenanceOfValue(value: ScientificValue): DataProvenance | undefined {
+  if (value.status === 'not_applicable' || value.status === 'not_implemented') {
+    return undefined;
+  }
+  return value.provenance;
+}
+
 /** Оформление результата для температуры, пригодной как ответ. */
 function resolutionFromValue(
   temperature: ScientificValue,
@@ -404,7 +412,7 @@ function resolutionFromValue(
     placeKind: place.placeKind,
     placeId: place.placeId,
     source,
-    provenance: temperature.provenance,
+    provenance: provenanceOfValue(temperature),
     reason
   };
 }
