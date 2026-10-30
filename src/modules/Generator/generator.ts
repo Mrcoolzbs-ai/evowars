@@ -17,6 +17,15 @@
 // 9. Полные физические характеристики.
 // 10. Источники энергии.
 // 11. Проверка совместимости на реальных данных мира.
+//
+// Этап 3 — физическая модель (причинно-следственная цепочка):
+// после выбора атмосферы сэмплируются физические параметры тела
+// (масса/радиус/плотность/гравитация), строится система центрального
+// объекта, орбита, атмосферная физическая модель (молярные доли,
+// парциальные давления, столб), фазовый скрининг, геологический
+// анализ, энергетический бюджет и начальное состояние химической
+// эволюции. Каждый следующий этап использует данные предыдущих,
+// а не независимую случайность.
 
 import { createRandom } from './random';
 import type {
@@ -36,18 +45,26 @@ import type {
   EvolutionImplications,
   FixedCategories,
   CradleLocalEnvironment,
-  EnergySourceClass
+  EnergySourceClass,
+  GeologicalAnalysis
 } from '../../types';
 import { GENERATOR_VERSION } from '../../types';
 
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
+import { getEarliestUniverseAgeGyr } from '../Data/starPhysical';
 import { checkCompatibility, CRADLE_RELATED_CATEGORIES } from '../Compatibility';
-import { createAtmosphere, normalizeAtmosphere } from '../Atmosphere';
+import { createAtmosphere, normalizeAtmosphere, computeAtmospherePhysicalModel } from '../Atmosphere';
 import {
   calculatePhysicalCharacteristics,
   calculateBodyCharacteristics,
-  determineCradleLocalEnvironment
+  determineCradleLocalEnvironment,
+  sampleBodyPhysics
 } from '../WorldModel';
+import { buildCentralObjectSystem, sampleOrbit } from '../OrbitalMechanics';
+import { analyzeAtmospherePhases } from '../PhaseEquilibrium';
+import { analyzeGeology } from '../Geology';
+import { computeEnergyBudget } from '../EnergyBalance';
+import { createChemicalState } from '../ChemicalEvolution';
 
 // ============================================
 // ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
@@ -76,12 +93,30 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
   // 6. Атмосфера
   const atmosphere = generateAtmosphere(rng, settings);
 
+  // 6a. Физические параметры тела (этап 3): масса, радиус, плотность,
+  // гравитация сэмплируются детерминированно из диапазонов каталога.
+  const bodyPhysics = sampleBodyPhysics(celestialBody, rng);
+
+  // 6b. Структурированная система центрального объекта (звезда /
+  // остаток / субзвёздный объект / система гиганта / система джета).
+  const centralObjectSystem = buildCentralObjectSystem(centralObject);
+
+  // 6c. Орбитальная конфигурация: вокруг звезды, родительской планеты
+  // (для спутников), свободное плавание или окрестность джета.
+  const orbit = sampleOrbit(rng, {
+    centralObject,
+    celestialBody,
+    parentBodyRadiusM: bodyPhysics.radiusM.value
+  });
+
   // 7. Характеристики небесного тела, зависящие только от тела,
-  // центрального объекта и атмосферы (без колыбели)
+  // центрального объекта и атмосферы (без колыбели).
+  // При наличии физической выборки используются её масса/радиус/гравитация.
   const bodyCharacteristics = calculateBodyCharacteristics({
     centralObject,
     celestialBody,
-    atmosphere
+    atmosphere,
+    bodyPhysics
   });
 
   // 8. Колыбель жизни: сначала варианты, поддерживаемые данным миром
@@ -108,10 +143,42 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     atmosphere
   });
 
-  // 11. Источники энергии
-  const energySources = determineEnergySources(centralObject, cradle);
+  // 10a. Физическая модель атмосферы (этап 3): молярные доли, давление
+  // в Па, парциальные давления, атмосферный столб. Столб рассчитывается
+  // только при известной гравитации сэмплированного тела.
+  const atmospherePhysics = computeAtmospherePhysicalModel(atmosphere, {
+    surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
+  });
+
+  // 10b. Фазовый скрининг компонентов атмосферы при её температуре.
+  const phaseAnalysis = analyzeAtmospherePhases(atmospherePhysics, atmosphere.temperature);
+
+  // 10c. Геологический анализ: раздельные источники внутреннего тепла
+  // (остаточное, радиогенное, приливное) без автоматической геотермы.
+  const geologyAnalysis = analyzeGeology({ celestialBody, centralObject, orbit });
+
+  // 10d. Энергетический бюджет: поток излучения и равновесная температура
+  // из светимости класса и орбитального расстояния (или unknown).
+  const energyBudget = computeEnergyBudget({
+    centralObjectId: centralObject.id,
+    centralObjectSystem: centralObjectSystem ?? undefined,
+    orbit,
+    geologyAnalysis
+  });
+
+  // 11. Источники энергии. Геотермальная энергия добавляется ТОЛЬКО
+  // если геологический анализ подтвердил её доступность.
+  const energySources = determineEnergySources(centralObject, cradle, geologyAnalysis);
+
+  // 11a. Начальное состояние химической эволюции: инвентарь веществ
+  // (моль/м² столба при известных данных, иначе нормированный игровой).
+  const chemicalState = createChemicalState({
+    atmospherePhysicalModel: atmospherePhysics,
+    surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
+  });
 
   // 12. Проверка совместимости на РЕАЛЬНЫХ данных сгенерированного мира
+  // (включая фазовый скрининг атмосферы)
   const compatibilityWarnings = checkCompatibility({
     mode,
     cosmology,
@@ -122,7 +189,8 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     cradleLocalEnvironment,
     physicalCharacteristics,
     atmosphere,
-    energySources
+    energySources,
+    phaseAnalysis
   }, mode);
 
   const allWarnings = [...modeWarnings, ...cradleWarnings, ...compatibilityWarnings];
@@ -176,6 +244,14 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     physicalCharacteristics,
     energySources,
     atmosphere,
+    centralObjectSystem,
+    orbit,
+    bodyPhysics,
+    atmospherePhysics,
+    phaseAnalysis,
+    geologyAnalysis,
+    energyBudget,
+    chemicalState,
     appliedRules: allWarnings.map(w => w.ruleId),
     warnings: allWarnings,
     scientificStatus,
@@ -219,14 +295,21 @@ function selectCentralObject(
   }
   const epochAge = epoch.ageRange;
   // В аномальном режиме возрастные ограничения не применяются
-  // (соответствует exemptInAnomalousMode правила age_central_object_compatibility)
+  // (соответствует exemptInAnomalousMode правила age_central_object_compatibility).
+  //
+  // Этап 3: класс центрального объекта отсекается ТОЛЬКО если Вселенная
+  // ещё слишком молода для формирования объектов этого класса
+  // (например, белые карлики не существуют до появления звёзд-предшественниц).
+  // Короткоживущая звезда (голубой гигант) НЕ запрещена в древней
+  // Вселенной: она могла сформироваться недавно — это отмечается
+  // предупреждением short_lived_star_recent_formation, а не фильтром.
   const ageCompatibleObjects = mode === 'anomalous'
     ? centralObjects
     : centralObjects.filter((obj) => {
-        if (obj.minAge === null && obj.maxAge === null) return true;
-        if (obj.minAge !== null && epochAge.min < obj.minAge) return false;
-        if (obj.maxAge !== null && epochAge.max > obj.maxAge) return false;
-        return true;
+        const earliest =
+          obj.existenceWindow?.earliestUniverseAgeGyr ??
+          getEarliestUniverseAgeGyr(obj.id);
+        return epochAge.max >= earliest;
       });
   if (ageCompatibleObjects.length === 0) {
     console.warn('No central objects compatible with selected epoch, using all');
@@ -426,7 +509,8 @@ function generateAtmosphere(rng: ReturnType<typeof createRandom>, settings: Gene
 
 function determineEnergySources(
   centralObject: CentralObjectOption,
-  cradle: CradleOption
+  cradle: CradleOption,
+  geologyAnalysis?: GeologicalAnalysis
 ): EnergySources {
   const primary: EnergySources['primary'] = [];
   const secondary: EnergySources['secondary'] = [];
@@ -440,8 +524,13 @@ function determineEnergySources(
       secondary.push(source);
     }
   });
-  if (!primary.includes('geothermal') && !secondary.includes('geothermal')) {
-    secondary.push('geothermal');
+  // Геотермальная энергия НЕ добавляется автоматически каждому миру:
+  // только если геологический анализ подтвердил наличие доступного
+  // внутреннего тепла (этап 3).
+  if (geologyAnalysis?.geothermalEnergyAvailable) {
+    if (!primary.includes('geothermal') && !secondary.includes('geothermal')) {
+      secondary.push('geothermal');
+    }
   }
   return {
     primary,
@@ -599,3 +688,4 @@ export function generateRandomSeed(): string {
   }
   return result;
 }
+

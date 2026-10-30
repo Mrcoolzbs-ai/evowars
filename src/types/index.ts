@@ -2,6 +2,17 @@
 // TYPES - Основные типы проекта "Эволюционные Войны"
 // ============================================
 
+import type {
+  CentralObjectSystem,
+  OrbitalConfigurationData,
+  BodyPhysicalSample,
+  AtmospherePhysicalModel,
+  AtmospherePhaseAnalysis,
+  GeologicalAnalysis,
+  EnergyBudgetModel,
+  ChemicalEvolutionState
+} from './physics';
+
 // ============================================
 // 1. БАЗОВЫЕ ТИПЫ
 // ============================================
@@ -91,7 +102,18 @@ export interface CentralObjectOption {
   baseWeight: number;
   tags: string[];
   minAge: number | null; // минимальный возраст вселенной в млрд лет
-  maxAge: number | null; // максимальный возраст вселенной в млрд лет
+  maxAge: number | null; // максимальный возраст вселенной в млрд лет (легаси-семантика)
+  /**
+   * Окно существования объекта в истории Вселенной (млрд лет от Большого взрыва).
+   * earliestUniverseAgeGyr — минимальный возраст Вселенной, при котором объекты
+   * этого класса уже могут существовать.
+   *
+   * ВАЖНО: время жизни ОТДЕЛЬНОГО объекта здесь не хранится. Короткоживущая
+   * звезда (например, голубой гигант) может сформироваться недавно даже в
+   * древней Вселенной — большой возраст Вселенной её не запрещает.
+   * Запрещён лишь объект, который не мог сформироваться к выбранной эпохе.
+   */
+  existenceWindow?: { earliestUniverseAgeGyr: number; note?: string };
 }
 
 // ============================================
@@ -245,9 +267,13 @@ export interface AtmosphereComponent {
 
 export interface AtmosphereState {
   components: AtmosphereComponent[];
-  totalPressure: number | null; // в атмосферах
+  totalPressure: number | null; // в атмосферах (легаси-поле, мигрировавшее из этапа 1)
   temperature: number | null; // в Кельвинах
   notes: string;
+  /** Происхождение пресета: исторический игровой сценарий, наблюдательный справочник или гипотеза */
+  presetKind?: 'historical_game' | 'observational_reference' | 'hypothetical';
+  /** Явные пояснения о достоверности параметров пресета (давление, температура и т.п.) */
+  presetNotes?: string;
 }
 
 // ============================================
@@ -291,6 +317,7 @@ export type RuleCategory =
   | 'cradle_pressure'
   | 'chemical_composition'
   | 'atmosphere'
+  | 'phase_equilibrium'
   | 'energy_sources'
   | 'matter_state'
   | 'geological_requirements';
@@ -390,6 +417,24 @@ export interface GeneratedWorld {
   physicalCharacteristics: PhysicalCharacteristics;
   energySources: EnergySources;
   atmosphere: AtmosphereState;
+  // ===== Физическая модель (этап 3; опционально — старые миры
+  // отображают эти параметры как неизвестные, а не пересоздаются) =====
+  /** Структурная модель центрального объекта / системы (звезда, остаток, джет и т.п.) */
+  centralObjectSystem?: CentralObjectSystem;
+  /** Орбитальная конфигурация (сэмплирована детерминированно через PRNG) */
+  orbit?: OrbitalConfigurationData;
+  /** Сэмплированные масса/радиус/плотность/гравитация планеты (SI) */
+  bodyPhysics?: BodyPhysicalSample;
+  /** Физическая модель атмосферы: молярные доли, парциальные давления (Па), столб */
+  atmospherePhysics?: AtmospherePhysicalModel;
+  /** Фазовый скрининг атмосферных компонентов */
+  phaseAnalysis?: AtmospherePhaseAnalysis;
+  /** Анализ внутренних источников тепла (Geology) */
+  geologyAnalysis?: GeologicalAnalysis;
+  /** Энергетический бюджет: поток, равновесная температура, допущения */
+  energyBudget?: EnergyBudgetModel;
+  /** Начальное состояние химической эволюции (инвентарь + резервуары) */
+  chemicalState?: ChemicalEvolutionState;
   // Правила и предупреждения
   appliedRules: ID[];
   warnings: GenerationWarning[];
@@ -440,6 +485,8 @@ export interface SavedWorld extends GeneratedWorld {
   savedAt: string;
   version: Version;
   settings: GenerationSettings;
+  /** Отметка о миграции из старого формата сохранения */
+  migration?: { from: string; notes: string[] };
 }
 
 // ============================================
@@ -484,6 +531,12 @@ export interface SelectOption<T> {
 // 18. КОНСТАНТЫ
 // ============================================
 
-export const GENERATOR_VERSION = '0.2.0';
+export const GENERATOR_VERSION = '0.3.0';
 export const STORAGE_KEY = 'evowars_worlds';
 export const SETTINGS_KEY = 'evowars_settings';
+
+// ============================================
+// 19. ТИПЫ ФИЗИЧЕСКОЙ МОДЕЛИ (ЭТАП 3)
+// ============================================
+
+export * from './physics';

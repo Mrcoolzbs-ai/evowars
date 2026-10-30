@@ -12,6 +12,43 @@ import type {
 const STORAGE_KEY = 'evowars_worlds';
 const SETTINGS_KEY = 'evowars_settings';
 
+/**
+ * Версия формата сохранения.
+ *
+ * 1.1 (этап 3): GeneratedWorld получил опциональные поля физической
+ * модели (centralObjectSystem, orbit, bodyPhysics, atmospherePhysics,
+ * phaseAnalysis, geologyAnalysis, energyBudget, chemicalState).
+ * Все новые поля опциональны: их отсутствие в старых сохранениях
+ * означает «неизвестно», значения НЕ пересоздаются при миграции.
+ */
+export const STORAGE_FORMAT_VERSION = '1.1';
+
+/**
+ * Миграция мира из старой версии формата.
+ *
+ * Старые миры (version 1.0) не содержат полей физической модели этапа 3.
+ * Данные не пересоздаются: отсутствующие физические параметры
+ * отображаются как неизвестные. Легаси-давление totalPressure остаётся
+ * в atm и НЕ переписывается: пересчёт в Па выполняется моделью
+ * (Atmosphere.computeAtmospherePhysicalModel) на лету, а исходное
+ * значение сохраняется без изменений.
+ */
+function migrateWorld(world: SavedWorld): SavedWorld {
+  if (world.version === STORAGE_FORMAT_VERSION) return world;
+  const previousVersion = world.version ?? 'unknown';
+  return {
+    ...world,
+    version: STORAGE_FORMAT_VERSION,
+    migration: {
+      from: previousVersion,
+      notes: [
+        'добавлены опциональные поля физической модели этапа 3 (система центрального объекта, орбита, физика тела, атмосферная модель, фазовый анализ, геология, энергетический бюджет, химическое состояние): их отсутствие означает «неизвестно», значения не пересоздаются',
+        'totalPressure сохранено в исторических единицах atm; значение в Па вычисляется моделью на лету и не заменяет исходное'
+      ]
+    }
+  };
+}
+
 // ============================================
 // ФУНКЦИИ РАБОТЫ С LOCALSTORAGE
 // ============================================
@@ -23,7 +60,7 @@ export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): 
   const savedWorld: SavedWorld = {
     ...world,
     savedAt: new Date().toISOString(),
-    version: '1.0',
+    version: STORAGE_FORMAT_VERSION,
     settings
   };
 
@@ -48,9 +85,13 @@ export function getAllWorlds(): SavedWorld[] {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     if (!data) return [];
-    
+
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    // Миграция старых миров к актуальной версии формата.
+    // Старые данные не удаляются и не пересоздаются.
+    return parsed.map(migrateWorld);
   } catch {
     return [];
   }
@@ -239,6 +280,112 @@ export function exportWorldToMarkdown(world: SavedWorld): string {
   if (pc.geologicalActivity) lines.push(`- **Геологическая активность:** ${pc.geologicalActivity}`);
   lines.push('');
 
+  // --- Этап 3: физическая модель (опциональные поля) ---
+  if (world.bodyPhysics) {
+    lines.push('## Физическая модель тела (этап 3)');
+    lines.push('');
+    const bp = world.bodyPhysics;
+    lines.push(`- **Масса:** ${formatPhysValue(bp.massKg)}`);
+    lines.push(`- **Радиус:** ${formatPhysValue(bp.radiusM)}`);
+    lines.push(`- **Плотность:** ${formatPhysValue(bp.densityKgM3)}`);
+    lines.push(`- **Гравитация:** ${formatPhysValue(bp.surfaceGravityMs2)} (${bp.surfaceGravityInG.value?.toFixed(2) ?? '?'} g)`);
+    lines.push(`- **Физическая согласованность:** ${bp.consistencyCheck.plausible ? 'правдоподобно' : 'ВНЕ ДИАПАЗОНА'} — ${bp.consistencyCheck.note}`);
+    lines.push('');
+  }
+
+  if (world.orbit) {
+    lines.push('## Орбитальная конфигурация (этап 3)');
+    lines.push('');
+    lines.push(`- **Система отсчёта:** ${world.orbit.orbitalBasis}`);
+    if (world.orbit.semiMajorAxis.value !== null) {
+      lines.push(`- **Большая полуось:** ${world.orbit.semiMajorAxis.value.toFixed(0)} м (${(world.orbit.semiMajorAxis.value / 1.495978707e11).toFixed(3)} а.е.)`);
+    } else {
+      lines.push(`- **Большая полуось:** неизвестно — ${world.orbit.semiMajorAxis.note ?? ''}`);
+    }
+    if (world.orbit.eccentricity.value !== null) {
+      lines.push(`- **Эксцентриситет:** ${world.orbit.eccentricity.value.toFixed(3)}`);
+    }
+    if (world.orbit.orbitalPeriod.value !== null) {
+      const years = world.orbit.orbitalPeriod.value / 3.15576e7;
+      lines.push(`- **Орбитальный период:** ${world.orbit.orbitalPeriod.value.toFixed(0)} с (~${years.toFixed(2)} лет)`);
+    }
+    lines.push(`- **Проверка устойчивости:** ${world.orbit.stabilityCheck === 'not_performed' ? 'не выполнялась' : world.orbit.stabilityCheck}`);
+    lines.push('');
+  }
+
+  if (world.energyBudget) {
+    lines.push('## Энергетический бюджет (этап 3)');
+    lines.push('');
+    lines.push(`- **Падающий поток:** ${formatPhysValue(world.energyBudget.incidentFlux)}`);
+    lines.push(`- **Равновесная температура:** ${formatPhysValue(world.energyBudget.equilibriumTemperature)}`);
+    lines.push(`- **Внутреннее тепло:** ${world.energyBudget.internalHeatLevel}`);
+    lines.push(`- Примечание: ${world.energyBudget.greenhouseNote}`);
+    world.energyBudget.assumptions.forEach(a => lines.push(`  - допущение: ${a}`));
+    lines.push('');
+  }
+
+  if (world.atmospherePhysics) {
+    lines.push('## Физическая модель атмосферы (этап 3)');
+    lines.push('');
+    const ap = world.atmospherePhysics;
+    if (ap.surfacePressurePa) lines.push(`- **Давление:** ${formatPhysValue(ap.surfacePressurePa)}`);
+    if (ap.meanMolarMassKgMol) lines.push(`- **Средняя молярная масса:** ${(ap.meanMolarMassKgMol.value ?? 0).toFixed(4)} кг/моль`);
+    if (ap.columnMassKgM2) lines.push(`- **Масса столба:** ${formatPhysValue(ap.columnMassKgM2)}`);
+    if (ap.columnMolM2) lines.push(`- **Вещество столба:** ${formatPhysValue(ap.columnMolM2)}`);
+    lines.push(`- ${ap.idealGasNote}`);
+    lines.push('');
+    lines.push('| Газ | Молярная доля | Парциальное давление, Па |');
+    lines.push('|-----|---------------|--------------------------|');
+    for (const [gasId, fraction] of Object.entries(ap.molarFractions)) {
+      const partial = ap.partialPressuresPa[gasId]?.value;
+      lines.push(`| ${getGasName(gasId)} | ${(fraction * 100).toFixed(4)}% | ${partial !== null && partial !== undefined ? partial.toExponential(3) : 'неизвестно'} |`);
+    }
+    lines.push('');
+  }
+
+  if (world.phaseAnalysis) {
+    lines.push('## Фазовые состояния (этап 3)');
+    lines.push('');
+    for (const component of world.phaseAnalysis.components) {
+      lines.push(`- **${getGasName(component.gasId)}:** ${formatPhaseState(component.state)}${component.screeningRatio !== null && component.screeningRatio !== undefined ? ` (S = ${component.screeningRatio.toFixed(2)})` : ''}${component.message ? ` — ${component.message}` : ''}`);
+    }
+    world.phaseAnalysis.warnings.forEach(w => lines.push(`- Предупреждение: ${w}`));
+    if (world.phaseAnalysis.hasPotentialTransitions) {
+      lines.push('- Точный состав и количество конденсированной фазы не рассчитаны: требуется модель равновесия смеси.');
+    }
+    lines.push('');
+  }
+
+  if (world.geologyAnalysis) {
+    lines.push('## Внутреннее тепло (этап 3)');
+    lines.push('');
+    const ga = world.geologyAnalysis;
+    lines.push(`- **Суммарный уровень:** ${formatHeatLevel(ga.totalInternalHeat)}`);
+    lines.push(`- **Геотермальная энергия доступна:** ${ga.geothermalEnergyAvailable ? 'да' : 'нет'}`);
+    lines.push(`- **Остаточное тепло формирования:** ${formatHeatSource(ga.primordialHeat)}`);
+    lines.push(`- **Радиогенный нагрев:** ${formatHeatSource(ga.radiogenicHeat)}`);
+    lines.push(`- **Приливный нагрев:** ${formatHeatSource(ga.tidalHeat)}`);
+    if (ga.volcanism === true) lines.push('- **Вулканизм:** возможен');
+    if (ga.volcanism === null) lines.push('- **Вулканизм:** неизвестно');
+    lines.push('');
+  }
+
+  if (world.chemicalState) {
+    lines.push('## Химическая эволюция (этап 3)');
+    lines.push('');
+    const cs = world.chemicalState;
+    lines.push(`- **Режим инвентаря:** ${cs.mode === 'column_inventory' ? 'моль/м² атмосферного столба' : 'нормированный игровой (абсолютное количество неизвестно)'}`);
+    lines.push(`- **Единицы:** ${cs.unitsNote}`);
+    lines.push(`- **Модельное время:** ${cs.modelTimeYears.toExponential(2)} лет`);
+    lines.push(`- **Шаг:** ${cs.stepDurationYears.toExponential(2)} лет (игровое допущение)`);
+    if (cs.surfacePressurePa !== null && cs.surfacePressurePa !== undefined) {
+      lines.push(`- **Давление:** ${cs.surfacePressurePa.toExponential(4)} Па`);
+    }
+    const steps = cs.history.length;
+    lines.push(`- **Выполнено шагов реакций:** ${steps}`);
+    lines.push('');
+  }
+
   lines.push('## Энергия');
   lines.push('');
   lines.push(`- **Основные источники:** ${world.energySources.primary.join(', ')}`);
@@ -300,7 +447,9 @@ export function importWorldFromJSON(json: string): SavedWorld | null {
       return null;
     }
     
-    return parsed as SavedWorld;
+    // Импортированный мир мигрируется к актуальной версии формата
+    // (отсутствующие физические поля остаются неизвестными).
+    return migrateWorld(parsed as SavedWorld);
   } catch {
     return null;
   }
@@ -370,6 +519,59 @@ function getGasFormula(gasId: string): string {
 }
 
 /**
+ * Форматирование значения физической модели с указанием достоверности.
+ * Показывает, где заканчивается известная физика и начинается
+ * модельное предположение.
+ */
+function formatPhysValue(value: { value: number | null; unit: string; confidence: string; note?: string }): string {
+  if (value.value === null) {
+    return `неизвестно (${value.note ?? 'данных недостаточно'})`;
+  }
+  const confidenceLabels: Record<string, string> = {
+    'established': 'установлено',
+    'derived': 'рассчитано',
+    'estimated': 'оценка',
+    'hypothetical': 'гипотеза',
+    'game_assumption': 'игровое допущение',
+    'unknown': 'неизвестно'
+  };
+  const label = confidenceLabels[value.confidence] ?? value.confidence;
+  return `${value.value.toExponential(3)} ${value.unit} [${label}]`;
+}
+
+/** Русская метка фазового состояния компонента. */
+function formatPhaseState(state: string): string {
+  const labels: Record<string, string> = {
+    'gas': 'газ',
+    'potentially_condensing': 'потенциальная конденсация',
+    'potential_solid_deposition': 'возможно выпадение твёрдой фазы',
+    'no_condensation_above_critical': 'выше критической температуры: жидкой фазы нет',
+    'unknown': 'неизвестно'
+  };
+  return labels[state] ?? state;
+}
+
+/** Русская метка уровня внутреннего тепла. */
+function formatHeatLevel(level: string): string {
+  const labels: Record<string, string> = {
+    'high': 'высокий',
+    'moderate': 'умеренный',
+    'low': 'низкий',
+    'none': 'отсутствует',
+    'unknown': 'неизвестно'
+  };
+  return labels[level] ?? level;
+}
+
+/** Описание отдельного источника внутреннего тепла. */
+function formatHeatSource(source: { level: string | null; status: string; note: string }): string {
+  if (source.level === null) {
+    return `${source.status === 'potential' ? 'возможен, не оценён' : 'не оценён'} — ${source.note}`;
+  }
+  return `${formatHeatLevel(source.level)} — ${source.note}`;
+}
+
+/**
  * Получение статистики хранения
  */
 export function getStorageStats(): { total: number; lastSaved: string | null } {
@@ -398,3 +600,4 @@ export default {
   importWorldFromJSON,
   getStorageStats
 };
+

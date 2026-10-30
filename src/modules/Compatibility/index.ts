@@ -20,6 +20,7 @@ import type {
   AtmosphereState,
   PhysicalCharacteristics
 } from '../../types';
+import { getEarliestUniverseAgeGyr, getTypicalLifetimeGyr } from '../Data/starPhysical';
 
 // ============================================
 // ВСПОМОГАТЕЛЬНЫЕ КОНСТАНТЫ И ФУНКЦИИ
@@ -98,7 +99,16 @@ export const CRADLE_RELATED_CATEGORIES: RuleCategory[] = [
 // ============================================
 
 const compatibilityRules: CompatibilityRule[] = [
-  // Правило 1: Проверка возраста вселенной и центрального объекта
+  // Правило 1: Окно существования центрального объекта в эпоху
+  //
+  // СЕМАНТИКА ЭТАПА 3: возраст Вселенной НЕ равен времени жизни звезды.
+  // Запрещён ТОЛЬКО объект, класс которого не мог сформироваться
+  // к выбранной эпохе (максимальный возраст эпохи меньше минимального
+  // возраста Вселенной для класса). Короткоживущая звезда (голубой
+  // гигант) может сформироваться недавно даже в древней Вселенной —
+  // для неё действует отдельное предупреждение (правило 13), а НЕ
+  // запрет: максимальное время жизни звезды не используется как
+  // максимальный возраст существования Вселенной.
   {
     id: 'age_central_object_compatibility',
     category: 'age_central_object',
@@ -108,17 +118,26 @@ const compatibilityRules: CompatibilityRule[] = [
       const epochAge = world.epoch.ageRange;
       const obj = world.centralObject;
 
-      if (obj.minAge !== null && epochAge.min < obj.minAge) return false;
-      if (obj.maxAge !== null && epochAge.max > obj.maxAge) return false;
+      // Минимальный возраст Вселенной, при котором класс объекта
+      // уже может существовать (окно существования этапа 3).
+      const earliestUniverseAgeGyr =
+        obj.existenceWindow?.earliestUniverseAgeGyr ??
+        getEarliestUniverseAgeGyr(obj.id) ??
+        obj.minAge ??
+        0;
+
+      // Вселенная слишком молода: объект этого класса ещё не мог
+      // сформироваться к выбранной эпохе.
+      if (epochAge.max < earliestUniverseAgeGyr) return false;
 
       return true;
     },
     result: 'incompatible',
     severity: 'error',
-    explanation: 'Центральный объект не может существовать в выбранную эпоху вселенной.',
+    explanation: 'Центральный объект этого класса не мог сформироваться к выбранной эпохе: Вселенная ещё слишком молода.',
     resolutionSuggestions: [
-      'Выберите другой центральный объект',
-      'Выберите другую эпоху',
+      'Выберите более позднюю эпоху',
+      'Выберите центральный объект, возможный в ранней Вселенной',
       'Используйте аномальный режим для игнорирования возрастных ограничений'
     ],
     dependsOn: [],
@@ -459,6 +478,73 @@ const compatibilityRules: CompatibilityRule[] = [
     ],
     dependsOn: [],
     isActive: true
+  },
+
+  // Правило 13: Короткоживущая звезда в позднюю эпоху (этап 3)
+  //
+  // Короткоживущая звезда НЕ запрещена в древней Вселенной: она
+  // могла сформироваться недавно. Но время, доступное для развития
+  // планетарной среды, ограничено временем жизни звезды — это
+  // УСЛОВНАЯ совместимость (предупреждение), а не ошибка.
+  {
+    id: 'short_lived_star_recent_formation',
+    category: 'age_central_object',
+    condition: (world: Partial<GeneratedWorld>) => {
+      if (!world.epoch || !world.centralObject) return true;
+
+      const lifetime = getTypicalLifetimeGyr(world.centralObject.id);
+      // Характерное время жизни определено только для звёзд.
+      if (!lifetime) return true;
+
+      // Звезда класса могла сформироваться недавно, только если
+      // время её жизни короче возраста Вселенной к концу эпохи.
+      // Тогда формирование вынужденно состоялось недавно, и окно
+      // стабильных условий ограничено временем жизни звезды.
+      return world.epoch.ageRange.max <= lifetime.max;
+    },
+    result: 'conditionally_compatible',
+    severity: 'warning',
+    explanation:
+      'Время жизни звезды этого класса короче возраста Вселенной выбранной эпохи: звезда должна была сформироваться недавно, и время, доступное для развития планетарной среды, ограничено её временем жизни (а не возрастом Вселенной).',
+    resolutionSuggestions: [
+      'Учтите ограниченное окно стабильных условий вблизи короткоживущей звезды',
+      'Выберите долгоживущий класс звезды для длительной эволюции среды',
+      'Подтвердите осознанный выбор сценария быстрой эволюции'
+    ],
+    dependsOn: [],
+    isActive: true
+    // Специально БЕЗ exemptInAnomalousMode: ограничение времени жизни
+    // звезды — физическое свойство самого объекта, не привязанное
+    // к аномальной космологии.
+  },
+
+  // Правило 14: Фазовый скрининг атмосферных компонентов (этап 3)
+  //
+  // Потенциальная конденсация или выпадение твёрдой фазы компонентов
+  // — не ошибка состава: вещество не удаляется и не нормализуется.
+  // Предупреждение сообщает о потенциальном фазовом переходе и о том,
+  // что точное распределение по фазам не рассчитано.
+  {
+    id: 'atmosphere_phase_screening',
+    category: 'phase_equilibrium',
+    condition: (world: Partial<GeneratedWorld>) => {
+      // Физическая модель не построена (старые миры) — проверка не применима.
+      if (!world.phaseAnalysis) return true;
+      return !world.phaseAnalysis.hasPotentialTransitions;
+    },
+    result: 'conditionally_compatible',
+    severity: 'warning',
+    explanation:
+      'Фазовый скрининг обнаружил компоненты с потенциалом конденсации или выпадения твёрдой фазы при заданных условиях. Компоненты не удаляются: точное распределение между фазами требует модели равновесия смеси.',
+    resolutionSuggestions: [
+      'Учтите возможное существование жидких/твёрдых резервуаров вещества',
+      'Проверьте температуру и давление атмосферы',
+      'Точный состав и количество конденсированной фазы не рассчитаны — требуется модель равновесия смеси'
+    ],
+    dependsOn: [],
+    isActive: true
+    // Специально БЕЗ exemptInAnomalousMode: фазовая физика вещества
+    // не отменяется аномальной космологией.
   }
 ];
 
@@ -516,7 +602,8 @@ function getAffectedFields(category: RuleCategory): string[] {
     'atmosphere': ['atmosphere'],
     'energy_sources': ['energySources', 'centralObject', 'cradle'],
     'matter_state': ['cradle', 'cradleLocalEnvironment'],
-    'geological_requirements': ['cradle', 'physicalCharacteristics']
+    'geological_requirements': ['cradle', 'physicalCharacteristics'],
+    'phase_equilibrium': ['atmosphere', 'phaseAnalysis']
   };
 
   return fieldMap[category] || [];
@@ -615,3 +702,4 @@ export default {
   removeRule,
   toggleRule
 };
+

@@ -130,7 +130,7 @@ describe('Compatibility Module', () => {
       expect(hasAnomalousWarning).toBe(false);
     });
 
-    it('should detect age and central object incompatibility', () => {
+    it('короткоживущая звезда НЕ запрещена в древней Вселенной (этап 3)', () => {
       const mockWorld: Partial<GeneratedWorld> = {
         ...baseWorld(),
         epoch: epochs.find(e => e.id === 'ancient_cosmos')!, // 11-13.8 bln years
@@ -139,10 +139,40 @@ describe('Compatibility Module', () => {
       };
 
       const warnings = checkCompatibility(mockWorld, 'realistic');
-      const hasAgeWarning = warnings.some(
+      // Голубой гигант мог сформироваться недавно даже в древней Вселенной:
+      // время жизни звезды НЕ равно возрасту Вселенной.
+      const hasAgeError = warnings.some(
         w => w.ruleId === 'age_central_object_compatibility' && w.severity === 'error'
       );
-      expect(hasAgeWarning).toBe(true);
+      expect(hasAgeError).toBe(false);
+
+      // Вместо запрета — предупреждение об ограниченном окне стабильности.
+      const hasShortLivedWarning = warnings.some(
+        w => w.ruleId === 'short_lived_star_recent_formation' && w.severity === 'warning'
+      );
+      expect(hasShortLivedWarning).toBe(true);
+    });
+
+    it('объект, не существовавший в ранней Вселенной, всё ещё даёт ошибку (этап 3)', () => {
+      // Синтетический объект: класс возникает не раньше 20 млрд лет
+      // (например, гипотетический поздний класс) — Вселенная 13.8 млрд лет слишком молода.
+      const lateObject = {
+        ...centralObjects.find(o => o.id === 'blue_giant')!,
+        id: 'test_late_object',
+        existenceWindow: { earliestUniverseAgeGyr: 20 }
+      };
+      const mockWorld: Partial<GeneratedWorld> = {
+        ...baseWorld(),
+        epoch: epochs.find(e => e.id === 'ancient_cosmos')!,
+        centralObject: lateObject,
+        cradle: findCradle('supercritical_water')
+      };
+
+      const warnings = checkCompatibility(mockWorld, 'realistic');
+      const hasAgeError = warnings.some(
+        w => w.ruleId === 'age_central_object_compatibility' && w.severity === 'error'
+      );
+      expect(hasAgeError).toBe(true);
     });
 
     it('should detect central object and celestial body incompatibility', () => {
@@ -275,8 +305,10 @@ describe('Compatibility Module', () => {
       const second = checkCompatibility(mockWorld, 'realistic');
 
       expect(first.map(w => w.id)).toEqual(second.map(w => w.id));
-      const ageWarning = first.find(w => w.ruleId === 'age_central_object_compatibility');
-      expect(ageWarning?.id).toBe('warn_age_central_object_compatibility');
+      // Этап 3: для короткоживущей звезды в древней Вселенной срабатывает
+      // предупреждение времени жизни (детерминированный идентификатор).
+      const shortLivedWarning = first.find(w => w.ruleId === 'short_lived_star_recent_formation');
+      expect(shortLivedWarning?.id).toBe('warn_short_lived_star_recent_formation');
     });
   });
 });
@@ -643,16 +675,49 @@ describe('Cradle Local Environment Compatibility', () => {
     });
 
     it('аномальный режим отключает проверку возраста (привязанное исключение)', () => {
+      // Этап 3: используем объект, который РЕАЛЬНО нарушает возрастное
+      // ограничение в реалистичном режиме, чтобы проверить, что аномальный
+      // режим отключает именно это правило.
+      const lateObject = {
+        ...centralObjects.find(o => o.id === 'blue_giant')!,
+        id: 'test_late_object',
+        existenceWindow: { earliestUniverseAgeGyr: 20 }
+      };
       const world: Partial<GeneratedWorld> = {
         ...baseWorld(),
         mode: 'anomalous',
         epoch: epochs.find(e => e.id === 'ancient_cosmos')!,
-        centralObject: centralObjects.find(o => o.id === 'blue_giant')!,
+        centralObject: lateObject,
         cradle: findCradle('supercritical_water')
       };
 
+      // Реалистичный режим: ошибка есть — Вселенная слишком молода для класса.
+      expect(errorsForRule(checkCompatibility(world, 'realistic'), 'age_central_object_compatibility')).toHaveLength(1);
+
+      // Аномальный режим: возрастное правило отключено.
       const warnings = checkCompatibility(world, 'anomalous');
       expect(errorsForRule(warnings, 'age_central_object_compatibility')).toHaveLength(0);
+    });
+
+    it('аномальный режим НЕ отключает физическое правило фазового скрининга (этап 3)', () => {
+      // Синтетический мир с подтверждённой потенциальной конденсацией:
+      // правило 14 сознательно без exemptInAnomalousMode.
+      const phaseAnalysis = {
+        temperatureK: 95,
+        components: [],
+        hasPotentialTransitions: true,
+        warnings: ['тестовая конденсация'],
+        mixtureNote: 'тест'
+      };
+      const world: Partial<GeneratedWorld> = {
+        ...baseWorld(),
+        mode: 'anomalous',
+        cosmology: cosmologies.find(c => c.id === 'world_as_body')!,
+        phaseAnalysis: phaseAnalysis as GeneratedWorld['phaseAnalysis']
+      };
+
+      const warnings = checkCompatibility(world, 'anomalous');
+      expect(warnings.some(w => w.ruleId === 'atmosphere_phase_screening')).toBe(true);
     });
 
     it('релятивистский джет запрещён в реалистичном режиме и разрешён в аномальном', () => {
@@ -749,3 +814,4 @@ describe('Compatibility Rule Validation', () => {
     });
   });
 });
+
