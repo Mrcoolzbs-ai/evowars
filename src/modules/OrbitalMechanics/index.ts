@@ -462,15 +462,6 @@ export function solarConstantCheck(): number | null {
   return incidentFlux(3.828e26, AU_M);
 }
 
-export {
-  buildCentralObjectSystem,
-  incidentFlux,
-  equilibriumTemperature,
-  sampleOrbit,
-  orbitalPeriodFromElements,
-  existsInEpoch
-};
-
 export default {
   ORBIT_BANDS,
   MOON_ORBIT_BAND_PARENT_RADII,

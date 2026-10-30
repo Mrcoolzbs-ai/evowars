@@ -244,7 +244,7 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     physicalCharacteristics,
     energySources,
     atmosphere,
-    centralObjectSystem,
+    centralObjectSystem: centralObjectSystem ?? undefined,
     orbit,
     bodyPhysics,
     atmospherePhysics,

@@ -432,16 +432,6 @@ export const EOS_NOT_IMPLEMENTED_NOTE =
   'Уравнения состояния (Peng–Robinson, SRK) и модель равновесия смеси не реализованы: ' +
   'результаты фазового анализа являются скрининговыми оценками, а не точным расчётом.';
 
-export {
-  saturationPressure,
-  checkComponentPhase,
-  analyzeAtmospherePhases,
-  createEmptyReservoirs,
-  totalSubstanceAmount,
-  transferSubstance,
-  raoultScreening
-};
-
 export default {
   saturationPressure,
   checkComponentPhase,

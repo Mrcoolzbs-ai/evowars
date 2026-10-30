@@ -118,6 +118,4 @@ export function computeEnergyBudget(input: EnergyBudgetInput): EnergyBudgetModel
   };
 }
 
-export { computeEnergyBudget, ENERGY_BUDGET_ASSUMPTIONS };
-
 export default { computeEnergyBudget, ENERGY_BUDGET_ASSUMPTIONS };

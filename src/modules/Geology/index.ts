@@ -34,8 +34,8 @@ const LEVEL_RANK: Record<NonNullable<HeatSourceAnalysis['level']>, number> = {
   high: 3
 };
 
-const RANK_LEVEL: Record<number, NonNullable<HeatSourceAnalysis['level']>> = {
-  0: 'negligible',
+const RANK_LEVEL: Record<number, GeologicalAnalysis['totalInternalHeat']> = {
+  0: 'none',
   1: 'low',
   2: 'moderate',
   3: 'high'
@@ -281,7 +281,5 @@ export function analyzeGeology(input: GeologyAnalysisInput): GeologicalAnalysis 
     ]
   };
 }
-
-export { analyzeGeology };
 
 export default { analyzeGeology };
