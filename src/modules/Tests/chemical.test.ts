@@ -347,8 +347,10 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       world = runChemicalEvolutionStep(world).world;
       world = runChemicalEvolutionStep(world).world;
       const after = elementTotalsOf(world.chemicalState!);
-      for (const element of Object.keys(before)) {
-        expect(after[element] ?? 0).toBeCloseTo(before[element], 6);
+      // elementTotalsOf возвращает { totals, excludedSubstances }:
+      // индексируем именно таблицу totals.
+      for (const element of Object.keys(before.totals)) {
+        expect(after.totals[element] ?? 0).toBeCloseTo(before.totals[element], 6);
       }
     });
   });
