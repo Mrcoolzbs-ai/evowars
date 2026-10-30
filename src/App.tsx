@@ -156,13 +156,13 @@ function GeneratorPanel(props: {
             }}
           >
             <option value="">По умолчанию (метаново-этановая)</option>
-            {Object.entries(getAllPresets()).map(([presetId, preset]) => (
+            {Object.entries(getAllPresets()).map(([presetId]) => (
               <option key={presetId} value={presetId}>
-                {preset.id === 'methane_ethane'
+                {presetId === 'methane_ethane'
                   ? 'Метаново-этановая (историческая игровая)'
-                  : preset.id === 'titan_reference'
+                  : presetId === 'titan_reference'
                     ? 'Титан — наблюдательный ориентир'
-                    : preset.id}
+                    : presetId}
               </option>
             ))}
           </select>

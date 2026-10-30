@@ -673,10 +673,20 @@ export function computeAtmospherePhysicalModel(
     }
   ];
 
+  // Средняя молярная масса как PhysValue: значение + степень достоверности.
+  const meanMolarMassValue: PhysValue | null = meanMolarMassKgMol === null ? null : {
+    value: meanMolarMassKgMol,
+    unit: 'кг/моль',
+    confidence: 'derived',
+    method: 'средняя молярная масса смеси по молярным долям',
+    formula: 'M = Σ x_i·M_i',
+    note: 'не рассчитывается при компонентах с неизвестной молярной массой (в том числе unidentified)'
+  };
+
   return {
     molarFractions,
     surfacePressurePa,
-    meanMolarMassKgMol,
+    meanMolarMassKgMol: meanMolarMassValue,
     partialPressuresPa,
     columnMassKgM2,
     columnMolM2,

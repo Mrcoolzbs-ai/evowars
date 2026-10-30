@@ -25,9 +25,9 @@ import type {
   GeneratedWorld,
   SubstanceReservoirs
 } from '../../types';
-import chemicalReactions from '../../Data/chemicalReactions';
-import gases from '../../Data/gases';
-import { getElementComposition } from '../../Data/elementCompositions';
+import chemicalReactions from '../Data/chemicalReactions';
+import gases from '../Data/gases';
+import { getElementComposition } from '../Data/elementCompositions';
 import { paToAtm } from '../Units';
 import { createEmptyReservoirs, totalSubstanceAmount } from '../PhaseEquilibrium';
 
@@ -612,17 +612,7 @@ export function runChemicalEvolutionStep(
   };
 }
 
-export {
-  isReactionBalanced,
-  createChemicalState,
-  applyReaction,
-  runKineticStep,
-  computeOxygenBalance,
-  createDefaultProcessRegistry,
-  elementTotalsOf,
-  substanceTotalsOf,
-  runChemicalEvolutionStep
-};
+// Все функции экспортированы непосредственно в своих определениях.
 
 export default {
   isReactionBalanced,
