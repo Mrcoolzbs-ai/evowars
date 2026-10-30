@@ -17,7 +17,7 @@ import {
 import chemicalReactions from '../Data/chemicalReactions';
 import { computeAtmospherePhysicalModel, getAllPresets } from '../Atmosphere';
 import { G_EARTH_MS2 } from '../Units';
-import type { AtmospherePhysicalModel, GeneratedWorld } from '../../types';
+import type { AtmospherePhysicalModel, GeneratedWorld, ChemicalStepRecord } from '../../types';
 import type { ChemicalReaction } from '../../types';
 
 // ============================================
@@ -435,11 +435,12 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       expect(state.oxygenBalance.consumption).toBeLessThan(cumulative);
     });
 
-    it('баланс (сценарий E): прямой applyReaction не создаёт несогласованного состояния', () => {
-      // Ответственность разделена явно: applyReaction применяет реакцию
-      // и добавляет запись в history; поле oxygenBalance отражает итог
-      // последнего ЗАВЕРШЁННОГО глобального шага (обновляет его только
-      // runChemicalEvolutionStep) и не претендует на учёт отдельной реакции.
+    it('баланс (сценарий E): прямой applyReaction сохраняет семантику последнего завершённого шага', () => {
+      // Контракт: отдельный applyReaction — НЕ глобальный шаг. Он
+      // применяет реакцию и добавляет запись в history, но не двигает
+      // время и не меняет oxygenBalance: поле продолжает отражать
+      // последний ЗАВЕРШЁННЫЙ глобальный шаг (здесь — нулевую
+      // инициализацию).
       const state = createChemicalState({
         atmospherePhysicalModel: makeModel({ ch4: 0.6, o2: 0.4 })
       });
@@ -448,19 +449,54 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
         temperatureK: 500,
         pressureAtm: 1
       });
-      // Запись уже в истории и несёт расход O₂ — она гарантированно
-      // учтена балансом следующего глобального шага:
+      // Запись сохранена в истории и несёт численный расход O₂:
       const record = after.history.find(r => r.applied);
       expect(record).toBeDefined();
-      expect(record!.changes['o2']).toBeLessThan(0);
-      // Баланс по записям истории с первой записи реакцию учитывает:
-      expect(computeOxygenBalance(after, 0).consumption).toBeCloseTo(4, 6);
-      // Поле состояния — семантика последнего завершённого шага
-      // (нулевая инициализация), а не «актуальный» баланс,
-      // забывший про только что применённую реакцию.
+      expect(record!.changes['o2']).toBeCloseTo(-4, 6);
+      expect(after.history.length).toBe(1);
+      // Время и баланс последнего завершённого шага не тронуты:
+      expect(after.modelTimeYears).toBe(0);
       expect(after.oxygenBalance.consumption).toBe(0);
       expect(after.oxygenBalance.production).toBe(0);
       expect(after.oxygenBalance.net).toBe(0);
+      // Баланс по ЯВНО переданным записям (вся история) реакцию учитывает:
+      const balanceFromHistory = computeOxygenBalance(after.history, after.mode);
+      expect(balanceFromHistory.consumption).toBeCloseTo(4, 6);
+    });
+
+    it('баланс: запись прямого applyReaction НЕ включается в баланс следующего глобального шага', () => {
+      // Контракт: баланс глобального шага учитывает ТОЛЬКО реакции,
+      // выполненные внутри этого шага. Запись, добавленная прямым
+      // вызовом applyReaction, остаётся в истории, но в баланс
+      // следующего runChemicalEvolutionStep автоматически не попадает.
+      const manual = applyReaction(
+        createChemicalState({ atmospherePhysicalModel: makeModel({ ch4: 0.6, o2: 0.4 }) }),
+        findReaction('ch4_oxidation'),
+        { extentFraction: 0.1, temperatureK: 500, pressureAtm: 1 }
+      ).state;
+      // Глобальный шаг над этим состоянием (мир собирается вокруг него):
+      const world = {
+        chemicalState: manual,
+        atmospherePhysics: makeModel({ ch4: 0.6, o2: 0.4 }),
+        atmosphere: { temperature: 600 },
+        phaseAnalysis: { temperatureK: 600 },
+        energyBudget: { incidentFlux: { value: 1361 } },
+        energySources: { primary: [], secondary: [] }
+      } as unknown as GeneratedWorld;
+      const result = runChemicalEvolutionStep(world);
+      const state = result.world.chemicalState!;
+      // В истории: 1 ручная запись + 4 записи глобального шага
+      // (по одной на каждую реакцию каталога).
+      expect(state.history.length).toBe(5);
+      // Баланс шага — только реакции САМОГО шага: ещё одно окисление
+      // метана (инвентарь после ручной реакции: ch4=58, o2=36 →
+      // лимит min(58, 36/2=18)=18 → 0.1×18 → −3.6 O₂), без ручной
+      // записи (с ней было бы 4 + 3.6 = 7.6).
+      expect(state.oxygenBalance.consumption).toBeCloseTo(3.6, 6);
+      expect(state.oxygenBalance.consumption).not.toBeCloseTo(7.6, 6);
+      // История по-прежнему хранит ручную запись с расходом 4:
+      const manualRecord = state.history[0];
+      expect(manualRecord.changes['o2']).toBeCloseTo(-4, 6);
     });
 
     it('баланс (сценарий F): производство O₂ остаётся нулевым без источников', () => {
@@ -493,6 +529,51 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
     });
   });
 
+  describe('computeOxygenBalance: явный набор записей', () => {
+    /** Синтетическая запись с изменением O₂ (остальные поля — константы). */
+    const rec = (o2: number, applied = true): ChemicalStepRecord => ({
+      stepNumber: 1,
+      reactionId: 'synthetic',
+      applied,
+      mode: 'stoichiometric',
+      extent: applied ? 1 : null,
+      limitingReactant: 'o2',
+      reason: '',
+      changes: o2 === 0 ? {} : { o2 },
+      confidence: 'game_assumption'
+    });
+
+    it('пустой набор записей даёт нулевой баланс', () => {
+      const balance = computeOxygenBalance([], 'game_normalized');
+      expect(balance.production).toBe(0);
+      expect(balance.consumption).toBe(0);
+      expect(balance.net).toBe(0);
+      expect(balance.note).toContain('НЕ кинетическая скорость');
+    });
+
+    it('баланс считается ТОЛЬКО по переданным записям шага', () => {
+      // Две применимые записи шага (−4 и −3.6 O₂) и одна пустая:
+      const balance = computeOxygenBalance([rec(-4), rec(0, false), rec(-3.6)], 'game_normalized');
+      expect(balance.consumption).toBeCloseTo(7.6, 6);
+      expect(balance.production).toBe(0);
+      expect(balance.net).toBeCloseTo(-7.6, 6);
+      // Единицы режима column_inventory — моль O₂/м² за шаг:
+      const column = computeOxygenBalance([rec(-4)], 'column_inventory');
+      expect(column.consumption).toBeCloseTo(4, 6);
+      expect(column.note).toContain('моль');
+    });
+
+    it('записи разных шагов не смешиваются: каждой порции — свой баланс', () => {
+      const step1 = [rec(-4), rec(0, false)];
+      const step2 = [rec(-3.6), rec(0, false)];
+      // Баланс каждого шага — только его записи; накопленный итог 7.6
+      // не присваивается ни одному отдельному шагу:
+      expect(computeOxygenBalance(step1, 'game_normalized').consumption).toBeCloseTo(4, 6);
+      expect(computeOxygenBalance(step2, 'game_normalized').consumption).toBeCloseTo(3.6, 6);
+      expect(computeOxygenBalance([...step1, ...step2], 'game_normalized').consumption).toBeCloseTo(7.6, 6);
+    });
+  });
+
   describe('кинетический режим B честно недоступен', () => {
     it('runKineticStep не выдаёт физически рассчитанную скорость', () => {
       for (const reaction of chemicalReactions) {
@@ -520,14 +601,14 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
         temperatureK: 500,
         pressureAtm: 1
       });
-      const balance = computeOxygenBalance(after);
+      const balance = computeOxygenBalance(after.history, after.mode);
       expect(balance.consumption).toBeCloseTo(4, 10); // −4 O2 за шаг
       expect(balance.production).toBe(0);
       expect(balance.net).toBeCloseTo(-4, 10);
       // Итог дискретного шага, а не кинетическая скорость d(O₂)/dt:
       expect(balance.note).toContain('НЕ кинетическая скорость');
-      // Баланс считается по записям истории с указанного индекса;
-      // по умолчанию — по всей истории (здесь одна запись).
+      // Баланс считается по ЯВНО переданному набору записей
+      // (здесь — вся история, состоящая из одной записи шага).
     });
 
     it('O2 не накапливается без источников: структура ждёт будущих организмов', () => {
