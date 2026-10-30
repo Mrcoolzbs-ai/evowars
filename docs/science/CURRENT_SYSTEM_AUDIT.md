@@ -25,6 +25,11 @@
 > см. §1.16) и обязательность properties в validateReservoirRecord;
 > после 4.1.1.2 в проекте 550 тестов (21 файл), из них ядро — 279.
 > Коммиты 4.1.1.2: 35e7b0e → bf3f677 (CI run #30, 41114561545, зелёный).
+> Ревизия Stage 4.1.1.3 (2026-10-30): 2 остаточных дефекта — явная
+> неприменимость материи в пофазовом аудите (ISSUE A) и словари вместо
+> массивов (ISSUE B, см. §1.16); после 4.1.1.3 в проекте 574 теста
+> (21 файл), из них ядро — 303. Коммит 4.1.1.3: 00d9985 (CI run #32,
+> 41118174329, зелёный).
 
 ## 1. Реестр модулей
 
@@ -198,6 +203,13 @@
   обязательность properties: 19 в coreFluxLedger, 7 в corePersistence,
   4 в coreWorldState, 3 в coreReservoir). CI run #30 (41114561545,
   HEAD bf3f677) зелёный: tsc 0 ошибок, vitest, oxlint, build.
+- **Ревизия Stage 4.1.1.3**: 21 файл, 574 теста, из них 303 — ядро
+  (279 после 4.1.1.2 + 24 регрессионных теста на ISSUE A/B: 11 в
+  coreFluxLedger, 10 в coreReservoir, 3 в coreWorldState; фактические
+  итоги Vitest «Test Files 21 passed (21) / Tests 574 passed (574)»
+  публикуются notice-аннотацией шага Tests — страницы логов GitHub
+  Actions требуют входа в аккаунт). CI run #32 (41118174329,
+  HEAD 00d9985) зелёный: tsc 0 ошибок, vitest, oxlint, build.
 
 ### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
 
@@ -297,6 +309,33 @@
      (раньше отсутствие проходило молча, проверка была условной);
      отсутствующие material/energy — отдельные состояния, не ошибки;
      storedJ = null допустим; NaN/±Inf/отрицательный запас — ошибки.
+- **Ревизия Stage 4.1.1.3 — 2 остаточных дефекта materialApplicability
+  и формы записей** (подтверждены в коде ДО правки на HEAD a5e6065;
+  исправлены в 00d9985):
+  A. fluxLedger: auditReservoirFluxes при отсутствии material в ОБОИХ
+     состояниях без материальных потоков молча пропускал материальное
+     измерение (materialMandatory = false → ни проверки, ни
+     исключения) — противоречие с reservoirsToMolarCounts, где
+     отсутствие material без маркера уже означало неизвестный запас:
+     глобальный аудит давал not_verifiable, пофазовый — balanced;
+     теперь единственное законное основание пропуска измерения —
+     materialApplicability = 'not_applicable' в ОБОИХ состояниях;
+     маркер только в одном состоянии — «переход неприменимости не
+     подтверждён» (not_verifiable); отсутствие material без маркера —
+     исключение «запас неизвестен и не приравнивается к нулю»
+     (not_verifiable); энергетические буферы обязаны объявлять
+     нематериальность явно (energyFixture в тестах); материальная и
+     энергетическая применимость не смешиваются;
+  B. reservoir: проверки typeof 'object' пропускали массивы —
+     properties: [] и material.entries: [] проходили как «пустые
+     словари», inventoryToMolarCounts через spread пустого массива
+     давал «известную пустоту», totalInventory агрегировал бы
+     индексные ключи; теперь isPlainRecord (объект, не null, не
+     массив) в validateReservoirRecord, validateMaterialInventory,
+     inventoryToMolarCounts (массив → not_verifiable, а не «известный
+     пустой инвентарь»), totalInventory (массив → FluxLedgerError) и
+     auditReservoirFluxes; пустой объект {} остаётся валидным,
+     известные нули (entries[s] = 0) не меняются.
 
 ### 1.15 App.tsx (966 строк)
 

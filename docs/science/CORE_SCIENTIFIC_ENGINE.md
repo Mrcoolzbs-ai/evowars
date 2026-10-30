@@ -36,6 +36,19 @@
 > (StorageError 'storage_unreadable', исходная строка не меняется),
 > properties в ReservoirRecord обязательны. Коммиты 35e7b0e → bf3f677
 > (CI run #30 зелёный). После 4.1.1.2 — 550 тестов, из них ядро — 279.
+>
+> Ревизия Stage 4.1.1.3 (2026-10-30): materialApplicability и форма
+> записей — 2 остаточных дефекта (ISSUE A/B). ISSUE A: пофазовый
+> аудит auditReservoirFluxes больше НЕ выводит нематериальность из
+> отсутствия material — единственное законное основание пропустить
+> материальное измерение — materialApplicability = 'not_applicable'
+> в ОБОИХ состояниях (согласованно с reservoirsToMolarCounts); чисто
+> энергетические буферы обязаны объявлять нематериальность явно.
+> ISSUE B: properties и material.entries обязаны быть объектами-
+> записями (isPlainRecord: объект, не null, не массив): массив — не
+> словарь; пустой массив НЕ равен пустому словарю и не трактуется
+> как «известная пустота». Коммит 00d9985 (CI run #32, 41118174329,
+> зелёный). После 4.1.1.3 — 574 теста, из них ядро — 303.
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -158,6 +171,16 @@ not_verifiable с исключением; (2) явно заданный пуст
 буфер), помечается явно: `materialApplicability: 'not_applicable'` —
 неприменимость НЕ выводится из отсутствия поля.
 
+Словари — не массивы (ревизия 4.1.1.3, ISSUE B): `properties` и
+`material.entries` обязаны быть объектами-записями (помощник
+`isPlainRecord`: объект, не null, не массив). У массива typeof тоже
+'object', поэтому массивы исключаются ЯВНО: пустой массив `[]` НЕ
+равен пустому словарю `{}` и не принимается за «известную пустоту».
+Пустой объект остаётся допустимым; известные нули не меняются.
+Энергетический буфер без материи по своей природе ОБЯЗАН объявлять
+это явно: `materialApplicability: 'not_applicable'` — и в валидации,
+и в тестовых фикстурах.
+
 ### 2.5 FluxLedger — потоки и аудиты
 
 - Поток: internal_transfer | external_input | external_output;
@@ -219,11 +242,28 @@ not_verifiable с исключением; (2) явно заданный пуст
   exclusions и ДЕЛАЮТ итог not_verifiable: balanced при непроверенных
   обязательных вкладах невозможен. Статусы: imbalanced (расхождения)
   / not_verifiable (untimed-исключения или exclusions) / balanced
-  (всё проверено и сходится).
+  (всё проверено и сходится). Ревизия 4.1.1.3 (ISSUE A): если
+  инвентаря нет в ОБОИХ состояниях и материальных потоков нет,
+  единственное законное основание пропустить материальное измерение —
+  materialApplicability = 'not_applicable' в ОБОИХ состояниях;
+  отсутствие material без маркера — неизвестный запас (исключение
+  с ключом reservoirId, итог not_verifiable — согласованно с
+  reservoirsToMolarCounts и глобальным аудитом); маркер только в
+  одном состоянии — переход неприменимости не подтверждён (тоже
+  not_verifiable); materialApplicability ничего не говорит об
+  известности энергетического инвентаря (применимости не
+  смешиваются); массив в material.entries — не словарь, пофазовая
+  сверка невозможна (ISSUE B).
 - `validateFluxLedger`: форма и согласованность записей журнала
   (id, status, kind, subject, time, ссылки на резервуары).
 - `totalInventory` отказывается суммировать резервуары со смешанными
-  основаниями.
+  основаниями и с material.entries-массивом (не словарём).
+  Ревизия 4.1.1.3: totalInventory — СПРАВОЧНЫЙ агрегат заданных
+  инвентарей, а НЕ доказательство сохранения материи: резервуары
+  без инвентаря в сумму не входят (их запас неизвестен, а не ноль),
+  поэтому «постоянство» итога ничего не доказывает о полноте баланса
+  (доказательство — аудиты, дающие not_verifiable при неизвестных
+  запасах).
 
 ### 2.6 SimulationClock — время без потери точности
 
@@ -358,21 +398,21 @@ OrbitalMechanics, Geology, WorldModel) продолжают работать к�
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (279 тестов, 9 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2)
+## 4. Тесты ядра (303 теста, 9 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3)
 
 | Файл | it() | Покрытие |
 |---|---|---|
 | corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
 | coreScientificValue.test | 14 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации |
 | coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
-| coreReservoir.test | 33 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки) |
-| coreFluxLedger.test | 71 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced |
+| coreReservoir.test | 43 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён) |
+| coreFluxLedger.test | 82 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
-| coreWorldState.test | 35 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы; 4.1.1.2: обязательность properties ReservoirRecord |
+| coreWorldState.test | 38 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы; 4.1.1.2: обязательность properties ReservoirRecord; 4.1.1.3: массивы в properties/material.entries — invalid_reservoir |
 | coreSolverBackend.test | 11 | честный empty backend, лжец unsupported_kind_claim, реестр planned vs available |
 | corePersistence.test | 59 | миграции 1.0/1.1/1.2 (идемпотентность, null≠0, легаси-записи; '0.9'/'1.3'/'2.0' → unsupported_version; 'abc'/'2'/'' → invalid_version; оригинал не мутируется), Storage raw-изоляция несовместимых записей + getStorageHealth, адаптеры всех веток (50% → 0.5, provenance у unknown), PRNG-регрессия; 4.1.1.2: отказ записи при повреждённом корневом JSON (storage_unreadable) |
 
-Всего в проекте 21 тест-файл, 550 тестов (после ревизии 4.1.1.2; после 4.1.1 — 517; этап 4.1
+Всего в проекте 21 тест-файл, 574 теста (после ревизии 4.1.1.3; после 4.1.1.2 — 550; после 4.1.1 — 517; этап 4.1
 фактически заканчивался на 442 — CI #24: в доках ревизии 4.1 ошибочно
 указывалось 438). PRNG-регрессия
 (два инстанса `createRandom(seed)` дают идентичные последовательности
