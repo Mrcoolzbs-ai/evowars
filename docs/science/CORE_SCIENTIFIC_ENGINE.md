@@ -49,6 +49,27 @@
 > словарь; пустой массив НЕ равен пустому словарю и не трактуется
 > как «известная пустота». Коммит 00d9985 (CI run #32, 41118174329,
 > зелёный). После 4.1.1.3 — 574 теста, из них ядро — 303.
+>
+> Ревизия Stage 4.1.1.3.1 (2026-10-30): строгая проверка записей —
+> isPlainRecord принимает только настоящие объекты-записи (прототип
+> Object.prototype или null): Map, Set, Date, RegExp и экземпляры
+> пользовательских классов больше не проходят как «словари» и не
+> превращаются в «известную пустоту» через Object.entries(). После
+> 4.1.1.3.1 — 597 тестов (CI run #34, 21 файл), из них ядро — 326.
+>
+> Stage 4.2.1 (2026-10-30): фундамент политики времени — WorldClock
+> поверх сегментированного SimulationClock (§2.11), реестр процессов
+> с честными τ (§2.12), планировщик с Lie/Strang splitting,
+> sub-cycling и очередью событий (§2.13), общий InvariantAuditor
+> (§2.14); схема состояния ядра 1.0.0 → 1.1.0 (опциональное
+> scheduling), версия сохранений 1.2 → 1.3 (§2.9). Коммиты:
+> 63375e9 (golden baseline химии) → eba0a94 → 31f2298 → 2af6970
+> (CI runs #38–#42, зелёные). ChemicalEvolution НЕ переведён на
+> Scheduler (это Stage 4.2.3): SHA-256 контрольной траектории 100
+> шагов
+> (877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20)
+> совпал до и после. После 4.2.1 — 672 теста (26 файлов), из
+> них ядро — 401 (14 файлов).
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -60,6 +81,10 @@
 | `reservoir.ts` | Вещество и энергия | материальный инвентарь с явным основанием; энергетический инвентарь (запас/мощность/поток раздельно); иммутабельные записи |
 | `fluxLedger.ts` | Потоки | внутренние/внешние переносы; rate против integrated; атомарное применение; revert; аудиты сохранения |
 | `simulationClock.ts` | Время | сегментированное локальное время; сериализация; космический возраст — отдельно |
+| `worldClock.ts` | Мировое время | контракт ПОВЕРХ SimulationClock (4.2.1): продвижение, сериализация; второе числовое поле времени запрещено |
+| `processRegistry.ts` | Процессы | дескрипторы процессов с честными τ и статусами доступности solver (4.2.1) |
+| `scheduler.ts` | Планировщик | детерминированный порядок операторов, Lie/Strang, sub-cycling, очередь событий (4.2.1) |
+| `invariantAuditor.ts` | Инварианты | объединённый аудит перехода before → process → after (4.2.1) |
 | `worldState.ts` | Состояние мира | каноническое состояние: тела, гравитация, излучение, резервуары, потоки, часы; валидация |
 | `solverBackend.ts` | Численные методы | контракт решателей без фиктивных методов; probe-проверка заявлений; реестр available/planned |
 | `migrations.ts` | Версионирование | версии схем сохранений 1.0→1.1→1.2; реестр наборов данных; детерминированные миграции |
@@ -281,9 +306,12 @@ stepCount, representableStepS). Когда шаг становится непр�
 
 ### 2.7 CoreWorldState — каноническое состояние мира
 
-`CoreWorldState` = { schemaVersion ('1.0.0'), worldId, clock, cosmicAge,
-bodies, gravity, radiationSources, reservoirs, fluxLedger, legacy,
-note }. Ключевое разделение:
+`CoreWorldState` = { schemaVersion ('1.1.0' после 4.2.1; ранее
+'1.0.0' — поддерживаются обе), worldId, clock, cosmicAge, bodies,
+gravity, radiationSources, reservoirs, fluxLedger, scheduling?,
+legacy, note }. `scheduling` (динамика процессов и очередь событий,
+§2.13) опционален: отсутствие = «не инициализировано», миграции
+его НЕ создают. Ключевое разделение:
 
 - `gravity: Record<bodyId, parentId | null>` — гравитационная иерархия;
 - `radiationSources` — источники излучения.
@@ -293,7 +321,10 @@ note }. Ключевое разделение:
 плавающий мир не получает ни родителя, ни фиктивного излучателя.
 `validateWorldState` диагностирует: дубли id, битые ссылки (излучение →
 тело, резервуар → тело, поток → резервуар), self_parent, циклы
-гравитации, некорректные часы, несовпадение версий, пустой worldId.
+гравитации, некорректные часы, несовпадение версий, пустой worldId;
+ревизия 4.2.1: некорректное scheduling (включая события с
+некорректным временем в очереди) — invalid_scheduling /
+invalid_event.
 
 ### 2.8 SolverBackend — контракт без блефа
 
@@ -315,7 +346,13 @@ bitwise_same_environment | within_tolerance | platform_dependent).
 (2) версия набора данных (DatasetDescriptor.version), (3) версия модели
 (provenance.modelVersion), (4) версия алгоритма/генератора, (5) версия
 сохранения (SavedWorld.version). Цепочка миграций сохранений:
-**1.0 → 1.1 → 1.2** (текущая 1.2). Правила:
+**1.0 → 1.1 → 1.2 → 1.3** (текущая 1.3; ревизия 4.2.1: migrate12to13
+НЕ создаёт scheduling и НЕ переносит ChemicalEvolutionState.
+modelTimeYears в локальные секунды WorldClock — фиктивное
+прошедшее время не изобретается; версия схемы CoreWorldState
+поднята 1.0.0 → 1.1.0 с миграцией 1.0.0 → 1.1.0, которая также не
+создаёт scheduling и не пересчитывает старые значения; сохранения
+без coreWorldState остаются без него). Правила:
 
 - миграция детерминирована и идемпотентна на целевой версии (мир 1.2
   не переписывается повторно, история не плодится);
@@ -367,13 +404,107 @@ bitwise_same_environment | within_tolerance | platform_dependent).
   атмосферный резервуар создаётся только при непустом инвентаре;
   seed и generatorVersion сохраняются в legacy.
 
+### 2.11 WorldClock — мировое время поверх SimulationClock (4.2.1)
+
+WorldClockState = { clock: SimulationClockState } — ровно одно поле;
+второго независимого числового поля прошедшего времени НЕ существует
+(validateWorldClock отклоняет любые дополнительные поля — защита от
+дублирующего elapsed). Продвижение — advanceWorldClock /
+advanceWorldClockYears (годы переводятся в секунды ТОЛЬКО явно:
+yearsToSeconds, юлианский год 3.15576e7 с); шаги только положительные
+конечные (WorldClockError 'invalid_step'/'invalid_state'). Локальное
+время симуляции не смешивается с космологическим возрастом
+(cosmicAge — отдельное поле состояния мира): возраст Вселенной,
+звезды и эпохи никогда не суммируются с локальным временем.
+Сериализация/десериализация — round-trip без потерь; повторный
+запуск с одинаковым состоянием даёт одинаковый результат
+(Date.now()/системное время не используются).
+
+### 2.12 ProcessRegistry — процессы с честными τ (4.2.1)
+
+Дескриптор процесса (ProcessDescriptor): id (уникальность
+проверяется реестром), name, processKind, tau (ScientificValue с
+размерностью времени и provenance), stepPolicy, solverAvailability
+(available | scheduled | not_implemented | unknown), enabled,
+provenance, applicability, assumptions, timescaleNote, dependencies.
+Правила честности:
+
+- τ — физически значимая величина в секундах ИЛИ unknownValue с
+  явной причиной; текстовые timescaleNote («миллионы лет») НЕ
+  конвертируются в числа; словесные диапазоны не превращаются в
+  якобы точные τ;
+- dt ≤ τ/20 — только ПРЕДВАРИТЕЛЬНАЯ эвристика (heuristicStepSeconds,
+  provenance 'tau_heuristic'): окончательный шаг выбирает конкретный
+  solver; единого универсального dt для химии, атмосферы, орбит и
+  геологии НЕ существует;
+- итоговая доступность (processAvailability): disabled →
+  not_implemented → scheduled → unknown → available; процесс без
+  числового τ или без решателя НЕ запускается автоматически
+  (isProcessAutoRunnable = false);
+- мост chemicalProcessesToCoreDescriptors переносит 11 легаси-
+  процессов ChemicalEvolution в ЧЕСТНОМ состоянии: tau unknown,
+  solver not_implemented, enabled false → доступность 'disabled';
+  скорости, характерные времена, константы и физическая
+  доступность НЕ выдумываются.
+
+### 2.13 Scheduler — порядок процессов и события (4.2.1)
+
+runMacroStep(world, registry, operators, { durationS, splitting,
+processIds?, subCycles?, audit? }) → { status, world, bookkeeping,
+log, audit?, diagnostics }. Свойства:
+
+- детерминированность: скрытого состояния нет; runtime-исполнители
+  (ProcessOperator) передаются отдельно от сериализуемого состояния
+  мира; Lie — последовательное выполнение (порядок по id),
+  sub-cycling делит durationS на равные подшаги (только для Lie);
+- Strang splitting — ровно ДВА оператора в симметричном порядке
+  A(dt/2) → B(dt) → A(dt/2) (журнал strang_a_half_first →
+  strang_b_full → strang_a_half_second); Strang с subCycles или
+  ≠ 2 процессов — SchedulerError 'invalid_splitting'; фиктивные
+  операторы ради демонстрации Strang не создаются;
+- атомарность транзакции шага: мировое время продвигается РОВНО
+  один раз — после успешного выполнения всех операторов и успешного
+  аудита; ошибка оператора, самовольное продвижение часов или
+  нарушенный инвариант → шаг rejected: возвращается исходный мир,
+  время не продвигается, диагностика не теряется;
+- очередь событий мира: порядок по comparePoints, при равном
+  времени — стабильный tie-break по sequence; данные события
+  JSON-сериализуемы (callback-функции в состоянии мира не
+  хранятся); повторная обработка обработанного события запрещена
+  (already_processed); ошибка обработки помечает событие failed с
+  failReason (событие не теряется); enqueue дубликата,
+  некорректного времени или несериализуемых данных — 'invalid_event'.
+  Физические события не изобретаются: типизированная инфраструктура
+  готова для фазовых переходов, исчерпания реагента, смены режима
+  и событий solver.
+
+### 2.14 InvariantAuditor — аудит перехода (4.2.1)
+
+auditWorldTransition(before, after, fluxLedger, { speciesCatalog,
+boundary, tolerance?, scope? }) объединяет контракты Stage 4.1 в
+ДЕВЯТИ секциях: substance, element, charge, energy, reservoir_fluxes,
+nonnegativity (отрицательные запасы), ledger (validateFluxLedger),
+state (validateReservoirRecord + validateWorldState), time
+(согласованность часов). Агрегация статусов: любой invalid или
+imbalanced → imbalanced; иначе not_verifiable или граница ≠ complete
+→ not_verifiable; иначе approximate → approximate; иначе balanced.
+Правила честности сохранены: balanced = true только при статусе
+balanced И полной границе системы; approximate НЕ является balanced;
+внутренний перенос, корректно отражённый в ledger, дисбалансом не
+признан; внешние источники/стоки учитываются явно (EXTERNAL);
+untimed-записи в ограниченной временной области не маскируются
+(правила 4.1.1.2/4.1.1.3). Scheduler вызывает аудитор ДО фиксации
+нового состояния: обязательные нарушенные инварианты отклоняют шаг
+без продвижения времени и без потери исходного состояния.
+
 ## 3. Интеграция (точки контакта с легаси)
 
 1. `GeneratedWorld.coreWorldState?: CoreWorldState` — опциональное поле.
    **Отсутствие = «ядро для мира не инициализировано»**, а не нулевое
    состояние; миграции его не создают.
-2. `Storage`: STORAGE_FORMAT_VERSION = '1.2' (ведётся реестром миграций
-   ядра); SUPPORTED_SAVE_VERSIONS = ['1.0','1.1','1.2'];
+2. `Storage`: STORAGE_FORMAT_VERSION = '1.3' (ведётся реестром миграций
+   ядра; ревизия 4.2.1: была '1.2'); SUPPORTED_SAVE_VERSIONS =
+   ['1.0','1.1','1.2','1.3'];
    `migrateWorld` делегирует цепочке `Core/migrations`; экспорт Markdown
    дополнен секцией «Научное ядро (этап 4.1)». Ревизия 4.1.1: работа с
    localStorage ведётся по RAW-записям (readRawEntries) — одна битая
@@ -390,29 +521,47 @@ bitwise_same_environment | within_tolerance | platform_dependent).
    резервных копий в виде «фиктивного мира» с выдуманной версией;
    несовместимые записи (например, 2.0) по-прежнему сохраняются как
    raw и не удаляются.
-3. Баррель `Tests/index.ts` реэкспортирует 9 новых тест-файлов ядра.
+3. Баррель `Tests/index.ts` реэкспортирует 9 тест-файлов ядра Stage
+   4.1; тест-файлы Stage 4.2.1 (coreChemicalGoldenBaseline,
+   coreWorldClock, coreProcessRegistry, coreScheduler,
+   coreInvariantAuditor) запускаются Vitest напрямую (баррель никем
+   не импортируется и не расширялся — несвязанный код не трогался).
 
 Чего интеграция НЕ делает: UI не переключён на ядро (задача Stage 4.2);
 легаси-вычисления (Generator, ChemicalEvolution, Atmosphere, PhaseEquilibrium,
 OrbitalMechanics, Geology, WorldModel) продолжают работать как есть;
+ChemicalEvolution НЕ переведён на Scheduler (Stage 4.2.3): applyReaction
+не меняет модельное время, один runChemicalEvolutionStep увеличивает
+modelTimeYears ровно один раз, Scheduler легаси-химию не вызывает;
+golden-траектория 100 шагов воспроизводится численно (SHA-256
+877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20);
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (303 теста, 9 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3)
+## 4. Тесты ядра (401 тест, 14 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1)
 
 | Файл | it() | Покрытие |
 |---|---|---|
 | corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
 | coreScientificValue.test | 14 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации |
 | coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
-| coreReservoir.test | 43 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён) |
-| coreFluxLedger.test | 82 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries |
+| coreReservoir.test | 56 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён); 4.1.1.3.1: строгие записи — Map/Set/Date/RegExp/экземпляры классов в properties/material.entries/energy — invalid, Object.create(null) валиден |
+| coreFluxLedger.test | 88 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries; 4.1.1.3.1: Map/Date в entries — not_verifiable, а не «известная пустота» |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
-| coreWorldState.test | 38 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы; 4.1.1.2: обязательность properties ReservoirRecord; 4.1.1.3: массивы в properties/material.entries — invalid_reservoir |
+| coreWorldState.test | 46 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы; 4.1.1.2: обязательность properties ReservoirRecord; 4.1.1.3: массивы в properties/material.entries — invalid_reservoir; 4.2.1: scheduling (invalid_scheduling/invalid_event; схема 1.0.0 → 1.1.0) |
 | coreSolverBackend.test | 11 | честный empty backend, лжец unsupported_kind_claim, реестр planned vs available |
-| corePersistence.test | 59 | миграции 1.0/1.1/1.2 (идемпотентность, null≠0, легаси-записи; '0.9'/'1.3'/'2.0' → unsupported_version; 'abc'/'2'/'' → invalid_version; оригинал не мутируется), Storage raw-изоляция несовместимых записей + getStorageHealth, адаптеры всех веток (50% → 0.5, provenance у unknown), PRNG-регрессия; 4.1.1.2: отказ записи при повреждённом корневом JSON (storage_unreadable) |
+| corePersistence.test | 62 | миграции 1.0/1.1/1.2 (идемпотентность, null≠0, легаси-записи; '0.9'/'1.3'/'2.0' → unsupported_version; 'abc'/'2'/'' → invalid_version; оригинал не мутируется), Storage raw-изоляция несовместимых записей + getStorageHealth, адаптеры всех веток (50% → 0.5, provenance у unknown), PRNG-регрессия; 4.1.1.2: отказ записи при повреждённом корневом JSON (storage_unreadable); 4.2.1: миграция сохранений 1.2 → 1.3 (scheduling не создаётся, старые значения не пересчитываются) |
+| coreChemicalGoldenBaseline.test | 4 | 4.2.1 golden-траектория химии: generateWorld → runChemicalEvolutionStep × 100, фиксированный seed; SHA-256 канонического снимка 877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20 (steps=100, modelTimeYears=1e8, reactionRecords=0, oxygenNet=0); детерминизм повтора; обязательная регрессия перед 4.2.3 |
+| coreWorldClock.test | 11 | 4.2.1: старт с нуля, секунды SI, advance, сегментация, cosmicAge не смешивается, round-trip сериализации, некорректные интервалы, детерминизм |
+| coreProcessRegistry.test | 15 | 4.2.1: уникальные id, τ с размерностью времени и provenance, unknown τ ≠ число, disabled/без solver не запускаются автоматически, мост легаси-химии (11 процессов, честное состояние) |
+| coreScheduler.test | 23 | 4.2.1: детерминированный порядок, sub-cycling, Lie и Strang A(dt/2) → B(dt) → A(dt/2) (ровно 2 оператора), один macro-шаг — одно продвижение WorldClock, атомарный отказ шага, очередь событий (сортировка, tie-break, повторная обработка запрещена), сериализация bookkeeping |
+| coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 
-Всего в проекте 21 тест-файл, 574 теста (после ревизии 4.1.1.3; после 4.1.1.2 — 550; после 4.1.1 — 517; этап 4.1
+Всего в проекте 26 тест-файлов, 672 теста (после Stage 4.2.1 —
+фактические итоги Vitest «Test Files 26 passed (26) / Tests 672
+passed (672)» из CI; после golden baseline — 601 (22 файла), после
+4.1.1.3.1 — 597, после ревизии 4.1.1.3 — 574, после 4.1.1.2 — 550,
+после 4.1.1 — 517; этап 4.1
 фактически заканчивался на 442 — CI #24: в доках ревизии 4.1 ошибочно
 указывалось 438). PRNG-регрессия
 (два инстанса `createRandom(seed)` дают идентичные последовательности
@@ -426,6 +575,14 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
 
 - численные решатели (ODE/DAE/равновесия/линейные системы) — только
   контракт и пустой бэкенд;
+- физические solver'ы процессов (4.2.1): планировщик управляет
+  порядком и временем, но ни один процесс легаси-химии не получил
+  скорость, константу, τ или решателя — реестр перенесён мостом в
+  честном состоянии (unknown τ, not_implemented, disabled), ни один
+  процесс не активируется автоматически;
+- перевод ChemicalEvolution на Scheduler — Stage 4.2.3 (легаси-химия
+  продолжает работать как есть, golden-траектория воспроизводится);
+  температурная иерархия — Stage 4.2.2 (не начата);
 - кинетика, термодинамика видов, EOS, равновесие смесей;
 - сэмплирование звезды из класса (аудит §2.1), иерархия температурных
   величин (§2.2/2.3) — контракты ScientificValue/Reservoir к ним
