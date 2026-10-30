@@ -14,3 +14,14 @@ export * from './phase.test';
 export * from './chemical.test';
 export * from './geology.test';
 export * from './generatorPhysics.test';
+
+// --- Научное ядро (Stage 4.1) ---
+export * from './corePhysicalQuantity.test';
+export * from './coreScientificValue.test';
+export * from './coreSpecies.test';
+export * from './coreReservoir.test';
+export * from './coreFluxLedger.test';
+export * from './coreSimulationClock.test';
+export * from './coreWorldState.test';
+export * from './coreSolverBackend.test';
+export * from './corePersistence.test';

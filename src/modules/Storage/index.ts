@@ -9,44 +9,51 @@ import type {
   Seed
 } from '../../types';
 
+// Миграции сохранений ведутся реестром научного ядра
+// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 детерминирована,
+// «нет поля» остаётся «неизвестно», provenance не теряется.
+import {
+  CURRENT_SAVE_SCHEMA_VERSION,
+  migrateSavedWorld,
+  SAVE_SCHEMA_VERSIONS
+} from '../Core/migrations';
+
 const STORAGE_KEY = 'evowars_worlds';
 const SETTINGS_KEY = 'evowars_settings';
 
 /**
- * Версия формата сохранения.
+ * Версия формата сохранения. Ведётся реестром миграций ядра.
  *
- * 1.1 (этап 3): GeneratedWorld получил опциональные поля физической
- * модели (centralObjectSystem, orbit, bodyPhysics, atmospherePhysics,
- * phaseAnalysis, geologyAnalysis, energyBudget, chemicalState).
- * Все новые поля опциональны: их отсутствие в старых сохранениях
- * означает «неизвестно», значения НЕ пересоздаются при миграции.
+ * История версий:
+ * - 1.0 — формат этапа 1–2 (без физической модели);
+ * - 1.1 (этап 3) — опциональные поля физической модели
+ *   (centralObjectSystem, orbit, bodyPhysics, atmospherePhysics,
+ *   phaseAnalysis, geologyAnalysis, energyBudget, chemicalState);
+ *   отсутствие поля означает «неизвестно», значения НЕ пересоздаются;
+ * - 1.2 (этап 4.1) — опциональное поле coreWorldState (состояние
+ *   научного ядра: часы, тела, резервуары, потоки); отсутствие поля
+ *   означает «ядро не инициализировано», а не нулевое состояние.
  */
-export const STORAGE_FORMAT_VERSION = '1.1';
+export const STORAGE_FORMAT_VERSION: string = CURRENT_SAVE_SCHEMA_VERSION;
+
+/** Поддерживаемые схемы сохранений (для диагностики). */
+export const SUPPORTED_SAVE_VERSIONS: readonly string[] = SAVE_SCHEMA_VERSIONS;
 
 /**
  * Миграция мира из старой версии формата.
  *
- * Старые миры (version 1.0) не содержат полей физической модели этапа 3.
- * Данные не пересоздаются: отсутствующие физические параметры
- * отображаются как неизвестные. Легаси-давление totalPressure остаётся
- * в atm и НЕ переписывается: пересчёт в Па выполняется моделью
- * (Atmosphere.computeAtmospherePhysicalModel) на лету, а исходное
- * значение сохраняется без изменений.
+ * Выполняется цепочкой реестра Core/migrations.ts:
+ * - отсутствующие физические поля остаются «неизвестными»,
+ *   значения не пересоздаются;
+ * - легаси-давление totalPressure остаётся в atm и не переписывается
+ *   (пересчёт в Па выполняется моделью на лету);
+ * - поле coreWorldState не создаётся задним числом: ядру нужны данные,
+ *   которых в старом сохранении нет;
+ * - история миграций накапливается в world.migration.notes.
  */
 function migrateWorld(world: SavedWorld): SavedWorld {
-  if (world.version === STORAGE_FORMAT_VERSION) return world;
-  const previousVersion = world.version ?? 'unknown';
-  return {
-    ...world,
-    version: STORAGE_FORMAT_VERSION,
-    migration: {
-      from: previousVersion,
-      notes: [
-        'добавлены опциональные поля физической модели этапа 3 (система центрального объекта, орбита, физика тела, атмосферная модель, фазовый анализ, геология, энергетический бюджет, химическое состояние): их отсутствие означает «неизвестно», значения не пересоздаются',
-        'totalPressure сохранено в исторических единицах atm; значение в Па вычисляется моделью на лету и не заменяет исходное'
-      ]
-    }
-  };
+  if (world.version === CURRENT_SAVE_SCHEMA_VERSION) return world;
+  return migrateSavedWorld(world).world;
 }
 
 // ============================================
@@ -386,6 +393,19 @@ export function exportWorldToMarkdown(world: SavedWorld): string {
     lines.push('');
   }
 
+  // --- Этап 4.1: научное ядро (опциональное поле) ---
+  if (world.coreWorldState) {
+    lines.push('## Научное ядро (этап 4.1)');
+    lines.push('');
+    const core = world.coreWorldState;
+    lines.push(`- **Схема ядра:** ${core.schemaVersion}`);
+    lines.push(`- **Сегмент времени:** ${core.clock.segmentIndex}, шагов: ${core.clock.stepCount}`);
+    lines.push(`- **Локальное время симуляции, с:** ${core.clock.localTimeS}`);
+    lines.push(`- **Тела:** ${core.bodies.length}; резервуары: ${core.reservoirs.length}; записи потоков: ${core.fluxLedger.records.length}`);
+    if (core.note) lines.push(`- Примечание: ${core.note}`);
+    lines.push('');
+  }
+
   lines.push('## Энергия');
   lines.push('');
   lines.push(`- **Основные источники:** ${world.energySources.primary.join(', ')}`);
@@ -600,4 +620,3 @@ export default {
   importWorldFromJSON,
   getStorageStats
 };
-

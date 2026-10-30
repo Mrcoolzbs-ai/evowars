@@ -13,6 +13,8 @@ import type {
   ChemicalEvolutionState
 } from './physics';
 
+import type { CoreWorldState } from '../modules/Core/worldState';
+
 // ============================================
 // 1. БАЗОВЫЕ ТИПЫ
 // ============================================
@@ -435,6 +437,15 @@ export interface GeneratedWorld {
   energyBudget?: EnergyBudgetModel;
   /** Начальное состояние химической эволюции (инвентарь + резервуары) */
   chemicalState?: ChemicalEvolutionState;
+  // ===== Научное ядро (этап 4.1; опционально) =====
+  /**
+   * Каноническое состояние научного ядра (часы, тела, резервуары,
+   * потоки). Отсутствие поля означает «ядро для мира не
+   * инициализировано», а НЕ нулевое состояние: значения не
+   * пересоздаются при миграции сохранений. Легаси-поля этапа 1–3
+   * остаются источниками генерационных данных и не дублируются.
+   */
+  coreWorldState?: CoreWorldState;
   // Правила и предупреждения
   appliedRules: ID[];
   warnings: GenerationWarning[];
