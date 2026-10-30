@@ -322,7 +322,7 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
     it('баланс (сценарий A): первый шаг показывает расход именно этого шага', () => {
       // До первого шага баланс нулевой (инициализация состояния).
       const world = makeWorld({ ch4: 0.6, o2: 0.4 });
-      expect(world.chemicalState.oxygenBalance.consumption).toBe(0);
+      expect(world.chemicalState!.oxygenBalance.consumption).toBe(0);
       const result = runChemicalEvolutionStep(world);
       const state = result.world.chemicalState!;
       // Инвентарь: ch4=60, o2=40 → лимитирующий реагент o2 (40/2=20),
@@ -384,7 +384,7 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
         energyBudget: { incidentFlux: { value: 1361 } },
         energySources: { primary: [], secondary: [] }
       } as unknown as GeneratedWorld;
-      expect(columnWorld.chemicalState.mode).toBe('column_inventory');
+      expect(columnWorld.chemicalState!.mode).toBe('column_inventory');
       const columnResult = runChemicalEvolutionStep(columnWorld).world;
       const noteColumn = columnResult.chemicalState!.oxygenBalance.note;
       expect(noteColumn).toContain('моль');
