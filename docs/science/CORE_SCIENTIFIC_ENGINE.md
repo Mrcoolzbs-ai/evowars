@@ -24,6 +24,18 @@
 > 2.9/2.10 и §4 обновлены. Подсчёт тестов исправлен: CI #24 = 442 теста /
 > 21 файл (в доках ревизии 4.1 ошибочно указывалось 438); после 4.1.1 —
 > 517 тестов, из них ядро — 246.
+>
+> Ревизия Stage 4.1.1.2 (2026-10-30): корректирующая ревизия полноты
+> балансов и защиты хранилища — 4 остаточных дефекта (ISSUE A/B/C/D):
+> отсутствие материального инвентаря больше не превращается в ноль
+> (unknown ≠ known-empty ≠ known-zero; явный materialApplicability
+> 'not_applicable'), пофазовый аудит проверяет объединение всех
+> резервуаров (изменение «из ниоткуда» ловится), untimed-исключения
+> не маскируются как balanced (отдельная диагностика от out-of-range),
+> Storage отказывает записью при повреждённом корневом JSON
+> (StorageError 'storage_unreadable', исходная строка не меняется),
+> properties в ReservoirRecord обязательны. Коммиты 35e7b0e → bf3f677
+> (CI run #30 зелёный). После 4.1.1.2 — 550 тестов, из них ядро — 279.
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -131,7 +143,20 @@ INVENTORY_BASES, конечные неотрицательные entries),
 `validateEnergyInventory` (storedJ: null = «неизвестно» — допустимо,
 NaN или отрицательное значение — ошибка; netPowerW и fluxW_m2 могут
 быть отрицательными), `validateReservoirRecord` (id, kind, material,
-energy, properties через validateScientificValueShape).
+energy, properties через validateScientificValueShape; ревизия 4.1.1.2:
+properties — ОБЯЗАТЕЛЬНОЕ поле записи (объект; пустой `{}` допустим),
+materialApplicability — только 'not_applicable' и только при
+ОТСУТСТВУЮЩЕМ material).
+
+Три состояния материального вклада не схлопываются (ревизия 4.1.1.2,
+ISSUE A): (1) `material` отсутствует без явного маркера — запас
+НЕИЗВЕСТЕН и не приравнивается к нулю: глобальные аудиты возвращают
+not_verifiable с исключением; (2) явно заданный пустой инвентарь
+(`entries = {}`) — известное отсутствие запасов; (3) нулевое значение
+вида в заданном инвентаре (`entries[species] = 0`) — известный ноль.
+Резервуар, по своей природе не содержащий материю (энергетический
+буфер), помечается явно: `materialApplicability: 'not_applicable'` —
+неприменимость НЕ выводится из отсутствия поля.
 
 ### 2.5 FluxLedger — потоки и аудиты
 
@@ -171,11 +196,30 @@ energy, properties через validateScientificValueShape).
   → not_verifiable.
 - Временная область аудита: FluxAuditScope { after, upTo, includeUntimed }
   с семантикой after < t <= upTo; потоки без метки времени по умолчанию
-  исключены и перечисляются в untimedRecords.
-- `auditReservoirFluxes` (4.1.1): пофазовая проверка — ожидаемое Δ
-  каждого резервуара по каждому виду и энергии сверяется с фактически
-  применёнными потоками; ловит «вещество ушло не туда» при сохранении
-  общей суммы (расхождения несут reservoirId).
+  исключены и перечисляются в untimedRecords. Ревизия 4.1.1.2 (ISSUE C):
+  применённые integrated-записи без времени в ограниченной области делают
+  аудит not_verifiable — их изменения нельзя отнести к интервалу, и
+  численно «сходящийся» итог не объявляется успехом; includeUntimed:
+  true включает их в область НА ОТВЕТСТВЕННОСТЬ вызывающего кода
+  (untimedRecords при этом пуст). Запись С меткой времени вне
+  диапазона — ДРУГАЯ диагностика (событие относится к другому
+  интервалу): она не попадает в untimedRecords и не отравляет статус
+  суммарного аудита области.
+- `auditReservoirFluxes` (4.1.1; полнота — 4.1.1.2, ISSUE B):
+  пофазовая проверка — ожидаемое Δ каждого резервуара по каждому виду
+  и энергии сверяется с фактически применёнными потоками; проверяется
+  ОБЪЕДИНЕНИЕ резервуаров «до» ∪ «после» ∪ затронутых потоками:
+  нетронутый резервуар с известным инвентарём обязан сохранить его
+  (ожидаемое Δ = 0) — изменение «из ниоткуда» ловится (A→B применён,
+  C изменился без записи → imbalanced с указанием C). Измерение
+  (материя/энергия) обязательно для резервуара, если инвентарь задан
+  хотя бы в одном состоянии или резервуар затронут потоком этого
+  типа; непроверяемые вклады (отсутствующий инвентарь, сменённый
+  basis, storedJ = null, несовместимые основания) дают диагностические
+  exclusions и ДЕЛАЮТ итог not_verifiable: balanced при непроверенных
+  обязательных вкладах невозможен. Статусы: imbalanced (расхождения)
+  / not_verifiable (untimed-исключения или exclusions) / balanced
+  (всё проверено и сходится).
 - `validateFluxLedger`: форма и согласованность записей журнала
   (id, status, kind, subject, time, ссылки на резервуары).
 - `totalInventory` отказывается суммировать резервуары со смешанными
@@ -297,7 +341,15 @@ bitwise_same_environment | within_tolerance | platform_dependent).
    обработка каждой) и НИКОГДА не удаляется при saveWorld/deleteWorld;
    getStorageHealth() диагностирует хранилище (rawEntryCount,
    loadedWorldCount, parseError, incompatibleEntries, nonObjectEntries);
-   importWorldFromJSON возвращает null при MigrationError.
+   importWorldFromJSON возвращает null при MigrationError. Ревизия
+   4.1.1.2 (ISSUE D): при повреждённом корневом JSON (битая строка или
+   корень не массив) saveWorld/deleteWorld ОТКАЗЫВАЮТ — исходная строка
+   localStorage не меняется; saveWorld бросает структурированную
+   StorageError 'storage_unreadable' (с parseError; диагностика —
+   getStorageHealth(), явная очистка — clearAllWorlds()). Никаких
+   резервных копий в виде «фиктивного мира» с выдуманной версией;
+   несовместимые записи (например, 2.0) по-прежнему сохраняются как
+   raw и не удаляются.
 3. Баррель `Tests/index.ts` реэкспортирует 9 новых тест-файлов ядра.
 
 Чего интеграция НЕ делает: UI не переключён на ядро (задача Stage 4.2);
@@ -306,21 +358,21 @@ OrbitalMechanics, Geology, WorldModel) продолжают работать к�
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (246 тестов, 9 файлов; Stage 4.1 + ревизия 4.1.1)
+## 4. Тесты ядра (279 тестов, 9 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2)
 
 | Файл | it() | Покрытие |
 |---|---|---|
 | corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
 | coreScientificValue.test | 14 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации |
 | coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
-| coreReservoir.test | 30 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord |
-| coreFluxLedger.test | 52 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары |
+| coreReservoir.test | 33 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки) |
+| coreFluxLedger.test | 71 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
-| coreWorldState.test | 31 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы |
+| coreWorldState.test | 35 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы; 4.1.1.2: обязательность properties ReservoirRecord |
 | coreSolverBackend.test | 11 | честный empty backend, лжец unsupported_kind_claim, реестр planned vs available |
-| corePersistence.test | 52 | миграции 1.0/1.1/1.2 (идемпотентность, null≠0, легаси-записи; '0.9'/'1.3'/'2.0' → unsupported_version; 'abc'/'2'/'' → invalid_version; оригинал не мутируется), Storage raw-изоляция несовместимых записей + getStorageHealth, адаптеры всех веток (50% → 0.5, provenance у unknown), PRNG-регрессия |
+| corePersistence.test | 59 | миграции 1.0/1.1/1.2 (идемпотентность, null≠0, легаси-записи; '0.9'/'1.3'/'2.0' → unsupported_version; 'abc'/'2'/'' → invalid_version; оригинал не мутируется), Storage raw-изоляция несовместимых записей + getStorageHealth, адаптеры всех веток (50% → 0.5, provenance у unknown), PRNG-регрессия; 4.1.1.2: отказ записи при повреждённом корневом JSON (storage_unreadable) |
 
-Всего в проекте 21 тест-файл, 517 тестов (после ревизии 4.1.1; этап 4.1
+Всего в проекте 21 тест-файл, 550 тестов (после ревизии 4.1.1.2; после 4.1.1 — 517; этап 4.1
 фактически заканчивался на 442 — CI #24: в доках ревизии 4.1 ошибочно
 указывалось 438). PRNG-регрессия
 (два инстанса `createRandom(seed)` дают идентичные последовательности
