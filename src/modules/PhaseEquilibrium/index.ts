@@ -22,7 +22,6 @@ import type {
   AtmospherePhysicalModel,
   AtmospherePhaseAnalysis,
   PhaseComponentAnalysis,
-  PhaseScreenState,
   ScientificConfidence,
   SubstanceReservoirs
 } from '../../types';

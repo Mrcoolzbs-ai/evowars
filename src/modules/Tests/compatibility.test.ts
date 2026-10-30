@@ -713,7 +713,7 @@ describe('Cradle Local Environment Compatibility', () => {
         ...baseWorld(),
         mode: 'anomalous',
         cosmology: cosmologies.find(c => c.id === 'world_as_body')!,
-        phaseAnalysis: phaseAnalysis as GeneratedWorld['phaseAnalysis']
+        phaseAnalysis: phaseAnalysis as unknown as GeneratedWorld['phaseAnalysis']
       };
 
       const warnings = checkCompatibility(world, 'anomalous');
@@ -814,4 +814,3 @@ describe('Compatibility Rule Validation', () => {
     });
   });
 });
-

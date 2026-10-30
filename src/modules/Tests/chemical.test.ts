@@ -16,7 +16,7 @@ import {
 import chemicalReactions from '../Data/chemicalReactions';
 import { computeAtmospherePhysicalModel, getAllPresets } from '../Atmosphere';
 import { G_EARTH_MS2 } from '../Units';
-import type { AtmospherePhysicalModel, ChemicalEvolutionState } from '../../types';
+import type { AtmospherePhysicalModel } from '../../types';
 import type { ChemicalReaction } from '../../types';
 
 // ============================================

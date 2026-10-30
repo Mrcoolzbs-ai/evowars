@@ -176,7 +176,7 @@ describe('Физическая модель атмосферы (этап 3)', ()
       const model = computeAtmospherePhysicalModel(getAllPresets()['earth']);
       expect(model.layers).toHaveLength(1);
       expect(model.layers[0].layerId).toBe('surface_boundary');
-      expect(model.layers[0].altitudeRangeM.max).toBeNull();
+      expect(model.layers[0].altitudeRangeM?.max ?? null).toBeNull();
       expect(model.layersNote).toContain('минимальна');
     });
   });

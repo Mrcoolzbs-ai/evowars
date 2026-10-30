@@ -3,6 +3,7 @@
 // ============================================
 
 import { describe, it, expect } from 'vitest';
+import type { SubstanceReservoirs } from '../../types';
 import {
   saturationPressure,
   checkComponentPhase,
@@ -188,7 +189,7 @@ describe('PhaseEquilibrium (фазовые переходы, этап 3)', () =>
     });
 
     it('обратный перенос (испарение) возвращает вещество в атмосферу', () => {
-      let reservoirs = {
+      let reservoirs: SubstanceReservoirs = {
         ...createEmptyReservoirs(),
         atmospheric: { ch4: 100 }
       };
@@ -218,7 +219,7 @@ describe('PhaseEquilibrium (фазовые переходы, этап 3)', () =>
     });
 
     it('сконденсированное вещество не исчезает: сумма по резервуарам постоянна при цепочке переходов', () => {
-      let reservoirs = {
+      let reservoirs: SubstanceReservoirs = {
         ...createEmptyReservoirs(),
         atmospheric: { ch4: 1000, n2: 500 }
       };
