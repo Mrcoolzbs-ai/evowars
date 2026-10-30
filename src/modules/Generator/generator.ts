@@ -515,6 +515,12 @@ function determineEnergySources(
   const primary: EnergySources['primary'] = [];
   const secondary: EnergySources['secondary'] = [];
   centralObject.potentialEnergySources.forEach(source => {
+    // Геотермальная энергия — не автоматическое свойство мира: Potential
+    // список центрального объекта — это меню, а не гарантия. Геотерма
+    // подтверждается только геологическим анализом самого тела (этап 3).
+    if (source === 'geothermal' && !geologyAnalysis?.geothermalEnergyAvailable) {
+      return;
+    }
     if (!primary.includes(source as EnergySourceClass)) {
       primary.push(source as EnergySourceClass);
     }
