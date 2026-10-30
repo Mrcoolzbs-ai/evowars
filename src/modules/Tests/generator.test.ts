@@ -234,18 +234,23 @@ describe('Generator Module', () => {
       // Атмосфера планеты при этом остаётся земной
       expect(world.atmosphere.temperature).toBe(288);
       expect(world.atmosphere.totalPressure).toBe(1);
-      expect(world.physicalCharacteristics.surfaceTemperature).toBe(288);
+      // Stage 4.2.2: пресетная температура атмосферы больше НЕ
+      // копируется в температуру поверхности (это разные величины:
+      // 288 K — допущение об атмосфере, а не измерение поверхности)
+      expect(world.physicalCharacteristics.surfaceTemperature).toBeUndefined();
       expect(world.physicalCharacteristics.atmosphericPressure).toBe(1);
     });
 
-    it('температура поверхности берётся из атмосферы (метановый пресет: 95 K)', () => {
+    it('пресетная температура атмосферы не становится температурой поверхности (4.2.2: метановый пресет, 95 K)', () => {
       const world = generateWorld(baseSettings({
         seed: 'methane_surface_temperature',
         atmospherePreset: 'methane_ethane'
       }));
 
       expect(world.atmosphere.temperature).toBe(95);
-      expect(world.physicalCharacteristics.surfaceTemperature).toBe(95);
+      // Stage 4.2.2: 95 K — допущение об атмосфере (пресет), а НЕ
+      // температура поверхности; копирование запрещено
+      expect(world.physicalCharacteristics.surfaceTemperature).toBeUndefined();
       // Основные компоненты пресета сохраняются
       const ch4 = world.atmosphere.components.find(c => c.gasId === 'ch4');
       expect(ch4?.percentage).toBe(60);
@@ -449,3 +454,4 @@ describe('Data Validation', () => {
     });
   });
 });
+

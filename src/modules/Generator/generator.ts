@@ -61,10 +61,11 @@ import {
   sampleBodyPhysics
 } from '../WorldModel';
 import { buildCentralObjectSystem, sampleOrbit } from '../OrbitalMechanics';
-import { analyzeAtmospherePhases } from '../PhaseEquilibrium';
+import { analyzeAtmospherePhasesWithProvenance } from '../PhaseEquilibrium';
 import { analyzeGeology } from '../Geology';
 import { computeEnergyBudget } from '../EnergyBalance';
 import { createChemicalState } from '../ChemicalEvolution';
+import { atmospherePresetTemperatureToScientificValue } from '../Core/adapters';
 
 // ============================================
 // ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
@@ -156,8 +157,16 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
   });
 
-  // 10b. Фазовый скрининг компонентов атмосферы при её температуре.
-  const phaseAnalysis = analyzeAtmospherePhases(atmospherePhysics, atmosphere.temperature);
+  // 10b. Фазовый скрининг компонентов атмосферы при её температуре
+  // (Stage 4.2.2: температура передаётся как типизированное значение
+  // ScientificValue с происхождением пресета — historical_game,
+  // observational_reference и т.п. Числовой результат скрининга НЕ
+  // меняется, детерминизм генерации сохранён; пресетная температура
+  // по-прежнему НЕ является температурой поверхности).
+  const phaseAnalysis = analyzeAtmospherePhasesWithProvenance(
+    atmospherePhysics,
+    atmospherePresetTemperatureToScientificValue(atmosphere)
+  );
 
   // 10c. Геологический анализ: раздельные источники внутреннего тепла
   // (остаточное, радиогенное, приливное) без автоматической геотермы.

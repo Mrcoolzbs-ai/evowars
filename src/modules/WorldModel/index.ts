@@ -324,11 +324,17 @@ export function calculateBodyCharacteristics(params: {
     if (gravity) characteristics.surfaceGravity = gravity;
   }
 
-  // Температура поверхности: только известные данные атмосферы.
-  // Не подменяем её температурой колыбели жизни.
-  if (typeof params.atmosphere?.temperature === 'number') {
-    characteristics.surfaceTemperature = params.atmosphere.temperature;
-  }
+  // Stage 4.2.2: пресетная температура атмосферы больше НЕ становится
+  // температурой поверхности. Это РАЗНЫЕ величины:
+  // - температура атмосферы (atmosphere.temperature) — допущение
+  //   генератора о газовой оболочке (пресет), а не измерение;
+  // - температура поверхности (physicalCharacteristics.surfaceTemperature)
+  //   — свойство твёрдой поверхности, до радиационно-конвективной
+  //   модели (RCM) неизвестное;
+  // - равновесная температура T_eq (energyBudget) — радиационная
+  //   оценка серого тела, а не температура поверхности.
+  // Копирование любой из этих величин в surfaceTemperature запрещено:
+  // типизированный путь — BodyThermalState (Core/thermalState).
 
   // Атмосферное давление: только известные данные атмосферы.
   if (typeof params.atmosphere?.totalPressure === 'number') {
@@ -730,4 +736,5 @@ export default {
   updateWorld,
   sampleBodyPhysics
 };
+
 
