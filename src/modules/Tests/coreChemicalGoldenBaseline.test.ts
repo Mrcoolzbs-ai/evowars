@@ -22,6 +22,11 @@
 // численно по всем измеримым научным полям.
 
 import { describe, it, expect } from 'vitest';
+// tsconfig проекта не включает 'node' в types: типы Node недоступны,
+// поэтому импорт подавлен явно. Запись диагностического файла —
+// единственная цель этого импорта (см. тест пина хэша).
+// @ts-expect-error типы node:fs не подключены в tsconfig проекта
+import { writeFileSync } from 'node:fs';
 import { generateWorld } from '../Generator';
 import { runChemicalEvolutionStep } from '../ChemicalEvolution';
 import type { GenerationSettings, ChemicalEvolutionState } from '../../types';
@@ -231,13 +236,16 @@ describe('Stage 4.2.1 §0.1: golden baseline химической эволюци
   it('SHA-256 канонического снимка зафиксирован', () => {
     const { hash, state } = goldenHash();
     // Линия для CI-аннотации: фактический хэш реального прогона.
-    console.log(
+    // Запись в файл детерминирована и не зависит от перехвата
+    // консольного вывода раннером; CI публикует строку notice-аннотацией.
+    const line =
       'GOLDEN-BASELINE-4.2.1 sha256=' + hash +
       ' steps=' + String(GOLDEN_STEPS) +
       ' modelTimeYears=' + String(state.modelTimeYears) +
       ' reactionRecords=' + String(state.history.length) +
-      ' oxygenNet=' + String(state.oxygenBalance.net)
-    );
+      ' oxygenNet=' + String(state.oxygenBalance.net);
+    writeFileSync('golden-baseline.txt', line + '\n');
+    console.log(line);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     if (GOLDEN_BASELINE_SHA256 !== null) {
       expect(hash).toBe(GOLDEN_BASELINE_SHA256);

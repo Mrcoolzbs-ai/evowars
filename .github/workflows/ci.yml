@@ -36,11 +36,13 @@ jobs:
           SUMMARY="$(grep -E 'Test Files|Tests ' vitest-output.log | head -n 4 | tr '\n' ' ')"
           echo "Vitest totals: ${SUMMARY}"
           echo "::notice title=Vitest totals::${SUMMARY}"
-          # Stage 4.2.1 §0.1: фактический golden baseline химии
-          # (SHA-256 контрольной траектории) публикуется notice-аннотацией.
-          GOLDEN="$(grep -E 'GOLDEN-BASELINE' vitest-output.log | head -n 1 || true)"
+          # Stage 4.2.1 §0.1: фактический golden baseline химии.
+          # Тест пишет контрольную строку в golden-baseline.txt
+          # (запись файла не зависит от перехвата консоли раннером);
+          # notice-аннотация делает хэш видимым без входа в аккаунт.
+          GOLDEN="$(grep -h -E 'GOLDEN-BASELINE' golden-baseline.txt vitest-output.log 2>/dev/null | head -n 1 || true)"
           echo "Golden baseline: ${GOLDEN}"
-          echo "::notice title=Golden baseline::${GOLDEN}"
+          echo "::notice title=Golden baseline::FOUND=[${GOLDEN}]"
 
       - name: Lint
         run: npm run lint
