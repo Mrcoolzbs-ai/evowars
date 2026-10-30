@@ -16,6 +16,7 @@ import { createReservoir, setMaterialInventory } from '../Core/reservoir';
 import type { ReservoirRecord } from '../Core/reservoir';
 import { createFluxLedger, EXTERNAL } from '../Core/fluxLedger';
 import type { FluxRecord } from '../Core/fluxLedger';
+import { createSchedulerBookkeeping, enqueueEvent } from '../Core/scheduler';
 
 function validState(): CoreWorldState {
   const state = createCoreWorldState('w1');
@@ -461,5 +462,42 @@ describe('Stage 4.1.1.3.1 WorldState: некорректные структур�
     nullProto.co2 = 7;
     state.reservoirs.push({ id: 'null-proto', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: nullProto } } as unknown as ReservoirRecord);
     expect(validateWorldState(state)).toEqual([]);
+  });
+});
+
+// ============================================
+// STAGE 4.2.1 — WORLDSTATE: ПЛАНИРОВЩИК В СОСТОЯНИИ МИРА
+// ============================================
+
+describe('Stage 4.2.1 WorldState: опциональное поле scheduling', () => {
+  it('отсутствие scheduling валидно: планировщик не инициализирован', () => {
+    const state = validState();
+    expect(state.scheduling).toBeUndefined();
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('корректное состояние планировщика проходит валидацию', () => {
+    const state = validState();
+    state.scheduling = enqueueEvent(
+      createSchedulerBookkeeping(),
+      { id: 'ev-1', time: { segmentIndex: 0, localTimeS: 10 }, type: 'regime_change', data: { note: 'тест' }, source: 'test' }
+    );
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('мусор в scheduling → invalid_scheduling', () => {
+    const state = validState();
+    state.scheduling = { processDynamics: 'мусор', eventQueue: 5 } as never;
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_scheduling')).toBe(true);
+  });
+
+  it('событие с некорректным временем в очереди → invalid_scheduling', () => {
+    const state = validState();
+    const bk = createSchedulerBookkeeping();
+    bk.eventQueue.push({ id: 'ev-bad', time: { segmentIndex: -1, localTimeS: 5 }, type: 'regime_change', data: {}, source: 'test', status: 'pending', sequence: 0 });
+    state.scheduling = bk;
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_scheduling')).toBe(true);
   });
 });

@@ -17,6 +17,8 @@
 //   simulationClock   — время симуляции;
 //   worldClock        — мировая временная система поверх часов;
 //   processRegistry   — реестр физических процессов (τ, политики шага);
+//   scheduler         — планировщик процессов (Lie/Strang, sub-cycling);
+//   invariantAuditor  — аудит инвариантов перехода состояния;
 //   worldState        — каноническое состояние мира;
 //   solverBackend     — контракты численных решателей;
 //   migrations        — версии схем, датасетов и миграции сохранений;
@@ -30,6 +32,8 @@ export * from './fluxLedger';
 export * from './simulationClock';
 export * from './worldClock';
 export * from './processRegistry';
+export * from './scheduler';
+export * from './invariantAuditor';
 export * from './worldState';
 export * from './solverBackend';
 export * from './migrations';

@@ -92,11 +92,15 @@ export function createDatasetRegistry(): DatasetRegistry {
  *         поля = «неизвестно», значения не пересоздаются;
  * - 1.2 — этап 4.1: опциональное поле coreWorldState (состояние
  *         ядра: часы, тела, резервуары, потоки); отсутствие поля
- *         = «ядро не инициализировано», значения не пересоздаются.
+ *         = «ядро не инициализировано», значения не пересоздаются;
+ * - 1.3 — этап 4.2.1: опциональное поле coreWorldState.scheduling
+ *         (динамика процессов планировщика, очередь событий мира,
+ *         журнал шагов); отсутствие = «планировщик не
+ *         инициализирован», значения не пересоздаются.
  */
-export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2'] as const;
+export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3'] as const;
 export type SaveSchemaVersion = (typeof SAVE_SCHEMA_VERSIONS)[number];
-export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.2';
+export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.3';
 
 export function isKnownSchemaVersion(version: string): boolean {
   return (SAVE_SCHEMA_VERSIONS as readonly string[]).includes(version);
@@ -110,7 +114,7 @@ export function isKnownSchemaVersion(version: string): boolean {
  * - 'invalid_version' — строка версии не является семантической
  *   версией схемы ('abc', '2', '');
  * - 'unsupported_version' — версия корректна по формату, но ядро
- *   её не поддерживает ('0.9', '1.3', '2.0');
+ *   её не поддерживает ('0.9', '1.4', '2.0');
  * - 'missing_migration_path' — нет шага цепочки к целевой версии;
  * - 'migration_failed' — шаг цепочки завершился ошибкой.
  * Каждый бросок содержит исходную и целевую версии.
@@ -201,7 +205,33 @@ const migrate11to12: SaveMigration<any> = {
   }
 };
 
-const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12];
+/**
+ * Миграция 1.2 → 1.3 (этап 4.2.1).
+ * Поле coreWorldState.scheduling НЕ создаётся: динамика процессов и
+ * очередь событий принадлежат планировщику, их отсутствие —
+ * «планировщик не инициализирован», а не нулевое состояние. Часы и
+ * физические значения НЕ пересчитываются: легаси химическое время
+ * (modelTimeYears) не переносится в локальные секунды WorldClock
+ * (это разные величины), космический возраст не переносится в часы.
+ */
+const migrate12to13: SaveMigration<any> = {
+  from: '1.2',
+  to: '1.3',
+  migrate(world: any): SaveMigrationResult<any> {
+    if (world.coreWorldState?.scheduling !== undefined) {
+      // Поле уже есть — не перезаписываем чужие данные.
+      return { world: { ...world, version: '1.3' }, notes: [] };
+    }
+    return {
+      world: { ...world, version: '1.3' },
+      notes: [
+        'добавлено опциональное поле coreWorldState.scheduling (динамика процессов планировщика, очередь событий мира, журнал шагов): его отсутствие означает «планировщик не инициализирован», значения не пересоздаются'
+      ]
+    };
+  }
+};
+
+const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13];
 
 /**
  * Полная цепочка миграций. Детерминирована: одна и та же входная
@@ -210,8 +240,8 @@ const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12]
  * Stage 4.1.1 — честная политика версий:
  * - version === undefined — легаси-сохранение этапа 1-2:
  *   трактуется как 1.0 С ЯВНОЙ записью в истории миграции;
- * - версия известна (1.0 / 1.1 / 1.2) — мигрируется цепочкой;
- * - версия корректна по формату, но неизвестна ядру ('0.9', '1.3',
+ * - версия известна (1.0 / 1.1 / 1.2 / 1.3) — мигрируется цепочкой;
+ * - версия корректна по формату, но неизвестна ядру ('0.9', '1.4',
  *   '2.0') — MigrationError 'unsupported_version': сохранение из
  *   будущего не «мигрируется» из выдуманной версии и не
  *   уничтожается молча (Storage сохраняет его как есть);

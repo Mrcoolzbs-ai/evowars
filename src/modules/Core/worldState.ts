@@ -38,13 +38,15 @@ import type { ScientificValue } from './scientificValue';
 import { validateScientificValueShape } from './scientificValue';
 import type { SimulationClockState } from './simulationClock';
 import { validateClock } from './simulationClock';
+import { validateSchedulerBookkeeping } from './scheduler';
+import type { SchedulerBookkeeping } from './scheduler';
 
 // ============================================
 // 1. ТИПЫ
 // ============================================
 
 /** Версия схемы CoreWorldState (semver; меняется при изменении структуры). */
-export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.0.0';
+export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.1.0';
 
 /**
  * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
@@ -52,7 +54,7 @@ export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.0.0';
  * списку, а не только на непустоту: неизвестная версия — это
  * version_mismatch, а не молчаливое «сойдёт любая».
  */
-export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0'];
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0'];
 
 export const BODY_KINDS: readonly BodyKind[] = [
   'star',
@@ -114,6 +116,15 @@ export interface CoreWorldState {
   radiationSources: RadiationSourceRecord[];
   reservoirs: ReservoirRecord[];
   fluxLedger: FluxLedger;
+  /**
+   * Динамическое состояние планировщика и очередь событий мира
+   * (Stage 4.2.1). Опционально: состояния схемы 1.0.0 его не имеют,
+   * и миграция его НЕ создаёт — отсутствие означает «планировщик
+   * не инициализирован». Определения процессов — в ProcessRegistry
+   * (здесь не сериализуются); runtime-исполнители не сериализуются
+   * никогда (передаются планировщику отдельно).
+   */
+  scheduling?: SchedulerBookkeeping;
   /** Идентификация легаси-источника (НЕ копия его данных). */
   legacy: {
     generatorVersion?: string;
@@ -137,6 +148,8 @@ export interface WorldStateIssue {
     | 'invalid_reservoir'
     | 'invalid_flux'
     | 'invalid_flux_reference'
+    | 'invalid_scheduling'
+    | 'invalid_event'
     | 'invalid_body'
     | 'invalid_scientific_value'
     | 'version_mismatch'
@@ -259,6 +272,14 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
   const fluxProblems = validateFluxLedger(state.fluxLedger, { reservoirIds: [...reservoirIds] });
   if (fluxProblems.length > 0) {
     issues.push({ code: 'invalid_flux', component: 'FluxLedger', message: fluxProblems.join('; '), refs: [] });
+  }
+
+  // --- планировщик (Stage 4.2.1): опциональное состояние расписаний ---
+  if (state.scheduling !== undefined) {
+    const schedulingIssues = validateSchedulerBookkeeping(state.scheduling);
+    if (schedulingIssues.length > 0) {
+      issues.push({ code: 'invalid_scheduling', component: 'Scheduler', message: schedulingIssues.join('; '), refs: [] });
+    }
   }
 
   // --- часы ---
