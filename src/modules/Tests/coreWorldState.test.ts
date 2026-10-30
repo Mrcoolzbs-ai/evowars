@@ -424,3 +424,42 @@ describe('Stage 4.1.1.3 WorldState: словари-поля не принима�
     expect(validateWorldState(state)).toEqual([]);
   });
 });
+
+
+// ============================================
+// STAGE 4.1.1.3.1 — WORLDSTATE: НЕКОРРЕКТНЫЕ СТРУКТУРЫ СЛОВАРЕЙ
+// ============================================
+
+describe('Stage 4.1.1.3.1 WorldState: некорректные структуры словарей → invalid_reservoir', () => {
+  it('резервуар с properties = new Map() → invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({ id: 'map-props', kind: 'ocean', properties: new Map() } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reservoir' && i.message.includes('properties'))).toBe(true);
+  });
+
+  it('резервуар с material.entries = new Set() → invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({ id: 'set-entries', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: new Set() } } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reservoir' && i.message.includes('material.entries'))).toBe(true);
+  });
+
+  it('резервуар с material.entries-классом → invalid_reservoir', () => {
+    class PseudoEntries {
+      co2 = 5;
+    }
+    const state = validState();
+    state.reservoirs.push({ id: 'class-entries', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: new PseudoEntries() } } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reservoir' && i.message.includes('material.entries'))).toBe(true);
+  });
+
+  it('словарь с прототипом null и корректными ключами — состояние полностью валидно', () => {
+    const state = validState();
+    const nullProto: Record<string, number> = Object.create(null);
+    nullProto.co2 = 7;
+    state.reservoirs.push({ id: 'null-proto', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: nullProto } } as unknown as ReservoirRecord);
+    expect(validateWorldState(state)).toEqual([]);
+  });
+});

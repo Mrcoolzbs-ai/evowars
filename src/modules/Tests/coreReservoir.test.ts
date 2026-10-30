@@ -15,6 +15,7 @@ import {
   validateMaterialInventory,
   validateEnergyInventory,
   validateReservoirRecord,
+  isPlainRecord,
   amountToMass,
   massToAmount,
   ReservoirError
@@ -395,5 +396,113 @@ describe('Stage 4.1.1.3 Reservoir: словари — не массивы (ISSUE
     expect(material.valid).toBe(false);
     const energy = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, energy: [] });
     expect(energy.valid).toBe(false);
+  });
+});
+
+
+// ============================================
+// STAGE 4.1.1.3.1 — СТРОГАЯ ПРОВЕРКА ОБЪЕКТОВ-ЗАПИСЕЙ
+// ============================================
+
+/** Псевдо-словарь: typeof 'object', но прототип — не объектная запись. */
+class PseudoInventory {
+  co2 = 5;
+  h2o = 10;
+}
+
+describe('Stage 4.1.1.3.1 Reservoir: строгая проверка объектов-записей (isPlainRecord)', () => {
+  it('isPlainRecord принимает настоящие записи: {}, именованные ключи, Object.create(null)', () => {
+    expect(isPlainRecord({})).toBe(true);
+    expect(isPlainRecord({ co2: 5, h2o: 10 })).toBe(true);
+    const nullProto = Object.create(null);
+    nullProto.co2 = 5;
+    expect(isPlainRecord(nullProto)).toBe(true);
+  });
+
+  it('isPlainRecord отвергает массивы, Map, Set, Date, RegExp, классы и прочие прототипы', () => {
+    expect(isPlainRecord([])).toBe(false);
+    expect(isPlainRecord([5, 10])).toBe(false);
+    expect(isPlainRecord(new Map())).toBe(false);
+    expect(isPlainRecord(new Map([['co2', 5]]))).toBe(false);
+    expect(isPlainRecord(new Set())).toBe(false);
+    expect(isPlainRecord(new Date())).toBe(false);
+    expect(isPlainRecord(/pattern/)).toBe(false);
+    expect(isPlainRecord(new PseudoInventory())).toBe(false);
+    expect(isPlainRecord(Object.create({}))).toBe(false);
+    expect(isPlainRecord('dict')).toBe(false);
+    expect(isPlainRecord(42)).toBe(false);
+    expect(isPlainRecord(null)).toBe(false);
+    expect(isPlainRecord(undefined)).toBe(false);
+  });
+
+  it('properties: new Map() — невалидная запись (Map не словарь характеристик)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: new Map() });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('properties') && e.includes('Map'))).toBe(true);
+  });
+
+  it('material.entries: new Map с данными — невалидная запись (не известный инвентарь)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: new Map([['co2', 5]]) } });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('material.entries') && e.includes('Map'))).toBe(true);
+  });
+
+  it('material.entries: new Set() — невалидная запись (пустой Set ≠ известная пустота)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: new Set() } });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('material.entries') && e.includes('Set'))).toBe(true);
+  });
+
+  it('material.entries: new Date() — невалидная запись', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: new Date() } });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('material.entries') && e.includes('Date'))).toBe(true);
+  });
+
+  it('material.entries — экземпляр пользовательского класса: невалидная запись', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: new PseudoInventory() } });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('material.entries') && e.includes('PseudoInventory'))).toBe(true);
+  });
+
+  it('validateMaterialInventory отвергает Map/Set/Date/RegExp/класс напрямую', () => {
+    expect(validateMaterialInventory({ basis: 'amount', entries: new Map([['co2', 5]]) } as unknown as never).valid).toBe(false);
+    expect(validateMaterialInventory({ basis: 'amount', entries: new Set() } as unknown as never).valid).toBe(false);
+    expect(validateMaterialInventory({ basis: 'amount', entries: new Date() } as unknown as never).valid).toBe(false);
+    expect(validateMaterialInventory({ basis: 'amount', entries: /pattern/ } as unknown as never).valid).toBe(false);
+    expect(validateMaterialInventory({ basis: 'amount', entries: new PseudoInventory() } as unknown as never).valid).toBe(false);
+  });
+
+  it('setMaterialInventory отвергает Map-структуру с ReservoirError', () => {
+    expect(() =>
+      setMaterialInventory(createReservoir('r', 'test'), 'amount', new Map([['co2', 5]]) as unknown as Record<string, number>)
+    ).toThrow(ReservoirError);
+  });
+
+  it('properties: {} и material.entries: {} — валидные записи (известная пустота сохранена)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: {} } });
+    expect(check.valid).toBe(true);
+    expect(check.errors).toEqual([]);
+  });
+
+  it('material.entries: Object.create(null) с корректными ключами — валидная запись', () => {
+    const nullProto: Record<string, number> = Object.create(null);
+    nullProto.co2 = 5;
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: nullProto } });
+    expect(check.valid).toBe(true);
+    expect(check.errors).toEqual([]);
+    expect(validateMaterialInventory({ basis: 'amount', entries: nullProto }).valid).toBe(true);
+  });
+
+  it('известный ноль { co2: 0 } остаётся валидным (семантика известности не изменилась)', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, material: { basis: 'amount', entries: { co2: 0 } } });
+    expect(check.valid).toBe(true);
+    expect(validateMaterialInventory({ basis: 'amount', entries: { co2: 0 } }).valid).toBe(true);
+  });
+
+  it('energy: new Map() — невалидная запись', () => {
+    const check = validateReservoirRecord({ id: 'r1', kind: 'ocean', properties: {}, energy: new Map() });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('energy'))).toBe(true);
   });
 });

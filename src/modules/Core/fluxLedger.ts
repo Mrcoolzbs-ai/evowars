@@ -54,12 +54,19 @@
 // - material.entries и properties — объекты-записи: массив не
 //   принимается за словарь и не трактуется как «известная пустота».
 //
+// Stage 4.1.1.3.1 (строгая форма записей): словарь speciesId →
+// количество — ТОЛЬКО настоящая объектная запись (прототип
+// Object.prototype или null). Map, Set, Date, RegExp и экземпляры
+// пользовательских классов отвергаются во всех точках входа:
+// Object.entries по таким структурам вернул бы пустой массив и
+// выдал бы некорректную структуру за «известную пустоту».
+//
 // Материя не создаётся и не уничтожается «внутри системы»:
 // изменение суммарного инвентаря допустимо ТОЛЬКО за счёт
 // внешних потоков; внутренние переносы сохраняют итог.
 
 import type { InventoryBasis, MaterialInventory, ReservoirRecord } from './reservoir';
-import { addMaterial, isKnownBasis, isPlainRecord, removeMaterial, validateMaterialInventory } from './reservoir';
+import { addMaterial, describeRecordCandidate, isKnownBasis, isPlainRecord, removeMaterial, validateMaterialInventory } from './reservoir';
 import type { SpeciesCatalog } from './species';
 import { chargeTotal, elementTotals as speciesElementTotals } from './species';
 import { comparePoints } from './simulationClock';
@@ -677,8 +684,11 @@ export function totalInventory(reservoirs: Record<string, ReservoirRecord>): { b
     // Stage 4.1.1.3 (ISSUE B): entries — объект-запись; массив не
     // принимается за словарь (Object.entries по массиву дал бы
     // мусорные «виды» с числовыми индексными ключами).
+    // Stage 4.1.1.3.1: строгий прототип — Map/Set/Date/RegExp и
+    // экземпляры классов тоже не словари: Object.entries по ним
+    // вернул бы пустой массив и «изобрёл» известную пустоту.
     if (!isPlainRecord(res.material.entries)) {
-      throw new FluxLedgerError('invalid_flux', `резервуар «${res.id}»: material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null`, null);
+      throw new FluxLedgerError('invalid_flux', `резервуар «${res.id}»: material.entries должен быть настоящим объектом-записью (speciesId → количество), а не массивом/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(res.material.entries)}`, null);
     }
     for (const [id, amount] of Object.entries(res.material.entries)) {
       totals[id] = (totals[id] ?? 0) + amount;
@@ -767,9 +777,7 @@ export function inventoryToMolarCounts(catalog: SpeciesCatalog, inv: { basis: st
       counts: {},
       exclusions: [{
         key: 'inventory',
-        reason: `material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null: получено ${
-          inv.entries === null ? 'null' : Array.isArray(inv.entries) ? 'массив' : typeof inv.entries
-        }`
+        reason: `material.entries должен быть настоящим объектом-записью (speciesId → количество), а не массивом/null/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(inv.entries)}`
       }],
       scope: null
     };
@@ -1391,7 +1399,10 @@ export function auditReservoirFluxes(
       } else if (!isPlainRecord(beforeInv.entries) || !isPlainRecord(afterInv.entries)) {
         // Stage 4.1.1.3 (ISSUE B): массив — не словарь; пофазовая
         // сверка по индексным «видам» невозможна и не имитируется.
-        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: material.entries не является объектом-словарём (speciesId → количество) — пофазовая проверка невозможна` });
+        // Stage 4.1.1.3.1: строгий прототип — Map/Set/Date/RegExp и
+        // экземпляры классов тоже не словари.
+        const nonRecordEntries = isPlainRecord(beforeInv.entries) ? afterInv.entries : beforeInv.entries;
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: material.entries не является настоящим объектом-записью (speciesId → количество; получено ${describeRecordCandidate(nonRecordEntries)}) — пофазовая проверка невозможна` });
       } else if (beforeInv.basis !== afterInv.basis) {
         exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: основание инвентаря изменилось («${beforeInv.basis}» → «${afterInv.basis}») — пофазовая проверка невозможна` });
       } else {

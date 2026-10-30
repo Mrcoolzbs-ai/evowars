@@ -91,14 +91,46 @@ export function isKnownBasis(basis: string): basis is InventoryBasis {
 
 /**
  * Проверка значения как объекта-записи (именованного словаря) для
- * runtime-данных (Stage 4.1.1.3, ISSUE B): у массива typeof тоже
- * 'object', поэтому массивы исключаются ЯВНО. properties и
- * material.entries — словари (speciesId → значение), а не массивы:
- * пустой массив не равен пустому словарю и не принимается за
- * «известную пустоту». Пустой обычный объект {} остаётся допустимым.
+ * runtime-данных (Stage 4.1.1.3 ISSUE B; строгая ревизия 4.1.1.3.1):
+ * у массива, Map, Set, Date, RegExp и экземпляров пользовательских
+ * классов typeof тоже 'object', поэтому typeof + !Array.isArray
+ * недостаточно. Настоящая объектная запись — объект с прототипом
+ * Object.prototype ИЛИ словарь с прототипом null (Object.create(null)).
+ * Всё остальное отвергается ЯВНО: по некоторым из таких структур
+ * Object.entries() возвращает пустой массив, и некорректная
+ * структура превращалась бы в якобы «известный пустой словарь».
+ * Пустой обычный объект {} и объект с именованными ключами
+ * остаются валидными.
  */
 export function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === null || prototype === Object.prototype;
+}
+
+/**
+ * Человекочитаемое описание кандидата в словарь для диагностики
+ * (Stage 4.1.1.3.1): сообщение об ошибке называет реальный вид
+ * полученной структуры, а не безликое 'object'.
+ */
+export function describeRecordCandidate(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'массив';
+  if (typeof value !== 'object') return `тип ${typeof value}`;
+  if (value instanceof Map) return 'Map';
+  if (value instanceof Set) return 'Set';
+  if (value instanceof Date) return 'Date';
+  if (value instanceof RegExp) return 'RegExp';
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype === null) return 'объект с прототипом null';
+  if (prototype === Object.prototype) return 'объект-запись';
+  const name =
+    typeof prototype.constructor === 'function' && prototype.constructor.name !== ''
+      ? prototype.constructor.name
+      : 'безымянный прототип';
+  return `объект с прототипом ${name} (не Object.prototype/null)`;
 }
 
 /**
@@ -190,7 +222,11 @@ export interface MaterialInventoryValidation {
  *   (инвентарь может быть частичным), это не ошибка, а контракт поля;
  * - Stage 4.1.1.3 (ISSUE B): entries — объект-запись
  *   (speciesId → количество), НЕ массив: пустой массив не является
- *   «известным пустым инвентарём» и отвергается явно.
+ *   «известным пустым инвентарём» и отвергается явно;
+ * - Stage 4.1.1.3.1 (строгая форма): принимаются только объекты с
+ *   прототипом Object.prototype или null; Map, Set, Date, RegExp и
+ *   экземпляры классов отвергаются — Object.entries по ним вернул бы
+ *   пустой массив и «изобрёл» известную пустоту.
  */
 export function validateMaterialInventory(inv: MaterialInventory): MaterialInventoryValidation {
   const errors: string[] = [];
@@ -199,9 +235,7 @@ export function validateMaterialInventory(inv: MaterialInventory): MaterialInven
   }
   if (!isPlainRecord(inv.entries)) {
     errors.push(
-      `material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null: получено ${
-        inv.entries === null ? 'null' : Array.isArray(inv.entries) ? 'массив' : typeof inv.entries
-      }`
+      `material.entries должен быть настоящим объектом-записью (speciesId → количество), а не массивом/null/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(inv.entries)}`
     );
     return { valid: false, errors };
   }
@@ -468,14 +502,14 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
   }
   if (rec.material !== undefined) {
     if (!isPlainRecord(rec.material)) {
-      errors.push('material резервуара должен быть объектом (basis + entries)');
+      errors.push(`material резервуара должен быть настоящим объектом-записью (basis + entries), а не массивом/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(rec.material)}`);
     } else {
       const material = rec.material as Record<string, unknown>;
       if (typeof material.basis !== 'string' || !isKnownBasis(material.basis)) {
         errors.push(`material.basis должен быть известным основанием, получено «${String(material.basis)}»`);
       }
       if (!isPlainRecord(material.entries)) {
-        errors.push('material.entries должен быть объектом-словарём (speciesId → количество), а не массивом/null');
+        errors.push(`material.entries должен быть настоящим объектом-записью (speciesId → количество), а не массивом/null/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(material.entries)}`);
       } else {
         for (const [id, amount] of Object.entries(material.entries as Record<string, unknown>)) {
           if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
@@ -487,7 +521,7 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
   }
   if (rec.energy !== undefined && rec.energy !== null) {
     if (!isPlainRecord(rec.energy)) {
-      errors.push('energy резервуара должен быть объектом-записью (не массивом) или null');
+      errors.push(`energy резервуара должен быть настоящим объектом-записью (не массив/Map/Set/Date/RegExp/экземпляр класса) или null: получено ${describeRecordCandidate(rec.energy)}`);
     } else {
       const energy = rec.energy as Record<string, unknown>;
       const storedJ = energy.storedJ;
@@ -521,7 +555,9 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
   } else if (!isPlainRecord(rec.properties)) {
     // Stage 4.1.1.3 (ISSUE B): properties — именованный словарь
     // ScientificValue; массив (включая пустой []) — не словарь.
-    errors.push('properties резервуара должен быть объектом-словарём (именованные ScientificValue), а не массивом');
+    // Stage 4.1.1.3.1: строгий прототип — Map/Set/Date/RegExp и
+    // экземпляры классов тоже не словари.
+    errors.push(`properties резервуара должен быть настоящим объектом-записью (именованные ScientificValue), а не массивом/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(rec.properties)}`);
   } else {
     for (const [key, value] of Object.entries(rec.properties as Record<string, unknown>)) {
       const issues = validateScientificValueShape(value);

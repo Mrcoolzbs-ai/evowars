@@ -16,6 +16,7 @@ import {
   integratePower,
   totalInventory,
   netExternalTransfers,
+  inventoryToMolarCounts,
   reservoirsToMolarCounts,
   auditSubstanceConservation,
   auditElementConservation,
@@ -1369,5 +1370,94 @@ describe('Stage 4.1.1.3 FluxLedger: materialApplicability в пофазовом 
     expect(result.status).toBe('not_verifiable');
     expect(result.counts).toEqual({});
     expect(result.exclusions.length).toBeGreaterThan(0);
+  });
+});
+
+
+// ============================================
+// STAGE 4.1.1.3.1 — ТОЛЬКО НАСТОЯЩИЕ ЗАПИСИ ПРЕДСТАВЛЯЮТ СЛОВАРИ
+// ============================================
+
+describe('Stage 4.1.1.3.1 FluxLedger: только настоящие записи представляют словари', () => {
+  class PseudoEntries {
+    co2 = 5;
+  }
+
+  it('inventoryToMolarCounts: Map/Set/Date/класс в entries — not_verifiable, а не exact', () => {
+    const catalog = speciesFixture();
+    const badStructures = [
+      new Map([['co2', 5]]),
+      new Set(['co2']),
+      new Date(),
+      new PseudoEntries()
+    ];
+    for (const entries of badStructures) {
+      const result = inventoryToMolarCounts(catalog, { basis: 'amount', entries: entries as unknown as Record<string, number> });
+      expect(result.status).toBe('not_verifiable');
+      expect(result.counts).toEqual({});
+      expect(result.exclusions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('inventoryToMolarCounts: Object.create(null)-словарь — exact (настоящая запись)', () => {
+    const catalog = speciesFixture();
+    const nullProto: Record<string, number> = Object.create(null);
+    nullProto.co2 = 5;
+    const result = inventoryToMolarCounts(catalog, { basis: 'amount', entries: nullProto });
+    expect(result.status).toBe('exact');
+    expect(result.counts).toEqual({ co2: 5 });
+    expect(result.exclusions).toEqual([]);
+  });
+
+  it('reservoirsToMolarCounts: Map-entries не превращаются в известную пустоту', () => {
+    const catalog = speciesFixture();
+    const bad = {
+      ...createReservoir('bad', 'test'),
+      material: { basis: 'amount', entries: new Map([['co2', 5]]) } as unknown as MaterialInventory
+    };
+    const result = reservoirsToMolarCounts(catalog, { bad });
+    expect(result.status).toBe('not_verifiable');
+    expect(result.counts).toEqual({});
+    expect(result.exclusions.length).toBeGreaterThan(0);
+  });
+
+  it('totalInventory: Map-entries — структурированная FluxLedgerError, а не пустой итог', () => {
+    const bad = {
+      ...createReservoir('bad', 'test'),
+      material: { basis: 'amount', entries: new Map([['co2', 5]]) } as unknown as MaterialInventory
+    };
+    try {
+      totalInventory({ bad });
+      expect.unreachable('Map-entries должен быть отвергнут');
+    } catch (e) {
+      const err = e as FluxLedgerError;
+      expect(err).toBeInstanceOf(FluxLedgerError);
+      expect(err.code).toBe('invalid_flux');
+      expect(err.message).toContain('Map');
+    }
+  });
+
+  it('auditReservoirFluxes: Date-entries в состояниях — not_verifiable с исключением, не balanced', () => {
+    const ledger: FluxLedger = { records: [] };
+    const badReservoir = (): ReservoirRecord => ({
+      ...createReservoir('bad', 'test'),
+      material: { basis: 'amount', entries: new Date() } as unknown as MaterialInventory
+    });
+    const before: Record<string, ReservoirRecord> = { bad: badReservoir() };
+    const after: Record<string, ReservoirRecord> = { bad: badReservoir() };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.exclusions.some((e) => e.key === 'bad' && e.reason.includes('Date'))).toBe(true);
+  });
+
+  it('auditReservoirFluxes: настоящая запись с известными нулями по-прежнему balanced', () => {
+    const ledger: FluxLedger = { records: [] };
+    const before: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', { co2: 0 }) };
+    const after: Record<string, ReservoirRecord> = { b: setMaterialInventory(createReservoir('b', 'test'), 'amount', { co2: 0 }) };
+    const audit = auditReservoirFluxes(ledger, before, after);
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
+    expect(audit.exclusions).toEqual([]);
   });
 });
