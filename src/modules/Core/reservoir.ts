@@ -269,6 +269,21 @@ export interface ReservoirRecord {
   energy?: EnergyInventory;
   properties: Record<string, ScientificValue>;
   note?: string;
+  /**
+   * Явное указание, что резервуар по своей природе НЕ содержит материю
+   * (Stage 4.1.1.2): например, чисто энергетический буфер. Только это
+   * поле даёт право исключить резервуар из материального баланса.
+   *
+   * Семантика материального состояния (три РАЗНЫХ состояния):
+   * - material задан — запас известен (entries = {} — известная пустота,
+   *   entries[species] = 0 — известный ноль);
+   * - material отсутствует И materialApplicability = 'not_applicable' —
+   *   резервуар заведомо без материи: баланс вправе его не учитывать;
+   * - material отсутствует без этого поля — запас НЕИЗВЕСТЕН:
+   *   он не приравнивается к нулю и делает аудит непроверяемым.
+   * Неприменимость НЕ выводится из отсутствия поля.
+   */
+  materialApplicability?: 'not_applicable';
 }
 
 // ============================================
@@ -462,17 +477,29 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
       }
     }
   }
-  if (rec.properties !== undefined) {
-    if (typeof rec.properties !== 'object' || rec.properties === null) {
-      errors.push('properties резервуара должен быть объектом');
-    } else {
-      for (const [key, value] of Object.entries(rec.properties as Record<string, unknown>)) {
-        const issues = validateScientificValueShape(value);
-        if (issues.length > 0) {
-          errors.push(`properties["${key}"]: ${issues.join('; ')}`);
-        }
+  if (rec.materialApplicability !== undefined) {
+    if (rec.materialApplicability !== 'not_applicable') {
+      errors.push(`materialApplicability должен быть 'not_applicable', если задан, получено «${String(rec.materialApplicability)}»`);
+    } else if (rec.material !== undefined) {
+      errors.push('material и materialApplicability = \'not_applicable\' противоречат друг другу: инвентарь не может быть одновременно задан и неприменим');
+    }
+  }
+  if (rec.properties === undefined) {
+    // Stage 4.1.1.2: properties — ОБЯЗАТЕЛЬНОЕ поле ReservoirRecord.
+    // Раньше отсутствие поля проходило проверку молча (проверка была
+    // условной); пустой объект {} допустим — «характеристик нет»
+    // отличается от «характеристики не заданы структурно».
+    errors.push('properties резервуара обязателен (объект ScientificValue; пустой объект допустим)');
+  } else if (typeof rec.properties !== 'object' || rec.properties === null) {
+    errors.push('properties резервуара должен быть объектом');
+  } else {
+    for (const [key, value] of Object.entries(rec.properties as Record<string, unknown>)) {
+      const issues = validateScientificValueShape(value);
+      if (issues.length > 0) {
+        errors.push(`properties["${key}"]: ${issues.join('; ')}`);
       }
     }
   }
   return { valid: errors.length === 0, errors };
 }
+

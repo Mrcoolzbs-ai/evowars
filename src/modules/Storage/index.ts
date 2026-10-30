@@ -61,6 +61,33 @@ function migrateWorld(world: SavedWorld): SavedWorld {
 // RAW-ДОСТУП К ХРАНИЛИЩУ (Stage 4.1.1)
 // ============================================
 
+/**
+ * Структурированная ошибка хранилища (Stage 4.1.1.2, ISSUE D):
+ * корневой JSON localStorage повреждён или не является массивом —
+ * приложение не может ни читать, ни безопасно переписать данные.
+ * Запись в такое хранилище ОТКАЗЫВАЕТ: исходная строка остаётся
+ * нетронутой, пока пользователь явно не очистит хранилище
+ * (clearAllWorlds). Никаких резервных копий в виде «фиктивного
+ * мира» с выдуманной версией не создаётся.
+ */
+export class StorageError extends Error {
+  readonly code: 'storage_unreadable';
+  readonly component = 'Storage';
+  /** Диагностика разбора из readRawEntries (не null). */
+  readonly parseError: string;
+
+  constructor(parseError: string) {
+    super(
+      `[Storage/storage_unreadable] хранилище сохранений не читается (${parseError}). ` +
+      'Запись отклонена: исходные данные НЕ изменены. ' +
+      'Диагностика — getStorageHealth(); явная очистка — clearAllWorlds().'
+    );
+    this.name = 'StorageError';
+    this.code = 'storage_unreadable';
+    this.parseError = parseError;
+  }
+}
+
 /** Несовместимая запись хранилища: версия известна формату, но ядро её не поддерживает. */
 export interface IncompatibleEntry {
   /** Позиция записи в массиве localStorage. */
@@ -146,6 +173,15 @@ function loadSingleEntry(entry: unknown, index: number): { world: SavedWorld | n
  * (50 записей); НЕСОВМЕСТИМЫЕ записи (версии из будущего, например
  * '2.0') сохраняются КАК ЕСТЬ и не удаляются: лимит к ним не
  * применяется — пользовательский данные не уничтожаются молча.
+ *
+ * Stage 4.1.1.2 (ISSUE D): если корневой JSON повреждён или не
+ * является массивом, запись ОТКАЗАЕТ со структурированной ошибкой
+ * StorageError('storage_unreadable'). Раньше parseError
+ * игнорировался, entries приходил пустым, и saveWorld перезаписывал
+ * хранилище новым массивом — уничтожая исходные данные, которые
+ * приложение не смогло прочитать. Теперь исходная строка localStorage
+ * остаётся неизменной; никакая «резервная копия» в виде фиктивного
+ * мира не создаётся.
  */
 export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): SavedWorld {
   const savedWorld: SavedWorld = {
@@ -156,7 +192,12 @@ export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): 
   };
 
   // Читаем raw-записи: что реально лежит в хранилище.
-  const { entries } = readRawEntries();
+  const { entries, parseError } = readRawEntries();
+
+  // Хранилище не разобрать: переписывать его нельзя — отказ.
+  if (parseError !== null) {
+    throw new StorageError(parseError);
+  }
 
   // Совместимые миры — загружаются и мигрируются;
   // несовместимые — сохраняются как есть (см. контракт выше).
@@ -253,9 +294,18 @@ export function getWorldById(id: string): SavedWorld | null {
  * Stage 4.1.1: удаление работает по RAW-записям — удаляется ТОЛЬКО
  * выбранная запись. Раньше список переписывался из getAllWorlds(),
  * что молча удаляло бы все несовместимые записи хранилища.
+ *
+ * Stage 4.1.1.2 (ISSUE D): при повреждённом корневом JSON удаление
+ * явно отказывает (false) и НЕ трогает хранилище — исходные данные,
+ * которые не удалось разобрать, сохраняются как есть.
  */
 export function deleteWorld(id: string): boolean {
-  const { entries } = readRawEntries();
+  const { entries, parseError } = readRawEntries();
+  if (parseError !== null) {
+    // Хранилище не читается: переписывать его (даже «сокращённой»
+    // версией) нельзя — возвращаем честный false без записи.
+    return false;
+  }
   const targetIndex = entries.findIndex(
     (entry) => isObjectEntry(entry) && entry.id === id
   );
@@ -774,3 +824,4 @@ export default {
   getStorageStats,
   getStorageHealth
 };
+

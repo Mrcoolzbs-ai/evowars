@@ -293,3 +293,37 @@ describe('Stage 4.1.1 Reservoir: валидация энергетическог
     expect(estimatedNoMethod.valid).toBe(false);
   });
 });
+
+
+// ============================================
+// STAGE 4.1.1.2 — RESERVOIR: ОБЯЗАТЕЛЬНОСТЬ properties И ЯВНАЯ НЕПРИМЕНИМОСТЬ
+// ============================================
+
+describe('Stage 4.1.1.2 Reservoir: обязательность properties и явная неприменимость материи', () => {
+  it('properties обязательны: отсутствие поля — ошибка, пустой объект — валиден', () => {
+    const missing = validateReservoirRecord({ id: 'x', kind: 'ocean' });
+    expect(missing.valid).toBe(false);
+    expect(missing.errors.some((e) => e.includes('properties'))).toBe(true);
+    const empty = validateReservoirRecord({ id: 'x', kind: 'ocean', properties: {} });
+    expect(empty.valid).toBe(true);
+    expect(empty.errors).toEqual([]);
+  });
+
+  it('materialApplicability not_applicable без material — валидная запись', () => {
+    const check = validateReservoirRecord({ id: 'x', kind: 'buffer', properties: {}, materialApplicability: 'not_applicable' });
+    expect(check.valid).toBe(true);
+    expect(check.errors).toEqual([]);
+  });
+
+  it('конфликт material + not_applicable и мусорное значение маркера — ошибки', () => {
+    const conflict = validateReservoirRecord({
+      id: 'x', kind: 'buffer', properties: {}, materialApplicability: 'not_applicable',
+      material: { basis: 'amount', entries: {} }
+    });
+    expect(conflict.valid).toBe(false);
+    expect(conflict.errors.some((e) => e.includes('противоречат'))).toBe(true);
+    const junk = validateReservoirRecord({ id: 'x', kind: 'buffer', properties: {}, materialApplicability: 'sometimes' });
+    expect(junk.valid).toBe(false);
+    expect(junk.errors.some((e) => e.includes('materialApplicability'))).toBe(true);
+  });
+});

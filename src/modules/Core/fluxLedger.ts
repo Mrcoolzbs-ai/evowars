@@ -856,11 +856,36 @@ function mergeMolarCounts(results: MolarCountResult[]): MolarCountResult {
   return { status: approximate ? 'approximate' : 'exact', counts, exclusions, scope };
 }
 
-/** Молярные счёты системы резервуаров (basis-aware). */
+/**
+ * Молярные счёты системы резервуаров (basis-aware).
+ *
+ * Stage 4.1.1.2 (ISSUE A): резервуар БЕЗ материального инвентаря —
+ * это НЕ известный ноль. Три состояния различаются явно:
+ * - material задан (entries могут быть пусты или содержать нули) —
+ *   известный запас, участвует в балансе;
+ * - material отсутствует и materialApplicability = 'not_applicable' —
+ *   резервуар по своей природе не содержит материю: законно исключён
+ *   из материального баланса;
+ * - material отсутствует без явного неприменима — запас неизвестен:
+ *   весь подсчёт становится not_verifiable, а не «успешным без него».
+ */
 export function reservoirsToMolarCounts(catalog: SpeciesCatalog, reservoirs: Record<string, ReservoirRecord>): MolarCountResult {
   const results: MolarCountResult[] = [];
   for (const res of Object.values(reservoirs)) {
-    if (!res.material) continue;
+    if (!res.material) {
+      if (res.materialApplicability === 'not_applicable') {
+        continue;
+      }
+      return {
+        status: 'not_verifiable',
+        counts: {},
+        exclusions: [{
+          key: res.id,
+          reason: `резервуар «${res.id}»: материальный инвентарь не задан — запас неизвестен и не приравнивается к нулю`
+        }],
+        scope: null
+      };
+    }
     const converted = inventoryToMolarCounts(catalog, res.material);
     if (converted.status === 'not_verifiable') {
       results.push({
@@ -952,6 +977,18 @@ export function auditSubstanceConservation(
   if (discrepancies.length > 0) {
     return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: [], tolerance, untimedRecords: untimed };
   }
+  if (untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
+    // времени, исключённые из ограниченной области, — это реальные
+    // изменения, которые нельзя отнести к интервалу. Аудит не может
+    // объявить полный успех — только честную непроверяемость.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
+  }
   const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
   return {
     status: approximate ? 'approximate' : 'balanced',
@@ -1009,6 +1046,18 @@ export function auditElementConservation(
   if (discrepancies.length > 0) {
     return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: [], tolerance, untimedRecords: untimed };
   }
+  if (untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
+    // времени, исключённые из ограниченной области, — это реальные
+    // изменения, которые нельзя отнести к интервалу. Аудит не может
+    // объявить полный успех — только честную непроверяемость.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
+  }
   const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
   return {
     status: approximate ? 'approximate' : 'balanced',
@@ -1056,6 +1105,18 @@ export function auditChargeConservation(
       : [];
   if (discrepancies.length > 0) {
     return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: [], tolerance, untimedRecords: untimed };
+  }
+  if (untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
+    // времени, исключённые из ограниченной области, — это реальные
+    // изменения, которые нельзя отнести к интервалу. Аудит не может
+    // объявить полный успех — только честную непроверяемость.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
   }
   const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
   return {
@@ -1124,6 +1185,17 @@ export function auditEnergyConservation(
   const actual = afterTotal.value;
   const discrepancies: BalanceDiscrepancy[] =
     Math.abs(expected - actual) > tolerance ? [{ key: 'energy', expected, actual }] : [];
+  if (discrepancies.length === 0 && untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые энергетические потоки без
+    // времени исключены из области — их вклад нельзя отнести к
+    // интервалу, полный успех невозможен.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
+  }
   return {
     status: discrepancies.length === 0 ? 'balanced' : 'imbalanced',
     balanced: discrepancies.length === 0,
@@ -1149,15 +1221,26 @@ export interface ReservoirFluxAuditResult {
 }
 
 /**
- * Пофазовый аудит применения потоков (Stage 4.1.1): сверяет фактические
- * изменения каждого резервуара с ожидаемыми Δ от каждого applied-
- * потока в области. Ловит «вещество ушло не туда»: суммарный аудит
- * системы при этом остаётся сбалансированным, но пофазовый находит
- * неверного получателя/источник.
+ * Пофазовый аудит применения потоков (Stage 4.1.1; полнота — 4.1.1.2):
+ * сверяет фактические изменения КАЖДОГО резервуара с ожидаемыми Δ от
+ * каждого applied-потока в области. Ловит «вещество ушло не туда»:
+ * суммарный аудит системы при этом остаётся сбалансированным, но
+ * пофазовый находит неверного получателя/источник.
  *
- * Непроверяемые вклады (неизвестный запас энергии, отсутствующий
- * инвентарь, несовместимое основание) не заносятся в расхождения —
- * они исключаются с явной причиной.
+ * Stage 4.1.1.2 (ISSUE B): проверяется ОБЪЕДИНЕНИЕ резервуаров —
+ * всех ID из состояния «до», всех ID из состояния «после» и всех,
+ * затронутых applied-потоками в области. Резервуар без потоков в
+ * области обязан сохранить инвентарь (ожидаемое Δ = 0): его изменение
+ * без записи потока — расхождение, а не слепая зона.
+ *
+ * Измерение (материя/энергия) обязательно для резервуара, если
+ * соответствующий инвентарь задан хотя бы в одном состоянии или
+ * резервуар затронут потоком этого типа. Непроверяемые вклады
+ * (неизвестный запас энергии, отсутствующий инвентарь, несовместимое
+ * основание) не заносятся в расхождения — они исключаются с явной
+ * причиной и ДЕЛАЮТ итог непроверяемым: balanced при наличии
+ * исключений невозможен (ISSUE B). Исключённые untimed-записи
+ * (ISSUE C) также не позволяют объявить полный успех.
  */
 export function auditReservoirFluxes(
   ledger: FluxLedger,
@@ -1217,62 +1300,111 @@ export function auditReservoirFluxes(
   const discrepancies: BalanceDiscrepancy[] = [];
   const exclusions: AuditExclusion[] = [];
 
-  for (const [reservoirId, delta] of expected) {
+  // Stage 4.1.1.2 (ISSUE B): проверяются ВСЕ резервуары — объединение
+  // ID из «до», «после» и затронутых потоками в области. Раньше
+  // резервуар без applied-потоков не проверялся вовсе: его изменение
+  // «из ниоткуда» проходило молча.
+  const allIds = new Set<string>([...Object.keys(before), ...Object.keys(after), ...expected.keys()]);
+
+  for (const reservoirId of allIds) {
     const beforeRes = before[reservoirId];
     const afterRes = after[reservoirId];
     if (!beforeRes || !afterRes) {
       exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}» отсутствует в состоянии «${!beforeRes ? 'до' : 'после'}»: пофазовая проверка невозможна` });
       continue;
     }
-    for (const [speciesId, spec] of Object.entries(delta.species)) {
-      if (Number.isNaN(spec.delta)) {
-        exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: потоки вида «${speciesId}» имеют несовместимые основания` });
-        continue;
-      }
-      const beforeInv = beforeRes.material;
-      const afterInv = afterRes.material;
+    const delta = expected.get(reservoirId);
+    const fluxSpecies: Record<string, { delta: number; basis: string }> = delta ? delta.species : {};
+    const fluxEnergyJ = delta && delta.hasEnergy ? delta.energyJ : null;
+
+    // --- МАТЕРИАЛЬНОЕ ИЗМЕРЕНИЕ ---
+    // Обязательно, если инвентарь задан хотя бы в одном состоянии
+    // (явное наличие материи) или резервуар затронут вещественным
+    // потоком. Отсутствие инвентаря в ОБОИХ состояниях без потоков —
+    // материальное измерение неприменимо к этому резервуару в данном
+    // аудите (например, чисто энергетический буфер): оно не создаёт
+    // ни расхождения, ни исключения. Неизвестность запаса при этом
+    // честно проверяется ГЛОБАЛЬНЫМ аудитом (reservoirsToMolarCounts).
+    const beforeInv = beforeRes.material;
+    const afterInv = afterRes.material;
+    const materialMandatory =
+      beforeInv !== undefined || afterInv !== undefined || Object.keys(fluxSpecies).length > 0;
+    if (materialMandatory) {
       if (!beforeInv || !afterInv) {
-        exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: материальный инвентарь не задан в состоянии «${!beforeInv ? 'до' : 'после'}» — пофазовая проверка невозможна` });
-        continue;
-      }
-      if (beforeInv.basis !== afterInv.basis || beforeInv.basis !== spec.basis) {
-        exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: основание инвентаря («${beforeInv.basis}»/«${afterInv.basis}») не совпадает с основанием потока «${spec.basis}»` });
-        continue;
-      }
-      const beforeAmount = beforeInv.entries[speciesId] ?? 0;
-      const afterAmount = afterInv.entries[speciesId] ?? 0;
-      const expectedAmount = beforeAmount + spec.delta;
-      if (Math.abs(expectedAmount - afterAmount) > tolerance) {
-        discrepancies.push({
-          key: `${reservoirId}:${speciesId}`,
-          expected: expectedAmount,
-          actual: afterAmount,
-          reservoirId
-        });
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: материальный инвентарь не задан в состоянии «${!beforeInv ? 'до' : 'после'}» — пофазовая проверка невозможна (запас неизвестен, а не ноль)` });
+      } else if (beforeInv.basis !== afterInv.basis) {
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: основание инвентаря изменилось («${beforeInv.basis}» → «${afterInv.basis}») — пофазовая проверка невозможна` });
+      } else {
+        // виды: объединение из «до», «после» и ожидаемых Δ потока
+        const speciesIds = new Set<string>([
+          ...Object.keys(beforeInv.entries),
+          ...Object.keys(afterInv.entries),
+          ...Object.keys(fluxSpecies)
+        ]);
+        for (const speciesId of speciesIds) {
+          const spec = fluxSpecies[speciesId];
+          if (spec && Number.isNaN(spec.delta)) {
+            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: потоки вида «${speciesId}» имеют несовместимые основания` });
+            continue;
+          }
+          if (spec && spec.basis !== beforeInv.basis) {
+            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: основание потока «${spec.basis}» не совпадает с основанием инвентаря «${beforeInv.basis}»` });
+            continue;
+          }
+          const beforeAmount = beforeInv.entries[speciesId] ?? 0;
+          const afterAmount = afterInv.entries[speciesId] ?? 0;
+          const expectedAmount = beforeAmount + (spec ? spec.delta : 0);
+          if (Math.abs(expectedAmount - afterAmount) > tolerance) {
+            discrepancies.push({
+              key: `${reservoirId}:${speciesId}`,
+              expected: expectedAmount,
+              actual: afterAmount,
+              reservoirId
+            });
+          }
+        }
       }
     }
-    if (delta.hasEnergy) {
-      const beforeEnergy = beforeRes.energy;
-      const afterEnergy = afterRes.energy;
-      if (!beforeEnergy || beforeEnergy.storedJ === null || !afterEnergy || afterEnergy.storedJ === null) {
-        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: запас энергии неизвестен в состоянии «${!beforeEnergy || beforeEnergy.storedJ === null ? 'до' : 'после'}» — пофазовая проверка энергии невозможна` });
-        continue;
-      }
-      const expectedStoredJ = beforeEnergy.storedJ + delta.energyJ;
-      if (Math.abs(expectedStoredJ - (afterEnergy.storedJ as number)) > tolerance) {
-        discrepancies.push({
-          key: `${reservoirId}:energy`,
-          expected: expectedStoredJ,
-          actual: afterEnergy.storedJ as number,
-          reservoirId
-        });
+
+    // --- ЭНЕРГЕТИЧЕСКОЕ ИЗМЕРЕНИЕ ---
+    // Обязательно, если энергия задана хотя бы в одном состоянии или
+    // резервуар затронут энергетическим потоком. storedJ = null —
+    // «неизвестно», а не ноль: проверка невозможна → исключение.
+    const beforeEnergy = beforeRes.energy;
+    const afterEnergy = afterRes.energy;
+    const energyMandatory =
+      beforeEnergy !== undefined || afterEnergy !== undefined || fluxEnergyJ !== null;
+    if (energyMandatory) {
+      if (!beforeEnergy || !afterEnergy || beforeEnergy.storedJ === null || afterEnergy.storedJ === null) {
+        exclusions.push({ key: `${reservoirId}:energy`, reason: `резервуар «${reservoirId}»: запас энергии неизвестен (нет инвентаря или storedJ = null) — пофазовая проверка энергии невозможна` });
+      } else {
+        const expectedStoredJ = beforeEnergy.storedJ + (fluxEnergyJ ?? 0);
+        if (Math.abs(expectedStoredJ - (afterEnergy.storedJ as number)) > tolerance) {
+          discrepancies.push({
+            key: `${reservoirId}:energy`,
+            expected: expectedStoredJ,
+            actual: afterEnergy.storedJ as number,
+            reservoirId
+          });
+        }
       }
     }
   }
 
+  // Статус: расхождения > непроверяемость от untimed-исключений >
+  // непроверяемость от исключений > успех. balanced возможен только
+  // при полностью проверенном аудите без расхождений (ISSUE B/C).
+  let status: ConservationStatus;
+  if (discrepancies.length > 0) {
+    status = 'imbalanced';
+  } else if (untimed.length > 0 || exclusions.length > 0) {
+    status = 'not_verifiable';
+  } else {
+    status = 'balanced';
+  }
   return {
-    status: discrepancies.length === 0 ? 'balanced' : 'imbalanced',
-    balanced: discrepancies.length === 0,
+    status,
+    balanced: status === 'balanced',
     discrepancies,
     exclusions,
     untimedRecords: untimed,
@@ -1425,3 +1557,4 @@ export function validateReservoirInventories(reservoirs: Record<string, Reservoi
   }
   return problems;
 }
+
