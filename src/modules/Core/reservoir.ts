@@ -34,6 +34,7 @@ import type { PhysicalQuantity } from './physicalQuantity';
 import { assertDimension, convert, dimension, QuantityError } from './physicalQuantity';
 import type { ScientificValue } from './scientificValue';
 import { validateScientificValueShape } from './scientificValue';
+import { validateThermalScientificValue } from './thermalState';
 
 // ============================================
 // 1. ОСНОВАНИЯ ИНВЕНТАРЯ
@@ -325,6 +326,14 @@ export interface ReservoirRecord {
   material?: MaterialInventory;
   energy?: EnergyInventory;
   properties: Record<string, ScientificValue>;
+  /**
+   * Температура КОНКРЕТНОГО резервуара (Stage 4.2.2) как ScientificValue
+   * с происхождением. Отсутствие поля ≠ ноль и ≠ температуре
+   * поверхности/T_eq: оно означает «температура этого резервуара не
+   * заявлена». Автоматически из других величин НЕ назначается;
+   * локальная температура процессов читает именно это поле.
+   */
+  reservoirTemperature?: ScientificValue;
   note?: string;
   /**
    * Явное указание, что резервуар по своей природе НЕ содержит материю
@@ -566,6 +575,14 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
       }
     }
   }
+  // --- температура резервуара (Stage 4.2.2) ---
+  // Проверяется только ЯВНО заданное поле: отсутствие — не ошибка.
+  // Валидация термодинамическая (только 'K', размерность,
+  // неотрицательность), статус unknown допустим, «чинить» нельзя.
+  if (rec.reservoirTemperature !== undefined) {
+    errors.push(...validateThermalScientificValue(rec.reservoirTemperature, `резервуар «${String(rec.id)}»: reservoirTemperature`));
+  }
   return { valid: errors.length === 0, errors };
 }
+
 

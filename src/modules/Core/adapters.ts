@@ -26,12 +26,13 @@ import type { PhysValue, ScientificConfidence } from '../../types/physics';
 import type { ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import { quantity, isKnownUnit } from './physicalQuantity';
 import type { DataProvenance, ScientificValue } from './scientificValue';
-import { estimatedValue, invalidValue, knownValue, unknownValue } from './scientificValue';
+import { estimatedValue, invalidValue, knownValue, notApplicable, unknownValue } from './scientificValue';
 import type { ProcessDescriptor } from './processRegistry';
 import type { MaterialInventory } from './reservoir';
 import { createReservoir, setMaterialInventory } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
 import { createSpeciesCatalog } from './species';
+import type { AtmosphericTemperatureProfile, BodyThermalState } from './thermalState';
 import type { CoreWorldState, WorldBody } from './worldState';
 import { CORE_WORLD_STATE_SCHEMA_VERSION } from './worldState';
 
@@ -305,8 +306,13 @@ export interface LegacyWorldInput {
   id: string;
   seed: string;
   generatorVersion: string;
-  /** Опциональная структурная модель центрального объекта (этап 3). */
-  centralObjectSystem?: { kind: string } | null;
+  /**
+   * Опциональная структурная модель центрального объекта (этап 3).
+   * effectiveTemperatureK читается ТОЛЬКО как эффективная
+   * температура ИСТОЧНИКА излучения (звезда/субзвёздный объект)
+   * и никогда не переносится на планету (Stage 4.2.2).
+   */
+  centralObjectSystem?: { kind: string; effectiveTemperatureK?: PhysValue | null } | null;
   /** Опциональная орбита: задаёт гравитационную иерархию. */
   orbit?: { frame: string } | null;
   /** Опциональная физика тела (масса/радиус/гравитация, SI). */
@@ -316,6 +322,17 @@ export interface LegacyWorldInput {
     densityKgM3: PhysValue;
     surfaceGravityMs2: PhysValue;
   } | null;
+  /**
+   * Легаси-атмосфера (Stage 4.2.2): temperature — числовое допущение
+   * пресета, а НЕ измерение; presetKind/presetNotes объясняют его
+   * происхождение. Никакое из этих полей не является температурой
+   * поверхности.
+   */
+  atmosphere?: {
+    temperature: number | null;
+    presetKind?: string;
+    presetNotes?: string;
+  } | null;
   /** Опциональный энергетический бюджет (падающий поток, T_eq). */
   energyBudget?: {
     incidentFlux: PhysValue;
@@ -323,6 +340,223 @@ export interface LegacyWorldInput {
   } | null;
   /** Опциональное химическое состояние (инвентарь + время). */
   chemicalState?: ChemicalEvolutionState | null;
+}
+
+// ============================================
+// 5a. ТЕМПЕРАТУРНАЯ ИЕРАРХИЯ: ЛЕГАСИ → ТИПИЗИРОВАННАЯ (STAGE 4.2.2)
+// ============================================
+//
+// Шесть температурных понятий не смешиваются (см. thermalState.ts):
+// пресетная температура атмосферы, T_eq и температура поверхности —
+// РАЗНЫЕ величины. Адаптеры переводят легаси-числа в ScientificValue
+// С ЯВНЫМ происхождением и никогда не подставляют одну вместо другой.
+
+/**
+ * Пресетная температура атмосферы → ScientificValue (Stage 4.2.2).
+ *
+ * Легаси-число (например, 95 K метанового пресета) — это ДОПУЩЕНИЕ
+ * генератора, а не измерение. Оно обязано получить статус estimated
+ * с методом и происхождением:
+ * - historical_game — игровое допущение (game_assumption): исторический
+ *   игровой сценарий, НЕ научное измерение;
+ * - observational_reference — справочный ориентир из наблюдений за
+ *   реальными телами: НЕ измерение ЭТОГО мира;
+ * - hypothetical — физически мотивированная гипотеза;
+ * - без presetKind — пользовательская конфигурация.
+ * - null → unknown; NaN/отрицательные → invalid (диагностика).
+ *
+ * Происхождение сохраняется в provenance.rawInput
+ * (presetTemperatureK, presetKind) и не теряется.
+ */
+export function atmospherePresetTemperatureToScientificValue(
+  atmosphere: LegacyWorldInput['atmosphere']
+): ScientificValue {
+  if (atmosphere === null || atmosphere === undefined) {
+    return unknownValue('температура атмосферы не заявлена (поле отсутствует или null)');
+  }
+  const raw = atmosphere.temperature;
+  const presetKind = atmosphere.presetKind ?? null;
+  const provenance: DataProvenance = {
+    rawInput: { presetTemperatureK: raw === null ? null : raw, presetKind }
+  };
+  if (atmosphere.presetNotes !== undefined && atmosphere.presetNotes !== '') {
+    provenance.sourceName = atmosphere.presetNotes;
+  }
+  if (raw === null) {
+    return unknownValue('температура атмосферы не заявлена (null)', provenance);
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return invalidValue(
+      `пресетная температура атмосферы непригодна как число: ${String(raw)}`,
+      undefined,
+      provenance
+    );
+  }
+  if (raw < 0) {
+    return invalidValue(
+      `пресетная температура атмосферы отрицательна (${raw} K) — термодинамическая температура неотрицательна`,
+      undefined,
+      provenance
+    );
+  }
+  const q = quantity(raw, 'K');
+  if (presetKind === 'historical_game') {
+    return estimatedValue(q, 'игровое допущение пресета атмосферы (game_assumption)', {
+      provenance: {
+        ...provenance,
+        note: 'игровое допущение исторического сценария: значение пресета НЕ является научным измерением'
+      }
+    });
+  }
+  if (presetKind === 'observational_reference') {
+    return estimatedValue(q, 'справочный ориентир пресета (observational_reference)', {
+      provenance: {
+        ...provenance,
+        note: 'справочное значение из наблюдений за реальными телами: НЕ измерение этого мира'
+      }
+    });
+  }
+  if (presetKind === 'hypothetical') {
+    return estimatedValue(q, 'гипотетическая оценка пресета атмосферы', {
+      provenance: {
+        ...provenance,
+        note: 'гипотетический сценарий: подтверждённых данных нет'
+      }
+    });
+  }
+  return estimatedValue(q, 'пользовательской конфигурацией атмосферы', {
+    provenance: {
+      ...provenance,
+      note: 'температура задана пользователем без указания происхождения пресета'
+    }
+  });
+}
+
+/**
+ * Профиль температур атмосферы из пресета (Stage 4.2.2).
+ *
+ * ОДНО число из пресета — НЕ вертикальный профиль: оно становится
+ * профилем со статусом single_layer_estimate и ЯВНЫМ limitations.
+ * Непригодная/отсутствующая температура → null (фиктивный профиль
+ * не создаётся).
+ */
+export function atmosphericProfileFromPreset(
+  atmosphere: LegacyWorldInput['atmosphere']
+): AtmosphericTemperatureProfile | null {
+  const temperature = atmospherePresetTemperatureToScientificValue(atmosphere);
+  if (temperature.status !== 'known' && temperature.status !== 'estimated') {
+    return null;
+  }
+  const provenance: DataProvenance = {};
+  if (temperature.provenance !== undefined) {
+    provenance.rawInput = temperature.provenance.rawInput;
+    if (temperature.provenance.sourceName !== undefined) {
+      provenance.sourceName = temperature.provenance.sourceName;
+    }
+  }
+  return {
+    status: 'single_layer_estimate',
+    layers: [
+      {
+        layerId: 'surface_boundary',
+        temperature,
+        note: 'единственная оценка из пресета атмосферы (приповерхностный слой)'
+      }
+    ],
+    limitations:
+      'одиночная оценка из пресета — НЕ расчётный вертикальный профиль; слоистая структура и градиенты не вычислялись (RCM/гидростатика не реализованы, Stage 4.2.2)',
+    provenance
+  };
+}
+
+/**
+ * Тепловое состояние ПЛАНЕТЫ из легаси-данных (Stage 4.2.2).
+ *
+ * - equilibriumTemperature — из энергетического бюджета (T_eq),
+ *   переносится КАК СЕБЯ: радиационная оценка серого тела, а не
+ *   температура поверхности;
+ * - surfaceTemperature — ЯВНО unknown: RCM не реализована, и ни
+ *   T_eq, ни пресетная температура атмосферы НЕ являются
+ *   измерением поверхности;
+ * - effectiveTemperature — not_applicable: планета — получатель
+ *   излучения, а не источник с собственной эффективной температурой;
+ * - профиль — single_layer_estimate из пресета, если пригоден.
+ */
+export function planetThermalStateFromLegacy(input: LegacyWorldInput): BodyThermalState {
+  const equilibrium =
+    input.energyBudget !== undefined && input.energyBudget !== null
+      ? physValueToScientificValue(input.energyBudget.equilibriumTemperature)
+      : unknownValue('равновесная температура не вычислена: энергетический бюджет отсутствует');
+  const profile = atmosphericProfileFromPreset(input.atmosphere);
+  const provenance: DataProvenance = {
+    note: 'собрано адаптером Stage 4.2.2 из легаси-полей GeneratedWorld; величины перенесены раздельно, без подстановок'
+  };
+  return {
+    effectiveTemperature: notApplicable('планета — получатель излучения, а не источник: эффективная температура неприменима'),
+    equilibriumTemperature: equilibrium,
+    surfaceTemperature: unknownValue(
+      'температура поверхности неизвестна: радиационно-конвективная модель (RCM) не реализована; T_eq и пресетная температура атмосферы НЕ являются измерением поверхности',
+      undefined
+    ),
+    atmosphericTemperatureProfile: profile ?? {
+      status: 'unknown',
+      layers: [],
+      note: 'профиль температур неизвестен: пригодной пресетной температуры нет'
+    },
+    provenance
+  };
+}
+
+/**
+ * Тепловое состояние ЦЕНТРАЛЬНОГО объекта из легаси-модели (Stage 4.2.2).
+ *
+ * - null, если centralObjectSystem не задана: тепловое состояние
+ *   центрального объекта не инициализируется из ничего;
+ * - звезда/субзвёздный объект: effectiveTemperatureK переносится
+ *   как эффективная температура ИСТОЧНИКА; при отсутствии значения
+ *   — unknown (среднее по классу НЕ подставляется);
+ * - jet_system: not_applicable (джет — поток, а не тело с температурой);
+ * - остальные kinds (компактный остаток, система гиганта): unknown
+ *   по всем величинам — честное «не знаем» вместо выдумки.
+ */
+export function centralThermalStateFromLegacy(input: LegacyWorldInput): BodyThermalState | null {
+  const system = input.centralObjectSystem;
+  if (system === null || system === undefined) {
+    return null;
+  }
+  const kind = system.kind;
+  if (kind === 'star' || kind === 'substellar') {
+    const teff = system.effectiveTemperatureK ?? null;
+    const effective =
+      teff !== null && teff.value !== null
+        ? physValueToScientificValue(teff)
+        : unknownValue(
+            'эффективная температура источника неизвестна: значение класса не задано; среднее по классу НЕ подставляется'
+          );
+    return {
+      effectiveTemperature: effective,
+      equilibriumTemperature: unknownValue('равновесная температура для центрального объекта не определена'),
+      surfaceTemperature: unknownValue('температура поверхности центрального объекта не моделируется'),
+      atmosphericTemperatureProfile: { status: 'unknown', layers: [] },
+      provenance: { note: 'собрано адаптером Stage 4.2.2 из структурной модели центрального объекта' }
+    };
+  }
+  if (kind === 'jet_system') {
+    return {
+      effectiveTemperature: notApplicable('релятивистский джет — направленный поток, а не тело с эффективной температурой'),
+      equilibriumTemperature: notApplicable('равновесная температура к джету неприменима'),
+      surfaceTemperature: notApplicable('у высокоэнергетического потока нет поверхности'),
+      atmosphericTemperatureProfile: { status: 'unknown', layers: [] },
+      provenance: { note: 'собрано адаптером Stage 4.2.2: все величины not_applicable/unknown, без выдумки' }
+    };
+  }
+  return {
+    effectiveTemperature: unknownValue('эффективная температура центрального объекта этого класса неизвестна'),
+    equilibriumTemperature: unknownValue('равновесная температура центрального объекта не определена'),
+    surfaceTemperature: unknownValue('температура поверхности центрального объекта не моделируется'),
+    atmosphericTemperatureProfile: { status: 'unknown', layers: [] },
+    provenance: { note: 'собрано адаптером Stage 4.2.2: величины честно неизвестны' }
+  };
 }
 
 /**
@@ -383,6 +617,7 @@ export function coreWorldStateFromLegacyWorld(input: LegacyWorldInput): CoreWorl
   const centralIsRadiatingStar = centralKind === 'star';
 
   if (centralKind !== null) {
+    const centralThermalState = centralThermalStateFromLegacy(input);
     state.bodies.push({
       id: 'central',
       kind: centralKind === 'star'
@@ -393,11 +628,17 @@ export function coreWorldStateFromLegacyWorld(input: LegacyWorldInput): CoreWorl
             ? 'gas_giant'
             : 'other',
       name: 'центральный объект системы',
-      properties: {}
+      properties: {},
+      // Stage 4.2.2: тепловое состояние центрального объекта — только
+      // из структурной модели; без неё подсистема не инициализируется.
+      thermalState: centralThermalState ?? undefined
     });
   }
 
   const planet = bodyPhysicsToPlanetBody(input);
+  // Stage 4.2.2: тепловое состояние планеты — раздельные величины
+  // (T_eq отдельно, поверхность неизвестна, профиль из пресета).
+  planet.thermalState = planetThermalStateFromLegacy(input);
   state.bodies.push(planet);
 
   // Гравитационная иерархия — только там, где орбита это утверждает.
@@ -509,3 +750,4 @@ export function chemicalProcessesToCoreDescriptors(
     timescaleNote: p.timescaleNote
   }));
 }
+

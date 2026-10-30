@@ -27,6 +27,8 @@ import type {
 } from '../../types';
 import { getPhaseProperties, type AntoineSet } from '../Data/phaseProperties';
 import { BAR_TO_PA } from '../Units';
+import { temperatureValueOrNull } from '../Core/thermalState';
+import type { ScientificValue } from '../Core/scientificValue';
 
 export const MIXTURE_LIMITATION_MESSAGE =
   'Обнаружен потенциальный фазовый переход. Точный состав и количество конденсированной фазы не рассчитаны.';
@@ -326,6 +328,42 @@ export function analyzeAtmospherePhases(
 }
 
 // ============================================
+// 3a. ФАЗОВЫЙ СКРИНИНГ С ПРОИСХОЖДЕНИЕМ ТЕМПЕРАТУРЫ (STAGE 4.2.2)
+// ============================================
+
+/**
+ * Фазовый скрининг по ТИПИЗИРОВАННОЙ температуре (Stage 4.2.2).
+ *
+ * Делегирует числовой analyzeAtmospherePhases и добавляет
+ * temperatureBasis — исходное значение температуры с его статусом
+ * и происхождением. Числовой результат идентичен легаси-вызову:
+ * - пригодная температура → скрининг как раньше, происхождение
+ *   сохранено в temperatureBasis;
+ * - unknown/непригодная температура → скрининг без числа (все
+ *   компоненты unknown), подстановка T_eq или температуры
+ *   поверхности ЗАПРЕЩЕНА: отсутствие числа остаётся отсутствием
+ *   числа.
+ *
+ * Численный API (analyzeAtmospherePhases) не изменён — регрессии
+ * этапа 3 остаются в силе.
+ */
+export function analyzeAtmospherePhasesWithProvenance(
+  model: AtmospherePhysicalModel,
+  temperature: ScientificValue
+): AtmospherePhaseAnalysis {
+  const temperatureK = temperatureValueOrNull(temperature);
+  const base = analyzeAtmospherePhases(model, temperatureK);
+  const note =
+    temperatureK === null
+      ? `фазовый скрининг выполнен без числовой температуры (статус «${temperature.status}»): состояния компонентов остаются unknown — подстановка T_eq или температуры поверхности запрещена (Stage 4.2.2)`
+      : `фазовый скрининг основан на температуре ${temperatureK} K; происхождение значения сохранено в temperatureBasis (Stage 4.2.2)`;
+  return {
+    ...base,
+    temperatureBasis: { temperature, note }
+  };
+}
+
+// ============================================
 // 4. РЕЗЕРВУАРЫ ВЕЩЕСТВА И ПЕРЕНОС МЕЖДУ ФАЗАМИ
 // ============================================
 
@@ -435,6 +473,7 @@ export default {
   saturationPressure,
   checkComponentPhase,
   analyzeAtmospherePhases,
+  analyzeAtmospherePhasesWithProvenance,
   createEmptyReservoirs,
   totalSubstanceAmount,
   transferSubstance,
@@ -443,3 +482,4 @@ export default {
   MIXTURE_MODEL_NOTE,
   EOS_NOT_IMPLEMENTED_NOTE
 };
+

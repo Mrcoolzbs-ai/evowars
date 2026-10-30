@@ -19,6 +19,7 @@
 //   processRegistry   — реестр физических процессов (τ, политики шага);
 //   scheduler         — планировщик процессов (Lie/Strang, sub-cycling);
 //   invariantAuditor  — аудит инвариантов перехода состояния;
+//   thermalState      — температурная иерархия и происхождение (4.2.2);
 //   worldState        — каноническое состояние мира;
 //   solverBackend     — контракты численных решателей;
 //   migrations        — версии схем, датасетов и миграции сохранений;
@@ -34,7 +35,9 @@ export * from './worldClock';
 export * from './processRegistry';
 export * from './scheduler';
 export * from './invariantAuditor';
+export * from './thermalState';
 export * from './worldState';
 export * from './solverBackend';
 export * from './migrations';
 export * from './adapters';
+

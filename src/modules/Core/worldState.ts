@@ -40,13 +40,21 @@ import type { SimulationClockState } from './simulationClock';
 import { validateClock } from './simulationClock';
 import { validateSchedulerBookkeeping } from './scheduler';
 import type { SchedulerBookkeeping } from './scheduler';
+import type { BodyThermalState } from './thermalState';
+import { validateBodyThermalState } from './thermalState';
 
 // ============================================
 // 1. ТИПЫ
 // ============================================
 
-/** Версия схемы CoreWorldState (semver; меняется при изменении структуры). */
-export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.1.0';
+/**
+ * Версия схемы CoreWorldState (semver; меняется при изменении структуры).
+ * 1.2.0 (Stage 4.2.2): опциональное тело WorldBody.thermalState
+ * (температурная иерархия с provenance) и опциональное поле
+ * ReservoirRecord.reservoirTemperature; миграция не создаёт их —
+ * поля появляются только там, где температурные данные заявлены.
+ */
+export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.2.0';
 
 /**
  * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
@@ -54,7 +62,7 @@ export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.1.0';
  * списку, а не только на непустоту: неизвестная версия — это
  * version_mismatch, а не молчаливое «сойдёт любая».
  */
-export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0'];
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0'];
 
 export const BODY_KINDS: readonly BodyKind[] = [
   'star',
@@ -84,6 +92,15 @@ export interface WorldBody {
   name?: string;
   /** Научные характеристики: масса, радиус, температура, ... Ключи свободные. */
   properties: Record<string, ScientificValue>;
+  /**
+   * Температурное состояние тела (Stage 4.2.2): РАЗДЕЛЬНЫЕ величины
+   * effective/equilibrium/surface/профиль с происхождением.
+   * Отсутствие поля ≠ ноль и не равно температуре из properties:
+   * оно означает «температурная подсистема для этого тела не
+   * инициализирована» (например, старые сохранения). Миграции НЕ
+   * создают thermalState и НЕ заполняют его суррогатами.
+   */
+  thermalState?: BodyThermalState;
 }
 
 /** Источник излучения: тело-источник + семантика, БЕЗ гравитационного смысла. */
@@ -151,6 +168,7 @@ export interface WorldStateIssue {
     | 'invalid_scheduling'
     | 'invalid_event'
     | 'invalid_body'
+    | 'invalid_thermal_state'
     | 'invalid_scientific_value'
     | 'version_mismatch'
     | 'empty_world_id';
@@ -198,6 +216,16 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
       const valueIssues = validateScientificValueShape(value);
       if (valueIssues.length > 0) {
         issues.push({ code: 'invalid_scientific_value', component: 'WorldBody', message: `тело «${body.id}», свойство «${key}»: ${valueIssues.join('; ')}`, refs: [body.id] });
+      }
+    }
+    // --- тепловое состояние тела (Stage 4.2.2) ---
+    // Проверяется только ЯВНО заданное thermalState; отсутствие — не
+    // ошибка (подсистема может быть не инициализирована). Валидатор
+    // не «чинит» иерархию: любая проблема — это issue, а не тихая правка.
+    if (body.thermalState !== undefined) {
+      const thermalIssues = validateBodyThermalState(body.thermalState, `тело «${body.id}», thermalState`);
+      if (thermalIssues.length > 0) {
+        issues.push({ code: 'invalid_thermal_state', component: 'WorldBody', message: `тело «${body.id}», thermalState: ${thermalIssues.join('; ')}`, refs: [body.id] });
       }
     }
     seenBodies.push(body.id);
@@ -329,3 +357,4 @@ export function createCoreWorldState(worldId: string): CoreWorldState {
     legacy: {}
   };
 }
+
