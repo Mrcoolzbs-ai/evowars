@@ -11,6 +11,19 @@
 > поля означает «неизвестно», а не 0; неприменимое не становится
 > неизвестным; отклонённые данные сохраняются для диагностики и не
 > используются как корректные.
+>
+> Ревизия Stage 4.1.1 (2026-10-30): независимый аудит кода 4.1 нашёл 8
+> дефектов научной целостности (ISSUE 1–8); все исправлены в рамках этапа
+> (коммиты f63c5be → af14dd8 → 25f813e, CI #27 зелёный): convert-корректные
+> преобразования массаↆколичество с контролем переполнения, статусная
+> семантика аудитов (balanced | imbalanced | approximate | not_verifiable),
+> basis-aware элементные/зарядовые балансы, РЕАЛЬНЫЙ перенос энергии в
+> applyFlux, временная область аудитов (FluxAuditScope), строгие версии
+> схем (MigrationError), изоляция несовместимых сохранений в Storage,
+> масштабирование процентов в адаптере (50% → 0.5). Контракты §2.4/2.5/
+> 2.9/2.10 и §4 обновлены. Подсчёт тестов исправлен: CI #24 = 442 теста /
+> 21 файл (в доках ревизии 4.1 ошибочно указывалось 438); после 4.1.1 —
+> 517 тестов, из них ядро — 246.
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -107,6 +120,19 @@ molar_fraction | mass_fraction | arbitrary_units. Смешение основа�
 (netPowerW, Вт) и **удельный поток** (fluxW_m2, Вт/м²): Дж ≠ Вт ≠ Вт/м²,
 null = «неизвестно» в каждом поле отдельно.
 
+Преобразования между количеством и массой — только явные, через
+молярную массу вида (ревизия 4.1.1): `amountToMass` = convert(mol →
+kg-основа) ДО умножения, `massToAmount` = convert(г/кг → kg) ДО деления
+(дефект 4.1: сырое значение в граммах делилось на кг/моль — 1000 г
+давало 1/0.018 вместо 55.5556 моль); молярная масса обязательна и
+положительна; переполнение результата — QuantityError 'overflow', а не
+±Infinity. Валидация: `validateMaterialInventory` (basis из
+INVENTORY_BASES, конечные неотрицательные entries),
+`validateEnergyInventory` (storedJ: null = «неизвестно» — допустимо,
+NaN или отрицательное значение — ошибка; netPowerW и fluxW_m2 могут
+быть отрицательными), `validateReservoirRecord` (id, kind, material,
+energy, properties через validateScientificValueShape).
+
 ### 2.5 FluxLedger — потоки и аудиты
 
 - Поток: internal_transfer | external_input | external_output;
@@ -120,11 +146,38 @@ null = «неизвестно» в каждом поле отдельно.
 - Применение атомарно и идемпотентно: повторное применение —
   `already_applied`; revert восстанавливает инвентарь и сохраняет
   историю статусов (pending → applied → reverted).
+- Применение РЕАЛЬНО переносит величины (ревизия 4.1.1): substance —
+  from −amount / to +amount; energy — internal: from −energyJ /
+  to +energyJ, external_input: to +energyJ, external_output:
+  from −energyJ; revertFlux атомарно возвращает и substance, и energy.
+  Отсутствующий материальный инвентарь — `unknown_inventory` (пустой
+  инвентарь больше не создаётся молча); несовместимый basis —
+  `incompatible_basis`; достаточность запаса проверяется всегда;
+  неизвестный запас энергии — `unknown_energy_inventory`; уход
+  в отрицательный запас — `insufficient_energy`.
 - Аудиты: `auditSubstanceConservation`, `auditElementConservation`,
   `auditChargeConservation`, `auditEnergyConservation` — по паре
-  «до/после»: внутренние переносы не меняют итог системы, внешние
-  входы/выходы учитываются по знаку (internal energy transfer даёт 0
-  в netEnergyJ).
+  «до/после» с результатом-СТАТУСОМ: ConservationStatus = balanced |
+  imbalanced | approximate | not_verifiable; balanced:true допускается
+  ТОЛЬКО при полном 'balanced'. Непроверяемость не приравнивается к
+  нулю и не считается успехом: неизвестный (null) запас энергии любого
+  резервуара, исключённый вид или несмешиваемые основания дают
+  not_verifiable; оценочные (estimated) молярные массы — approximate.
+- Basis-aware молярная семантика (4.1.1): amount и column_amount —
+  точные моль (но между собой НЕ смешиваются); mass/column_mass —
+  через молярную массу вида (отсутствует или статус не known/estimated
+  → not_verifiable; estimated → approximate); концентрации (нужен
+  объём), доли (нужен общий запас) и arbitrary_units (нет калибровки)
+  → not_verifiable.
+- Временная область аудита: FluxAuditScope { after, upTo, includeUntimed }
+  с семантикой after < t <= upTo; потоки без метки времени по умолчанию
+  исключены и перечисляются в untimedRecords.
+- `auditReservoirFluxes` (4.1.1): пофазовая проверка — ожидаемое Δ
+  каждого резервуара по каждому виду и энергии сверяется с фактически
+  применёнными потоками; ловит «вещество ушло не туда» при сохранении
+  общей суммы (расхождения несут reservoirId).
+- `validateFluxLedger`: форма и согласованность записей журнала
+  (id, status, kind, subject, time, ссылки на резервуары).
 - `totalInventory` отказывается суммировать резервуары со смешанными
   основаниями.
 
@@ -185,9 +238,15 @@ bitwise_same_environment | within_tolerance | platform_dependent).
 - «нет поля» остаётся «неизвестно»: поля не создаются и не
   пересчитываются задним числом; null не становится 0; provenance
   и легаси-записи истории сохраняются и дополняются;
-- отсутствующая/неизвестная версия трактуется как 1.0 С ЧЕСТНОЙ записью
-  об этом в migration.notes;
-- миграция к несуществующей цепочке — явная ошибка, а не тихий noop.
+- отсутствующая версия (undefined) трактуется как легаси 1.0 С ЧЕСТНОЙ
+  записью об этом в migration.notes; формат-валидная, но НЕИЗВЕСТНАЯ
+  версия ('0.9', '1.3', '2.0') — MigrationError 'unsupported_version',
+  а не тихая миграция «как из 1.0» (дефект 4.1); мусорные версии
+  ('abc', '2', '') — MigrationError 'invalid_version'; оригинал не
+  мутируется;
+- миграция к несуществующей цепочке — MigrationError
+  'missing_migration_path' (в сообщении явно «нет миграции»), сбой шага
+  — 'migration_failed'; тихий noop невозможен.
 
 `DatasetRegistry` регистрирует наборы по (id, version); поля лицензии и
 контрольной суммы не выдумываются (undefined = «не определено»).
@@ -195,15 +254,22 @@ bitwise_same_environment | within_tolerance | platform_dependent).
 ### 2.10 adapters — мосты к легаси
 
 - `legacyUnitToCore`: русские единицы PhysValue → реестр ядра
-  («кг»→kg, «Вт/м²»→W_m2, «g»→g0, «%»/«доля»→1); неизвестная единица →
-  null, а не выдуманный идентификатор.
+  («кг»→kg, «Вт/м²»→W_m2, «g»→g0); неизвестная единица →
+  null, а не выдуманный идентификатор. «%» и «доля» → безразмерная
+  единица '1' С масштабированием: проценты переводятся в доли ×0.01
+  (50% → 0.5, 100% → 1.0), range масштабируется вместе со значением,
+  факт пересчёта фиксируется в provenance (ревизия 4.1.1: ранее '%'
+  проходил без пересчёта — 50 превращалось в «50 долей»).
 - `physValueToScientificValue`: established/derived → known;
   estimated → estimated (метод обязателен); hypothetical → estimated
   с предупреждением о гипотетичности; game_assumption → estimated
-  с пометкой «не является научным измерением»; value=null → unknown;
-  незарегистрированная единица → invalid с сохранением отклонённых
-  данных; range → interval-неопределённость; parameters → rawInput;
-  source → sourceName.
+  с пометкой «не является научным измерением»; value=null → unknown
+  (provenance СОХРАНЯЕТСЯ: sourceName, method, note, rawInput — ревизия
+  4.1.1); незарегистрированная единица → invalid БЕЗ фиктивной единицы
+  '1' (quantity не создаётся; отклонённые данные сохраняются в
+  provenance.rawInput с originalValue/originalUnit — ревизия 4.1.1);
+  range → interval-неопределённость (масштабируется при factor ≠ 1);
+  parameters → rawInput; source → sourceName.
 - `buildSpeciesCatalogFromLegacy`: г/моль → кг/моль (точный множитель
   1e-3), фаза gas, заряд 0; виды без известного состава в каталог
   не попадают (состав не выдумывается).
@@ -225,7 +291,13 @@ bitwise_same_environment | within_tolerance | platform_dependent).
 2. `Storage`: STORAGE_FORMAT_VERSION = '1.2' (ведётся реестром миграций
    ядра); SUPPORTED_SAVE_VERSIONS = ['1.0','1.1','1.2'];
    `migrateWorld` делегирует цепочке `Core/migrations`; экспорт Markdown
-   дополнен секцией «Научное ядро (этап 4.1)».
+   дополнен секцией «Научное ядро (этап 4.1)». Ревизия 4.1.1: работа с
+   localStorage ведётся по RAW-записям (readRawEntries) — одна битая
+   или несовместимая запись не скрывает остальные (изолированная
+   обработка каждой) и НИКОГДА не удаляется при saveWorld/deleteWorld;
+   getStorageHealth() диагностирует хранилище (rawEntryCount,
+   loadedWorldCount, parseError, incompatibleEntries, nonObjectEntries);
+   importWorldFromJSON возвращает null при MigrationError.
 3. Баррель `Tests/index.ts` реэкспортирует 9 новых тест-файлов ядра.
 
 Чего интеграция НЕ делает: UI не переключён на ядро (задача Stage 4.2);
@@ -234,21 +306,23 @@ OrbitalMechanics, Geology, WorldModel) продолжают работать к�
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты Stage 4.1 (171 новый тест, 9 файлов)
+## 4. Тесты ядра (246 тестов, 9 файлов; Stage 4.1 + ревизия 4.1.1)
 
 | Файл | it() | Покрытие |
 |---|---|---|
 | corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
 | coreScientificValue.test | 14 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации |
 | coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
-| coreReservoir.test | 15 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия null≠0, amount↔mass |
-| coreFluxLedger.test | 20 | внутренние/внешние, rate≠integrated, идемпотентность, revert, балансы вещества/элементов/заряда/энергии, ghost-резервуары, смешанные basis |
+| coreReservoir.test | 30 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord |
+| coreFluxLedger.test | 52 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
-| coreWorldState.test | 16 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, версии |
+| coreWorldState.test | 31 | валидный каркас, дубли, битые ссылки, self_parent, циклы, гравитация≠излучение, строгие версии схем, резервуары/потоки через validateReservoirRecord/validateFluxLedger, unknown-значения допустимы |
 | coreSolverBackend.test | 11 | честный empty backend, лжец unsupported_kind_claim, реестр planned vs available |
-| corePersistence.test | 39 | миграции 1.0/1.1/1.2 (идемпотентность, неизвестная версия, null≠0, легаси-записи), Storage-версии, адаптеры всех веток, PRNG-регрессия (детерминизм, разные seed) |
+| corePersistence.test | 52 | миграции 1.0/1.1/1.2 (идемпотентность, null≠0, легаси-записи; '0.9'/'1.3'/'2.0' → unsupported_version; 'abc'/'2'/'' → invalid_version; оригинал не мутируется), Storage raw-изоляция несовместимых записей + getStorageHealth, адаптеры всех веток (50% → 0.5, provenance у unknown), PRNG-регрессия |
 
-Всего в проекте теперь 21 тест-файл, 438 тестов. PRNG-регрессия
+Всего в проекте 21 тест-файл, 517 тестов (после ревизии 4.1.1; этап 4.1
+фактически заканчивался на 442 — CI #24: в доках ревизии 4.1 ошибочно
+указывалось 438). PRNG-регрессия
 (два инстанса `createRandom(seed)` дают идентичные последовательности
 next/nextIntRange/shuffle/generateId; разные seed различаются) защищает
 главное требование совместимости — детерминизм генерации.
@@ -267,4 +341,8 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
 - перевод UI на ядро, перенос форматтеров из App.tsx, удаление
   легаси-ветки bodyPhysics (§2.6) и дублей (§2.7) — Stage 4.2;
 - сами миграции создают только версии — значения в старых сохранениях
-  не пересчитываются и не «дозаполняются».
+  не пересчитываются и не «дозаполняются»;
+- массово-молярные пересчёты требуют молярной массы вида: неизвестная
+  или неподтверждённая масса → not_verifiable, оценочная (estimated) →
+  approximate; концентрации, доли и arbitrary_units не пересчитываются
+  в моль без дополнительных данных (объём, общий запас).
