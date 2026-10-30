@@ -515,11 +515,14 @@ describe('Data Validation', () => {
       // Температура НЕ называется surfaceTemperature и НЕ T_eq
       expect(world.phaseAnalysis!.temperatureBasis!.note).toContain('НЕ T_eq');
       // Пресет 288 K (earth): статус и provenance сохранены
-      expect(world.phaseAnalysis!.temperatureBasis!.temperature.status).toBe('estimated');
-      expect(world.phaseAnalysis!.temperatureBasis!.temperature.provenance?.rawInput).toMatchObject({
-        presetTemperatureK: 288,
-        presetKind: 'observational_reference'
-      });
+      const basisTemperature = world.phaseAnalysis!.temperatureBasis!.temperature;
+      expect(basisTemperature.status).toBe('estimated');
+      if (basisTemperature.status === 'estimated') {
+        expect(basisTemperature.provenance?.rawInput).toMatchObject({
+          presetTemperatureK: 288,
+          presetKind: 'observational_reference'
+        });
+      }
     });
 
     it('без пригодной пресетной температуры скрининг остаётся unknown без fallback на T_eq', () => {
