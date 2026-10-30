@@ -21,6 +21,8 @@ import type {
   PhysicalCharacteristics
 } from '../../types';
 import { getEarliestUniverseAgeGyr, getTypicalLifetimeGyr } from '../Data/starPhysical';
+import { atmospherePresetTemperatureToScientificValue } from '../Core/adapters';
+import { temperatureValueOrNull } from '../Core/thermalState';
 
 // ============================================
 // ВСПОМОГАТЕЛЬНЫЕ КОНСТАНТЫ И ФУНКЦИИ
@@ -254,7 +256,12 @@ const compatibilityRules: CompatibilityRule[] = [
     isActive: true
   },
 
-  // Правило 6: Температура локальной среды колыбели жизни
+  // Правило 6: Температура локальной среды колыбели жизни.
+  // ОШИБКОЙ (incompatible/error) остаётся ТОЛЬКО доказанное нарушение:
+  // ИЗВЕСТНОЕ числовое значение локальной среды вне требуемого
+  // диапазона. Отсутствие данных БОЛЬШЕ не считается пройденной
+  // проверкой — за это отвечает правило cradle_temperature_unproven
+  // (Stage 4.2.2.1): молчаливый пропуск запрещён.
   {
     id: 'cradle_temperature_compatibility',
     category: 'cradle_temperature',
@@ -266,21 +273,32 @@ const compatibilityRules: CompatibilityRule[] = [
       const range = world.cradle.requiredTemperatureRange;
 
       // Среда на поверхности или в океане: температура задаётся
-      // известными данными о поверхности планеты.
+      // известными данными о поверхности планеты. Число — проверяем;
+      // отсутствие числа — НЕ «пройдено», но и не ошибка: доказанной
+      // совместимости нет (см. cradle_temperature_unproven).
       if (env.locationType === 'surface' || env.locationType === 'ocean') {
         const pc = world.physicalCharacteristics as PhysicalCharacteristics | undefined;
-        if (!pc || typeof pc.surfaceTemperature !== 'number') return true; // данных нет
+        if (!pc || typeof pc.surfaceTemperature !== 'number') return true; // не доказано — отдельная диагностика
         return isInRange(pc.surfaceTemperature, range);
       }
 
-      // Среда в слоях атмосферы: используем известную температуру атмосферы.
+      // Среда в слоях атмосферы: Stage 4.2.2.1 — температура читается
+      // как ТИПИЗИРОВАННОЕ значение с provenance (пресет — оценка/
+      // допущение, НЕ измерение), а не как безусловно известное число.
+      // Число из пригодного значения (включая явную оценку
+      // game_assumption — историческое игровое поведение) проверяется
+      // по диапазону; непригодное/неизвестное — не ошибка, а
+      // недоказанность.
       if (env.locationType === 'atmosphere') {
-        if (typeof world.atmosphere?.temperature !== 'number') return true; // данных нет
-        return isInRange(world.atmosphere.temperature, range);
+        const typed = atmospherePresetTemperatureToScientificValue(world.atmosphere ?? null);
+        const temperatureK = temperatureValueOrNull(typed);
+        if (temperatureK === null) return true; // не доказано — отдельная диагностика
+        return isInRange(temperatureK, range);
       }
 
-      // Подземный резервуар / глубокие слои: локальная температура не равна
-      // поверхностной, поверхностные данные для проверки не применимы.
+      // Подземный резервуар / глубокие слои: локальная температура не
+      // равна поверхностной, поверхностные данные для проверки не
+      // применимы — не доказано (см. cradle_temperature_unproven).
       return true;
     },
     result: 'incompatible',
@@ -290,6 +308,61 @@ const compatibilityRules: CompatibilityRule[] = [
       'Выберите другую колыбель жизни',
       'Измените атмосферу (пресет с подходящей температурой)',
       'Выберите другое небесное тело'
+    ],
+    dependsOn: [],
+    isActive: true
+  },
+
+  // Правило 6a (Stage 4.2.2.1): локальная температура колыбели НЕ
+  // ДОКАЗАНА. Главный принцип ревизии: отсутствие локальной температуры
+  // — это отсутствие доказательства совместимости, а не доказательство
+  // совместимости; оценка не становится измерением только потому, что
+  // она числовая.
+  //
+  // Предупреждение (НЕ ошибка): неизвестность автоматически не
+  // превращается в incompatible с severity error — выбор колыбели не
+  // блокируется, но молчаливой «успешной проверки» больше нет.
+  {
+    id: 'cradle_temperature_unproven',
+    category: 'cradle_temperature',
+    condition: (world: Partial<GeneratedWorld>) => {
+      if (!world.cradle) return true;
+      const env = world.cradleLocalEnvironment as CradleLocalEnvironment | undefined;
+      if (!env) return true; // локальная среда не определена — правило не применимо
+
+      // Поверхность/океан: доказательством служит ИЗВЕСТНОЕ число
+      // (surfaceTemperature). Отсутствие числа — недоказанность.
+      if (env.locationType === 'surface' || env.locationType === 'ocean') {
+        const pc = world.physicalCharacteristics as PhysicalCharacteristics | undefined;
+        return typeof pc?.surfaceTemperature === 'number';
+      }
+
+      // Атмосфера: только статус known — измерение. Оценка (пресет,
+      // включая observational_reference и game_assumption) не является
+      // измерением ЭТОГО мира: числовая оценка фиксируется правилом 6
+      // как условная проверка диапазона, но здесь напоминает, что
+      // это оценка, а не измерение. unknown/not_applicable/invalid —
+      // температура не доказана вовсе.
+      if (env.locationType === 'atmosphere') {
+        const typed = atmospherePresetTemperatureToScientificValue(world.atmosphere ?? null);
+        if (typed.status === 'known') {
+          return temperatureValueOrNull(typed) !== null;
+        }
+        return false;
+      }
+
+      // Подземные резервуары, глубокие слои и прочие среды: локальная
+      // температура не моделируется — совместимость условна.
+      return false;
+    },
+    result: 'conditionally_compatible',
+    severity: 'warning',
+    explanation:
+      'Совместимость колыбели по температуре НЕ ДОКАЗАНА: локальная температура неизвестна, не моделируется или является оценкой (пресетом), а не измерением — отсутствие данных не является доказательством совместимости; оценка не становится измерением.',
+    resolutionSuggestions: [
+      'Учтите условный статус: проверка диапазона по оценке (пресету) не эквивалентна измерению',
+      'Выберите колыбель с известной локальной температурой',
+      'Задайте атмосферу с заявленной температурой (пресет)'
     ],
     dependsOn: [],
     isActive: true

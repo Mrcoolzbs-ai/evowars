@@ -65,7 +65,16 @@ import { analyzeAtmospherePhasesWithProvenance } from '../PhaseEquilibrium';
 import { analyzeGeology } from '../Geology';
 import { computeEnergyBudget } from '../EnergyBalance';
 import { createChemicalState } from '../ChemicalEvolution';
-import { atmospherePresetTemperatureToScientificValue } from '../Core/adapters';
+import {
+  atmospherePresetTemperatureToScientificValue,
+  atmosphericProfileFromPreset,
+  physValueToScientificValue
+} from '../Core/adapters';
+import {
+  diagnosePresetEquilibriumDivergence,
+  type AtmosphereTemperatureLayer
+} from '../Core/thermalState';
+import { unknownValue } from '../Core/scientificValue';
 
 // ============================================
 // ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
@@ -157,15 +166,27 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
   });
 
-  // 10b. Фазовый скрининг компонентов атмосферы при её температуре
-  // (Stage 4.2.2: температура передаётся как типизированное значение
-  // ScientificValue с происхождением пресета — historical_game,
-  // observational_reference и т.п. Числовой результат скрининга НЕ
-  // меняется, детерминизм генерации сохранён; пресетная температура
-  // по-прежнему НЕ является температурой поверхности).
+  // 10b. Фазовый скрининг компонентов атмосферы при ЛОКАЛЬНОЙ
+  // температуре приповерхностного слоя (Stage 4.2.2.1: скрининг
+  // привязан к явно обозначенной области — слою 'surface_boundary'
+  // из AtmosphericTemperatureProfile (однослойная модель текущего
+  // этапа). Контракт общий: слой несёт ScientificValue со статусом
+  // и provenance, вторая параллельная система значений не создаётся.
+  // Числовой результат скрининга НЕ меняется, детерминизм сохранён;
+  // эта температура НЕ surfaceTemperature, и T_eq НЕ используется
+  // как fallback: без пригодной пресетной температуры слой
+  // формируется unknown, и скрининг остаётся unknown.)
+  const atmosphereTemperatureProfile = atmosphericProfileFromPreset(atmosphere);
+  const surfaceBoundaryLayer: AtmosphereTemperatureLayer = atmosphereTemperatureProfile?.layers[0] ?? {
+    layerId: 'surface_boundary',
+    temperature: unknownValue(
+      'локальная температура приповерхностного слоя атмосферы неизвестна: пригодной пресетной температуры нет — фазовый скрининг остаётся unknown, подстановка T_eq или температуры поверхности запрещена'
+    ),
+    note: 'слой не заполнен из пресета: температура отсутствует или непригодна'
+  };
   const phaseAnalysis = analyzeAtmospherePhasesWithProvenance(
     atmospherePhysics,
-    atmospherePresetTemperatureToScientificValue(atmosphere)
+    surfaceBoundaryLayer
   );
 
   // 10c. Геологический анализ: раздельные источники внутреннего тепла
@@ -180,6 +201,37 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     orbit,
     geologyAnalysis
   });
+
+  // 10e. Диагностика «пресетная температура vs T_eq» (Stage 4.2.2.1):
+  // в реальном генерационном контуре фиксируются ОБЕ исходные величины
+  // и их абсолютная разница. Это информационная запись: пресетная
+  // температура атмосферы и равновесная температура серого тела —
+  // РАЗНЫЕ физические величины, и их численное расхождение НЕ
+  // объявляется физическим противоречием. Порог НЕ задаётся:
+  // универсального порога в K не существует и скрытого значения
+  // по умолчанию нет (verdict 'noted'). Если одна из величин
+  // неизвестна/непригодна — 'not_comparable'. Сами температуры
+  // диагностикой НЕ изменяются.
+  const presetTemperatureForDivergence = atmospherePresetTemperatureToScientificValue(atmosphere);
+  const equilibriumTemperatureForDivergence = physValueToScientificValue(
+    energyBudget.equilibriumTemperature
+  );
+  const presetEquilibriumDivergence = diagnosePresetEquilibriumDivergence(
+    presetTemperatureForDivergence,
+    equilibriumTemperatureForDivergence
+  );
+  const presetEquilibriumDivergenceWarning: GenerationWarning = {
+    id: 'note_preset_equilibrium_divergence',
+    ruleId: 'preset_equilibrium_divergence',
+    category: 'atmosphere',
+    severity: 'info',
+    message: presetEquilibriumDivergence.message,
+    suggestions: [
+      'Помните: пресетная температура атмосферы и T_eq — разные величины с разным происхождением',
+      'Проверьте исходные допущения пресета и энергетического бюджета, если расхождение существенно для сценария'
+    ],
+    affectedFields: ['atmosphere', 'energyBudget']
+  };
 
   // 11. Источники энергии. Геотермальная энергия добавляется ТОЛЬКО
   // если геологический анализ подтвердил её доступность.
@@ -208,7 +260,15 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     phaseAnalysis
   }, mode);
 
-  const allWarnings = [...modeWarnings, ...cradleWarnings, ...compatibilityWarnings];
+  // Диагностика «пресет vs T_eq» — информационная запись: попадает
+  // в предупреждения мира вместе с режимными, колыбельными и
+  // совместимостными (Stage 4.2.2.1).
+  const allWarnings = [
+    ...modeWarnings,
+    ...cradleWarnings,
+    ...compatibilityWarnings,
+    presetEquilibriumDivergenceWarning
+  ];
 
   const causalChain = createCausalChain({
     cosmology,

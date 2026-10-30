@@ -28,6 +28,7 @@ import type {
 import { getPhaseProperties, type AntoineSet } from '../Data/phaseProperties';
 import { BAR_TO_PA } from '../Units';
 import { temperatureValueOrNull } from '../Core/thermalState';
+import type { AtmosphereTemperatureLayer } from '../Core/thermalState';
 import type { ScientificValue } from '../Core/scientificValue';
 
 export const MIXTURE_LIMITATION_MESSAGE =
@@ -347,19 +348,46 @@ export function analyzeAtmospherePhases(
  * Численный API (analyzeAtmospherePhases) не изменён — регрессии
  * этапа 3 остаются в силе.
  */
+/**
+ * Типизированный температурный контекст фазового скрининга (Stage 4.2.2.1).
+ *
+ * Два допустимых вида — обе НЕсут полный ScientificValue со статусом
+ * и provenance, вторая параллельная система значений не создаётся:
+ * - ScientificValue — «температура некоторой области», когда конкретный
+ *   слой не определён вызывающим кодом;
+ * - AtmosphereTemperatureLayer — ЯВНО указанная локальная область
+ *   (например, приповерхностный слой 'surface_boundary'), согласованная
+ *   с AtmosphericTemperatureProfile.
+ *
+ * Сама температура НЕ называется surfaceTemperature и ТРЕБУЕТ
+ * собственного статуса: unknown → скрининг остаётся unknown.
+ * T_eq как fallback НЕ используется ни при каких условиях.
+ */
+export type PhaseScreeningTemperatureContext = ScientificValue | AtmosphereTemperatureLayer;
+
 export function analyzeAtmospherePhasesWithProvenance(
   model: AtmospherePhysicalModel,
-  temperature: ScientificValue
+  temperature: PhaseScreeningTemperatureContext
 ): AtmospherePhaseAnalysis {
-  const temperatureK = temperatureValueOrNull(temperature);
+  // Слой несёт ту же ScientificValue-температуру, что и профиль:
+  // контракт общий, дублирования системы значений нет.
+  const layer = (temperature as AtmosphereTemperatureLayer).layerId !== undefined
+    ? (temperature as AtmosphereTemperatureLayer)
+    : null;
+  const value = layer !== null ? layer.temperature : (temperature as ScientificValue);
+  const temperatureK = temperatureValueOrNull(value);
   const base = analyzeAtmospherePhases(model, temperatureK);
-  const note =
+  const statusNote =
     temperatureK === null
-      ? `фазовый скрининг выполнен без числовой температуры (статус «${temperature.status}»): состояния компонентов остаются unknown — подстановка T_eq или температуры поверхности запрещена (Stage 4.2.2)`
+      ? `фазовый скрининг выполнен без числовой температуры (статус «${value.status}»): состояния компонентов остаются unknown — подстановка T_eq или температуры поверхности запрещена (Stage 4.2.2)`
       : `фазовый скрининг основан на температуре ${temperatureK} K; происхождение значения сохранено в temperatureBasis (Stage 4.2.2)`;
+  const note =
+    layer !== null
+      ? `${statusNote}; локальная область скрининга — слой атмосферы «${layer.layerId}» (Stage 4.2.2.1): это НЕ глобальная surfaceTemperature и НЕ T_eq`
+      : statusNote;
   return {
     ...base,
-    temperatureBasis: { temperature, note }
+    temperatureBasis: { temperature: value, note }
   };
 }
 
