@@ -26,7 +26,7 @@ import {
 } from '../Core/scheduler';
 import type { ProcessOperator } from '../Core/scheduler';
 import { createProcessRegistry } from '../Core/processRegistry';
-import type { ProcessDescriptor } from '../Core/processRegistry';
+import type { ProcessDescriptor, ProcessRegistry } from '../Core/processRegistry';
 import { knownValue, unknownValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 import { createCoreWorldState } from '../Core/worldState';
@@ -158,9 +158,11 @@ describe('Stage 4.2.1 Scheduler: Strang splitting', () => {
     const calls: Call[] = [];
     const result = runMacroStep(world, registry, [recorder('a', calls), recorder('b', calls)], { durationS: 10, splitting: 'strang' });
     expect(result.status).toBe('committed');
+    // Стадия 4.2.1.2: подынтервалы — физические; B интегрирует [0, dt]
+    // (полный шаг B-динамики внутри macro-шага), а не [dt/2, 3dt/2]
     expect(calls).toEqual([
       { processId: 'a', durationS: 5, intervalStartS: 0 },
-      { processId: 'b', durationS: 10, intervalStartS: 5 },
+      { processId: 'b', durationS: 10, intervalStartS: 0 },
       { processId: 'a', durationS: 5, intervalStartS: 5 }
     ]);
     expect(result.log.map((e) => e.phase)).toEqual(['strang_a_half_first', 'strang_b_full', 'strang_a_half_second']);
@@ -191,6 +193,136 @@ describe('Stage 4.2.1 Scheduler: Strang splitting', () => {
       () => runMacroStep(world, registry, [recorder('a', [])], { durationS: 10, splitting: 'strang', processIds: ['a'] }),
       'invalid_splitting'
     );
+  });
+});
+
+describe('Stage 4.2.1.2 Scheduler: дублирующиеся processId запрещены', () => {
+  it('Strang с processIds [a, a] отклоняется: два одинаковых id — не два процесса', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const calls: Call[] = [];
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, [recorder('a', calls), recorder('b', calls)], {
+          durationS: 10,
+          splitting: 'strang',
+          processIds: ['a', 'a']
+        }),
+      'duplicate_process_id'
+    );
+    // отказ ДО выполнения первого оператора: мир и часы не тронуты
+    expect(calls).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world.scheduling).toBeUndefined();
+  });
+
+  it('Lie с повторяющимся processId отклоняется', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, [recorder('a', calls)], {
+          durationS: 10,
+          splitting: 'lie',
+          processIds: ['a', 'a']
+        }),
+      'duplicate_process_id'
+    );
+    expect(calls).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
+  });
+
+  it('два оператора с одним processId отклоняются явно, без молчаливой перезаписи', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const first: Call[] = [];
+    const second: Call[] = [];
+    expectSchedulerError(
+      () => runMacroStep(world, registry, [recorder('a', first), recorder('a', second)], { durationS: 10, splitting: 'lie' }),
+      'duplicate_process_id'
+    );
+    // ни первый, ни «перезаписавший» его оператор не вызваны
+    expect(first).toEqual([]);
+    expect(second).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
+  });
+});
+
+describe('Stage 4.2.1.2 Scheduler: физические подынтервалы операторов', () => {
+  it('Strang: подынтервалы всех вызовов лежат внутри [0, dt] и согласованы с композицией', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const calls: Call[] = [];
+    const dt = 10;
+    const result = runMacroStep(world, registry, [recorder('a', calls), recorder('b', calls)], { durationS: dt, splitting: 'strang' });
+    expect(result.status).toBe('committed');
+    expect(calls.length).toBe(3);
+    for (const call of calls) {
+      expect(call.intervalStartS).toBeGreaterThanOrEqual(0);
+      expect(call.intervalStartS + call.durationS).toBeLessThanOrEqual(dt);
+    }
+    // согласованность композиции: A — [0, dt/2], B — [0, dt] (полный
+    // шаг ВНУТРИ macro-шага), второй A — [dt/2, dt]
+    expect(calls[0]).toEqual({ processId: 'a', durationS: 5, intervalStartS: 0 });
+    expect(calls[1]).toEqual({ processId: 'b', durationS: 10, intervalStartS: 0 });
+    expect(calls[2]).toEqual({ processId: 'a', durationS: 5, intervalStartS: 5 });
+  });
+
+  it('журнал Strang фиксирует те же физические подынтервалы, что и вызовы операторов', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const result = runMacroStep(world, registry, [recorder('a', []), recorder('b', [])], { durationS: 10, splitting: 'strang' });
+    expect(result.status).toBe('committed');
+    expect(result.log.map((e) => [e.phase, e.durationS, e.intervalStartS])).toEqual([
+      ['strang_a_half_first', 5, 0],
+      ['strang_b_full', 10, 0],
+      ['strang_a_half_second', 5, 5]
+    ]);
+  });
+
+  it('Lie sub-cycling: подшаги последовательно покрывают [0, dt] и не выходят за него', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    const dt = 10;
+    const result = runMacroStep(world, registry, [recorder('a', calls)], { durationS: dt, splitting: 'lie', subCycles: 4 });
+    expect(result.status).toBe('committed');
+    for (const call of calls) {
+      expect(call.intervalStartS).toBeGreaterThanOrEqual(0);
+      expect(call.intervalStartS + call.durationS).toBeLessThanOrEqual(dt);
+    }
+    expect(calls.map((c) => [c.durationS, c.intervalStartS])).toEqual([
+      [2.5, 0],
+      [2.5, 2.5],
+      [2.5, 5],
+      [2.5, 7.5]
+    ]);
+  });
+});
+
+describe('Stage 4.2.1.2 Scheduler: непригодное τ не запускается', () => {
+  it('процесс с неположительным τ не запускается даже при прямом вызове (fail-closed)', () => {
+    const world = testWorld();
+    const bad = descriptor('neg', { tau: knownValue(quantity(-2, 'h')) });
+    // реестр, собранный в обход register(): runMacroStep обязан быть
+    // защищён и от дескрипторов, не прошедших валидацию реестра
+    const registry: ProcessRegistry = {
+      register: () => {
+        throw new Error('register не используется в этом тесте');
+      },
+      get: (processId) => (processId === 'neg' ? bad : null),
+      has: (processId) => processId === 'neg',
+      list: () => [bad]
+    };
+    const calls: Call[] = [];
+    expectSchedulerError(
+      () => runMacroStep(world, registry, [recorder('neg', calls)], { durationS: 10, splitting: 'lie' }),
+      'process_tau_unknown'
+    );
+    expect(calls).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
   });
 });
 

@@ -10,11 +10,15 @@
 // Научная семантика характерного времени τ:
 // - τ — физически значимая величина в секундах, представленная
 //   как ScientificValue с размерностью времени и provenance;
+//   числовое τ ОБЯЗАНО быть строго положительным (Stage 4.2.1.2):
+//   нулевое или отрицательное τ — не «мгновенный» процесс, а
+//   некорректное время (ошибка валидации; для исполнения — null);
 // - если данных недостаточно — tau = unknownValue с явной причиной;
 //   текстовые описания («миллионы лет», timescaleNote) НЕ являются
 //   числом и автоматически в τ не преобразуются;
-// - процесс с неизвестным τ или недоступным решателем НЕ может
-//   запускаться автоматически (isProcessAutoRunnable = false);
+// - процесс с неизвестным или непригодным (неположительным) τ или
+//   недоступным решателем НЕ может запускаться автоматически
+//   (isProcessAutoRunnable = false);
 // - политика шага dt ≤ τ/20 — ТОЛЬКО предварительная эвристика
 //   (stepPolicy 'tau_heuristic'): окончательный шаг выбирает
 //   конкретный solver (устойчивость, локальная ошибка, жёсткость,
@@ -156,13 +160,29 @@ export class ProcessRegistryError extends Error {
  * Числовое τ в секундах; null, если τ неизвестно или непригодно.
  * null — НЕ ноль и НЕ «процесс мгновенный»: неизвестное время
  * не превращается в число.
+ *
+ * Fail-closed (Stage 4.2.1.2): неположительное или неконечное τ
+ * так же непригодно для исполнения, как неизвестное — функция
+ * возвращает null, процесс не становится autorunnable и не
+ * запускается планировщиком. Значение при этом НЕ «чинится»:
+ * τ не заменяется на |τ|, ε или 0 — подмена выдумала бы физику.
+ * Нулевое/отрицательное числовое τ — структурный дефект
+ * дескриптора: validateProcessDescriptor отклоняет его
+ * (invalid_descriptor), реестр такой дескриптор не регистрирует.
  */
 export function tauSeconds(v: ScientificValue): number | null {
   if (!hasUsableQuantity(v)) {
     return null;
   }
   try {
-    return convert(v.quantity, 's').value;
+    const seconds = convert(v.quantity, 's').value;
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      // Неположительное или неконечное τ: непригодно для
+      // исполнения — как неизвестное (fail-closed); знак и
+      // значение τ автоматически не «чинятся».
+      return null;
+    }
+    return seconds;
   } catch {
     // Непригодная размерность τ: как неизвестное для исполнения;
     // структурный дефект дескриптора ловится validateProcessDescriptor.
@@ -201,8 +221,10 @@ export function processAvailability(d: ProcessDescriptor): ProcessAvailability {
     case 'unknown':
       return 'unknown';
     case 'available': {
-      // Решатель есть, но без числового τ автоматический запуск
-      // невозможен: неизвестное время не подменяется числом.
+      // Решатель есть, но без пригодного числового τ (строго
+      // положительного конечного числа секунд) автоматический
+      // запуск невозможен: неизвестное и непригодное время
+      // не подменяются числом (Stage 4.2.1.2).
       return tauSeconds(d.tau) !== null ? 'available' : 'unknown';
     }
     default: {
@@ -228,8 +250,10 @@ export function isProcessAutoRunnable(d: ProcessDescriptor): boolean {
 /**
  * Проверка формы дескриптора (данные могут приходить из JSON).
  * Возвращает список проблем; пустой список = форма корректна.
- * Физическую правильность τ эта проверка не доказывает — только
- * размерность времени и явность статуса.
+ * Физическую правильность τ эта проверка не доказывает — но
+ * проверяет размерность времени, СТРОГУЮ ПОЛОЖИТЕЛЬНОСТЬ числового
+ * значения (Stage 4.2.1.2: τ ≤ 0 — не «мгновенный» процесс,
+ * а некорректное время) и явность статуса.
  */
 export function validateProcessDescriptor(d: unknown): string[] {
   if (!isPlainRecord(d)) {
@@ -249,7 +273,8 @@ export function validateProcessDescriptor(d: unknown): string[] {
     );
   }
 
-  // τ — научное значение; числовое τ обязано иметь размерность времени.
+  // τ — научное значение; числовое τ обязано иметь размерность
+  // времени и быть строго положительным после перевода в секунды.
   const tauShapeIssues = validateScientificValueShape(d.tau);
   for (const issue of tauShapeIssues) {
     errors.push('tau: ' + issue);
@@ -258,7 +283,16 @@ export function validateProcessDescriptor(d: unknown): string[] {
     const tau = d.tau as ScientificValue;
     if (hasUsableQuantity(tau)) {
       try {
-        convert(tau.quantity, 's');
+        const tauSecondsValue = convert(tau.quantity, 's').value;
+        if (!Number.isFinite(tauSecondsValue) || tauSecondsValue <= 0) {
+          errors.push(
+            'tau: числовое τ обязано быть строго положительным конечным временем; после перевода в секунды получено ' +
+              String(tauSecondsValue) +
+              ' с (единица «' +
+              tau.quantity.unit +
+              '») — нулевое или отрицательное характерное время физически бессмысленно и автоматически не «чинится»'
+          );
+        }
       } catch {
         errors.push(
           'tau: числовое τ обязано иметь размерность времени; получена единица «' + tau.quantity.unit + '»'

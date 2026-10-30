@@ -43,6 +43,15 @@
 > После 4.2.1 — 672 теста (26 файлов), из них ядро — 401 (14 файлов).
 > Коммиты: 63375e9 → eba0a94 → 31f2298 → 8cb8ba3 → 2af6970 (CI runs
 > #38–#42; #41 — исправленный отказ теста untimed, #42 зелёный).
+> Stage 4.2.1.2 (2026-10-30): аудит контрактов реестра процессов и
+> планировщика — 3 остаточных дефекта (ISSUE 1–3, см. §1.16):
+> строго положительное числовое τ (τ ≤ 0 — invalid_descriptor,
+> fail-closed), запрет дублирующихся processId в macro-шаге и среди
+> runtime-операторов ('duplicate_process_id' до первого вызова),
+> физические подынтервалы операторов ⊆ [0, dt] (Strang: A [0, dt/2] →
+> B [0, dt] → второй A [dt/2, dt]; ранее B получал intervalStartS =
+> dt/2 при длительности dt — выход за macro-шаг). После 4.2.1.2 —
+> 685 тестов (26 файлов), из них ядро — 414 (14 файлов).
 > Stage 4.2 НЕ завершён: 4.2.2–4.2.4 не начаты; химия НЕ на Scheduler.
 
 ## 1. Реестр модулей
@@ -245,6 +254,19 @@
   (41128350834, HEAD 2af6970; первый прогон #41 41128163714 —
   исправление теста untimed-области в coreInvariantAuditor) зелёный:
   tsc 0 ошибок, vitest, oxlint, build.
+- **Stage 4.2.1.2**: 26 файлов, 685 тестов, из них 414 — ядро
+  (14 файлов; +13 регрессионных тестов контрактов аудита: 6 в
+  coreProcessRegistry — 21 итого, 7 в coreScheduler — 30 итого).
+  Новые контракты: строго положительное числовое τ (τ ≤ 0 —
+  invalid_descriptor, tauSeconds fail-closed → null, не
+  autorunnable, Scheduler не запускает даже при прямом вызове);
+  дублирующиеся processId в processIds и среди runtime-операторов —
+  duplicate_process_id до вызова первого оператора (исходный мир и
+  часы не изменяются); физические подынтервалы операторов ⊆ [0, dt]
+  (Strang: A [0, dt/2] → B [0, dt] → второй A [dt/2, dt]). Фактические
+  итоги Vitest «Test Files 26 passed (26) / Tests 685 passed (685)»
+  сверяются с notice-аннотацией шага Tests; golden baseline
+  (877e17d3…bc0a) не изменился.
 
 ### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
 
@@ -420,6 +442,36 @@
      ChemicalEvolution НЕ переведён на Scheduler (4.2.3),
      температурная иерархия (4.2.2) не начата — отсутствие
      готовых физических solver не маскируется.
+- **Stage 4.2.1.2 — аудит контрактов реестра процессов и
+  планировщика** (3 остаточных дефекта, исправлены; +13
+  регрессионных тестов: 6 coreProcessRegistry → 21, 7
+  coreScheduler → 30):
+  G. (ISSUE 1) τ: числовое τ для known/estimated обязано быть
+     строго положительным конечным временем (после перевода в
+     секунды SI); τ ≤ 0 в любой единице — invalid_descriptor
+     (validateProcessDescriptor), значение НЕ «чинится» (не |τ|,
+     не ε, не 0); tauSeconds при непригодном τ — fail-closed (null),
+     heuristicStepSeconds → null, processAvailability → unknown,
+     isProcessAutoRunnable → false; runMacroStep не запускает
+     процесс с непригодным τ даже при прямом вызове
+     (process_tau_unknown до первого оператора);
+  H. (ISSUE 2) дубликаты processId: идентификаторы одного
+     macro-шага уникальны; дубликат в processIds (Strang ['A','A']
+     — не «два оператора») и повторяющийся processId в списке
+     runtime-операторов (молчаливая перезапись Map.set запрещена)
+     → SchedulerError duplicate_process_id ДО вызова первого
+     оператора; исходный мир и часы не изменяются; корректный
+     Strang A + B сохраняет поведение;
+  I. (ISSUE 3) физические подынтервалы: intervalStartS — начало
+     ФИЗИЧЕСКОГО подынтервала [intervalStartS,
+     intervalStartS + durationS) ⊆ [0, dt]; Lie — [0, dt]
+     (sub-cycling — равные подшаги), Strang — A [0, dt/2] →
+     B [0, dt] → второй A [dt/2, dt] (ранее B получал
+     intervalStartS = dt/2 при durationS = dt — интервал
+     [dt/2, 3dt/2] выходил за macro-шаг); порядок Strang и
+     ЕДИНСТВЕННОЕ продвижение часов на dt сохранены; тесты
+     проверяют и порядок вызовов, и согласованность временных
+     аргументов.
 
 ### 1.15 App.tsx (966 строк)
 

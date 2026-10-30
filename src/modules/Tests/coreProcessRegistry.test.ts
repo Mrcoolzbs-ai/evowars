@@ -19,7 +19,7 @@ import {
   validateProcessDescriptor
 } from '../Core/processRegistry';
 import type { ProcessDescriptor } from '../Core/processRegistry';
-import { knownValue, unknownValue } from '../Core/scientificValue';
+import { estimatedValue, knownValue, unknownValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 import { chemicalProcessesToCoreDescriptors } from '../Core/adapters';
 import { createDefaultProcessRegistry } from '../ChemicalEvolution';
@@ -175,5 +175,59 @@ describe('Stage 4.2.1 ProcessRegistry: мост легаси-химии (чес�
     const registry = createProcessRegistry();
     for (const d of descriptors) registry.register(d);
     expect(registry.list().map((d) => d.id)).toEqual(descriptors.map((d) => d.id));
+  });
+});
+
+describe('Stage 4.2.1.2 ProcessRegistry: числовое τ строго положительно', () => {
+  it('известное tau = 0 s отклоняется валидацией и реестром', () => {
+    const zero = descriptor({ tau: knownValue(quantity(0, 's')) });
+    const errors = validateProcessDescriptor(zero);
+    expect(errors.some((e) => e.includes('строго положительным'))).toBe(true);
+    const registry = createProcessRegistry();
+    expectRegistryError(() => registry.register(zero), 'invalid_descriptor');
+    expect(registry.list()).toEqual([]);
+  });
+
+  it('известное tau = -1 s отклоняется валидацией', () => {
+    const errors = validateProcessDescriptor(descriptor({ tau: knownValue(quantity(-1, 's')) }));
+    expect(errors.some((e) => e.includes('строго положительным'))).toBe(true);
+  });
+
+  it('оценочное tau = 0 s отклоняется валидацией', () => {
+    const errors = validateProcessDescriptor(
+      descriptor({ tau: estimatedValue(quantity(0, 's'), 'модельная оценка τ') })
+    );
+    expect(errors.some((e) => e.includes('строго положительным'))).toBe(true);
+  });
+
+  it('отрицательное τ в другой единице времени отклоняется после конвертации в секунды', () => {
+    // -1 ч = -3600 с: знак проверяется ПОСЛЕ перевода в секунды, а не в исходной единице
+    const errors = validateProcessDescriptor(descriptor({ tau: knownValue(quantity(-1, 'h')) }));
+    expect(errors.some((e) => e.includes('строго положительным') && e.includes('-3600'))).toBe(true);
+  });
+
+  it('положительное τ проходит в секундах и в других единицах времени', () => {
+    expect(validateProcessDescriptor(descriptor({ tau: knownValue(quantity(1000, 's')) }))).toEqual([]);
+    const hours = descriptor({ tau: knownValue(quantity(2, 'h')) });
+    expect(validateProcessDescriptor(hours)).toEqual([]);
+    expect(tauSeconds(hours.tau)).toBe(7200);
+  });
+
+  it('fail-closed: неположительное τ непригодно как неизвестное и не делает процесс autorunnable', () => {
+    const zero = descriptor({ id: 'zero_tau', tau: knownValue(quantity(0, 's')) });
+    const negativeHours = descriptor({ id: 'neg_tau', tau: knownValue(quantity(-5, 'h')) });
+    // τ ≤ 0 ведёт себя как неизвестное: null, а не 0 и не |τ|; знак не «чинится»
+    expect(tauSeconds(zero.tau)).toBeNull();
+    expect(tauSeconds(negativeHours.tau)).toBeNull();
+    // контраст: неизвестное τ остаётся неизвестным и не превращается в число
+    expect(tauSeconds(unknownValue('числовое τ неизвестно'))).toBeNull();
+    // эвристика шага не назначается от непригодного τ
+    expect(
+      heuristicStepSeconds({ ...zero, stepPolicy: { kind: 'tau_heuristic', tauFraction: 0.05 } })
+    ).toBeNull();
+    // доступность и autorunnable — честные: неположительное τ не проходит
+    expect(processAvailability(zero)).toBe('unknown');
+    expect(isProcessAutoRunnable(zero)).toBe(false);
+    expect(isProcessAutoRunnable(negativeHours)).toBe(false);
   });
 });

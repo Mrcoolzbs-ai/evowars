@@ -23,8 +23,18 @@
 //   окончательный шаг выбирает конкретный solver;
 // - Lie splitting: последовательное выполнение операторов;
 // - Strang splitting: симметричная композиция ровно ДВУХ
-//   операторов A(dt/2) → B(dt) → A(dt/2) — не произвольный порядок
-//   процессов и не два Lie-шага;
+//   РАЗНЫХ операторов A(dt/2) → B(dt) → A(dt/2) — не произвольный
+//   порядок процессов и не два Lie-шага;
+// - идентификаторы процессов одного macro-шага уникальны
+//   (Stage 4.2.1.2): дублирующийся processId — и в списке
+//   процессов шага, и среди переданных runtime-операторов —
+//   отклоняется ДО вызова первого оператора (SchedulerError
+//   'duplicate_process_id'); молчаливая перезапись оператора
+//   через Map.set невозможна;
+// - временной аргумент оператора — ФИЗИЧЕСКИЙ подынтервал
+//   macro-шага (Stage 4.2.1.2): [intervalStartS, intervalStartS +
+//   durationS) всегда лежит внутри [0, dt]; Strang: A интегрирует
+//   [0, dt/2], B — [0, dt], второй A — [dt/2, dt];
 // - оператор НЕ двигает мировое время: проверяется после каждого
 //   вызова; нарушение → шаг отклонён (operator_moved_clock);
 // - атомарность транзакции шага: при ошибке оператора или
@@ -64,6 +74,7 @@ export class SchedulerError extends Error {
     | 'process_tau_unknown'
     | 'solver_unavailable'
     | 'invalid_splitting'
+    | 'duplicate_process_id'
     | 'invalid_event'
     | 'already_processed'
     | 'operator_error'
@@ -160,7 +171,7 @@ export interface SchedulerStepLogEntry {
   processId: string;
   phase: StepLogPhase;
   durationS: number;
-  /** Начало подынтервала внутри macro-шага, с. */
+  /** Начало физического подынтервала [intervalStartS, intervalStartS + durationS) внутри macro-шага [0, dt], с. */
   intervalStartS: number;
   status: 'committed' | 'rejected';
 }
@@ -532,9 +543,14 @@ export function readyProcessIds(
 // ============================================
 
 /**
- * Runtime-исполнитель процесса. Оператор получает мир и интервал
- * (длительность и начало подынтервала внутри macro-шага, с) и
- * возвращает НОВОЕ состояние мира. Оператор НЕ двигает часы
+ * Runtime-исполнитель процесса. Оператор получает мир и ФИЗИЧЕСКИЙ
+ * подынтервал macro-шага: интервал [intervalStartS,
+ * intervalStartS + durationS), с, всегда лежит внутри [0, dt].
+ * Семантика по splitting (Stage 4.2.1.2): Lie — каждый оператор
+ * интегрирует [0, dt] (sub-cycling — последовательные подшаги,
+ * покрывающие [0, dt]); Strang — A(dt/2) интегрирует [0, dt/2],
+ * B(dt) интегрирует [0, dt], второй A(dt/2) — [dt/2, dt].
+ * Оператор возвращает НОВОЕ состояние мира, НЕ двигает часы
  * (проверяется; нарушение отклоняет шаг) и НЕ сериализуется.
  */
 export interface ProcessOperator {
@@ -593,6 +609,17 @@ function clocksEqual(a: SimulationClockState, b: SimulationClockState): boolean 
  * Strang: ровно два оператора в симметричном порядке
  * A(dt/2) → B(dt) → A(dt/2); sub-cycling при Strang запрещён.
  *
+ * Идентификаторы процессов одного macro-шага уникальны
+ * (Stage 4.2.1.2): дубликат processId — в opts.processIds или среди
+ * переданных операторов — SchedulerError 'duplicate_process_id'
+ * ДО выполнения первого оператора; перезапись оператора невозможна.
+ *
+ * Временные аргументы операторов — физические подынтервалы внутри
+ * [0, dt] (Stage 4.2.1.2): Lie без sub-cycling даёт каждому
+ * оператору [0, dt]; sub-cycling — последовательные подшаги
+ * [i·dt/n, (i+1)·dt/n); Strang — A: [0, dt/2], B: [0, dt],
+ * второй A: [dt/2, dt]. Выход за границы macro-шага невозможен.
+ *
  * Мировое время продвигается РОВНО один раз — после успеха всех
  * операторов и (если запрошен) аудита. Любая ошибка оператора,
  * самовольное продвижение часов оператором или нарушение
@@ -627,6 +654,33 @@ export function runMacroStep(
   if (processIds.length === 0) {
     throw new SchedulerError('invalid_step', 'macro-шаг требует хотя бы один процесс: не заданы ни processIds, ни операторы', null);
   }
+  // --- runtime-операторы: дубликаты processId отклоняются явно,
+  // молчаливая перезапись через Map.set невозможна (4.2.1.2) ---
+  const operatorByProcess = new Map<string, ProcessOperator>();
+  for (const operator of operators) {
+    if (operatorByProcess.has(operator.processId)) {
+      throw new SchedulerError(
+        'duplicate_process_id',
+        'runtime-оператор с processId «' + operator.processId + '» передан планировщику более одного раза: молчаливая перезапись оператора запрещена',
+        operator.processId
+      );
+    }
+    operatorByProcess.set(operator.processId, operator);
+  }
+  // --- идентификаторы процессов шага уникальны (4.2.1.2):
+  // дубликат processId — не второй оператор; отклоняется до
+  // выполнения первого оператора ---
+  const seenStepProcessIds = new Set<string>();
+  for (const processId of processIds) {
+    if (seenStepProcessIds.has(processId)) {
+      throw new SchedulerError(
+        'duplicate_process_id',
+        'processId «' + processId + '» повторяется в списке процессов macro-шага: идентификаторы одного macro-шага уникальны, дубликат — не второй оператор',
+        processId
+      );
+    }
+    seenStepProcessIds.add(processId);
+  }
   if (opts.splitting === 'strang' && processIds.length !== 2) {
     throw new SchedulerError(
       'invalid_splitting',
@@ -646,7 +700,7 @@ export function runMacroStep(
     if (tauSeconds(descriptor.tau) === null) {
       throw new SchedulerError(
         'process_tau_unknown',
-        'процесс «' + processId + '» не имеет числового характерного времени τ: шаг процесса не определяется',
+        'процесс «' + processId + '» не имеет пригодного числового характерного времени τ (требуется строго положительное конечное число секунд): шаг процесса не определяется',
         processId
       );
     }
@@ -657,10 +711,6 @@ export function runMacroStep(
         processId
       );
     }
-  }
-  const operatorByProcess = new Map<string, ProcessOperator>();
-  for (const operator of operators) {
-    operatorByProcess.set(operator.processId, operator);
   }
   for (const processId of processIds) {
     if (!operatorByProcess.has(processId)) {
@@ -683,8 +733,11 @@ export function runMacroStep(
       throw new SchedulerError('invalid_splitting', 'Strang splitting требует ровно два процесса', null);
     }
     const half = opts.durationS / 2;
+    // Физические подынтервалы (4.2.1.2): A интегрирует [0, dt/2],
+    // B — [0, dt] (полный шаг B-динамики ВНУТРИ macro-шага), второй
+    // A — [dt/2, dt]; ни один вызов не выходит за [0, dt].
     plan.push({ processId: a, phase: 'strang_a_half_first', durationS: half, intervalStartS: 0 });
-    plan.push({ processId: b, phase: 'strang_b_full', durationS: opts.durationS, intervalStartS: half });
+    plan.push({ processId: b, phase: 'strang_b_full', durationS: opts.durationS, intervalStartS: 0 });
     plan.push({ processId: a, phase: 'strang_a_half_second', durationS: half, intervalStartS: half });
   } else {
     const subDurationS = opts.durationS / subCycles;
