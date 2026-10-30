@@ -1,56 +1,106 @@
 // ============================================
 // GENERATOR - World generation functions
 // ============================================
+//
+// Порядок генерации (исправлен по результатам аудита):
+// 1. Космология и режим (аномальная космология принудительно
+//    активирует аномальный режим).
+// 2. Эпоха.
+// 3. Центральный объект (с учётом возраста эпохи).
+// 4. Небесное тело (с учётом центрального объекта).
+// 5. Атмосфера.
+// 6. Физические характеристики тела (только известные данные).
+// 7. Колыбель жизни — с фильтром поддерживаемых вариантов;
+//    если пользователь зафиксировал колыбель, она используется как есть,
+//    а несовместимость отмечается предупреждениями.
+// 8. Локальная среда колыбели (отдельно от атмосферы планеты).
+// 9. Полные физические характеристики.
+// 10. Источники энергии.
+// 11. Проверка совместимости на реальных данных мира.
 
 import { createRandom } from './random';
 import type {
   GeneratedWorld,
   GenerationSettings,
   GenerationMode,
+  GenerationWarning,
   CosmologyOption,
   EpochOption,
   CentralObjectOption,
   CelestialBodyOption,
   CradleOption,
-  GenerationWarning,
   AtmosphereState,
   PhysicalCharacteristics,
   EnergySources,
   CausalChain,
   EvolutionImplications,
-  FixedCategories
+  FixedCategories,
+  CradleLocalEnvironment,
+  EnergySourceClass
 } from '../../types';
 import { GENERATOR_VERSION } from '../../types';
 
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
-import { checkCompatibility } from '../Compatibility';
+import { checkCompatibility, CRADLE_RELATED_CATEGORIES } from '../Compatibility';
 import { createAtmosphere, normalizeAtmosphere } from '../Atmosphere';
-import { calculatePhysicalCharacteristics } from '../WorldModel';
+import {
+  calculatePhysicalCharacteristics,
+  calculateBodyCharacteristics,
+  determineCradleLocalEnvironment
+} from '../WorldModel';
 
 // ============================================
-// GENERATION FUNCTIONS
+// ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
 // ============================================
 
 export function generateWorld(settings: GenerationSettings): GeneratedWorld {
   const rng = createRandom(settings.seed);
-  
-  const cosmology = selectCosmology(rng, settings);
-  const epoch = selectEpoch(rng, settings);
-  const centralObject = selectCentralObject(rng, settings, epoch);
-  const celestialBody = selectCelestialBody(rng, settings, centralObject);
-  const cradle = selectCradle(rng, settings);
-  
-  const mode: GenerationMode = settings.mode || (cosmology.isAnomalous || isAnomalousCosmologySelected(settings) ? 'anomalous' : 'realistic');
 
-  const compatibilityWarnings = checkCompatibility({
-    cosmology,
-    epoch,
+  // 1. Космология
+  const cosmology = selectCosmology(rng, settings);
+
+  // 2. Режим: аномальная космология ВСЕГДА активирует аномальный режим.
+  // Заданный пользователем realistic не может молча перекрывать
+  // требования аномальной космологии.
+  const { mode, modeWarnings } = resolveMode(settings, cosmology);
+
+  // 3. Эпоха
+  const epoch = selectEpoch(rng, settings);
+
+  // 4. Центральный объект
+  const centralObject = selectCentralObject(rng, settings, epoch, mode);
+
+  // 5. Небесное тело
+  const celestialBody = selectCelestialBody(rng, settings, centralObject);
+
+  // 6. Атмосфера
+  const atmosphere = generateAtmosphere(rng, settings);
+
+  // 7. Характеристики небесного тела, зависящие только от тела,
+  // центрального объекта и атмосферы (без колыбели)
+  const bodyCharacteristics = calculateBodyCharacteristics({
     centralObject,
     celestialBody,
-    cradle
-  }, mode);
+    atmosphere
+  });
 
-  const atmosphere = generateAtmosphere(rng, settings);
+  // 8. Колыбель жизни: сначала варианты, поддерживаемые данным миром
+  const { cradle, cradleWarnings } = selectCradle(rng, settings, {
+    mode,
+    centralObject,
+    celestialBody,
+    atmosphere,
+    bodyCharacteristics
+  });
+
+  // 9. Локальная среда колыбели — отдельно от атмосферы планеты
+  const cradleLocalEnvironment = determineCradleLocalEnvironment({
+    cradle,
+    celestialBody,
+    atmosphere
+  });
+
+  // 10. Полные физические характеристики
   const physicalCharacteristics = calculatePhysicalCharacteristics({
     centralObject,
     celestialBody,
@@ -58,7 +108,25 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     atmosphere
   });
 
+  // 11. Источники энергии
   const energySources = determineEnergySources(centralObject, cradle);
+
+  // 12. Проверка совместимости на РЕАЛЬНЫХ данных сгенерированного мира
+  const compatibilityWarnings = checkCompatibility({
+    mode,
+    cosmology,
+    epoch,
+    centralObject,
+    celestialBody,
+    cradle,
+    cradleLocalEnvironment,
+    physicalCharacteristics,
+    atmosphere,
+    energySources
+  }, mode);
+
+  const allWarnings = [...modeWarnings, ...cradleWarnings, ...compatibilityWarnings];
+
   const causalChain = createCausalChain({
     cosmology,
     epoch,
@@ -66,6 +134,7 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     celestialBody,
     cradle,
     atmosphere,
+    cradleLocalEnvironment,
     physicalCharacteristics,
     energySources
   });
@@ -86,7 +155,8 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     centralObject,
     celestialBody,
     cradle,
-    warnings: compatibilityWarnings
+    mode,
+    warnings: allWarnings
   });
 
   const worldId = rng.generateId('world');
@@ -102,11 +172,12 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     centralObject,
     celestialBody,
     cradle,
+    cradleLocalEnvironment,
     physicalCharacteristics,
     energySources,
     atmosphere,
-    appliedRules: compatibilityWarnings.map(w => w.ruleId),
-    warnings: compatibilityWarnings,
+    appliedRules: allWarnings.map(w => w.ruleId),
+    warnings: allWarnings,
     scientificStatus,
     causalChain,
     evolutionImplications,
@@ -114,78 +185,234 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
   };
 }
 
-function selectCosmology(rng: any, settings: GenerationSettings): CosmologyOption {
+// ============================================
+// ВЫБОР КАТЕГОРИЙ
+// ============================================
+
+function selectCosmology(rng: ReturnType<typeof createRandom>, settings: GenerationSettings): CosmologyOption {
   if (settings.fixedCategories?.cosmology) {
     const fixed = cosmologies.find((c) => c.id === settings.fixedCategories.cosmology);
     if (fixed) return fixed;
   }
   const weights = settings.weights?.cosmology || {};
-  return rng.chooseWeighted(cosmologies, weights, (c: any) => c.id);
+  return rng.chooseWeighted(cosmologies, weights, (c) => c.id);
 }
 
-function selectEpoch(rng: any, settings: GenerationSettings): EpochOption {
+function selectEpoch(rng: ReturnType<typeof createRandom>, settings: GenerationSettings): EpochOption {
   if (settings.fixedCategories?.epoch) {
     const fixed = epochs.find((e) => e.id === settings.fixedCategories.epoch);
     if (fixed) return fixed;
   }
   const weights = settings.weights?.epoch || {};
-  return rng.chooseWeighted(epochs, weights, (e: any) => e.id);
+  return rng.chooseWeighted(epochs, weights, (e) => e.id);
 }
 
-function selectCentralObject(rng: any, settings: GenerationSettings, epoch: EpochOption): CentralObjectOption {
+function selectCentralObject(
+  rng: ReturnType<typeof createRandom>,
+  settings: GenerationSettings,
+  epoch: EpochOption,
+  mode: GenerationMode
+): CentralObjectOption {
   if (settings.fixedCategories?.centralObject) {
     const fixed = centralObjects.find((o) => o.id === settings.fixedCategories.centralObject);
     if (fixed) return fixed;
   }
   const epochAge = epoch.ageRange;
-  const compatibleObjects = centralObjects.filter((obj: any) => {
-    if (obj.minAge === null && obj.maxAge === null) return true;
-    if (obj.minAge !== null && epochAge.min < obj.minAge) return false;
-    if (obj.maxAge !== null && epochAge.max > obj.maxAge) return false;
-    return true;
-  });
-  if (compatibleObjects.length === 0) {
+  // В аномальном режиме возрастные ограничения не применяются
+  // (соответствует exemptInAnomalousMode правила age_central_object_compatibility)
+  const ageCompatibleObjects = mode === 'anomalous'
+    ? centralObjects
+    : centralObjects.filter((obj) => {
+        if (obj.minAge === null && obj.maxAge === null) return true;
+        if (obj.minAge !== null && epochAge.min < obj.minAge) return false;
+        if (obj.maxAge !== null && epochAge.max > obj.maxAge) return false;
+        return true;
+      });
+  if (ageCompatibleObjects.length === 0) {
     console.warn('No central objects compatible with selected epoch, using all');
-    return rng.chooseWeighted(centralObjects, settings.weights?.centralObject || {}, (o: any) => o.id);
+    const weights = settings.weights?.centralObject || {};
+    return rng.chooseWeighted(centralObjects, weights, (o) => o.id);
   }
   const weights = settings.weights?.centralObject || {};
-  return rng.chooseWeighted(compatibleObjects, weights, (o: any) => o.id);
+  return rng.chooseWeighted(ageCompatibleObjects, weights, (o) => o.id);
 }
 
-function selectCelestialBody(rng: any, settings: GenerationSettings, centralObject: CentralObjectOption): CelestialBodyOption {
+function selectCelestialBody(
+  rng: ReturnType<typeof createRandom>,
+  settings: GenerationSettings,
+  centralObject: CentralObjectOption
+): CelestialBodyOption {
   if (settings.fixedCategories?.celestialBody) {
     const fixed = celestialBodies.find((b) => b.id === settings.fixedCategories.celestialBody);
     if (fixed) return fixed;
   }
-  const compatibleBodies = celestialBodies.filter((body: any) => {
+  const compatibleBodies = celestialBodies.filter((body) => {
     if (body.compatibleCentralObjects.length === 0) return true;
     return body.compatibleCentralObjects.includes(centralObject.id);
   });
   if (compatibleBodies.length === 0) {
     console.warn('No celestial bodies compatible with selected central object, using all');
-    return rng.chooseWeighted(celestialBodies, settings.weights?.celestialBody || {}, (b: any) => b.id);
+    const weights = settings.weights?.celestialBody || {};
+    return rng.chooseWeighted(celestialBodies, weights, (b) => b.id);
   }
   const weights = settings.weights?.celestialBody || {};
-  return rng.chooseWeighted(compatibleBodies, weights, (b: any) => b.id);
+  return rng.chooseWeighted(compatibleBodies, weights, (b) => b.id);
 }
 
-function selectCradle(rng: any, settings: GenerationSettings): CradleOption {
+/**
+ * Выбор колыбели жизни.
+ *
+ * Для случайного выбора рассматриваются только колыбели, которые могут
+ * быть поддержаны данным сочетанием (небесное тело + атмосфера +
+ * центральный объект). Проверка выполняется теми же правилами
+ * совместимости, что и итоговая проверка мира (без заглушек).
+ *
+ * Если пользователь зафиксировал колыбель вручную, она используется
+ * как есть: несовместимость фиксируется предупреждениями совместимости.
+ */
+function selectCradle(
+  rng: ReturnType<typeof createRandom>,
+  settings: GenerationSettings,
+  context: {
+    mode: GenerationMode;
+    centralObject: CentralObjectOption;
+    celestialBody: CelestialBodyOption;
+    atmosphere: AtmosphereState;
+    bodyCharacteristics: PhysicalCharacteristics;
+  }
+): { cradle: CradleOption; cradleWarnings: GenerationWarning[] } {
+  const cradleWarnings: GenerationWarning[] = [];
+
+  // Пользователь зафиксировал колыбель: используем её без фильтра,
+  // предупреждения совместимости покажут реальные проблемы.
   if (settings.fixedCategories?.cradle) {
     const fixed = cradles.find((c) => c.id === settings.fixedCategories.cradle);
-    if (fixed) return fixed;
+    if (fixed) {
+      return { cradle: fixed, cradleWarnings };
+    }
   }
-  const compatibleCradles = cradles.filter((_cradle: any) => true);
-  if (compatibleCradles.length === 0) {
-    console.warn("No cradles compatible, using all");
-    return rng.chooseWeighted(cradles, settings.weights?.cradle || {}, (c: any) => c.id);
-  }
+
   const weights = settings.weights?.cradle || {};
-  return rng.chooseWeighted(compatibleCradles, weights, (c: any) => c.id);
+
+  // Оцениваем каждую колыбель реальными правилами совместимости
+  const supportedCradles = cradles.filter((cradle) =>
+    isCradleSupportedOnWorld(cradle, context)
+  );
+
+  if (supportedCradles.length === 0) {
+    // Ни одна колыбеля не поддерживается данным сочетанием условий:
+    // выбираем из общего списка, а предупреждения совместимости
+    // покажут, какие требования нарушены.
+    console.warn('No cradles fully supported by this world configuration, using all cradles');
+    cradleWarnings.push({
+      id: 'warn_cradle_support_fallback',
+      ruleId: 'cradle_support_fallback',
+      category: 'matter_state',
+      severity: 'warning',
+      message: 'Ни одна колыбель жизни не поддерживается данным сочетанием условий; колыбель выбрана из общего списка — смотрите предупреждения совместимости.',
+      suggestions: [
+        'Измените атмосферу или небесное тело',
+        'Зафиксируйте колыбель вручную',
+        'Используйте аномальный режим для экзотических конфигураций'
+      ],
+      affectedFields: ['cradle']
+    });
+    return { cradle: rng.chooseWeighted(cradles, weights, (c) => c.id), cradleWarnings };
+  }
+
+  return { cradle: rng.chooseWeighted(supportedCradles, weights, (c) => c.id), cradleWarnings };
 }
 
-function generateAtmosphere(rng: any, settings: GenerationSettings): AtmosphereState {
+/**
+ * Может ли колыбель быть поддержана данным миром.
+ * Использует реальные правила совместимости (те же, что и итоговая
+ * проверка): колыбель поддержана, если ни одно правило категорий,
+ * относящихся к колыбели, не даёт ошибки.
+ */
+function isCradleSupportedOnWorld(
+  cradle: CradleOption,
+  context: {
+    mode: GenerationMode;
+    centralObject: CentralObjectOption;
+    celestialBody: CelestialBodyOption;
+    atmosphere: AtmosphereState;
+    bodyCharacteristics: PhysicalCharacteristics;
+  }
+): boolean {
+  const cradleLocalEnvironment = determineCradleLocalEnvironment({
+    cradle,
+    celestialBody: context.celestialBody,
+    atmosphere: context.atmosphere
+  });
+
+  const warnings = checkCompatibility({
+    mode: context.mode,
+    centralObject: context.centralObject,
+    celestialBody: context.celestialBody,
+    atmosphere: context.atmosphere,
+    cradle,
+    cradleLocalEnvironment,
+    physicalCharacteristics: context.bodyCharacteristics
+  }, context.mode);
+
+  // Ошибка в правилах, относящихся к колыбели, означает,
+  // что эта колыбель не может быть поддержана данным миром.
+  return !warnings.some(
+    w => w.severity === 'error' && CRADLE_RELATED_CATEGORIES.includes(w.category)
+  );
+}
+
+// ============================================
+// РЕЖИМ ГЕНЕРАЦИИ
+// ============================================
+
+/**
+ * Определение режима генерации.
+ *
+ * Аномальная космология («Пленение Чудовища», «Симуляция», «Сон»,
+ * «Мир как тело») ВСЕГДА активирует аномальный режим, даже если
+ * пользователь задал realistic: заданный режим не может молча
+ * перекрывать требования выбранной аномальной космологии.
+ */
+function resolveMode(
+  settings: GenerationSettings,
+  cosmology: CosmologyOption
+): { mode: GenerationMode; modeWarnings: GenerationWarning[] } {
+  if (cosmology.isAnomalous) {
+    const mode: GenerationMode = 'anomalous';
+    const modeWarnings: GenerationWarning[] = [];
+
+    if (settings.mode !== 'anomalous') {
+      modeWarnings.push({
+        id: 'warn_anomalous_cosmology_mode_automatic_activation',
+        ruleId: 'anomalous_cosmology_mode_automatic_activation',
+        category: 'cosmology_physics',
+        severity: 'info',
+        message: `Аномальная космология «${cosmology.name}» автоматически активировала аномальный режим генерации (запрошенный режим «${settings.mode}» перекрыт).`,
+        suggestions: [
+          'Выберите неаномальную космологию, чтобы использовать реалистичный режим',
+          'Продолжайте в аномальном режиме: физические проверки колыбели и среды остаются активными'
+        ],
+        affectedFields: ['cosmology', 'mode']
+      });
+    }
+
+    return { mode, modeWarnings };
+  }
+
+  const mode: GenerationMode = settings.mode === 'anomalous' ? 'anomalous' : 'realistic';
+  return { mode, modeWarnings: [] };
+}
+
+// ============================================
+// АТМОСФЕРА
+// ============================================
+
+function generateAtmosphere(rng: ReturnType<typeof createRandom>, settings: GenerationSettings): AtmosphereState {
   if (settings.customAtmosphere) {
-    return normalizeAtmosphere(settings.customAtmosphere);
+    // Пользовательская атмосфера нормализуется в строгом режиме:
+    // состав, превышающий 100%, считается ошибкой данных.
+    return normalizeAtmosphere(settings.customAtmosphere, { mode: 'strict' });
   }
   if (settings.atmospherePreset) {
     return createAtmosphere(settings.atmospherePreset, rng);
@@ -193,13 +420,9 @@ function generateAtmosphere(rng: any, settings: GenerationSettings): AtmosphereS
   return createAtmosphere('methane_ethane', rng);
 }
 
-function isAnomalousCosmologySelected(settings: GenerationSettings): boolean {
-  if (settings.fixedCategories?.cosmology) {
-    const cosmology = cosmologies.find((c) => c.id === settings.fixedCategories.cosmology);
-    return cosmology?.isAnomalous || false;
-  }
-  return false;
-}
+// ============================================
+// ПРОИЗВОДНЫЕ ДАННЫЕ МИРА
+// ============================================
 
 function determineEnergySources(
   centralObject: CentralObjectOption,
@@ -208,8 +431,8 @@ function determineEnergySources(
   const primary: EnergySources['primary'] = [];
   const secondary: EnergySources['secondary'] = [];
   centralObject.potentialEnergySources.forEach(source => {
-    if (!primary.includes(source as any)) {
-      primary.push(source as any);
+    if (!primary.includes(source as EnergySourceClass)) {
+      primary.push(source as EnergySourceClass);
     }
   });
   cradle.availableEnergySources.forEach(source => {
@@ -217,8 +440,8 @@ function determineEnergySources(
       secondary.push(source);
     }
   });
-  if (!primary.includes('geothermal' as any) && !secondary.includes('geothermal' as any)) {
-    secondary.push('geothermal' as any);
+  if (!primary.includes('geothermal') && !secondary.includes('geothermal')) {
+    secondary.push('geothermal');
   }
   return {
     primary,
@@ -234,6 +457,7 @@ function createCausalChain(params: {
   celestialBody: CelestialBodyOption;
   cradle: CradleOption;
   atmosphere: AtmosphereState;
+  cradleLocalEnvironment: CradleLocalEnvironment;
   physicalCharacteristics: PhysicalCharacteristics;
   energySources: EnergySources;
 }): CausalChain {
@@ -252,7 +476,9 @@ function createCausalChain(params: {
     ],
     unknowns: [
       `Atmosphere params: ${params.atmosphere.notes || 'undefined'}`,
-      `Geological activity: ${params.physicalCharacteristics.geologicalActivity || 'undefined'}`
+      `Geological activity: ${params.physicalCharacteristics.geologicalActivity || 'undefined'}`,
+      `Cradle local environment: ${params.cradleLocalEnvironment.locationDescription}; ` +
+        `exact temperature/pressure of the medium are unknown and not substituted with arbitrary values`
     ]
   };
 }
@@ -283,11 +509,11 @@ function determineEvolutionImplications(params: {
   if (params.atmosphere.components.some(c => c.gasId === 'nh3' && c.percentage > 1)) {
     constraints.push('Ammonia toxicity');
   }
-  if (params.energySources.primary.includes('stellar_radiation' as any)) {
+  if (params.energySources.primary.includes('stellar_radiation')) {
     opportunities.push('Photosynthesis');
   }
-  if (params.energySources.primary.includes('geothermal' as any) || 
-      params.energySources.secondary.includes('geothermal' as any)) {
+  if (params.energySources.primary.includes('geothermal') ||
+      params.energySources.secondary.includes('geothermal')) {
     opportunities.push('Chemosynthesis');
   }
   if (params.cosmology.isAnomalous) {
@@ -307,9 +533,10 @@ function determineScientificStatus(params: {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
   cradle: CradleOption;
+  mode: GenerationMode;
   warnings: GenerationWarning[];
-}): any {
-  if (params.cosmology.isAnomalous) {
+}): GeneratedWorld['scientificStatus'] {
+  if (params.cosmology.isAnomalous || params.mode === 'anomalous') {
     return 'anomalous_rule';
   }
   if (params.warnings.some(w => w.severity === 'error')) {
@@ -333,6 +560,10 @@ function determineScientificStatus(params: {
   }
   return 'physically_plausible';
 }
+
+// ============================================
+// ПАКЕТНЫЕ ФУНКЦИИ
+// ============================================
 
 export function generateMultipleWorlds(settings: GenerationSettings, count: number): GeneratedWorld[] {
   const worlds: GeneratedWorld[] = [];

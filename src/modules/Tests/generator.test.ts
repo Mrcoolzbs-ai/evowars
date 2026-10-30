@@ -12,25 +12,38 @@ import {
 import type { GenerationSettings } from '../../types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
 
+function baseSettings(overrides: Partial<GenerationSettings> = {}): GenerationSettings {
+  return {
+    seed: 'test_seed_123',
+    mode: 'realistic',
+    weights: {
+      cosmology: {},
+      epoch: {},
+      centralObject: {},
+      celestialBody: {},
+      cradle: {}
+    },
+    fixedCategories: {},
+    enableChemicalEvolution: false,
+    chemicalEvolutionSteps: 0,
+    ...overrides
+  };
+}
+
+function worldSignature(world: { cosmology: { id: string }; epoch: { id: string }; centralObject: { id: string }; celestialBody: { id: string }; cradle: { id: string } }) {
+  return [
+    world.cosmology.id,
+    world.epoch.id,
+    world.centralObject.id,
+    world.celestialBody.id,
+    world.cradle.id
+  ].join('|');
+}
+
 describe('Generator Module', () => {
   describe('generateWorld', () => {
     it('should generate a valid world object', () => {
-      const settings: GenerationSettings = {
-        seed: 'test_seed_123',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {},
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
-      };
-
-      const world = generateWorld(settings);
+      const world = generateWorld(baseSettings());
 
       expect(world).toBeDefined();
       expect(world.id).toBeDefined();
@@ -45,6 +58,7 @@ describe('Generator Module', () => {
       expect(world.physicalCharacteristics).toBeDefined();
       expect(world.energySources).toBeDefined();
       expect(world.atmosphere).toBeDefined();
+      expect(world.cradleLocalEnvironment).toBeDefined();
       expect(world.causalChain).toBeDefined();
       expect(world.evolutionImplications).toBeDefined();
       expect(world.scientificStatus).toBeDefined();
@@ -53,23 +67,8 @@ describe('Generator Module', () => {
     });
 
     it('should generate deterministic results with same seed', () => {
-      const settings: GenerationSettings = {
-        seed: 'deterministic_test',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {},
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
-      };
-
-      const world1 = generateWorld(settings);
-      const world2 = generateWorld(settings);
+      const world1 = generateWorld(baseSettings({ seed: 'deterministic_test' }));
+      const world2 = generateWorld(baseSettings({ seed: 'deterministic_test' }));
 
       expect(world1.id).toBe(world2.id);
       expect(world1.cosmology.id).toBe(world2.cosmology.id);
@@ -79,125 +78,233 @@ describe('Generator Module', () => {
       expect(world1.cradle.id).toBe(world2.cradle.id);
     });
 
-    it('should handle anomalous cosmology mode', () => {
-      const settings: GenerationSettings = {
-        seed: 'anomalous_test',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {
-          cosmology: 'world_as_body'
-        },
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
+    it('одинаковый seed воспроизводит мир полностью, включая предупреждения', () => {
+      const world1 = generateWorld(baseSettings({ seed: 'full_determinism' }));
+      const world2 = generateWorld(baseSettings({ seed: 'full_determinism' }));
+
+      // createdAt зависит от времени, всё остальное должно совпадать
+      const stripCreatedAt = (w: typeof world1) => {
+        const copy = { ...w } as Record<string, unknown>;
+        delete copy.createdAt;
+        return copy;
       };
 
-      const world = generateWorld(settings);
-      expect(world.mode).toBeDefined();
-      expect(['realistic', 'anomalous']).toContain(world.mode);
-      // Note: This test may need adjustment based on actual cosmology selection
+      expect(stripCreatedAt(world1)).toEqual(stripCreatedAt(world2));
+      expect(JSON.stringify(world1.warnings)).toBe(JSON.stringify(world2.warnings));
+    });
+
+    it('реалистичная космология не активирует аномальный режим', () => {
+      const world = generateWorld(baseSettings({
+        seed: 'realistic_stays_realistic',
+        fixedCategories: { cosmology: 'big_bang' }
+      }));
+
+      expect(world.mode).toBe('realistic');
+      expect(world.cosmology.id).toBe('big_bang');
+      expect(world.scientificStatus).not.toBe('anomalous_rule');
+      expect(world.warnings.some(w => w.ruleId === 'anomalous_cosmology_mode_automatic_activation')).toBe(false);
+    });
+
+    it.each(['world_as_body', 'dream', 'simulation', 'monster_imprisonment'])(
+      'аномальная космология %s принудительно активирует аномальный режим',
+      (cosmologyId) => {
+        const world = generateWorld(baseSettings({
+          seed: `anomalous_${cosmologyId}`,
+          mode: 'realistic', // пользователь явно запросил realistic — режим перекрывается
+          fixedCategories: { cosmology: cosmologyId }
+        }));
+
+        expect(world.cosmology.id).toBe(cosmologyId);
+        // Режим realistic не должен молча перекрывать требования аномальной космологии
+        expect(world.mode).toBe('anomalous');
+        expect(world.scientificStatus).toBe('anomalous_rule');
+
+        // Обязательное информационное предупреждение о переключении режима
+        const activationWarning = world.warnings.find(
+          w => w.ruleId === 'anomalous_cosmology_mode_automatic_activation'
+        );
+        expect(activationWarning).toBeDefined();
+        expect(activationWarning?.severity).toBe('info');
+
+        // Ошибки «аномальная космология без аномального режима» быть не должно:
+        // режим уже активирован автоматически
+        expect(world.warnings.some(
+          w => w.ruleId === 'anomalous_cosmology_requires_anomalous_mode'
+        )).toBe(false);
+      }
+    );
+
+    it('аномальный режим не отключает физические проверки колыбели', () => {
+      const world = generateWorld(baseSettings({
+        seed: 'anomalous_keeps_checks',
+        mode: 'realistic',
+        fixedCategories: {
+          cosmology: 'dream',
+          celestialBody: 'small_planet',
+          cradle: 'supercritical_water'
+        },
+        atmospherePreset: 'earth'
+      }));
+
+      expect(world.mode).toBe('anomalous');
+      // Геологическое требование — физическая проверка, а не аномальное правило:
+      // оно должно остаться активным даже в аномальном режиме
+      expect(world.warnings.some(
+        w => w.ruleId === 'cradle_geological_requirements' && w.severity === 'error'
+      )).toBe(true);
     });
 
     it('should respect fixed categories', () => {
-      const settings: GenerationSettings = {
+      const world = generateWorld(baseSettings({
         seed: 'fixed_test',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {
-          epoch: 'first_water_era'
-        },
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
-      };
+        fixedCategories: { epoch: 'first_water_era' }
+      }));
 
-      const world = generateWorld(settings);
       expect(world.epoch.id).toBe('first_water_era');
+    });
+
+    it('зафиксированная несовместимая колыбель даёт ошибку совместимости', () => {
+      // small_planet: низкая тектоническая активность — сверхкритической воде
+      // нужна высокая геологическая активность
+      const world = generateWorld(baseSettings({
+        seed: 'fixed_incompatible_cradle',
+        fixedCategories: {
+          celestialBody: 'small_planet',
+          cradle: 'supercritical_water'
+        },
+        atmospherePreset: 'earth'
+      }));
+
+      expect(world.cradle.id).toBe('supercritical_water');
+      expect(world.celestialBody.id).toBe('small_planet');
+
+      const geoError = world.warnings.find(
+        w => w.ruleId === 'cradle_geological_requirements' && w.severity === 'error'
+      );
+      expect(geoError).toBeDefined();
+    });
+
+    it('отсутствие поддерживаемых колыбелей даёт предупреждение fallback', () => {
+      // Земная атмосфера на маленькой планете: ни одна колыбель
+      // не проходит реальные проверки совместимости
+      const world = generateWorld(baseSettings({
+        seed: 'no_supported_cradles',
+        fixedCategories: { celestialBody: 'small_planet' },
+        atmospherePreset: 'earth'
+      }));
+
+      const fallbackWarning = world.warnings.find(
+        w => w.ruleId === 'cradle_support_fallback'
+      );
+      expect(fallbackWarning).toBeDefined();
+      expect(fallbackWarning?.severity).toBe('warning');
+    });
+
+    it('локальная среда колыбели отделяется от атмосферы планеты', () => {
+      const world = generateWorld(baseSettings({
+        seed: 'cradle_env_structure',
+        fixedCategories: {
+          celestialBody: 'earth_like',
+          cradle: 'supercritical_water'
+        },
+        atmospherePreset: 'earth'
+      }));
+
+      const env = world.cradleLocalEnvironment;
+
+      // Сверхкритическая вода существует в глубинном гидротермальном резервуаре
+      expect(env.locationType).toBe('subsurface_reservoir');
+      expect(env.matterState).toBe('supercritical_fluid');
+      // Точные значения не подменяются произвольными числами
+      expect(env.temperature).toBeNull();
+      expect(env.pressure).toBeNull();
+      // Известные диапазоны требований сохраняются
+      expect(env.temperatureRange).toEqual({ min: 647, max: 1000 });
+      expect(env.pressureRange).toEqual({ min: 22.1, max: 500 });
+      expect(env.energySources.length).toBeGreaterThan(0);
+      expect(env.chemicalConstraints).toBeInstanceOf(Array);
+      expect(env.composition.length).toBeGreaterThan(0);
+      expect(env.composition.some(c => c.componentId === 'h2o')).toBe(true);
+      expect(env.locationDescription.length).toBeGreaterThan(0);
+
+      // Атмосфера планеты при этом остаётся земной
+      expect(world.atmosphere.temperature).toBe(288);
+      expect(world.atmosphere.totalPressure).toBe(1);
+      expect(world.physicalCharacteristics.surfaceTemperature).toBe(288);
+      expect(world.physicalCharacteristics.atmosphericPressure).toBe(1);
+    });
+
+    it('температура поверхности берётся из атмосферы (метановый пресет: 95 K)', () => {
+      const world = generateWorld(baseSettings({
+        seed: 'methane_surface_temperature',
+        atmospherePreset: 'methane_ethane'
+      }));
+
+      expect(world.atmosphere.temperature).toBe(95);
+      expect(world.physicalCharacteristics.surfaceTemperature).toBe(95);
+      // Основные компоненты пресета сохраняются
+      const ch4 = world.atmosphere.components.find(c => c.gasId === 'ch4');
+      expect(ch4?.percentage).toBe(60);
+    });
+
+    it('атмосфера сгенерированного мира составляет ровно 100%', () => {
+      const world = generateWorld(baseSettings({ seed: 'atmosphere_sum' }));
+
+      const sum = world.atmosphere.components.reduce((acc, c) => acc + c.percentage, 0);
+      expect(sum).toBeCloseTo(100, 6);
+      expect(world.atmosphere.components.every(c => c.percentage >= 0)).toBe(true);
+    });
+
+    it('разные seed дают разные миры', () => {
+      const signatures = new Set<string>();
+      const ids = new Set<string>();
+
+      for (let i = 0; i < 20; i++) {
+        const world = generateWorld(baseSettings({ seed: `diversity_seed_${i}` }));
+        signatures.add(worldSignature(world));
+        ids.add(world.id);
+      }
+
+      // Реальная случайность: 20 миров должны давать заметное разнообразие
+      expect(signatures.size).toBeGreaterThanOrEqual(3);
+      expect(ids.size).toBe(20);
     });
   });
 
   describe('generateMultipleWorlds', () => {
     it('should generate multiple worlds', () => {
-      const settings: GenerationSettings = {
-        seed: 'multi_test_unique',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {},
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
-      };
+      const worlds = generateMultipleWorlds(baseSettings({ seed: 'multi_test_unique' }), 3);
 
-      const worlds = generateMultipleWorlds(settings, 3);
-
-      expect(worlds).toHaveLength(3);
       expect(worlds).toHaveLength(3);
       expect(worlds[0].seed).toBe('multi_test_unique_0');
       expect(worlds[1].seed).toBe('multi_test_unique_1');
       expect(worlds[2].seed).toBe('multi_test_unique_2');
-      
     });
 
     it('should generate worlds with different seeds', () => {
-      const settings: GenerationSettings = {
-        seed: 'multi_seed_test',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {},
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
-      };
-
-      const worlds = generateMultipleWorlds(settings, 2);
+      const worlds = generateMultipleWorlds(baseSettings({ seed: 'multi_seed_test' }), 2);
 
       expect(worlds[0].seed).toBe('multi_seed_test_0');
       expect(worlds[1].seed).toBe('multi_seed_test_1');
+    });
+
+    it('миры из серии различаются между собой', () => {
+      const worlds = generateMultipleWorlds(baseSettings({ seed: 'series_diversity' }), 8);
+
+      const signatures = new Set(worlds.map(worldSignature));
+      expect(signatures.size).toBeGreaterThanOrEqual(2);
     });
   });
 
   describe('generateWorldWithFixedCategories', () => {
     it('should override existing fixed categories', () => {
-      const settings: GenerationSettings = {
-        seed: 'override_test',
-        mode: 'realistic',
-        weights: {
-          cosmology: {},
-          epoch: {},
-          centralObject: {},
-          celestialBody: {},
-          cradle: {}
-        },
-        fixedCategories: {
-          epoch: 'first_water_era'
-        },
-        enableChemicalEvolution: false,
-        chemicalEvolutionSteps: 0
-      };
-
-      const world = generateWorldWithFixedCategories(settings, {
-        epoch: 'golden_middle'
-      });
+      const world = generateWorldWithFixedCategories(
+        baseSettings({
+          seed: 'override_test',
+          fixedCategories: { epoch: 'first_water_era' }
+        }),
+        { epoch: 'golden_middle' }
+      );
 
       expect(world.epoch.id).toBe('golden_middle');
     });

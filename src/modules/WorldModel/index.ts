@@ -8,22 +8,173 @@ import type {
   CentralObjectOption,
   CelestialBodyOption,
   CradleOption,
-  AtmosphereState
+  AtmosphereState,
+  CradleLocalEnvironment,
+  CradleLocationType,
+  LocalEnvironmentComponent,
+  EnergySourceClass
 } from '../../types';
 
+// ============================================
+// ЛОКАЛЬНАЯ СРЕДА КОЛЫБЕЛИ ЖИЗНИ
+// ============================================
 
+// Расположение локальной среды для известных колыбелей.
+// Среда возникновения жизни НЕ обязана совпадать с условиями
+// на поверхности планеты: сверхкритическая вода может существовать
+// в глубинном гидротермальном резервуаре при совершенно других
+// поверхностных условиях, а аэрозольная жизнь — в слоях атмосферы.
+const CRADLE_LOCATION_MAP: Record<string, { type: CradleLocationType; description: string }> = {
+  supercritical_water: {
+    type: 'subsurface_reservoir',
+    description: 'Глубинный гидротермальный резервуар со сверхкритической водой'
+  },
+  supercritical_co2: {
+    type: 'subsurface_reservoir',
+    description: 'Глубинный резервуар со сверхкритическим CO₂'
+  },
+  h2o_co2_supercritical_mix: {
+    type: 'subsurface_reservoir',
+    description: 'Глубинный резервуар со смесью H₂O–CO₂ в сверхкритическом состоянии'
+  },
+  liquid_ammonia: {
+    type: 'ocean',
+    description: 'Резервуары жидкого аммиака (аммиачный океан или приповерхностные резервуары)'
+  },
+  liquid_methane_ethane: {
+    type: 'ocean',
+    description: 'Углеводородные моря и озёра жидкого метана и этана (аналог Титана)'
+  },
+  hydrogen_helium_aerosols: {
+    type: 'atmosphere',
+    description: 'Слои водородно-гелиевой оболочки с аэрозолями (атмосфера газового гиганта)'
+  },
+  molten_salts: {
+    type: 'deep_planetary_layers',
+    description: 'Глубинные слои планетной оболочки с расплавами солей'
+  }
+};
+
+// Состав локальной среды для известных колыбелей.
+// Описывает среду возникновения жизни, а не атмосферу планеты.
+const CRADLE_COMPOSITION_MAP: Record<string, LocalEnvironmentComponent[]> = {
+  supercritical_water: [
+    { componentId: 'h2o', description: 'Сверхкритическая вода (H₂O) — растворитель среды' }
+  ],
+  supercritical_co2: [
+    { componentId: 'co2', description: 'Сверхкритический CO₂ — растворитель среды' }
+  ],
+  h2o_co2_supercritical_mix: [
+    { componentId: 'h2o', description: 'Сверхкритическая вода (H₂O)' },
+    { componentId: 'co2', description: 'Сверхкритический CO₂' }
+  ],
+  liquid_ammonia: [
+    { componentId: 'nh3', description: 'Жидкий аммиак (NH₃) — растворитель среды' }
+  ],
+  liquid_methane_ethane: [
+    { componentId: 'ch4', description: 'Жидкий метан (CH₄) — растворитель среды' },
+    { componentId: 'c2h6', description: 'Жидкий этан (C₂H₆) — растворитель среды' }
+  ],
+  hydrogen_helium_aerosols: [
+    { componentId: 'h2', description: 'Водород (H₂) — несущий газ среды' },
+    { componentId: 'he', description: 'Гелий (He) — несущий газ среды' },
+    { componentId: 'aerosol_droplets', description: 'Аэрозольные капли — микрообитаемая среда' }
+  ],
+  molten_salts: [
+    { componentId: 'molten_salts', description: 'Расплавы солей (например, NaCl, KCl) — ионный растворитель' }
+  ]
+};
+
+/**
+ * Определение типа расположения локальной среды колыбели жизни.
+ * Для неизвестных колыбелей используется тип 'other'.
+ */
+export function getCradleLocationType(cradle: CradleOption): CradleLocationType {
+  return CRADLE_LOCATION_MAP[cradle.id]?.type ?? 'other';
+}
+
+/**
+ * Формирование локальной среды колыбели жизни.
+ *
+ * Структура отделена от глобальной атмосферы планеты и от её поверхности:
+ * - точные температура и давление среды остаются null, если они неизвестны
+ *   (НЕ подменяются произвольными числами);
+ * - известные диапазоны требований колыбели сохраняются в
+ *   temperatureRange / pressureRange;
+ * - состав среды описывает растворитель/несущую среду колыбели,
+ *   а не процентные доли атмосферы планеты.
+ */
+export function determineCradleLocalEnvironment(params: {
+  cradle: CradleOption;
+  celestialBody?: CelestialBodyOption;
+  atmosphere?: AtmosphereState;
+}): CradleLocalEnvironment {
+  const { cradle } = params;
+  const location = CRADLE_LOCATION_MAP[cradle.id] ?? {
+    type: 'other' as CradleLocationType,
+    description: `Локальная среда колыбели «${cradle.name}»`
+  };
+
+  // Состав среды: известный для колыбели либо производный от её растворителей.
+  const composition: LocalEnvironmentComponent[] =
+    CRADLE_COMPOSITION_MAP[cradle.id] ??
+    cradle.solventTypes.map(solvent => ({
+      componentId: solvent.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+      description: solvent
+    }));
+
+  // Для атмосферной колыбели дополняем состав основными газами атмосферы,
+  // если они известны — это реальные данные сгенерированного мира.
+  if (location.type === 'atmosphere' && params.atmosphere) {
+    for (const component of params.atmosphere.components) {
+      if (!component.isTrace && component.percentage > 1 &&
+          !composition.some(c => c.componentId === component.gasId)) {
+        composition.push({
+          componentId: component.gasId,
+          description: `Атмосферный газ (${component.percentage.toFixed(4)}%)`
+        });
+      }
+    }
+  }
+
+  const notes = [
+    ...cradle.compatibilityRequirements,
+    'Локальная среда колыбели не тождественна условиям на поверхности планеты: ' +
+    'точные значения температуры и давления среды неизвестны и не подменяются произвольными числами.'
+  ].join('; ');
+
+  return {
+    temperature: null,
+    temperatureRange: { ...cradle.requiredTemperatureRange },
+    pressure: null,
+    pressureRange: { ...cradle.requiredPressureRange },
+    composition,
+    matterState: cradle.matterState,
+    energySources: [...cradle.availableEnergySources] as EnergySourceClass[],
+    chemicalConstraints: [...cradle.chemicalConstraints],
+    locationType: location.type,
+    locationDescription: location.description,
+    notes
+  };
+}
 
 // ============================================
 // ФУНКЦИИ РАСЧЕТА ФИЗИЧЕСКИХ ХАРАКТЕРИСТИК
 // ============================================
 
 /**
- * Расчет физических характеристик мира
+ * Расчет физических характеристик, зависящих только от небесного тела,
+ * центрального объекта и атмосферы (без колыбели жизни).
+ *
+ * ВАЖНО: температура поверхности и атмосферное давление берутся только
+ * из известных данных атмосферы. Если данные неизвестны, поля остаются
+ * незаданными — они НЕ подменяются характеристиками колыбели жизни,
+ * потому что локальная среда возникновения жизни может существенно
+ * отличаться от поверхности планеты.
  */
-export function calculatePhysicalCharacteristics(params: {
+export function calculateBodyCharacteristics(params: {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
-  cradle: CradleOption;
   atmosphere?: AtmosphereState;
 }): PhysicalCharacteristics {
   const characteristics: PhysicalCharacteristics = {};
@@ -37,31 +188,64 @@ export function calculatePhysicalCharacteristics(params: {
   const gravity = calculateSurfaceGravity(params.celestialBody);
   if (gravity) characteristics.surfaceGravity = gravity;
 
-  // Расчет температуры поверхности
-  const temperature = estimateSurfaceTemperature(params);
-  if (temperature) characteristics.surfaceTemperature = temperature;
+  // Температура поверхности: только известные данные атмосферы.
+  // Не подменяем её температурой колыбели жизни.
+  if (typeof params.atmosphere?.temperature === 'number') {
+    characteristics.surfaceTemperature = params.atmosphere.temperature;
+  }
 
-  // Расчет атмосферного давления
-  const pressure = estimateAtmosphericPressure(params);
-  if (pressure) characteristics.atmosphericPressure = pressure;
+  // Атмосферное давление: только известные данные атмосферы.
+  if (typeof params.atmosphere?.totalPressure === 'number') {
+    characteristics.atmosphericPressure = params.atmosphere.totalPressure;
+  }
 
   // Определение орбитальной конфигурации
-  characteristics.orbitalConfiguration = determineOrbitalConfiguration(params);
+  characteristics.orbitalConfiguration = determineOrbitalConfiguration({
+    centralObject: params.centralObject,
+    celestialBody: params.celestialBody
+  });
 
   // Определение геологической активности
   characteristics.geologicalActivity = determineGeologicalActivity(params.celestialBody);
 
-  // Определение резервуаров жидкости
-  characteristics.liquidReservoirs = determineLiquidReservoirs(params);
-
-  // Определение химических ограничений
-  characteristics.chemicalConstraints = determineChemicalConstraints(params);
-
   // Определение космических угроз
-  characteristics.cosmicThreats = determineCosmicThreats(params);
+  characteristics.cosmicThreats = determineCosmicThreats({
+    centralObject: params.centralObject,
+    celestialBody: params.celestialBody
+  });
 
   // Определение планетарных угроз
-  characteristics.planetaryThreats = determinePlanetaryThreats(params);
+  characteristics.planetaryThreats = determinePlanetaryThreats({
+    centralObject: params.centralObject,
+    celestialBody: params.celestialBody
+  });
+
+  return characteristics;
+}
+
+/**
+ * Расчет полных физических характеристик мира
+ * (характеристики тела + характеристики, зависящие от колыбели).
+ */
+export function calculatePhysicalCharacteristics(params: {
+  centralObject: CentralObjectOption;
+  celestialBody: CelestialBodyOption;
+  cradle: CradleOption;
+  atmosphere?: AtmosphereState;
+}): PhysicalCharacteristics {
+  const characteristics = calculateBodyCharacteristics(params);
+
+  // Определение резервуаров жидкости (зависит от колыбели)
+  characteristics.liquidReservoirs = determineLiquidReservoirs({
+    celestialBody: params.celestialBody,
+    cradle: params.cradle
+  });
+
+  // Определение химических ограничений (зависит от колыбели)
+  characteristics.chemicalConstraints = determineChemicalConstraints({
+    celestialBody: params.celestialBody,
+    cradle: params.cradle
+  });
 
   return characteristics;
 }
@@ -88,7 +272,7 @@ function calculateSurfaceGravity(body: CelestialBodyOption): number | undefined 
   if (gravityMatch) {
     return parseFloat(gravityMatch[1]);
   }
-  
+
   // Для известных типов тел используем стандартные значения
   switch (body.id) {
     case 'earth_like':
@@ -111,54 +295,11 @@ function calculateSurfaceGravity(body: CelestialBodyOption): number | undefined 
 }
 
 /**
- * Оценка температуры поверхности
- */
-function estimateSurfaceTemperature(params: {
-  centralObject: CentralObjectOption;
-  celestialBody: CelestialBodyOption;
-  cradle: CradleOption;
-  atmosphere?: AtmosphereState;
-}): number | undefined {
-  // Если есть атмосфера с заданной температурой, используем ее
-  if (params.atmosphere?.temperature) {
-    return params.atmosphere.temperature;
-  }
-
-  // Для колыбели используем среднюю температуру диапазона
-  const cradleTemp = (params.cradle.requiredTemperatureRange.min + 
-                      params.cradle.requiredTemperatureRange.max) / 2;
-  
-  return cradleTemp;
-}
-
-/**
- * Оценка атмосферного давления
- */
-function estimateAtmosphericPressure(params: {
-  centralObject: CentralObjectOption;
-  celestialBody: CelestialBodyOption;
-  cradle: CradleOption;
-  atmosphere?: AtmosphereState;
-}): number | undefined {
-  // Если есть атмосфера с заданным давлением, используем ее
-  if (params.atmosphere?.totalPressure) {
-    return params.atmosphere.totalPressure;
-  }
-
-  // Для колыбели используем среднее давление диапазона
-  const cradlePressure = (params.cradle.requiredPressureRange.min + 
-                          params.cradle.requiredPressureRange.max) / 2;
-  
-  return cradlePressure;
-}
-
-/**
  * Определение орбитальной конфигурации
  */
 function determineOrbitalConfiguration(params: {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
-  cradle: CradleOption;
 }): string {
   const body = params.celestialBody;
   const central = params.centralObject;
@@ -196,12 +337,19 @@ function determineOrbitalConfiguration(params: {
  * Определение геологической активности
  */
 function determineGeologicalActivity(body: CelestialBodyOption): string {
-  // Анализируем геологические свойства
-  if (body.geologicalProperties.some(p => p.includes('Active') || p.includes('High'))) {
+  // Анализируем геологические свойства (регистронезависимо)
+  const props = body.geologicalProperties.map(p => p.toLowerCase());
+
+  if (props.some(p =>
+    p.includes('active tectonic') ||
+    p.includes('high tectonic') ||
+    p.includes('extreme tectonic') ||
+    p.includes('tidal heating')
+  )) {
     return 'Высокая геологическая активность';
   }
 
-  if (body.geologicalProperties.some(p => p.includes('Low') || p.includes('Minimal'))) {
+  if (props.some(p => p.includes('low tectonic') || p.includes('minimal'))) {
     return 'Низкая геологическая активность';
   }
 
@@ -213,7 +361,6 @@ function determineGeologicalActivity(body: CelestialBodyOption): string {
  * Определение резервуаров жидкости
  */
 function determineLiquidReservoirs(params: {
-  centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
   cradle: CradleOption;
 }): string[] {
@@ -250,7 +397,6 @@ function determineLiquidReservoirs(params: {
  * Определение химических ограничений
  */
 function determineChemicalConstraints(params: {
-  centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
   cradle: CradleOption;
 }): string[] {
@@ -272,7 +418,6 @@ function determineChemicalConstraints(params: {
 function determineCosmicThreats(params: {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
-  cradle: CradleOption;
 }): string[] {
   const threats: string[] = [];
 
@@ -304,7 +449,6 @@ function determineCosmicThreats(params: {
 function determinePlanetaryThreats(params: {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
-  cradle: CradleOption;
 }): string[] {
   const threats: string[] = [];
 
@@ -373,6 +517,15 @@ export function createWorldDescription(world: Partial<GeneratedWorld>): string {
     parts.push(`- Давление: ${world.cradle.requiredPressureRange.min}-${world.cradle.requiredPressureRange.max} atm`);
   }
 
+  // Локальная среда колыбели жизни
+  if (world.cradleLocalEnvironment) {
+    const env = world.cradleLocalEnvironment;
+    parts.push(`**Локальная среда колыбели:** ${env.locationDescription}`);
+    parts.push(`- Тип расположения: ${env.locationType}`);
+    parts.push(`- Диапазон температур среды: ${env.temperatureRange ? `${env.temperatureRange.min}-${env.temperatureRange.max} K` : 'неизвестно'}`);
+    parts.push(`- Диапазон давлений среды: ${env.pressureRange ? `${env.pressureRange.min}-${env.pressureRange.max} atm` : 'неизвестно'}`);
+  }
+
   // Физические характеристики
   if (world.physicalCharacteristics) {
     const pc = world.physicalCharacteristics;
@@ -433,6 +586,9 @@ export function updateWorld(
 
 export default {
   calculatePhysicalCharacteristics,
+  calculateBodyCharacteristics,
+  determineCradleLocalEnvironment,
+  getCradleLocationType,
   createWorldDescription,
   createShortDescription,
   updateWorld

@@ -166,6 +166,50 @@ export interface CradleOption {
 }
 
 // ============================================
+// 6.1 ЛОКАЛЬНАЯ СРЕДА КОЛЫБЕЛИ ЖИЗНИ
+// ============================================
+//
+// Отдельная структура локальных условий колыбели жизни.
+// Она НЕ подменяет глобальную атмосферу планеты и температуру
+// её поверхности: сверхкритическая водная среда может существовать
+// в глубинном гидротермальном резервуаре, даже если на поверхности
+// условия совершенно другие; жизнь в водородно-гелиевой оболочке
+// живёт в слоях атмосферы, а не на твёрдой поверхности.
+//
+// Неизвестные значения остаются null / пустыми массивами —
+// они НЕ подменяются произвольными числами.
+
+// Тип расположения локальной среды колыбели жизни
+export type CradleLocationType =
+  | 'surface'                 // поверхность небесного тела
+  | 'subsurface_reservoir'    // подземный резервуар (гидротермальный и т.п.)
+  | 'ocean'                   // океан / глобальные жидкие резервуары
+  | 'atmosphere'              // слои атмосферы
+  | 'deep_planetary_layers'   // глубокие слои планетной оболочки
+  | 'other';                  // иное расположение
+
+// Описание компонента локальной среды (не процентная доля атмосферы,
+// а качественный состав среды возникновения жизни)
+export interface LocalEnvironmentComponent {
+  componentId: ID;
+  description: string;
+}
+
+export interface CradleLocalEnvironment {
+  temperature: number | null; // в Кельвинах; null, если точное значение неизвестно
+  temperatureRange: { min: number; max: number } | null; // известный диапазон требований, K
+  pressure: number | null; // в атмосферах; null, если точное значение неизвестно
+  pressureRange: { min: number; max: number } | null; // известный диапазон требований, atm
+  composition: LocalEnvironmentComponent[]; // состав локальной среды
+  matterState: MatterState; // агрегатное состояние среды
+  energySources: EnergySourceClass[]; // доступные источники энергии
+  chemicalConstraints: string[]; // химические ограничения среды
+  locationType: CradleLocationType; // тип расположения среды
+  locationDescription: string; // человекочитаемое описание расположения
+  notes: string; // примечания и допущения
+}
+
+// ============================================
 // 7. ХИМИЧЕСКИЕ ВЕЩЕСТВА
 // ============================================
 
@@ -248,7 +292,8 @@ export type RuleCategory =
   | 'chemical_composition'
   | 'atmosphere'
   | 'energy_sources'
-  | 'matter_state';
+  | 'matter_state'
+  | 'geological_requirements';
 
 export interface CompatibilityRule {
   id: ID;
@@ -260,6 +305,13 @@ export interface CompatibilityRule {
   resolutionSuggestions: string[];
   dependsOn: ID[];
   isActive: boolean;
+  /**
+   * Явное исключение для аномального режима.
+   * Аномальный режим НЕ отключает все проверки подряд: отключаются
+   * только правила, у которых этот флаг установлен, и каждое такое
+   * исключение привязано к конкретному аномальному правилу.
+   */
+  exemptInAnomalousMode?: boolean;
 }
 
 // ============================================
@@ -331,6 +383,9 @@ export interface GeneratedWorld {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
   cradle: CradleOption;
+  // Локальная среда колыбели жизни — отдельно от глобальной атмосферы
+  // планеты и температуры её поверхности
+  cradleLocalEnvironment: CradleLocalEnvironment;
   // Расширенные характеристики
   physicalCharacteristics: PhysicalCharacteristics;
   energySources: EnergySources;
@@ -429,6 +484,6 @@ export interface SelectOption<T> {
 // 18. КОНСТАНТЫ
 // ============================================
 
-export const GENERATOR_VERSION = '0.1.0';
+export const GENERATOR_VERSION = '0.2.0';
 export const STORAGE_KEY = 'evowars_worlds';
 export const SETTINGS_KEY = 'evowars_settings';

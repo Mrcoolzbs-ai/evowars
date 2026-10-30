@@ -16,6 +16,8 @@ import gases from '../Data/gases';
 // ============================================
 
 // Пресет "Метаново-этановая атмосфера"
+// ВАЖНО: исходные концентрации и следовые компоненты пресета сохранены
+// без изменений; нормализация не должна переписывать эти значения.
 const methaneEthanePreset: AtmosphereState = {
   components: [
     { gasId: 'ch4', percentage: 60, isTrace: false, uncertainty: 'Приблизительно', warnings: [] },
@@ -96,11 +98,203 @@ const atmospherePresets: Record<string, AtmosphereState> = {
 };
 
 // ============================================
+// НОРМАЛИЗАЦИЯ АТМОСФЕРЫ
+// ============================================
+
+// Идентификатор компонента "неизвестные минорные компоненты".
+// Неучтённый остаток обозначается именно так, а не произвольным газом.
+export const UNIDENTIFIED_COMPONENT_ID = 'unidentified';
+
+// Допустимая погрешность округления суммы компонентов (в процентах).
+// Пресеты заданы с 2-4 значащими цифрами, поэтому отклонения до 0.05%
+// считаются погрешностью округления, а не ошибкой состава.
+export const DEFAULT_NORMALIZATION_TOLERANCE = 0.05;
+
+// Режим нормализации:
+// - 'strict' — по умолчанию: если сумма известных компонентов превышает 100%
+//   сверх допустимой погрешности, выдаётся понятная ошибка;
+// - 'proportional' — явно выбранный режим пропорциональной нормализации:
+//   все компоненты пропорционально масштабируются к 100%.
+export type NormalizeMode = 'strict' | 'proportional';
+
+export interface NormalizeAtmosphereOptions {
+  mode?: NormalizeMode;
+  tolerance?: number;
+}
+
+/**
+ * Нормализация атмосферы (приведение суммы компонентов к 100%).
+ *
+ * Алгоритм (исправлен по результатам аудита):
+ *
+ * 1. Сумма считается по ВСЕМ компонентам — основным и следовым.
+ *    Следовые компоненты учитываются в общей сумме.
+ * 2. Основные компоненты НЕ принудительно растягиваются до 100%,
+ *    если в атмосфере присутствуют другие газы.
+ * 3. Если сумма известна с точностью до погрешности округления (по
+ *    умолчанию 0.05%) — исходные значения сохраняются без изменений.
+ * 4. Если сумма меньше 100% — неучтённый остаток добавляется ОДИН раз
+ *    как "неизвестные минорные компоненты" (gasId = 'unidentified').
+ *    Повторная нормализация не приводит к двойному учёту остатка.
+ * 5. Если сумма известных компонентов превышает 100% сверх погрешности:
+ *    - режим 'strict' (по умолчанию) — понятная ошибка;
+ *    - режим 'proportional' — явная пропорциональная нормализация.
+ * 6. Отрицательные и нечисловые концентрации не допускаются — ошибка.
+ * 7. Исходные значения, диапазоны (minRange/maxRange), пометка isTrace
+ *    и неопределённость (uncertainty) сохраняются.
+ */
+export function normalizeAtmosphere(
+  atmosphere: AtmosphereState,
+  options: NormalizeAtmosphereOptions = {}
+): AtmosphereState {
+  const mode: NormalizeMode = options.mode ?? 'strict';
+  const tolerance = options.tolerance ?? DEFAULT_NORMALIZATION_TOLERANCE;
+
+  // Пустая атмосфера не нормализуется
+  if (atmosphere.components.length === 0) {
+    return { ...atmosphere, components: [] };
+  }
+
+  // 6. Проверка корректности концентраций: без отрицательных значений и NaN.
+  for (const component of atmosphere.components) {
+    if (typeof component.percentage !== 'number' || Number.isNaN(component.percentage)) {
+      throw new Error(
+        `Некорректная концентрация компонента ${component.gasId}: ${component.percentage}. ` +
+        'Концентрация должна быть числом.'
+      );
+    }
+    if (component.percentage < 0) {
+      throw new Error(
+        `Отрицательная концентрация компонента ${component.gasId}: ${component.percentage}%. ` +
+        'Отрицательные концентрации не допускаются.'
+      );
+    }
+  }
+
+  // 1. Сумма по всем компонентам (основные + следовые + уже существующий остаток).
+  const total = atmosphere.components.reduce((sum, c) => sum + c.percentage, 0);
+  const remainder = 100 - total;
+
+  // 3. Сумма уже равна 100% с учётом погрешности округления — ничего не меняем.
+  if (Math.abs(remainder) <= tolerance) {
+    return { ...atmosphere, components: atmosphere.components.map(c => ({ ...c })) };
+  }
+
+  // 5. Сумма известных компонентов превышает 100% сверх погрешности.
+  if (remainder < 0) {
+    if (mode === 'proportional') {
+      // Явно выбранный режим пропорциональной нормализации:
+      // масштабируем все компоненты пропорционально, сохраняя соотношения.
+      const normalizedComponents = atmosphere.components.map(c => ({
+        ...c,
+        percentage: (c.percentage / total) * 100
+      }));
+      return { ...atmosphere, components: normalizedComponents };
+    }
+    throw new Error(
+      `Сумма компонентов атмосферы превышает 100%: ${total.toFixed(6)}% ` +
+      `(превышение ${Math.abs(remainder).toFixed(6)}%, допуск ${tolerance}%). ` +
+      'Используйте режим пропорциональной нормализации ' +
+      '(normalizeAtmosphere(atmosphere, { mode: \'proportional\' })) ' +
+      'или исправьте состав.'
+    );
+  }
+
+  // 4. Сумма меньше 100% — неучтённый остаток обозначается как
+  // неизвестные минорные компоненты, а не как произвольный газ.
+  // Если такой компонент уже существует, остаток добавляется к нему
+  // (без двойного учёта).
+  const existingUnidentifiedIndex = atmosphere.components.findIndex(
+    c => c.gasId === UNIDENTIFIED_COMPONENT_ID
+  );
+
+  const components: AtmosphereComponent[] = atmosphere.components.map(c => ({ ...c }));
+
+  if (existingUnidentifiedIndex !== -1) {
+    const existing = components[existingUnidentifiedIndex];
+    components[existingUnidentifiedIndex] = {
+      ...existing,
+      percentage: existing.percentage + remainder
+    };
+  } else {
+    components.push({
+      gasId: UNIDENTIFIED_COMPONENT_ID,
+      percentage: remainder,
+      isTrace: true,
+      uncertainty: 'Неуточненные минорные компоненты',
+      warnings: ['Содержит неидентифицированные газы']
+    });
+  }
+
+  return { ...atmosphere, components };
+}
+
+// ============================================
+// ПРОВЕРКА ВАЛИДНОСТИ СОСТАВА АТМОСФЕРЫ
+// ============================================
+
+export interface AtmosphereValidation {
+  valid: boolean;
+  total: number;
+  error: string | null;
+  issues: string[];
+}
+
+/**
+ * Отдельная проверка валидности состава атмосферы.
+ * Проверяет:
+ * - отсутствие отрицательных и нечисловых концентраций;
+ * - отсутствие дубликатов газов;
+ * - сумму компонентов (100% с учётом допустимой погрешности округления).
+ */
+export function validateAtmosphere(
+  atmosphere: AtmosphereState,
+  tolerance: number = DEFAULT_NORMALIZATION_TOLERANCE
+): AtmosphereValidation {
+  const issues: string[] = [];
+  const seen = new Set<ID>();
+  let total = 0;
+
+  for (const component of atmosphere.components) {
+    if (typeof component.percentage !== 'number' || Number.isNaN(component.percentage)) {
+      issues.push(`Компонент ${component.gasId}: концентрация не является числом (${component.percentage})`);
+      continue;
+    }
+    if (component.percentage < 0) {
+      issues.push(`Компонент ${component.gasId}: отрицательная концентрация (${component.percentage}%)`);
+    }
+    if (seen.has(component.gasId)) {
+      issues.push(`Компонент ${component.gasId} указан более одного раза`);
+    }
+    seen.add(component.gasId);
+    total += component.percentage;
+  }
+
+  const sumValid = Math.abs(total - 100) <= tolerance;
+  if (!sumValid) {
+    issues.push(`Сумма компонентов: ${total.toFixed(6)}% (ожидалось 100% с допуском ${tolerance}%)`);
+  }
+
+  const valid = issues.length === 0;
+
+  return {
+    valid,
+    total,
+    error: valid
+      ? null
+      : `Состав атмосферы невалиден: ${issues.join('; ')}`,
+    issues
+  };
+}
+
+// ============================================
 // ФУНКЦИИ РАБОТЫ С АТМОСФЕРОЙ
 // ============================================
 
 /**
- * Создание атмосферы из пресета
+ * Создание атмосферы из пресета.
+ * Исходные концентрации пресета сохраняются; неучтённый остаток
+ * обозначается как неизвестные минорные компоненты.
  */
 export function createAtmosphere(presetId: string, rng?: any): AtmosphereState {
   const preset = atmospherePresets[presetId];
@@ -108,16 +302,24 @@ export function createAtmosphere(presetId: string, rng?: any): AtmosphereState {
     throw new Error(`Unknown atmosphere preset: ${presetId}`);
   }
 
-  // Если есть RNG, можно добавить небольшие случайные вариации
+  // Работаем с копией, чтобы не изменять пресет
+  const copy: AtmosphereState = {
+    ...preset,
+    components: preset.components.map(c => ({ ...c }))
+  };
+
+  // Если есть RNG, добавляем небольшие случайные вариации
   if (rng) {
-    return addRandomVariations(preset, rng);
+    return addRandomVariations(copy, rng);
   }
 
-  return { ...preset };
+  return normalizeAtmosphere(copy);
 }
 
 /**
- * Добавление случайных вариаций к атмосфере
+ * Добавление случайных вариаций к атмосфере.
+ * Основные компоненты (> 5%, не следовые) не изменяются;
+ * следовые компоненты варьируются в пределах ±10%.
  */
 function addRandomVariations(atmosphere: AtmosphereState, rng: any): AtmosphereState {
   const result: AtmosphereState = {
@@ -128,10 +330,10 @@ function addRandomVariations(atmosphere: AtmosphereState, rng: any): AtmosphereS
         return { ...component };
       }
 
-      // Добавляем небольшие вариации к следовым компонентам
+      // Добавляем небольшие вариации к следовым и минорным компонентам
       const variation = (rng.next() - 0.5) * 0.2; // ±10%
       const newPercentage = component.percentage * (1 + variation);
-      
+
       return {
         ...component,
         percentage: Math.max(0, newPercentage)
@@ -144,77 +346,10 @@ function addRandomVariations(atmosphere: AtmosphereState, rng: any): AtmosphereS
 }
 
 /**
- * Нормализация атмосферы (приведение к 100%)
- */
-export function normalizeAtmosphere(atmosphere: AtmosphereState): AtmosphereState {
-  // Разделяем на основные и следовые компоненты
-  const majorComponents = atmosphere.components.filter(c => !c.isTrace);
-  const traceComponents = atmosphere.components.filter(c => c.isTrace);
-
-  // Считаем сумму основных компонентов
-  const majorSum = majorComponents.reduce((sum, c) => sum + c.percentage, 0);
-
-  // Нормализуем основные компоненты
-  const normalizedMajor = majorComponents.map(c => ({
-    ...c,
-    percentage: (c.percentage / majorSum) * 100
-  }));
-
-  // Для следовых компонентов оставляем их проценты как есть
-  // но учитываем, что они должны быть меньше основных
-  
-  // Создаем "неуточненные минорные компоненты" для остатка
-  const majorTotal = normalizedMajor.reduce((sum, c) => sum + c.percentage, 0);
-  const traceTotal = traceComponents.reduce((sum, c) => sum + c.percentage, 0);
-  const total = majorTotal + traceTotal;
-
-  // Если есть остаток, добавляем его как неуточненные компоненты
-  const unaccounted = 100 - total;
-
-  const components: AtmosphereComponent[] = [...normalizedMajor, ...traceComponents];
-
-  if (Math.abs(unaccounted) > 0.001) {
-    // Добавляем неуточненные компоненты только если остаток значительный
-    if (unaccounted > 0.01) {
-      components.push({
-        gasId: 'unidentified',
-        percentage: unaccounted,
-        isTrace: true,
-        uncertainty: 'Неуточненные минорные компоненты',
-        warnings: ['Содержит неидентифицированные газы']
-      });
-    }
-  }
-
-  return {
-    ...atmosphere,
-    components
-  };
-}
-
-/**
  * Получение газа по ID
  */
 export function getGasById(gasId: ID): GasSpecies | undefined {
   return gases.find(g => g.id === gasId);
-}
-
-/**
- * Проверка, что сумма компонентов атмосферы равна 100%
- */
-export function validateAtmosphere(atmosphere: AtmosphereState): {
-  valid: boolean;
-  total: number;
-  error: string | null;
-} {
-  const total = atmosphere.components.reduce((sum, c) => sum + c.percentage, 0);
-  const isValid = Math.abs(total - 100) < 0.001;
-
-  return {
-    valid: isValid,
-    total,
-    error: isValid ? null : `Сумма компонентов: ${total.toFixed(6)}% (ожидалось 100%)`
-  };
 }
 
 /**
@@ -223,7 +358,7 @@ export function validateAtmosphere(atmosphere: AtmosphereState): {
 export function createRandomAtmosphere(rng: any, bodyType: string): AtmosphereState {
   // Выбираем пресет в зависимости от типа тела
   let presetId = 'methane_ethane';
-  
+
   if (bodyType === 'earth_like' || bodyType === 'super_earth') {
     presetId = rng.choose(['earth', 'methane_ethane']);
   } else if (bodyType === 'small_planet') {
@@ -276,7 +411,10 @@ export function createEmptyAtmosphere(): AtmosphereState {
 }
 
 /**
- * Добавление компонента к атмосфере
+ * Добавление компонента к атмосфере.
+ * Пользовательское редактирование использует явно выбранный
+ * режим пропорциональной нормализации, чтобы новый компонент
+ * помещался в состав без превышения 100%.
  */
 export function addComponent(
   atmosphere: AtmosphereState,
@@ -295,7 +433,7 @@ export function addComponent(
   };
 
   let components: AtmosphereComponent[];
-  
+
   if (existingIndex !== -1) {
     // Обновляем существующий компонент
     components = [...atmosphere.components];
@@ -305,26 +443,26 @@ export function addComponent(
     components = [...atmosphere.components, newComponent];
   }
 
-  return normalizeAtmosphere({
-    ...atmosphere,
-    components
-  });
+  return normalizeAtmosphere(
+    { ...atmosphere, components },
+    { mode: 'proportional' }
+  );
 }
 
 /**
- * Удаление компонента из атмосферы
+ * Удаление компонента из атмосферы.
+ * Остаток неучтённой доли обозначается как неизвестные минорные компоненты.
  */
 export function removeComponent(atmosphere: AtmosphereState, gasId: ID): AtmosphereState {
   const components = atmosphere.components.filter(c => c.gasId !== gasId);
-  
-  return normalizeAtmosphere({
-    ...atmosphere,
-    components
-  });
+
+  return normalizeAtmosphere({ ...atmosphere, components });
 }
 
 /**
- * Обновление процента компонента
+ * Обновление процента компонента.
+ * Пользовательское редактирование использует явно выбранный
+ * режим пропорциональной нормализации.
  */
 export function updateComponentPercentage(
   atmosphere: AtmosphereState,
@@ -338,10 +476,10 @@ export function updateComponentPercentage(
     return c;
   });
 
-  return normalizeAtmosphere({
-    ...atmosphere,
-    components
-  });
+  return normalizeAtmosphere(
+    { ...atmosphere, components },
+    { mode: 'proportional' }
+  );
 }
 
 export default {
