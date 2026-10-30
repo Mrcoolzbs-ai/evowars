@@ -31,8 +31,9 @@
 // не создаёт и не уничтожает: переносы фиксируются в FluxLedger.
 
 import type { PhysicalQuantity } from './physicalQuantity';
-import { assertDimension, dimension } from './physicalQuantity';
+import { assertDimension, convert, dimension, QuantityError } from './physicalQuantity';
 import type { ScientificValue } from './scientificValue';
+import { validateScientificValueShape } from './scientificValue';
 
 // ============================================
 // 1. ОСНОВАНИЯ ИНВЕНТАРЯ
@@ -67,24 +68,90 @@ export const BASIS_DIMENSIONS: Partial<Record<InventoryBasis, { dimensionOf: Ret
 };
 
 /**
+ * Основания инвентаря, известные ядру (Stage 4.1.1).
+ * Runtime-список для валидации данных из JSON: основание может
+ * прийти из сохранения или внешнего источника и содержать мусор.
+ */
+export const INVENTORY_BASES: readonly InventoryBasis[] = [
+  'amount',
+  'mass',
+  'column_amount',
+  'column_mass',
+  'molar_concentration',
+  'mass_concentration',
+  'molar_fraction',
+  'mass_fraction',
+  'arbitrary_units'
+];
+
+/** Известно ли основание инвентаря ядру. */
+export function isKnownBasis(basis: string): basis is InventoryBasis {
+  return (INVENTORY_BASES as readonly string[]).includes(basis);
+}
+
+/**
+ * Проверка молярной массы перед преобразованием (Stage 4.1.1):
+ * null/NaN/∞/отрицательная масса не пригодны для перевода
+ * моль ↔ кг и не «зануляются».
+ */
+function requireMolarMass(molarMassKgMol: number, operation: string): void {
+  if (!Number.isFinite(molarMassKgMol) || molarMassKgMol <= 0) {
+    throw new QuantityError({
+      code: 'invalid_number',
+      component: 'Reservoir',
+      operation,
+      message: `молярная масса должна быть конечным положительным числом (кг/моль), получено ${molarMassKgMol}`
+    });
+  }
+}
+
+/**
  * Явное преобразование количества вещества (моль) в массу (кг).
  * Требует молярной массы; без неё преобразование невозможно.
+ *
+ * Stage 4.1.1: количество переводится в моли ЯВНО (convert) ДО
+ * умножения — единица входа может быть любой когерентной единицей
+ * количества вещества. Результат проверяется на переполнение.
  */
 export function amountToMass(amount: PhysicalQuantity, molarMassKgMol: number): PhysicalQuantity {
   assertDimension(amount, dimension(0, 0, 0, 0, 0, 1), 'amountToMass', 'Reservoir');
-  if (!Number.isFinite(molarMassKgMol) || molarMassKgMol <= 0) {
-    throw new Error(`[Reservoir/amountToMass] молярная масса должна быть конечным положительным числом, получено ${molarMassKgMol}`);
+  requireMolarMass(molarMassKgMol, 'amountToMass');
+  const mol = convert(amount, 'mol').value;
+  const value = mol * molarMassKgMol;
+  if (!Number.isFinite(value)) {
+    throw new QuantityError({
+      code: 'overflow',
+      component: 'Reservoir',
+      operation: 'amountToMass',
+      message: `результат непредставим: ${mol} моль × ${molarMassKgMol} кг/моль`
+    });
   }
-  return { value: amount.value * molarMassKgMol, unit: 'kg' };
+  return { value, unit: 'kg' };
 }
 
-/** Явное обратное преобразование массы в количество вещества. */
+/**
+ * Явное обратное преобразование массы в количество вещества.
+ *
+ * Stage 4.1.1 (исправление Issue 1): масса переводится в килограммы
+ * (convert) ДО деления на кг/моль. До исправления делилось сырое
+ * число: 1000 г / 0.018 кг/моль давало «55555 моль» — в 1000 раз
+ * больше физического значения (1000 г = 1 кг → 55.56 моль).
+ * Переполнение результата диагностируется явно.
+ */
 export function massToAmount(mass: PhysicalQuantity, molarMassKgMol: number): PhysicalQuantity {
   assertDimension(mass, dimension(1), 'massToAmount', 'Reservoir');
-  if (!Number.isFinite(molarMassKgMol) || molarMassKgMol <= 0) {
-    throw new Error(`[Reservoir/massToAmount] молярная масса должна быть конечным положительным числом, получено ${molarMassKgMol}`);
+  requireMolarMass(molarMassKgMol, 'massToAmount');
+  const kg = convert(mass, 'kg').value;
+  const value = kg / molarMassKgMol;
+  if (!Number.isFinite(value)) {
+    throw new QuantityError({
+      code: 'overflow',
+      component: 'Reservoir',
+      operation: 'massToAmount',
+      message: `результат непредставим: ${kg} кг / ${molarMassKgMol} кг/моль`
+    });
   }
-  return { value: mass.value / molarMassKgMol, unit: 'mol' };
+  return { value, unit: 'mol' };
 }
 
 // ============================================
@@ -104,13 +171,17 @@ export interface MaterialInventoryValidation {
 }
 
 /**
- * Валидация материального инвентаря:
+ * Валидация материального инвентаря (Stage 4.1.1):
+ * - основание известно реестру (данные из JSON могут содержать мусор);
  * - числа конечны и неотрицательны (отрицательный запас невозможен);
  * - для долей дополнительно: сумма долей не обязана быть 1
  *   (инвентарь может быть частичным), это не ошибка, а контракт поля.
  */
 export function validateMaterialInventory(inv: MaterialInventory): MaterialInventoryValidation {
   const errors: string[] = [];
+  if (!isKnownBasis(inv.basis)) {
+    errors.push(`неизвестное основание инвентаря «${String(inv.basis)}»`);
+  }
   for (const [id, amount] of Object.entries(inv.entries)) {
     if (!Number.isFinite(amount)) {
       errors.push(`количество вида «${id}» должно быть конечным числом, получено ${amount}`);
@@ -144,6 +215,36 @@ export interface EnergyInventory {
   fluxW_m2: number | null;
   /** Происхождение и допущения энергетической модели, если задана. */
   note?: string;
+}
+
+export interface EnergyInventoryValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Валидация энергетического инвентаря (Stage 4.1.1):
+ * - storedJ: null допустим (энергия не измерена), NaN/∞ — нет;
+ *   отрицательный запас энергии невозможен;
+ * - netPowerW / fluxW_m2: null допустим; значения конечны и могут
+ *   быть отрицательными (потеря энергии — физика, а не ошибка).
+ */
+export function validateEnergyInventory(inv: EnergyInventory): EnergyInventoryValidation {
+  const errors: string[] = [];
+  if (inv.storedJ !== null) {
+    if (!Number.isFinite(inv.storedJ)) {
+      errors.push(`storedJ должен быть конечным числом или null, получено ${String(inv.storedJ)}`);
+    } else if (inv.storedJ < 0) {
+      errors.push(`отрицательный запас энергии невозможен: ${inv.storedJ} Дж`);
+    }
+  }
+  if (inv.netPowerW !== null && !Number.isFinite(inv.netPowerW)) {
+    errors.push(`netPowerW должен быть конечным числом или null, получено ${String(inv.netPowerW)}`);
+  }
+  if (inv.fluxW_m2 !== null && !Number.isFinite(inv.fluxW_m2)) {
+    errors.push(`fluxW_m2 должен быть конечным числом или null, получено ${String(inv.fluxW_m2)}`);
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 // ============================================
@@ -290,9 +391,88 @@ export function getProperty(res: ReservoirRecord, key: string): ScientificValue 
 
 /** Задать энергетический инвентарь (величины разных размерностей — в отдельных полях). */
 export function setEnergyInventory(res: ReservoirRecord, energy: EnergyInventory): ReservoirRecord {
-  const check = (v: number | null): boolean => v === null || Number.isFinite(v);
-  if (!check(energy.storedJ) || !check(energy.netPowerW) || !check(energy.fluxW_m2)) {
-    throw new ReservoirError('invalid_amount', res.id, 'энергетические величины должны быть конечными числами или null');
+  const validation = validateEnergyInventory(energy);
+  if (!validation.valid) {
+    throw new ReservoirError('invalid_amount', res.id, `некорректный энергетический инвентарь: ${validation.errors.join('; ')}`);
   }
   return { ...res, energy };
+}
+
+export interface ReservoirRecordValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Валидация записи резервуара произвольной формы (Stage 4.1.1).
+ * Проверяет запись из JSON или внешнего кода ДО регистрации
+ * в состоянии мира. Диагностика точнее общей проверки объектов.
+ */
+export function validateReservoirRecord(reservoir: unknown): ReservoirRecordValidation {
+  const errors: string[] = [];
+  if (typeof reservoir !== 'object' || reservoir === null) {
+    return { valid: false, errors: ['резервуар должен быть объектом'] };
+  }
+  const rec = reservoir as Record<string, unknown>;
+  if (typeof rec.id !== 'string' || rec.id.trim() === '') {
+    errors.push('id резервуара должен быть непустой строкой');
+  }
+  if (typeof rec.kind !== 'string' || rec.kind.trim() === '') {
+    errors.push('kind резервуара должен быть непустой строкой');
+  }
+  if (typeof rec.bodyId !== 'undefined' && typeof rec.bodyId !== 'string') {
+    errors.push('bodyId резервуара должен быть строкой, если задан');
+  }
+  if (rec.material !== undefined) {
+    if (typeof rec.material !== 'object' || rec.material === null) {
+      errors.push('material резервуара должен быть объектом (basis + entries)');
+    } else {
+      const material = rec.material as Record<string, unknown>;
+      if (typeof material.basis !== 'string' || !isKnownBasis(material.basis)) {
+        errors.push(`material.basis должен быть известным основанием, получено «${String(material.basis)}»`);
+      }
+      if (typeof material.entries !== 'object' || material.entries === null) {
+        errors.push('material.entries должен быть объектом');
+      } else {
+        for (const [id, amount] of Object.entries(material.entries as Record<string, unknown>)) {
+          if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+            errors.push(`material.entries["${id}"] должен быть неотрицательным конечным числом, получено ${String(amount)}`);
+          }
+        }
+      }
+    }
+  }
+  if (rec.energy !== undefined && rec.energy !== null) {
+    if (typeof rec.energy !== 'object') {
+      errors.push('energy резервуара должен быть объектом или null');
+    } else {
+      const energy = rec.energy as Record<string, unknown>;
+      const storedJ = energy.storedJ;
+      if (storedJ !== null && storedJ !== undefined && (typeof storedJ !== 'number' || !Number.isFinite(storedJ) || storedJ < 0)) {
+        errors.push(`energy.storedJ должен быть неотрицательным конечным числом или null, получено ${String(storedJ)}`);
+      }
+      if (storedJ === undefined) {
+        errors.push('energy.storedJ обязателен (число или null — энергия неизвестна)');
+      }
+      for (const key of ['netPowerW', 'fluxW_m2'] as const) {
+        const value = energy[key];
+        if (value !== null && value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+          errors.push(`energy.${key} должен быть конечным числом или null, получено ${String(value)}`);
+        }
+      }
+    }
+  }
+  if (rec.properties !== undefined) {
+    if (typeof rec.properties !== 'object' || rec.properties === null) {
+      errors.push('properties резервуара должен быть объектом');
+    } else {
+      for (const [key, value] of Object.entries(rec.properties as Record<string, unknown>)) {
+        const issues = validateScientificValueShape(value);
+        if (issues.length > 0) {
+          errors.push(`properties["${key}"]: ${issues.join('; ')}`);
+        }
+      }
+    }
+  }
+  return { valid: errors.length === 0, errors };
 }

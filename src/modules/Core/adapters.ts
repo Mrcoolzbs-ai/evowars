@@ -39,54 +39,70 @@ import { CORE_WORLD_STATE_SCHEMA_VERSION } from './worldState';
  * Соответствие русских единиц легаси PhysValue (этап 3) и единиц
  * реестра ядра. Маппинг не двусторонний: единицы ядра — канон для
  * новых вычислений, русские строки остаются в легаси-данных как есть.
+ *
+ * Stage 4.1.1 (исправление Issue 8): каждому маппингу сопоставлен
+ * масштабирующий множитель. Проценты ('%') — это НЕ доля 0..1:
+ * 50% = 0.5, поэтому factor = 0.01. Раньше '%' → '1' без
+ * масштабирования превращало 50% в «50 долей» — в 100 раз больше
+ * физического значения (legacy molarFractions хранит доли 0..1).
  */
-const LEGACY_UNIT_TO_CORE: Record<string, string> = {
-  'кг': 'kg',
-  'г': 'g',
-  'м': 'm',
-  'км': 'km',
-  'см': 'cm',
-  'м²': 'm2',
-  'м³': 'm3',
-  'с': 's',
-  'мин': 'min',
-  'ч': 'h',
-  'сут': 'day',
-  'лет': 'yr',
-  'К': 'K',
-  'моль': 'mol',
-  'Па': 'Pa',
-  'кПа': 'kPa',
-  'МПа': 'MPa',
-  'бар': 'bar',
-  'атм': 'atm',
-  'Дж': 'J',
-  'кДж': 'kJ',
-  'Вт': 'W',
-  'кВт': 'kW',
-  'Вт/м²': 'W_m2',
-  'кг/м³': 'kg_m3',
-  'моль/м³': 'mol_m3',
-  'кг/м²': 'kg_m2',
-  'моль/м²': 'mol_m2',
-  'Дж/кг': 'J_kg',
-  'Дж/м³': 'J_m3',
-  'кг/моль': 'kg_mol',
-  'г/моль': 'g_mol',
-  'м/с': 'm_s',
-  'м/с²': 'm_s2',
-  'g': 'g0',
-  '%': '1',
-  'доля': '1'
+const LEGACY_UNIT_TO_CORE: Record<string, { unit: string; factor: number }> = {
+  'кг': { unit: 'kg', factor: 1 },
+  'г': { unit: 'g', factor: 1 },
+  'м': { unit: 'm', factor: 1 },
+  'км': { unit: 'km', factor: 1 },
+  'см': { unit: 'cm', factor: 1 },
+  'м²': { unit: 'm2', factor: 1 },
+  'м³': { unit: 'm3', factor: 1 },
+  'с': { unit: 's', factor: 1 },
+  'мин': { unit: 'min', factor: 1 },
+  'ч': { unit: 'h', factor: 1 },
+  'сут': { unit: 'day', factor: 1 },
+  'лет': { unit: 'yr', factor: 1 },
+  'К': { unit: 'K', factor: 1 },
+  'моль': { unit: 'mol', factor: 1 },
+  'Па': { unit: 'Pa', factor: 1 },
+  'кПа': { unit: 'kPa', factor: 1 },
+  'МПа': { unit: 'MPa', factor: 1 },
+  'бар': { unit: 'bar', factor: 1 },
+  'атм': { unit: 'atm', factor: 1 },
+  'Дж': { unit: 'J', factor: 1 },
+  'кДж': { unit: 'kJ', factor: 1 },
+  'Вт': { unit: 'W', factor: 1 },
+  'кВт': { unit: 'kW', factor: 1 },
+  'Вт/м²': { unit: 'W_m2', factor: 1 },
+  'кг/м³': { unit: 'kg_m3', factor: 1 },
+  'моль/м³': { unit: 'mol_m3', factor: 1 },
+  'кг/м²': { unit: 'kg_m2', factor: 1 },
+  'моль/м²': { unit: 'mol_m2', factor: 1 },
+  'Дж/кг': { unit: 'J_kg', factor: 1 },
+  'Дж/м³': { unit: 'J_m3', factor: 1 },
+  'кг/моль': { unit: 'kg_mol', factor: 1 },
+  'г/моль': { unit: 'g_mol', factor: 1 },
+  'м/с': { unit: 'm_s', factor: 1 },
+  'м/с²': { unit: 'm_s2', factor: 1 },
+  'g': { unit: 'g0', factor: 1 },
+  '%': { unit: '1', factor: 0.01 },
+  'доля': { unit: '1', factor: 1 }
 };
 
 /** Идентификатор единицы ядра для легаси-строки; null — единица ядру неизвестна. */
 export function legacyUnitToCore(unit: string): string | null {
   const mapped = LEGACY_UNIT_TO_CORE[unit];
-  if (mapped !== undefined) return mapped;
+  if (mapped !== undefined) return mapped.unit;
   // Латинские/ASCII единицы легаси могут уже совпадать с реестром.
   if (isKnownUnit(unit)) return unit;
   return null;
+}
+
+/**
+ * Масштабирующий множитель легаси-единицы (Stage 4.1.1):
+ * во сколько раз значение в легаси-единице больше значения в единице
+ * ядра ('%': 50 → 50 × 0.01 = 0.5 доли). Для единиц, совпадающих с
+ * реестром напрямую, множитель равен 1.
+ */
+export function legacyUnitScaleFactor(unit: string): number {
+  return LEGACY_UNIT_TO_CORE[unit]?.factor ?? 1;
 }
 
 // ============================================
@@ -124,20 +140,48 @@ export function physValueToScientificValue(pv: PhysValue): ScientificValue {
   }
 
   if (pv.value === null) {
-    return unknownValue('значение неизвестно в рамках легаси-модели этапа 3');
+    // Stage 4.1.1: unknown СОХРАНЯЕТ собранный provenance — источник
+    // и метод неизвестного значения не теряются.
+    return unknownValue('значение неизвестно в рамках легаси-модели этапа 3', provenance);
   }
 
   const coreUnit = legacyUnitToCore(pv.unit);
   if (coreUnit === null) {
     // Данные есть, но единица ядру не интерпретируема: как корректное
     // значение использовать нельзя — invalid с сохранением оригинала.
-    return invalidValue(`единица «${pv.unit}» не зарегистрирована в ядре; значение сохранено для диагностики`, { value: pv.value, unit: '1' }, provenance);
+    // Stage 4.1.1: ФИКТИВНОЙ единицы '1' больше нет; оригинальные
+    // значение и единица сохраняются в provenance.rawInput.
+    return invalidValue(
+      `единица «${pv.unit}» не зарегистрирована в ядре; значение сохранено для диагностики`,
+      undefined,
+      {
+        ...provenance,
+        rawInput: { ...(provenance.rawInput ?? {}), originalValue: pv.value, originalUnit: pv.unit }
+      }
+    );
   }
 
-  const q = quantity(pv.value, coreUnit);
+  // Stage 4.1.1: масштабирование легаси-единицы (проценты → доли).
+  const factor = legacyUnitScaleFactor(pv.unit);
+  const scaledValue = pv.value * factor;
+  if (!Number.isFinite(scaledValue)) {
+    return invalidValue(
+      `значение ${pv.value} в единице «${pv.unit}» непредставимо после масштабирования (×${factor})`,
+      undefined,
+      {
+        ...provenance,
+        rawInput: { ...(provenance.rawInput ?? {}), originalValue: pv.value, originalUnit: pv.unit }
+      }
+    );
+  }
+  if (factor !== 1) {
+    provenance.note = [provenance.note, `масштабирование легаси-единицы: 1 «${pv.unit}» = ${factor} ${coreUnit}`].filter(Boolean).join('; ');
+  }
+
+  const q = quantity(scaledValue, coreUnit);
   const uncertainty =
     pv.range !== undefined && Number.isFinite(pv.range.min) && Number.isFinite(pv.range.max) && pv.range.min <= pv.range.max
-      ? { kind: 'interval' as const, lower: pv.range.min, upper: pv.range.max }
+      ? { kind: 'interval' as const, lower: pv.range.min * factor, upper: pv.range.max * factor }
       : undefined;
 
   const confidence: ScientificConfidence = pv.confidence;

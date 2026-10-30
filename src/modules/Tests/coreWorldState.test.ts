@@ -13,7 +13,9 @@ import { createSimulationClock, advance } from '../Core/simulationClock';
 import { knownValue, unknownValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 import { createReservoir, setMaterialInventory } from '../Core/reservoir';
-import { createFluxLedger } from '../Core/fluxLedger';
+import type { ReservoirRecord } from '../Core/reservoir';
+import { createFluxLedger, EXTERNAL } from '../Core/fluxLedger';
+import type { FluxRecord } from '../Core/fluxLedger';
 
 function validState(): CoreWorldState {
   const state = createCoreWorldState('w1');
@@ -118,7 +120,8 @@ describe('Stage 4.1 WorldState: целостность ссылок', () => {
       ]
     };
     const issues = validateWorldState(state);
-    expect(issues.some((i) => i.code === 'invalid_flux_reference')).toBe(true);
+    // Stage 4.1.1: полная валидация формы FluxRecord (validateFluxLedger) → invalid_flux
+    expect(issues.some((i) => i.code === 'invalid_flux' && i.component === 'FluxLedger')).toBe(true);
   });
 
   it('некорректные часы обнаруживаются', () => {
@@ -173,6 +176,168 @@ describe('Stage 4.1 WorldState: время состояния', () => {
     state.clock = advance(createSimulationClock(), 1000);
     expect(state.clock.localTimeS).toBe(1000);
     expect(state.cosmicAge).toBeNull(); // возраст не «утёк» из часов
+    expect(validateWorldState(state)).toEqual([]);
+  });
+});
+
+// ============================================
+// STAGE 4.1.1 — глубокая валидация состояния мира (ISSUE 5)
+// ============================================
+
+function baseFluxRecord(): FluxRecord {
+  return {
+    id: 'flux-1',
+    kind: 'external_input',
+    from: EXTERNAL,
+    to: 'atm',
+    subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 1, basis: 'amount' },
+    time: null,
+    status: 'pending'
+  };
+}
+
+function badFluxRecord(overrides: Record<string, unknown>): FluxRecord {
+  return { ...baseFluxRecord(), ...overrides } as unknown as FluxRecord;
+}
+
+describe('Stage 4.1.1 WorldState: глубокая валидация резервуаров', () => {
+  it('отрицательный материальный инвентарь → invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({
+      id: 'bad-inventory', kind: 'ocean', material: { basis: 'amount', entries: { co2: -5 } }, properties: {}
+    } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reservoir' && i.component === 'Reservoir')).toBe(true);
+  });
+
+  it('NaN в storedJ → invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({
+      id: 'bad-energy', kind: 'ocean',
+      energy: { storedJ: Number.NaN, netPowerW: null, fluxW_m2: null },
+      properties: {}
+    } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reservoir' && i.component === 'Reservoir')).toBe(true);
+  });
+
+  it('storedJ: null (энергия неизвестна) проходит валидацию — отсутствие знания не ошибка', () => {
+    const state = validState();
+    state.reservoirs.push({
+      id: 'unknown-energy', kind: 'ocean',
+      energy: { storedJ: null, netPowerW: null, fluxW_m2: null },
+      properties: {}
+    } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.filter((i) => i.code === 'invalid_reservoir')).toEqual([]);
+    expect(issues).toEqual([]);
+  });
+
+  it('unknown-значения в свойствах тел и резервуаров допустимы', () => {
+    const state = validState();
+    state.bodies.push({
+      id: 'cold-planet', kind: 'planet',
+      properties: { surfaceTemp: unknownValue('не рассчитано'), albedo: unknownValue('нет данных') }
+    });
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('known-свойство без quantity → invalid_scientific_value', () => {
+    const state = validState();
+    state.bodies.push({
+      id: 'broken-planet', kind: 'planet',
+      properties: { mass: { status: 'known' } as unknown as never }
+    });
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_scientific_value' && i.component === 'WorldBody')).toBe(true);
+  });
+});
+
+describe('Stage 4.1.1 WorldState: полная валидация FluxRecord', () => {
+  it('корректная запись потока проходит', () => {
+    const state = validState();
+    state.fluxLedger = { records: [baseFluxRecord()] };
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('дублирующийся id потока → invalid_flux', () => {
+    const state = validState();
+    state.fluxLedger = { records: [baseFluxRecord(), baseFluxRecord()] };
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_flux' && i.component === 'FluxLedger')).toBe(true);
+  });
+
+  it('мусорный kind и status записи → invalid_flux', () => {
+    const state = validState();
+    state.fluxLedger = { records: [badFluxRecord({ kind: 'magic-teleport' })] };
+    expect(validateWorldState(state).some((i) => i.code === 'invalid_flux')).toBe(true);
+
+    const state2 = validState();
+    state2.fluxLedger = { records: [badFluxRecord({ status: 'weird' })] };
+    expect(validateWorldState(state2).some((i) => i.code === 'invalid_flux')).toBe(true);
+  });
+
+  it('несогласованные направления с kind → invalid_flux', () => {
+    // internal_transfer не может начинаться во внешнем источнике
+    const state = validState();
+    state.fluxLedger = { records: [badFluxRecord({ kind: 'internal_transfer', from: EXTERNAL, to: 'atm' })] };
+    expect(validateWorldState(state).some((i) => i.code === 'invalid_flux')).toBe(true);
+
+    // external_input обязан начинаться во внешнем источнике
+    const state2 = validState();
+    state2.fluxLedger = { records: [badFluxRecord({ kind: 'external_input', from: 'atm', to: 'atm' })] };
+    expect(validateWorldState(state2).some((i) => i.code === 'invalid_flux')).toBe(true);
+  });
+
+  it('неотрицательный subject: отрицательное/NaN количество → invalid_flux', () => {
+    const state = validState();
+    state.fluxLedger = {
+      records: [badFluxRecord({ subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: -1, basis: 'amount' } })]
+    };
+    expect(validateWorldState(state).some((i) => i.code === 'invalid_flux')).toBe(true);
+
+    const state2 = validState();
+    state2.fluxLedger = {
+      records: [badFluxRecord({ subject: { subjectType: 'energy', quantityKind: 'integrated', energyJ: Number.NaN } })]
+    };
+    expect(validateWorldState(state2).some((i) => i.code === 'invalid_flux')).toBe(true);
+  });
+
+  it('некорректное время потока (segmentIndex -1, localTimeS NaN) → invalid_flux', () => {
+    const state = validState();
+    state.fluxLedger = { records: [badFluxRecord({ time: { segmentIndex: -1, localTimeS: 10 } })] };
+    expect(validateWorldState(state).some((i) => i.code === 'invalid_flux')).toBe(true);
+
+    const state2 = validState();
+    state2.fluxLedger = { records: [badFluxRecord({ time: { segmentIndex: 0, localTimeS: Number.NaN } })] };
+    expect(validateWorldState(state2).some((i) => i.code === 'invalid_flux')).toBe(true);
+  });
+
+  it('ссылка на несуществующий резервуар → invalid_flux', () => {
+    const state = validState();
+    state.fluxLedger = { records: [badFluxRecord({ to: 'ghost-tank' })] };
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_flux' && i.component === 'FluxLedger')).toBe(true);
+  });
+});
+
+describe('Stage 4.1.1 WorldState: строгая проверка версии схемы', () => {
+  it('неподдерживаемая schemaVersion «2.0.0» → version_mismatch (раньше проходила любая строка)', () => {
+    const state = validState();
+    state.schemaVersion = '2.0.0';
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'version_mismatch' && i.component === 'CoreWorldState')).toBe(true);
+  });
+
+  it('мусорная schemaVersion → version_mismatch', () => {
+    const state = validState();
+    state.schemaVersion = 'абракадабра';
+    expect(validateWorldState(state).some((i) => i.code === 'version_mismatch')).toBe(true);
+  });
+
+  it('текущая версия схемы проходит', () => {
+    const state = validState();
+    state.schemaVersion = '1.0.0';
     expect(validateWorldState(state)).toEqual([]);
   });
 });

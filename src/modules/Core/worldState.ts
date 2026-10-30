@@ -31,8 +31,11 @@
 // диагностические проблемы, автозаполнения фиктивными значениями нет.
 
 import type { FluxLedger } from './fluxLedger';
+import { validateFluxLedger } from './fluxLedger';
 import type { ReservoirRecord } from './reservoir';
+import { validateReservoirRecord } from './reservoir';
 import type { ScientificValue } from './scientificValue';
+import { validateScientificValueShape } from './scientificValue';
 import type { SimulationClockState } from './simulationClock';
 import { validateClock } from './simulationClock';
 
@@ -42,6 +45,25 @@ import { validateClock } from './simulationClock';
 
 /** Версия схемы CoreWorldState (semver; меняется при изменении структуры). */
 export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.0.0';
+
+/**
+ * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
+ * Версия из данных (сохранение/JSON) проверяется на ПРИНАДЛЕЖНОСТЬ
+ * списку, а не только на непустоту: неизвестная версия — это
+ * version_mismatch, а не молчаливое «сойдёт любая».
+ */
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0'];
+
+export const BODY_KINDS: readonly BodyKind[] = [
+  'star',
+  'planet',
+  'moon',
+  'compact_remnant',
+  'gas_giant',
+  'asteroid',
+  'comet',
+  'other'
+];
 
 export type BodyKind =
   | 'star'
@@ -113,7 +135,10 @@ export interface WorldStateIssue {
     | 'self_parent'
     | 'invalid_clock'
     | 'invalid_reservoir'
+    | 'invalid_flux'
     | 'invalid_flux_reference'
+    | 'invalid_body'
+    | 'invalid_scientific_value'
     | 'version_mismatch'
     | 'empty_world_id';
   component: string;
@@ -134,14 +159,33 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
     issues.push({ code: 'empty_world_id', component: 'CoreWorldState', message: 'worldId не может быть пустым', refs: [] });
   }
 
-  // --- уникальность идентификаторов ---
+  // --- cosmicAge как научное значение (Stage 4.1.1) ---
+  if (state.cosmicAge !== null) {
+    const ageIssues = validateScientificValueShape(state.cosmicAge);
+    if (ageIssues.length > 0) {
+      issues.push({ code: 'invalid_scientific_value', component: 'CoreWorldState', message: `cosmicAge: ${ageIssues.join('; ')}`, refs: [] });
+    }
+  }
+
+  // --- уникальность идентификаторов и форма тел ---
   const bodyIds = new Set<string>();
   const seenBodies: string[] = [];
   for (const body of state.bodies) {
-    if (bodyIds.has(body.id)) {
+    if (body.id.trim() === '') {
+      issues.push({ code: 'invalid_body', component: 'WorldBody', message: 'id тела должен быть непустой строкой', refs: [] });
+    } else if (bodyIds.has(body.id)) {
       issues.push({ code: 'duplicate_id', component: 'WorldBody', message: `дублирующийся id тела «${body.id}»`, refs: [body.id] });
     } else {
       bodyIds.add(body.id);
+    }
+    if (!(BODY_KINDS as readonly string[]).includes(body.kind)) {
+      issues.push({ code: 'invalid_body', component: 'WorldBody', message: `неизвестный тип тела «${String(body.kind)}» (допустимы: ${BODY_KINDS.join(' | ')})`, refs: [body.id] });
+    }
+    for (const [key, value] of Object.entries(body.properties)) {
+      const valueIssues = validateScientificValueShape(value);
+      if (valueIssues.length > 0) {
+        issues.push({ code: 'invalid_scientific_value', component: 'WorldBody', message: `тело «${body.id}», свойство «${key}»: ${valueIssues.join('; ')}`, refs: [body.id] });
+      }
     }
     seenBodies.push(body.id);
   }
@@ -201,21 +245,20 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
     if (res.bodyId !== undefined && !bodyIds.has(res.bodyId)) {
       issues.push({ code: 'broken_reference', component: 'Reservoir', message: `резервуар «${res.id}» ссылается на несуществующее тело «${res.bodyId}»`, refs: [res.id, res.bodyId] });
     }
+    // Stage 4.1.1: проверка ФОРМЫ записи резервуара (инвентари,
+    // энергия, scientific-свойства), а не только ссылок.
+    const resValidation = validateReservoirRecord(res);
+    if (!resValidation.valid) {
+      issues.push({ code: 'invalid_reservoir', component: 'Reservoir', message: `резервуар «${res.id}» некорректен: ${resValidation.errors.join('; ')}`, refs: [res.id] });
+    }
   }
 
   // --- потоки ---
-  const fluxIds = new Set<string>();
-  for (const rec of state.fluxLedger.records) {
-    if (fluxIds.has(rec.id)) {
-      issues.push({ code: 'duplicate_id', component: 'FluxLedger', message: `дублирующийся id потока «${rec.id}»`, refs: [rec.id] });
-    } else {
-      fluxIds.add(rec.id);
-    }
-    for (const side of [rec.from, rec.to]) {
-      if (side !== 'external' && !reservoirIds.has(side)) {
-        issues.push({ code: 'invalid_flux_reference', component: 'FluxLedger', message: `поток «${rec.id}» ссылается на несуществующий резервуар «${side}»`, refs: [rec.id, side] });
-      }
-    }
+  // Stage 4.1.1: полная валидация формы записей реестра (id, kind,
+  // status, subject, time) и ссылок — не только дубли id.
+  const fluxProblems = validateFluxLedger(state.fluxLedger, { reservoirIds: [...reservoirIds] });
+  if (fluxProblems.length > 0) {
+    issues.push({ code: 'invalid_flux', component: 'FluxLedger', message: fluxProblems.join('; '), refs: [] });
   }
 
   // --- часы ---
@@ -225,8 +268,13 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
   }
 
   // --- версии ---
-  if (state.schemaVersion.trim() === '') {
-    issues.push({ code: 'version_mismatch', component: 'CoreWorldState', message: 'schemaVersion не может быть пустым', refs: [] });
+  if (!(SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS as readonly string[]).includes(state.schemaVersion)) {
+    issues.push({
+      code: 'version_mismatch',
+      component: 'CoreWorldState',
+      message: `версия схемы состояния мира «${state.schemaVersion}» не поддерживается (поддерживаются: ${SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS.join(', ')})`,
+      refs: []
+    });
   }
   if (state.legacy.savedSchemaVersion !== undefined && !/^\d+\.\d+(?:\.\d+)?$/.test(state.legacy.savedSchemaVersion)) {
     issues.push({ code: 'version_mismatch', component: 'CoreWorldState', message: `некорректная версия схемы сохранения «${state.legacy.savedSchemaVersion}»`, refs: [] });

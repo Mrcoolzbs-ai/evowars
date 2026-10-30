@@ -13,6 +13,8 @@ import {
   getProperty,
   setEnergyInventory,
   validateMaterialInventory,
+  validateEnergyInventory,
+  validateReservoirRecord,
   amountToMass,
   massToAmount,
   ReservoirError
@@ -154,5 +156,140 @@ describe('Stage 4.1 Reservoir: явные преобразования коли�
     expect(() => amountToMass(quantity(1, 'mol'), 0)).toThrow();
     expect(() => amountToMass(quantity(1, 'mol'), -0.01)).toThrow();
     expect(() => massToAmount(quantity(1, 'kg'), Number.NaN)).toThrow();
+  });
+});
+
+describe('Stage 4.1.1 Reservoir: регрессия массовых преобразований (ISSUE 1)', () => {
+  it('1000 г воды / 0.018 кг/моль = 55.5555... моль (до исправления делились сырые граммы)', () => {
+    // Регрессия Issue 1: старый massToAmount делил сырое число (1000)
+    // на 0.018 и получал 55555.6 «моль» — в 1000 раз больше
+    // физического значения. Значение обязано переводиться в кг ДО деления.
+    const amount = massToAmount(quantity(1000, 'g'), 0.018);
+    expect(amount.value).toBeCloseTo(55.5555555556, 8);
+    expect(amount.unit).toBe('mol');
+  });
+
+  it('1 кг воды / 0.018 кг/моль = 55.5555... моль', () => {
+    const amount = massToAmount(quantity(1, 'kg'), 0.018);
+    expect(amount.value).toBeCloseTo(55.5555555556, 8);
+    expect(amount.unit).toBe('mol');
+  });
+
+  it('18 г воды = 1 моль; 18 кг воды = 1000 моль', () => {
+    expect(massToAmount(quantity(18, 'g'), 0.018).value).toBeCloseTo(1, 12);
+    expect(massToAmount(quantity(18, 'kg'), 0.018).value).toBeCloseTo(1000, 9);
+  });
+
+  it('обратное преобразование: 0.044 кг CO2 = 1 моль CO2', () => {
+    const amount = massToAmount(quantity(0.044, 'kg'), 0.044);
+    expect(amount.value).toBeCloseTo(1, 12);
+    expect(amount.unit).toBe('mol');
+    const back = amountToMass(amount, 0.044);
+    expect(back.value).toBeCloseTo(0.044, 12);
+    expect(back.unit).toBe('kg');
+  });
+
+  it('разные молярные массы дают физически разные результаты', () => {
+    // 100 кг вещества: при 0.018 кг/моль (вода) и 0.044 кг/моль (CO2)
+    expect(massToAmount(quantity(100, 'kg'), 0.018).value).toBeCloseTo(5555.5555555556, 8);
+    expect(massToAmount(quantity(100, 'kg'), 0.044).value).toBeCloseTo(2272.7272727273, 8);
+  });
+
+  it('переполнение результата диагностируется QuantityError overflow', () => {
+    // 1 кг / 1e-320 кг/моль непредставимо в double
+    try {
+      massToAmount(quantity(1, 'kg'), 1e-320);
+      expect.unreachable('переполнение должно быть обнаружено');
+    } catch (e) {
+      expect(e).toBeInstanceOf(QuantityError);
+      expect((e as QuantityError).code).toBe('overflow');
+    }
+    try {
+      amountToMass(quantity(1e308, 'mol'), 10);
+      expect.unreachable('переполнение должно быть обнаружено');
+    } catch (e) {
+      expect(e).toBeInstanceOf(QuantityError);
+      expect((e as QuantityError).code).toBe('overflow');
+    }
+  });
+
+  it('некорректная молярная масса (0, отрицательная, бесконечность) — QuantityError', () => {
+    expect(() => massToAmount(quantity(1, 'kg'), 0)).toThrow(QuantityError);
+    expect(() => massToAmount(quantity(1, 'kg'), -0.044)).toThrow(QuantityError);
+    expect(() => massToAmount(quantity(1, 'kg'), Number.POSITIVE_INFINITY)).toThrow(QuantityError);
+    expect(() => amountToMass(quantity(1, 'mol'), Number.NaN)).toThrow(QuantityError);
+  });
+});
+
+describe('Stage 4.1.1 Reservoir: валидация энергетического инвентаря и записи', () => {
+  it('validateEnergyInventory: storedJ null допустим, NaN и отрицательный запас — нет', () => {
+    expect(validateEnergyInventory({ storedJ: null, netPowerW: null, fluxW_m2: null }).valid).toBe(true);
+    expect(validateEnergyInventory({ storedJ: Number.NaN, netPowerW: null, fluxW_m2: null }).valid).toBe(false);
+    expect(validateEnergyInventory({ storedJ: -5, netPowerW: null, fluxW_m2: null }).valid).toBe(false);
+  });
+
+  it('validateEnergyInventory: мощность и поток могут быть отрицательными (потеря энергии)', () => {
+    expect(validateEnergyInventory({ storedJ: 100, netPowerW: -50, fluxW_m2: -200 }).valid).toBe(true);
+    expect(validateEnergyInventory({ storedJ: 100, netPowerW: Number.POSITIVE_INFINITY, fluxW_m2: null }).valid).toBe(false);
+  });
+
+  it('setEnergyInventory отвергает отрицательный запас энергии', () => {
+    const res = createReservoir('r', 'test');
+    try {
+      setEnergyInventory(res, { storedJ: -1, netPowerW: null, fluxW_m2: null });
+      expect.unreachable('отрицательный запас должен быть отклонён');
+    } catch (e) {
+      expect((e as ReservoirError).code).toBe('invalid_amount');
+    }
+  });
+
+  it('validateReservoirRecord принимает корректную запись', () => {
+    const res = setMaterialInventory(createReservoir('ocean', 'ocean'), 'amount', { h2o: 10 });
+    const check = validateReservoirRecord(res);
+    expect(check.valid).toBe(true);
+    expect(check.errors).toEqual([]);
+  });
+
+  it('validateReservoirRecord: пустой id/kind, отрицательный инвентарь, NaN storedJ', () => {
+    expect(validateReservoirRecord({ id: '', kind: 'ocean', properties: {} }).valid).toBe(false);
+    expect(validateReservoirRecord({ id: 'x', kind: '', properties: {} }).valid).toBe(false);
+    expect(
+      validateReservoirRecord({ id: 'x', kind: 'ocean', material: { basis: 'amount', entries: { h2o: -1 } }, properties: {} }).valid
+    ).toBe(false);
+    expect(
+      validateReservoirRecord({ id: 'x', kind: 'ocean', energy: { storedJ: Number.NaN, netPowerW: null, fluxW_m2: null }, properties: {} }).valid
+    ).toBe(false);
+  });
+
+  it('validateReservoirRecord: неизвестное основание инвентаря — ошибка', () => {
+    const check = validateReservoirRecord({ id: 'x', kind: 'ocean', material: { basis: 'quarts', entries: {} }, properties: {} });
+    expect(check.valid).toBe(false);
+    expect(check.errors.some((e) => e.includes('основание'))).toBe(true);
+  });
+
+  it('validateReservoirRecord: storedJ null проходит (энергия неизвестна — не ошибка)', () => {
+    const check = validateReservoirRecord({ id: 'x', kind: 'ocean', energy: { storedJ: null, netPowerW: null, fluxW_m2: null }, properties: {} });
+    expect(check.valid).toBe(true);
+  });
+
+  it('validateReservoirRecord: scientific-свойства проверяются по форме', () => {
+    const good = validateReservoirRecord({
+      id: 'x', kind: 'ocean', properties: { temperature: { status: 'known', quantity: { value: 300, unit: 'K' } } }
+    });
+    expect(good.valid).toBe(true);
+    // known без quantity — нарушение формы
+    const bad = validateReservoirRecord({
+      id: 'x', kind: 'ocean', properties: { temperature: { status: 'known' } as unknown as never }
+    });
+    expect(bad.valid).toBe(false);
+    const badStatus = validateReservoirRecord({
+      id: 'x', kind: 'ocean', properties: { temperature: { status: 'magic' } as unknown as never }
+    });
+    expect(badStatus.valid).toBe(false);
+    const estimatedNoMethod = validateReservoirRecord({
+      id: 'x', kind: 'ocean',
+      properties: { temperature: { status: 'estimated', quantity: { value: 300, unit: 'K' } } as unknown as never }
+    });
+    expect(estimatedNoMethod.valid).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import type {
 // «нет поля» остаётся «неизвестно», provenance не теряется.
 import {
   CURRENT_SAVE_SCHEMA_VERSION,
+  MigrationError,
   migrateSavedWorld,
   SAVE_SCHEMA_VERSIONS
 } from '../Core/migrations';
@@ -57,11 +58,94 @@ function migrateWorld(world: SavedWorld): SavedWorld {
 }
 
 // ============================================
+// RAW-ДОСТУП К ХРАНИЛИЩУ (Stage 4.1.1)
+// ============================================
+
+/** Несовместимая запись хранилища: версия известна формату, но ядро её не поддерживает. */
+export interface IncompatibleEntry {
+  /** Позиция записи в массиве localStorage. */
+  index: number;
+  /** Версия записи («—», если не задана). */
+  version: string;
+  /** Причина, по которой запись не загружается. */
+  reason: string;
+}
+
+/** Диагностика хранилища: что лежит в localStorage на самом деле. */
+export interface StorageHealth {
+  /** Всего записей в raw-массиве localStorage. */
+  rawEntryCount: number;
+  /** Сколько записей успешно загружаются и мигрируются. */
+  loadedWorldCount: number;
+  /** Ошибка разбора JSON (null, если хранилище читается). */
+  parseError: string | null;
+  /** Записи с неподдерживаемыми версиями: они НЕ удаляются. */
+  incompatibleEntries: IncompatibleEntry[];
+  /** Индексы записей, не являющихся объектами (мусор). */
+  nonObjectEntries: number[];
+}
+
+/**
+ * Чтение RAW-записей хранилища без миграций и преобразований.
+ * Возвращает записи как есть + ошибку разбора, если JSON повреждён.
+ */
+function readRawEntries(): { entries: unknown[]; parseError: string | null } {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) return { entries: [], parseError: null };
+    const parsed = JSON.parse(data);
+    if (!Array.isArray(parsed)) {
+      return { entries: [], parseError: 'хранилище содержит не массив' };
+    }
+    return { entries: parsed as unknown[], parseError: null };
+  } catch (error) {
+    return { entries: [], parseError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Является ли запись потенциальным миром (объектом). */
+function isObjectEntry(entry: unknown): entry is Record<string, unknown> {
+  return typeof entry === 'object' && entry !== null;
+}
+
+/**
+ * Загрузка ОДНОЙ записи с изоляцией ошибок (Stage 4.1.1):
+ * - успешная миграция → мир;
+ * - MigrationError → несовместимая запись (пропускается с
+ *   диагностикой, НЕ удаляется);
+ * - прочие ошибки → запись пропускается с диагностикой.
+ * Одна плохая запись больше не прячет все остальные миры.
+ */
+function loadSingleEntry(entry: unknown, index: number): { world: SavedWorld | null; incompatible: IncompatibleEntry | null } {
+  if (!isObjectEntry(entry)) {
+    return { world: null, incompatible: { index, version: '—', reason: 'запись не является объектом' } };
+  }
+  try {
+    return { world: migrateWorld(entry as unknown as SavedWorld), incompatible: null };
+  } catch (error) {
+    return {
+      world: null,
+      incompatible: {
+        index,
+        version: String(entry.version ?? '—'),
+        reason: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
+// ============================================
 // ФУНКЦИИ РАБОТЫ С LOCALSTORAGE
 // ============================================
 
 /**
  * Сохранение мира
+ *
+ * Stage 4.1.1: хранилище переписывается из RAW-записей, а не из
+ * getAllWorlds(). Совместимые миры мигрируются и попадают под лимит
+ * (50 записей); НЕСОВМЕСТИМЫЕ записи (версии из будущего, например
+ * '2.0') сохраняются КАК ЕСТЬ и не удаляются: лимит к ним не
+ * применяется — пользовательский данные не уничтожаются молча.
  */
 export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): SavedWorld {
   const savedWorld: SavedWorld = {
@@ -71,37 +155,88 @@ export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): 
     settings
   };
 
-  // Получаем текущий список миров
-  const worlds = getAllWorlds();
-  
-  // Добавляем новый мир
-  worlds.unshift(savedWorld);
-  
-  // Сохраняем ограниченное количество миров (последние 50)
-  const trimmedWorlds = worlds.slice(0, 50);
-  
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedWorlds));
-  
+  // Читаем raw-записи: что реально лежит в хранилище.
+  const { entries } = readRawEntries();
+
+  // Совместимые миры — загружаются и мигрируются;
+  // несовместимые — сохраняются как есть (см. контракт выше).
+  const compatible: SavedWorld[] = [];
+  const untouched: unknown[] = [];
+  entries.forEach((entry) => {
+    if (!isObjectEntry(entry)) {
+      untouched.push(entry);
+      return;
+    }
+    try {
+      compatible.push(migrateWorld(entry as unknown as SavedWorld));
+    } catch {
+      untouched.push(entry);
+    }
+  });
+
+  compatible.unshift(savedWorld);
+
+  // Лимит применяется ТОЛЬКО к совместимым мирам.
+  const trimmedWorlds = compatible.slice(0, 50);
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...trimmedWorlds, ...untouched]));
+
   return savedWorld;
 }
 
 /**
  * Получение всех сохраненных миров
+ *
+ * Stage 4.1.1: изолированная обработка КАЖДОЙ записи. Раньше один
+ * try/catch на весь массив означал, что одна несовместимая запись
+ * прячет ВСЕ миры (getAllWorlds возвращал []). Теперь несовместимые
+ * записи пропускаются по одной (с диагностикой через
+ * getStorageHealth) и не мешают загрузке остальных.
  */
 export function getAllWorlds(): SavedWorld[] {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return [];
+  const { entries, parseError } = readRawEntries();
+  if (parseError !== null) return [];
+  const worlds: SavedWorld[] = [];
+  entries.forEach((entry, index) => {
+    const loaded = loadSingleEntry(entry, index);
+    if (loaded.world !== null) {
+      worlds.push(loaded.world);
+    }
+  });
+  return worlds;
+}
 
-    const parsed = JSON.parse(data);
-    if (!Array.isArray(parsed)) return [];
-
-    // Миграция старых миров к актуальной версии формата.
-    // Старые данные не удаляются и не пересоздаются.
-    return parsed.map(migrateWorld);
-  } catch {
-    return [];
-  }
+/**
+ * Диагностика хранилища (Stage 4.1.1): сколько raw-записей лежит,
+ * сколько загружается, какие несовместимы (с версиями и причинами),
+ * какие записи не являются объектами, и читается ли JSON вообще.
+ */
+export function getStorageHealth(): StorageHealth {
+  const { entries, parseError } = readRawEntries();
+  const incompatibleEntries: IncompatibleEntry[] = [];
+  const nonObjectEntries: number[] = [];
+  let loadedWorldCount = 0;
+  entries.forEach((entry, index) => {
+    const loaded = loadSingleEntry(entry, index);
+    if (loaded.world !== null) {
+      loadedWorldCount++;
+      return;
+    }
+    if (loaded.incompatible) {
+      if (loaded.incompatible.reason === 'запись не является объектом') {
+        nonObjectEntries.push(index);
+      } else {
+        incompatibleEntries.push(loaded.incompatible);
+      }
+    }
+  });
+  return {
+    rawEntryCount: entries.length,
+    loadedWorldCount,
+    parseError,
+    incompatibleEntries,
+    nonObjectEntries
+  };
 }
 
 /**
@@ -114,16 +249,22 @@ export function getWorldById(id: string): SavedWorld | null {
 
 /**
  * Удаление мира по ID
+ *
+ * Stage 4.1.1: удаление работает по RAW-записям — удаляется ТОЛЬКО
+ * выбранная запись. Раньше список переписывался из getAllWorlds(),
+ * что молча удаляло бы все несовместимые записи хранилища.
  */
 export function deleteWorld(id: string): boolean {
-  const worlds = getAllWorlds();
-  const index = worlds.findIndex(w => w.id === id);
-  
-  if (index === -1) return false;
-  
-  worlds.splice(index, 1);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(worlds));
-  
+  const { entries } = readRawEntries();
+  const targetIndex = entries.findIndex(
+    (entry) => isObjectEntry(entry) && entry.id === id
+  );
+
+  if (targetIndex === -1) return false;
+
+  const remaining = entries.filter((_, index) => index !== targetIndex);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+
   return true;
 }
 
@@ -469,7 +610,19 @@ export function importWorldFromJSON(json: string): SavedWorld | null {
     
     // Импортированный мир мигрируется к актуальной версии формата
     // (отсутствующие физические поля остаются неизвестными).
-    return migrateWorld(parsed as SavedWorld);
+    // Stage 4.1.1: сохранение несовместимой/будущей версии
+    // отклоняется ЯВНО (MigrationError) — import не должен возвращать
+    // «мигрированный» мир из выдуманной версии.
+    try {
+      return migrateWorld(parsed as SavedWorld);
+    } catch (error) {
+      if (error instanceof MigrationError) {
+        // Сохранение из будущего формата: импорт невозможен,
+        // ошибка проглатывается осознанно — контракт функции null.
+        return null;
+      }
+      throw error;
+    }
   } catch {
     return null;
   }
@@ -618,5 +771,6 @@ export default {
   exportWorldToJSON,
   exportWorldToMarkdown,
   importWorldFromJSON,
-  getStorageStats
+  getStorageStats,
+  getStorageHealth
 };

@@ -2,16 +2,26 @@
 // STAGE 4.1 - Тесты персистентности: миграции, адаптеры, PRNG-регрессия
 // ============================================
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   migrateSavedWorld,
   CURRENT_SAVE_SCHEMA_VERSION,
   SAVE_SCHEMA_VERSIONS,
-  createDatasetRegistry
+  createDatasetRegistry,
+  MigrationError
 } from '../Core/migrations';
-import { STORAGE_FORMAT_VERSION, SUPPORTED_SAVE_VERSIONS } from '../Storage';
+import {
+  STORAGE_FORMAT_VERSION,
+  SUPPORTED_SAVE_VERSIONS,
+  getAllWorlds,
+  saveWorld,
+  deleteWorld,
+  importWorldFromJSON,
+  getStorageHealth
+} from '../Storage';
 import {
   legacyUnitToCore,
+  legacyUnitScaleFactor,
   physValueToScientificValue,
   numberToScientificValue,
   buildSpeciesCatalogFromLegacy,
@@ -23,6 +33,15 @@ import type { LegacyGasRecord, LegacyCompositionRecord, LegacyWorldInput } from 
 import { validateWorldState } from '../Core/worldState';
 import { createRandom } from '../Generator/random';
 import type { PhysValue, ChemicalEvolutionState, InventoryMode } from '../../types/physics';
+import type {
+  GeneratedWorld,
+  GenerationSettings,
+  CosmologyOption,
+  EpochOption,
+  CentralObjectOption,
+  CelestialBodyOption,
+  CradleOption
+} from '../../types';
 
 // ============================================
 // Фикстуры
@@ -156,12 +175,43 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.world.migration).toBeUndefined();
   });
 
-  it('неизвестная версия трактуется как 1.0 с честной записью в истории', () => {
-    const save = makeLegacySave('0.9');
-    const result = migrateSavedWorld(save);
-    expect(result.from).toBe('1.0');
-    expect(result.to).toBe('1.2');
-    expect(result.world.migration?.notes[0]).toContain('не указана или не распознана');
+  it('неизвестная, но формат-корректная версия отклоняется явно (unsupported_version)', () => {
+    // Stage 4.1.1 (ISSUE 6): раньше '0.9'/'1.3'/'2.0' молча трактовались
+    // как 1.0 и «мигрировались» — номер схемы выдумывался. Теперь
+    // сохранение из будущего/прошлого формата — честная ошибка.
+    for (const version of ['0.9', '1.3', '2.0']) {
+      const save = makeLegacySave(version);
+      try {
+        migrateSavedWorld(save);
+        expect.unreachable(`версия ${version} должна быть отклонена`);
+      } catch (e) {
+        expect(e).toBeInstanceOf(MigrationError);
+        expect((e as MigrationError).code).toBe('unsupported_version');
+        expect((e as MigrationError).fromVersion).toBe(version);
+        expect((e as MigrationError).message).toContain(version);
+      }
+    }
+  });
+
+  it('мусорная строка версии отклоняется (invalid_version)', () => {
+    for (const version of ['abc', '2', '']) {
+      const save = makeLegacySave(version);
+      try {
+        migrateSavedWorld(save);
+        expect.unreachable(`версия «${version}» должна быть отклонена`);
+      } catch (e) {
+        expect(e).toBeInstanceOf(MigrationError);
+        expect((e as MigrationError).code).toBe('invalid_version');
+      }
+    }
+  });
+
+  it('ошибка миграции не мутирует оригинал сохранения', () => {
+    const save = makeLegacySave('2.0');
+    expect(() => migrateSavedWorld(save)).toThrow(MigrationError);
+    expect(save.version).toBe('2.0');
+    expect(save.migration).toBeUndefined();
+    expect(save.customMarker).toBe('unique-value-42');
   });
 
   it('отсутствующая версия трактуется как 1.0 без выдумывания номера', () => {
@@ -321,23 +371,37 @@ describe('Stage 4.1 Adapters: PhysValue → ScientificValue', () => {
     }
   });
 
-  it('value = null → unknown: неизвестность не подменяется числом', () => {
+  it('value = null → unknown: неизвестность не подменяется числом, provenance сохраняется', () => {
     const sv = physValueToScientificValue(
       physValue({ value: null, unit: 'Па', confidence: 'unknown', note: 'данных недостаточно' })
     );
     expect(sv.status).toBe('unknown');
     expect(sv).not.toHaveProperty('quantity');
+    // Stage 4.1.1 (ISSUE 8): provenance неизвестного значения не теряется
+    const withSource = physValueToScientificValue(
+      physValue({ value: null, unit: 'Па', confidence: 'unknown', method: 'модель не применима', source: 'датчик X' })
+    );
+    expect(withSource.status).toBe('unknown');
+    if (withSource.status === 'unknown') {
+      expect(withSource.provenance?.sourceName).toBe('датчик X');
+      expect(withSource.provenance?.method).toBe('модель не применима');
+    }
   });
 
-  it('незарегистрированная единица → invalid с сохранением отклонённых данных', () => {
+  it('незарегистрированная единица → invalid: фиктивной единицы нет, оригинал в rawInput', () => {
     const sv = physValueToScientificValue(
       physValue({ value: 12, unit: 'furlong', confidence: 'estimated', method: 'тест' })
     );
     expect(sv.status).toBe('invalid');
     if (sv.status === 'invalid') {
       expect(sv.reason).toContain('furlong');
-      // отклонённые данные сохранены для диагностики
-      expect(sv.quantity?.value).toBe(12);
+      // Stage 4.1.1 (ISSUE 8): корректного quantity больше нет — раньше
+      // создавалась фиктивная unit '1'; оригинал сохраняется в rawInput.
+      expect(sv.quantity).toBeUndefined();
+      const raw = sv.provenance?.rawInput as Record<string, unknown> | undefined;
+      expect(raw?.['originalValue']).toBe(12);
+      expect(raw?.['originalUnit']).toBe('furlong');
+      expect(sv.provenance?.method).toBe('тест');
     }
   });
 
@@ -573,5 +637,234 @@ describe('Stage 4.1 Регрессия: детерминизм PRNG', () => {
     const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     expect(a.shuffle(arr)).toEqual(b.shuffle(arr));
     expect(a.generateId('world')).toEqual(b.generateId('world'));
+  });
+});
+
+// ============================================
+// 9. STAGE 4.1.1: ПРОЦЕНТЫ ЛЕГАСИ-ЕДИНИЦ (ISSUE 8)
+// ============================================
+
+describe('Stage 4.1.1 Adapters: масштабирование легаси-процентов', () => {
+  it('50% → 0.5 доли (до 4.1.1 значение оставалось равным 50)', () => {
+    const sv = physValueToScientificValue(
+      physValue({ value: 50, unit: '%', confidence: 'established', source: 'справочник' })
+    );
+    expect(sv.status).toBe('known');
+    if (sv.status === 'known') {
+      expect(sv.quantity.value).toBe(0.5);
+      expect(sv.quantity.unit).toBe('1');
+      // масштабирование задокументировано в provenance
+      expect(sv.provenance?.note).toContain('масштабирование');
+      expect(sv.provenance?.sourceName).toBe('справочник');
+    }
+  });
+
+  it('100% → 1; 0% → 0', () => {
+    const full = physValueToScientificValue(physValue({ value: 100, unit: '%', confidence: 'established' }));
+    if (full.status !== 'known') throw new Error('ожидался known');
+    expect(full.quantity.value).toBe(1);
+    const zero = physValueToScientificValue(physValue({ value: 0, unit: '%', confidence: 'established' }));
+    if (zero.status !== 'known') throw new Error('ожидался known');
+    expect(zero.quantity.value).toBe(0);
+  });
+
+  it('range масштабируется вместе со значением', () => {
+    const sv = physValueToScientificValue(
+      physValue({ value: 50, unit: '%', confidence: 'estimated', method: 'тест', range: { min: 25, max: 75 } })
+    );
+    expect(sv.status).toBe('estimated');
+    if (sv.status === 'estimated') {
+      expect(sv.uncertainty?.kind).toBe('interval');
+      if (sv.uncertainty?.kind === 'interval') {
+        expect(sv.uncertainty.lower).toBe(0.25);
+        expect(sv.uncertainty.upper).toBe(0.75);
+      }
+    }
+  });
+
+  it('legacyUnitScaleFactor: проценты — 0.01, «доля» и прямые единицы — 1', () => {
+    expect(legacyUnitScaleFactor('%')).toBe(0.01);
+    expect(legacyUnitScaleFactor('доля')).toBe(1);
+    expect(legacyUnitScaleFactor('кг')).toBe(1);
+    // незнакомая единица не выдумывает множитель
+    expect(legacyUnitScaleFactor('furlong')).toBe(1);
+  });
+});
+
+// ============================================
+// 10. STAGE 4.1.1: STORAGE — ИЗОЛЯЦИЯ ОШИБОК И ЗАЩИТА НЕСОВМЕСТИМЫХ ЗАПИСЕЙ (ISSUE 7)
+// ============================================
+
+const STORAGE_TEST_KEY = 'evowars_worlds';
+
+const fixtureCosmology: CosmologyOption = {
+  id: 'cosmo-1', name: 'Тестовая вселенная', description: 'фикстура теста',
+  baseWeight: 1, tags: [], isAnomalous: false, compatibilityInfo: '—',
+  scientificStatus: 'physically_plausible', specialRules: [], generationImpact: '—'
+};
+const fixtureEpoch: EpochOption = {
+  id: 'epoch-1', name: 'Эпоха', ageRange: { min: 0, max: 13.8 }, description: 'фикстура',
+  baseWeight: 1, tags: [], scientificStatus: 'physically_plausible', compatibilityNotes: '—'
+};
+const fixtureCentralObject: CentralObjectOption = {
+  id: 'co-1', name: 'Звезда', objectClass: 'star', role: 'primary_star',
+  potentialEnergySources: [], characteristicConstraints: [], potentialThreats: [],
+  compatibleOrbits: [], scientificStatus: 'physically_plausible',
+  baseWeight: 1, tags: [], minAge: null, maxAge: null
+};
+const fixtureCelestialBody: CelestialBodyOption = {
+  id: 'body-1', name: 'Планета', bodyType: 'planet', sizeClass: 'earth_like',
+  gravityDescription: '—', geologicalProperties: [], typicalConstraints: [],
+  compatibleCentralObjects: [], scientificStatus: 'physically_plausible', baseWeight: 1, tags: []
+};
+const fixtureCradle: CradleOption = {
+  id: 'cradle-1', name: 'Колыбель', matterState: 'liquid',
+  requiredTemperatureRange: { min: 250, max: 400 }, requiredPressureRange: { min: 0.5, max: 10 },
+  chemicalFeatures: [], availableEnergySources: ['chemical'], chemicalConstraints: [],
+  solventTypes: [], compatibilityRequirements: [], scientificStatus: 'physically_plausible',
+  baseWeight: 1, tags: []
+};
+
+function makeGeneratedWorld(id: string): GeneratedWorld {
+  return {
+    id,
+    createdAt: '2024-01-01T00:00:00.000Z',
+    seed: 'seed-' + id,
+    generatorVersion: '0.3.0',
+    mode: 'realistic',
+    cosmology: fixtureCosmology,
+    epoch: fixtureEpoch,
+    centralObject: fixtureCentralObject,
+    celestialBody: fixtureCelestialBody,
+    cradle: fixtureCradle,
+    cradleLocalEnvironment: {
+      temperature: null,
+      temperatureRange: null,
+      pressure: null,
+      pressureRange: null,
+      composition: [],
+      matterState: 'liquid',
+      energySources: ['chemical'],
+      chemicalConstraints: [],
+      locationType: 'surface',
+      locationDescription: '—',
+      notes: 'фикстура теста'
+    },
+    physicalCharacteristics: {},
+    energySources: { primary: ['chemical'], secondary: [], description: '—' },
+    atmosphere: { components: [], totalPressure: null, temperature: null, notes: 'фикстура' },
+    appliedRules: [],
+    warnings: [],
+    scientificStatus: 'physically_plausible',
+    causalChain: {
+      cosmology: '—', epoch: '—', centralObject: '—', celestialBody: '—', cradle: '—',
+      chemicalConstraints: [], energySources: [], lifeChallenges: [], unknowns: []
+    },
+    evolutionImplications: { possibleAdaptations: [], constraints: [], opportunities: [], uncertainties: [] },
+    userModifications: {}
+  };
+}
+
+const fixtureSettings: GenerationSettings = {
+  seed: 'seed-storage',
+  mode: 'realistic',
+  weights: { cosmology: {}, epoch: {}, centralObject: {}, celestialBody: {}, cradle: {} },
+  fixedCategories: {},
+  enableChemicalEvolution: false,
+  chemicalEvolutionSteps: 0
+};
+
+function writeRawEntries(entries: unknown[]): void {
+  localStorage.setItem(STORAGE_TEST_KEY, JSON.stringify(entries));
+}
+
+function rawEntry(id: string, version: string): Record<string, unknown> {
+  return { id, version, savedAt: '2024-01-01T00:00:00.000Z', seed: 'seed-' + id };
+}
+
+function readRawEntries(): Array<Record<string, unknown>> {
+  return JSON.parse(localStorage.getItem(STORAGE_TEST_KEY) ?? '[]') as Array<Record<string, unknown>>;
+}
+
+describe('Stage 4.1.1 Storage: изоляция ошибок и защита несовместимых записей', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('три нормальных мира (1.0/1.1/1.2) загружаются и мигрируются к 1.2', () => {
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('w2', '1.1'), rawEntry('w3', '1.2')]);
+    const worlds = getAllWorlds();
+    expect(worlds.map((w) => w.id)).toEqual(['w1', 'w2', 'w3']);
+    expect(worlds.every((w) => w.version === '1.2')).toBe(true);
+  });
+
+  it('несовместимый мир (версия 2.0) не прячет остальные', () => {
+    // До 4.1.1 один try/catch на весь массив: любая ошибка → getAllWorlds() === []
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0'), rawEntry('w2', '1.0')]);
+    const worlds = getAllWorlds();
+    expect(worlds.map((w) => w.id)).toEqual(['w1', 'w2']);
+    const health = getStorageHealth();
+    expect(health.rawEntryCount).toBe(3);
+    expect(health.loadedWorldCount).toBe(2);
+    expect(health.parseError).toBeNull();
+    expect(health.incompatibleEntries.length).toBe(1);
+    expect(health.incompatibleEntries[0]?.version).toBe('2.0');
+    expect(health.incompatibleEntries[0]?.reason).toContain('2.0');
+  });
+
+  it('несовместимая запись НЕ удаляется из localStorage при чтении', () => {
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0')]);
+    getAllWorlds();
+    const raw = readRawEntries();
+    expect(raw.some((e) => e['id'] === 'future' && e['version'] === '2.0')).toBe(true);
+  });
+
+  it('saveWorld не уничтожает несовместимую запись', () => {
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0')]);
+    const saved = saveWorld(makeGeneratedWorld('w-new'), fixtureSettings);
+    expect(saved.version).toBe('1.2');
+    // запись из будущего формата сохранена как есть
+    const raw = readRawEntries();
+    expect(raw.some((e) => e['id'] === 'future' && e['version'] === '2.0')).toBe(true);
+    // новые и совместимые миры загружаются
+    const ids = getAllWorlds().map((w) => w.id);
+    expect(ids).toContain('w-new');
+    expect(ids).toContain('w1');
+  });
+
+  it('deleteWorld удаляет только выбранную запись, несовместимые не трогает', () => {
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0'), rawEntry('w2', '1.0')]);
+    expect(deleteWorld('w1')).toBe(true);
+    const raw = readRawEntries();
+    expect(raw.some((e) => e['id'] === 'w1')).toBe(false);
+    expect(raw.some((e) => e['id'] === 'future' && e['version'] === '2.0')).toBe(true);
+    expect(raw.some((e) => e['id'] === 'w2')).toBe(true);
+    // несуществующий id — честный false
+    expect(deleteWorld('missing')).toBe(false);
+  });
+
+  it('битый JSON диагностируется через getStorageHealth, а не молчит', () => {
+    localStorage.setItem(STORAGE_TEST_KEY, '{broken json');
+    expect(getAllWorlds()).toEqual([]);
+    const health = getStorageHealth();
+    expect(health.parseError).not.toBeNull();
+    expect(health.rawEntryCount).toBe(0);
+  });
+
+  it('importWorldFromJSON отклоняет сохранение будущей версии', () => {
+    const json = JSON.stringify({
+      id: 'w-future',
+      seed: 's',
+      cosmology: {},
+      epoch: {},
+      centralObject: {},
+      celestialBody: {},
+      cradle: {},
+      version: '2.0',
+      savedAt: '2024-01-01T00:00:00.000Z'
+    });
+    expect(importWorldFromJSON(json)).toBeNull();
+    // мусорный JSON — тоже честный null
+    expect(importWorldFromJSON('not json at all')).toBeNull();
   });
 });

@@ -31,7 +31,7 @@
 // Происхождение (provenance) сохраняется при преобразованиях единиц.
 
 import type { PhysicalQuantity } from './physicalQuantity';
-import { convert as convertQuantity } from './physicalQuantity';
+import { convert as convertQuantity, isKnownUnit } from './physicalQuantity';
 
 // ============================================
 // 1. СТАТУС И ОШИБКА
@@ -355,4 +355,82 @@ export function quantityOrNull(v: ScientificValue): PhysicalQuantity | null {
 /** Статус значения. */
 export function statusOf(v: ScientificValue): DataStatus {
   return v.status;
+}
+
+/**
+ * Runtime-список допустимых статусов (Stage 4.1.1).
+ * Данные приходят из JSON — статус не может проверяться типом TS.
+ */
+export const DATA_STATUSES: readonly DataStatus[] = [
+  'known',
+  'estimated',
+  'unknown',
+  'not_applicable',
+  'not_implemented',
+  'invalid'
+];
+
+/**
+ * Проверка ФОРМЫ научного значения произвольного происхождения
+ * (Stage 4.1.1). Возвращает список проблем; пустой список = форма корректна.
+ * Проверяет только структурный контракт статусов:
+ * - статус из реестра DATA_STATUSES;
+ * - known/estimated: quantity с конечным числом и известной единицей;
+ * - estimated: обязателен непустой method (иначе оценка безследна);
+ * - invalid: обязателен непустой reason; quantity, если есть, — валиден;
+ * - not_applicable: обязателен непустой reason;
+ * - unknown/not_implemented: числового содержания не требуют.
+ * Физическую/научную корректность значения эта проверка не оценивает.
+ */
+export function validateScientificValueShape(v: unknown): string[] {
+  const errors: string[] = [];
+  if (typeof v !== 'object' || v === null) {
+    return ['значение должно быть объектом с полем status'];
+  }
+  const rec = v as Record<string, unknown>;
+  const status = rec.status;
+  if (typeof status !== 'string' || !(DATA_STATUSES as readonly string[]).includes(status)) {
+    return [`неизвестный статус научного значения: ${String(status)}`];
+  }
+  const quantityIssues = (q: unknown, label: string): void => {
+    if (typeof q !== 'object' || q === null) {
+      errors.push(`${label}: quantity должен быть объектом`);
+      return;
+    }
+    const quantity = q as Record<string, unknown>;
+    if (typeof quantity.value !== 'number' || !Number.isFinite(quantity.value)) {
+      errors.push(`${label}: quantity.value должен быть конечным числом, получено ${String(quantity.value)}`);
+    }
+    if (typeof quantity.unit !== 'string' || !isKnownUnit(quantity.unit)) {
+      errors.push(`${label}: quantity.unit должен быть зарегистрированной единицей, получено «${String(quantity.unit)}»`);
+    }
+  };
+  switch (status) {
+    case 'known':
+      quantityIssues(rec.quantity, 'known');
+      break;
+    case 'estimated':
+      quantityIssues(rec.quantity, 'estimated');
+      if (typeof rec.method !== 'string' || rec.method.trim() === '') {
+        errors.push('estimated требует непустой method — оценка без метода безследна');
+      }
+      break;
+    case 'invalid':
+      if (typeof rec.reason !== 'string' || rec.reason.trim() === '') {
+        errors.push('invalid требует непустой reason');
+      }
+      if (rec.quantity !== undefined) {
+        quantityIssues(rec.quantity, 'invalid');
+      }
+      break;
+    case 'not_applicable':
+      if (typeof rec.reason !== 'string' || rec.reason.trim() === '') {
+        errors.push('not_applicable требует непустой reason');
+      }
+      break;
+    case 'unknown':
+    case 'not_implemented':
+      break;
+  }
+  return errors;
 }

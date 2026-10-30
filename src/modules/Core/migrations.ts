@@ -103,6 +103,37 @@ export function isKnownSchemaVersion(version: string): boolean {
 }
 
 /**
+ * Ошибка миграции сохранений (Stage 4.1.1). Раньше любая неизвестная
+ * версия молча трактовалась как 1.0: сохранение из будущего ('2.0')
+ * или мусорная строка ('abc') «мигрировали» из выдуманной версии.
+ * Теперь политика честная и различается:
+ * - 'invalid_version' — строка версии не является семантической
+ *   версией схемы ('abc', '2', '');
+ * - 'unsupported_version' — версия корректна по формату, но ядро
+ *   её не поддерживает ('0.9', '1.3', '2.0');
+ * - 'missing_migration_path' — нет шага цепочки к целевой версии;
+ * - 'migration_failed' — шаг цепочки завершился ошибкой.
+ * Каждый бросок содержит исходную и целевую версии.
+ */
+export class MigrationError extends Error {
+  readonly code: 'unsupported_version' | 'invalid_version' | 'missing_migration_path' | 'migration_failed';
+  readonly component = 'SaveMigration';
+  readonly fromVersion: string;
+  readonly toVersion: string;
+
+  constructor(code: MigrationError['code'], message: string, fromVersion: string, toVersion: string) {
+    super(`[SaveMigration/${code}] ${message}`);
+    this.name = 'MigrationError';
+    this.code = code;
+    this.fromVersion = fromVersion;
+    this.toVersion = toVersion;
+  }
+}
+
+/** Формат версии схемы сохранений: X.Y или X.Y.Z (семвер без суффиксов). */
+export const VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?$/;
+
+/**
  * Минимальная структура, с которой работают миграции.
  * СПЕЦИАЛЬНО без строкового индекс-сигнатуры: интерфейсы (SavedWorld)
  * не получают неявного индекс-типа и иначе не удовлетворяли бы
@@ -176,41 +207,78 @@ const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12]
  * Полная цепочка миграций. Детерминирована: одна и та же входная
  * версия всегда даёт один и тот же результат.
  *
- * Отсутствующая/неизвестная версия трактуется как 1.0 (легаси),
- * как и в предыдущей реализации Storage.migrateWorld.
+ * Stage 4.1.1 — честная политика версий:
+ * - version === undefined — легаси-сохранение этапа 1-2:
+ *   трактуется как 1.0 С ЯВНОЙ записью в истории миграции;
+ * - версия известна (1.0 / 1.1 / 1.2) — мигрируется цепочкой;
+ * - версия корректна по формату, но неизвестна ядру ('0.9', '1.3',
+ *   '2.0') — MigrationError 'unsupported_version': сохранение из
+ *   будущего не «мигрируется» из выдуманной версии и не
+ *   уничтожается молча (Storage сохраняет его как есть);
+ * - версия мусорная ('abc', '2', '') — MigrationError
+ *   'invalid_version';
+ * - отсутствующий шаг цепочки — MigrationError 'missing_migration_path';
+ * - оригинал НЕ мутируется: все преобразования идут по копиям.
  */
 export function migrateSavedWorld<T extends MigrationTarget>(world: T, target: SaveSchemaVersion = CURRENT_SAVE_SCHEMA_VERSION): { world: T; notes: string[]; from: string; to: string } {
   const rawVersion = world.version;
-  const from = rawVersion !== undefined && isKnownSchemaVersion(rawVersion) ? rawVersion : '1.0';
+  let from: SaveSchemaVersion;
+  const notes: string[] = [];
+  if (rawVersion === undefined) {
+    from = '1.0';
+    notes.push('исходная версия сохранения не указана: сохранение трактовано как схема 1.0 (легаси формат этапа 1-2)');
+  } else if (!VERSION_PATTERN.test(rawVersion)) {
+    throw new MigrationError(
+      'invalid_version',
+      `версия сохранения «${rawVersion}» не является корректной семантической версией схемы (ожидается X.Y или X.Y.Z)`,
+      rawVersion,
+      target
+    );
+  } else if (!isKnownSchemaVersion(rawVersion)) {
+    throw new MigrationError(
+      'unsupported_version',
+      `версия схемы сохранений «${rawVersion}» не поддерживается (поддерживаются: ${SAVE_SCHEMA_VERSIONS.join(', ')})`,
+      rawVersion,
+      target
+    );
+  } else {
+    from = rawVersion;
+  }
   // Уже целевая схема: возвращаем как есть (идемпотентность —
   // повторная миграция не переписывает историю и не плодит записи).
   if (from === target && rawVersion === target) {
     return { world, notes: [], from, to: target };
   }
-  const notes: string[] = [];
-  let current: T = { ...world };
-  let currentVersion: SaveSchemaVersion = from as SaveSchemaVersion;
-
-  if (rawVersion === undefined || !isKnownSchemaVersion(rawVersion)) {
-    // Версия отсутствовала или не распознана: фиксируем это в истории,
-    // чтобы след миграции был честным.
-    notes.push(`исходная версия сохранения не указана или не распознана («${String(rawVersion ?? '—')}»): сохранение трактовано как схема 1.0`);
-    current = { ...current, version: '1.0' };
-  }
+  let current: T = { ...world, version: from };
+  let currentVersion: SaveSchemaVersion = from;
 
   let guard = 0;
   while (currentVersion !== target) {
     const step = MIGRATIONS.find((m) => m.from === currentVersion);
     if (!step) {
-      throw new Error(`[SaveMigration] нет миграции из схемы «${currentVersion}» к «${target}»: цепочка не определена`);
+      throw new MigrationError(
+        'missing_migration_path',
+        `нет миграции из схемы «${currentVersion}» к «${target}»: цепочка не определена`,
+        currentVersion,
+        target
+      );
     }
-    const result = step.migrate(current);
-    current = result.world;
-    notes.push(...result.notes);
+    try {
+      const result = step.migrate(current);
+      current = result.world;
+      notes.push(...result.notes);
+    } catch (error) {
+      throw new MigrationError(
+        'migration_failed',
+        `миграция «${step.from}» → «${step.to}» завершилась ошибкой: ${error instanceof Error ? error.message : String(error)}`,
+        step.from,
+        step.to
+      );
+    }
     currentVersion = step.to;
     guard++;
     if (guard > MIGRATIONS.length + 1) {
-      throw new Error('[SaveMigration] цепочка миграций зациклилась: это ошибка конфигурации реестра');
+      throw new MigrationError('missing_migration_path', 'цепочка миграций зациклилась: это ошибка конфигурации реестра', from, target);
     }
   }
 
