@@ -667,9 +667,9 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
     );
     expect(withRange?.effectiveTemperature.status).toBe('unknown');
     if (withRange && withRange.effectiveTemperature.status === 'unknown') {
-      expect(withRange.effectiveTemperature.note).toContain('2500');
-      expect(withRange.effectiveTemperature.note).toContain('4000');
-      expect(withRange.effectiveTemperature.note).toContain('НЕ подставляется');
+      expect(withRange.effectiveTemperature.provenance?.note).toContain('2500');
+      expect(withRange.effectiveTemperature.provenance?.note).toContain('4000');
+      expect(withRange.effectiveTemperature.provenance?.note).toContain('НЕ подставляется');
     }
     expect(temperatureValueOrNull(withRange?.effectiveTemperature as ScientificValue)).toBeNull();
     if (withRange && withRange.effectiveTemperature.status === 'unknown') {

@@ -474,7 +474,7 @@ describe('Data Validation', () => {
       expect(divergence?.message).toContain('РАЗНЫЕ величины');
       expect(divergence?.message).toContain('K');
       // НЕ объявляется физическим противоречием (нет threshold)
-      expect(divergence?.message).toContain('противоречием');
+      expect(divergence?.message).toContain('без объявления физического противоречия');
       expect(divergence?.affectedFields).toContain('atmosphere');
 
       // appliedRules синхронно содержит правило
