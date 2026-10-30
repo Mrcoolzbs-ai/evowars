@@ -192,7 +192,7 @@ describe('Stage 4.2.1 InvariantAuditor: not_verifiable (неизвестное �
     expect(sectionOf(audit, 'reservoir_fluxes')?.status).toBe('not_verifiable');
   });
 
-  it('untimed-запись в ограниченной временной области — not_verifiable', () => {
+  it('untimed-запись в ограниченной области не маскируется как успех', () => {
     const before = worldOf([res('atm', 'atmosphere', { co2: 100 }), res('ocn', 'ocean', { co2: 0 })]);
     let ledger = createFluxLedger();
     ledger = registerFlux(ledger, {
@@ -209,9 +209,35 @@ describe('Stage 4.2.1 InvariantAuditor: not_verifiable (неизвестное �
       boundary: 'complete',
       scope: { after: { segmentIndex: 0, localTimeS: 0 }, upTo: { segmentIndex: 0, localTimeS: 100 } }
     });
-    expect(audit.status).toBe('not_verifiable');
+    // untimed-запись исключена из области: изменение резервуаров ничем
+    // не объясняется ВНУТРИ области → пофазовый аудит честно фиксирует
+    // расхождение (imbalanced), а балансы непроверяемы (not_verifiable).
+    // Итог — imbalanced: ни успех, ни маскировка неизвестности нулём.
+    expect(audit.status).toBe('imbalanced');
     expect(audit.balanced).toBe(false);
-    expect(audit.diagnostics.some((d) => d.includes('f1'))).toBe(true);
+    expect(sectionOf(audit, 'reservoir_fluxes')?.status).toBe('imbalanced');
+    expect(sectionOf(audit, 'substance')?.status).toBe('not_verifiable');
+  });
+
+  it('includeUntimed берёт ответственность на вызывающего: область полна → balanced', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100 }), res('ocn', 'ocean', { co2: 0 })]);
+    let ledger = createFluxLedger();
+    ledger = registerFlux(ledger, {
+      id: 'f1',
+      kind: 'internal_transfer',
+      from: 'atm',
+      to: 'ocn',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 40, basis: 'amount' }
+    });
+    const applied = applyFlux(ledger, reservoirsMap(before), 'f1');
+    const after: CoreWorldState = { ...before, reservoirs: [applied.reservoirs['atm'], applied.reservoirs['ocn']] };
+    const audit = auditWorldTransition(before, after, applied.ledger, {
+      speciesCatalog: catalogOf(),
+      boundary: 'complete',
+      scope: { after: { segmentIndex: 0, localTimeS: 0 }, upTo: { segmentIndex: 0, localTimeS: 100 }, includeUntimed: true }
+    });
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
   });
 
   it('неизвестная граница системы не даёт balanced', () => {
