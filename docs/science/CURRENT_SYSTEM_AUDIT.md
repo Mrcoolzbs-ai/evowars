@@ -52,7 +52,24 @@
 > B [0, dt] → второй A [dt/2, dt]; ранее B получал intervalStartS =
 > dt/2 при длительности dt — выход за macro-шаг). После 4.2.1.2 —
 > 685 тестов (26 файлов), из них ядро — 414 (14 файлов).
-> Stage 4.2 НЕ завершён: 4.2.2–4.2.4 не начаты; химия НЕ на Scheduler.
+> Stage 4.2.2 (2026-10-30): температурная иерархия и происхождение —
+> 6 РАЗДЕЛЬНЫХ температурных понятий (PHYSICS_ARCHITECTURE §5.1)
+> получили типизированный носитель в ядре: `Core/thermalState.ts`
+> (валидация «только K», BodyThermalState, профиль атмосферы,
+> reservoirTemperature, resolveLocalReactionTemperature без ложных
+> fallback, ThermalStateError), адаптеры пресетных температур с честным
+> provenance (historical_game → «игровое допущение»,
+> observational_reference → «справочное, НЕ измерение этого мира»),
+> WorldModel больше НЕ копирует пресетную температуру в
+> surfaceTemperature (проблема 2.3 закрыта в типизированной части),
+> генератор — типизированный фазовый скрининг с temperatureBasis.
+> Схема CoreWorldState 1.2.0 (thermalState опционален; миграция
+> сохранений 1.3 поле не создаёт). После 4.2.2 — 761 тест (27 файлов),
+> из них ядро — 490 (76 новых в coreThermalState.test). Коммиты:
+> d706841 → 7dc91ea → 7248b38 → a5888c6 (последний — фикс tsc:
+> provenanceOfValue; CI зелёный, golden baseline химии совпадает).
+> НЕ завершено в 4.2: 4.2.3–4.2.4 не начаты; химия НЕ на Scheduler;
+> RCM не реализована (surfaceTemperature = unknown).
 
 ## 1. Реестр модулей
 
@@ -267,6 +284,24 @@
   итоги Vitest «Test Files 26 passed (26) / Tests 685 passed (685)»
   сверяются с notice-аннотацией шага Tests; golden baseline
   (877e17d3…bc0a) не изменился.
+- **Stage 4.2.2**: 27 файлов, 761 тест, из них 490 — ядро (15
+  файлов: 14 прежних + coreThermalState.test — 76 новых проверок:
+  термодинамическая валидация «только K», профиль атмосферы
+  (single_layer_estimate/limitations), BodyThermalState в
+  validateWorldState (схема 1.2.0, invalid_thermal_state),
+  reservoirTemperature (invalid_reservoir), адаптеры пресетов с
+  provenance, resolver локальной температуры (отказ fallback на
+  T_eq/surfaceTemperature/соседние области, честный unknown,
+  ThermalStateError invalid_place/invalid_threshold),
+  diagnosePresetEquilibriumDivergence, типизированный фазовый
+  анализ (числовое совпадение с легаси), регрессии пресетов
+  (methane_ethane 95 K ≠ titan_reference 94 K, earth/venus/mars).
+  Фактические итоги Vitest «Test Files 27 passed (27) / Tests 761
+  passed (761)» сверяются с notice-аннотацией шага Tests; golden
+  baseline (877e17d3…bc0a) совпадает. Обновлён generator.test:
+  пресетная температура (288/95 K) больше НЕ появляется в
+  physicalCharacteristics.surfaceTemperature. CI зелёный:
+  tsc 0 ошибок, vitest, oxlint, build.
 
 ### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
 
@@ -440,7 +475,8 @@
      рассчитан реально выполнявшимся кодом, зафиксирован тестом и
      notice-аннотацией CI; после всех коммитов 4.2.1 совпадает.
      ChemicalEvolution НЕ переведён на Scheduler (4.2.3),
-     температурная иерархия (4.2.2) не начата — отсутствие
+     температурная иерархия (4.2.2) — на момент 4.2.1 не начата;
+     выполнена ревизией 4.2.2 (см. блок Stage 4.2.2 ниже) — отсутствие
      готовых физических solver не маскируется.
 - **Stage 4.2.1.2 — аудит контрактов реестра процессов и
   планировщика** (3 остаточных дефекта, исправлены; +13
@@ -472,6 +508,47 @@
      ЕДИНСТВЕННОЕ продвижение часов на dt сохранены; тесты
      проверяют и порядок вызовов, и согласованность временных
      аргументов.
+- **Stage 4.2.2 — температурная иерархия и происхождение**
+  (проблемы 2.2/2.3 закрыты в типизированной части; +76 тестов в
+  coreThermalState.test, +2 правки generator.test):
+  J. новые контракты `Core/thermalState.ts`: термодинамическая
+     температура — только единица 'K' с размерностью
+     Θ (validateThermalScientificValue; known/estimated конечны и
+     ≥ 0; invalid — только диагностика); BodyThermalState
+     (equilibrium/surface/effective раздельно + профиль атмосферы);
+     AtmosphericTemperatureProfile со статусами unknown /
+     single_layer_estimate (ровно 1 слой + обязательный
+     limitations) / partial_profile / complete_profile;
+  K. resolver локальной температуры
+     resolveLocalReactionTemperature: читает ТОЛЬКО явно указанную
+     область — (bodyId, reservoirId) или (bodyId, layerId);
+     T_eq, глобальная surfaceTemperature, температура соседних
+     резервуаров/слоев и AtmosphereState.temperature НЕ являются
+     fallback ни при каких условиях; отсутствие/чужая
+     область/непригодные данные → синтезированный unknown с
+     причиной; заявленные unknown/not_applicable/not_implemented
+     сохраняются как есть с provenance; некорректное место (оба
+     id / ни одного / пустой bodyId) → ThermalStateError
+     invalid_place; чистая функция (иммутабельность проверена
+     тестами);
+  L. схема CoreWorldState 1.2.0: WorldBody.thermalState опционален;
+     миграция сохранений 1.2→1.3 поле НЕ создаёт; validateWorldState
+     даёт invalid_thermal_state / invalid_reservoir
+     (reservoirTemperature);
+  M. адаптеры provenance: пресетная температура → ScientificValue с
+     происхождением (historical_game → estimated «игровое допущение
+     (game_assumption)», observational_reference → estimated
+     «справочное, НЕ измерение этого мира», hypothetical /
+     пользовательская — с пометками); planetThermalStateFromLegacy:
+     T_eq — known отдельно, surfaceTemperature — ЯВНО unknown до
+     RCM, effective — not_applicable (планета — получатель
+     излучения); WorldModel больше НЕ присваивает
+     characteristics.surfaceTemperature из пресета; генератор
+     передаёт в фазовый скрининг типизированную температуру
+     (analyzeAtmospherePhasesWithProvenance, числовой результат
+     неизменен, temperatureBasis с примечанием). Пресетная
+     температура (288/95 K) больше не появляется в
+     physicalCharacteristics.surfaceTemperature.
 
 ### 1.15 App.tsx (966 строк)
 
@@ -495,18 +572,48 @@
 - **Где**: EnergyBudget вычисляет `equilibriumTemperature`; PhaseEquilibrium и ChemicalEvolution используют `atmosphere.temperature` (из пресета) как рабочую температуру.
 - **Последствие**: энергетический контур и термохимический контур живут на разных температурах; результат одной модели (T_eq) не используется там, где он единственный физически обоснованный, а игровая пресетная температура выступает как физическая.
 - **Предлагаемое исправление (Stage 4.2/4.8, ревизия 4.0.1)**: ввести иерархию РАЗДЕЛЬНЫХ температурных величин вместо одного поля `T_surface` с разными источниками (PHYSICS_ARCHITECTURE §5.1): effectiveTemperature, equilibriumTemperature, surfaceTemperature, atmosphericTemperatureProfile, reservoirTemperature, localReactionTemperature. T_eq — радиационная оценка, не подменяет температуру поверхности; температура атмосферного пресета несёт явную пометку происхождения (historical_game / справочная); реакции и фазовые переходы читают температуру своего резервуара/области. До появления RCM surfaceTemperature остаётся `unknown` или явно оценочной, не подменяется T_eq. До реализации — задокументировано здесь.
+- **Статус (Stage 4.2.2)**: базовый слой иерархии реализован в ядре —
+  BodyThermalState (T_eq отдельно known; surfaceTemperature явно
+  unknown до RCM; effective not_applicable), профиль атмосферы со
+  статусами, reservoirTemperature, resolver локальной температуры
+  без ложных fallback, типизированный фазовый анализ
+  (temperatureBasis с provenance; подстановка T_eq/surface
+  запрещена и отмечена в примечании). Числовой легаси-путь
+  PhaseEquilibrium/ChemicalEvolution НЕ тронут (перевод химии на
+  Scheduler и локальную температуру — 4.2.3): легаси-химия
+  продолжает использовать пресетную температуру как рабочую,
+  что остаётся честно задокументированным.
 
 ### 2.3 Пресетная температура — скрытый вход скрининга [средний риск]
 
 - **Где**: `analyzeAtmospherePhases` (вход из AtmospherePhysicalModel), `runChemicalEvolutionStep` (пороги реакций).
 - **Последствие**: для Титана скрининг корректен (94 K из справочного пресета), но для случайных атмосфер температуры пресетов могут конфликтовать с T_eq орбиты (например, холодная орбита + тёплый пресет).
 - **Предлагаемое исправление**: то же, что 2.2 (единая политика температуры) + валидационное правило совместимости «пресетная температура vs T_eq: расхождение > X К — предупреждение» (Stage 4.2, правило Compatibility).
+- **Статус (Stage 4.2.2)**: исправлено в типизированной части —
+  WorldModel больше НЕ копирует пресетную температуру в
+  `characteristics.surfaceTemperature` (проверено тестами генератора:
+  288/95 K не появляются); фазовый скрининг генератора получает
+  типизированную температуру с происхождением пресета
+  (analyzeAtmospherePhasesWithProvenance); расхождение пресет vs
+  T_eq диагностируется ядром (diagnosePresetEquilibriumDivergence:
+  noted / threshold_exceeded / not_comparable — порог только явный,
+  температуры не изменяются). Легаси-правило Compatibility с жёстким
+  порогом НЕ добавлялось (чтобы не менять поведение легаси-совместимости
+  и RNG); правило совместимости появится при переводе UI/совместимости
+  на ядро.
 
 ### 2.4 Температурные диапазоны реакций каталога — игровые [низкий риск, гигиена данных]
 
 - **Где**: `chemicalReactions.allowedRanges` (например, ch4_oxidation: 300–2000 K).
 - **Проблема**: диапазоны выглядят как экспериментальные данные, но происхождения не имеют (реальное окисление CH₄ в атмосферах — фотохимическое, многостадийное). `gameSpeedCoefficient` честно помечен игрой, диапазоны — нет.
 - **Предлагаемое исправление (Stage 4.5)**: пометить диапазоны `game_assumption` в типе `ChemicalReaction` и добавить поле provenance; при появлении данных JPL Evaluation — заменить на проверенные.
+- **Статус (Stage 4.2.2)**: provenance-метки диапазонов реакций НЕ
+  тронуты — остаются Stage 4.5 (изменение каталога реакций вне этапа
+  запрещено). Подготовлен типизированный путь: локальная температура
+  процесса теперь разрешается ядром
+  (resolveLocalReactionTemperature) с honest-статусами, и при
+  появлении проверенных диапазонов реакции смогут читать температуру
+  своей области, а не пресет атмосферы.
 
 ### 2.5 Однонаправленная стехиометрия [архитектурное ограничение]
 

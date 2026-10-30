@@ -91,6 +91,23 @@
 > (ранее B получал intervalStartS = dt/2 и формально охватывал
 > [dt/2, 3dt/2] — выход за границы macro-шага). После 4.2.1.2 —
 > 685 тестов (26 файлов), из них ядро — 414 (14 файлов).
+>
+> Ревизия Stage 4.2.2 (2026-10-30): температурная иерархия и
+> происхождение — новый слой `thermalState.ts` (§2.15): 6 раздельных
+> температурных понятий с валидацией «только K», BodyThermalState на
+> теле (схема CoreWorldState 1.2.0), профиль атмосферы со статусами,
+> reservoirTemperature с provenance, resolver локальной температуры
+> без ложных fallback, диагностика расхождения пресет/T_eq, адаптеры
+> пресетных температур с честным происхождением (historical_game →
+> estimated «игровое допущение»; observational_reference → «справочное,
+> НЕ измерение этого мира»). WorldModel больше НЕ копирует пресетную
+> температуру в surfaceTemperature; генератор передаёт в фазовый
+> скрининг типизированную температуру (analyzeAtmospherePhasesWithProvenance,
+> temperatureBasis). RCM и вертикальный профиль НЕ реализованы и не
+> выдаются за реализованные (этап 4.8). После 4.2.2 — 761 тест
+> (27 файлов), из них ядро — 490 (15 файлов, +76 в
+> coreThermalState.test). Коммиты: d706841 → 7dc91ea → 7248b38 →
+> a5888c6 (CI зелёный; golden baseline химии совпадает).
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -106,7 +123,8 @@
 | `processRegistry.ts` | Процессы | дескрипторы процессов с честными τ и статусами доступности solver (4.2.1) |
 | `scheduler.ts` | Планировщик | детерминированный порядок операторов, Lie/Strang, sub-cycling, очередь событий (4.2.1) |
 | `invariantAuditor.ts` | Инварианты | объединённый аудит перехода before → process → after (4.2.1) |
-| `worldState.ts` | Состояние мира | каноническое состояние: тела, гравитация, излучение, резервуары, потоки, часы; валидация |
+| `thermalState.ts` | Температуры (4.2.2) | термодинамическая температура «только K»; BodyThermalState; профиль атмосферы со статусами; reservoirTemperature; resolver локальной температуры без ложных fallback; диагностика расхождения пресет/T_eq |
+| `worldState.ts` | Состояние мира | каноническое состояние: тела (с thermalState, 4.2.2), гравитация, излучение, резервуары, потоки, часы; валидация |
 | `solverBackend.ts` | Численные методы | контракт решателей без фиктивных методов; probe-проверка заявлений; реестр available/planned |
 | `migrations.ts` | Версионирование | версии схем сохранений 1.0→1.1→1.2; реестр наборов данных; детерминированные миграции |
 | `adapters.ts` | Мосты | PhysValue/GeneratedWorld → ядро без потери метода, источника и семантики неизвестности |
@@ -327,12 +345,14 @@ stepCount, representableStepS). Когда шаг становится непр�
 
 ### 2.7 CoreWorldState — каноническое состояние мира
 
-`CoreWorldState` = { schemaVersion ('1.1.0' после 4.2.1; ранее
-'1.0.0' — поддерживаются обе), worldId, clock, cosmicAge, bodies,
-gravity, radiationSources, reservoirs, fluxLedger, scheduling?,
-legacy, note }. `scheduling` (динамика процессов и очередь событий,
-§2.13) опционален: отсутствие = «не инициализировано», миграции
-его НЕ создают. Ключевое разделение:
+`CoreWorldState` = { schemaVersion ('1.2.0' после 4.2.2; ранее
+'1.1.0' и '1.0.0' — поддерживаются все), worldId, clock, cosmicAge,
+bodies, gravity, radiationSources, reservoirs, fluxLedger,
+scheduling?, legacy, note }. `scheduling` (динамика процессов и
+очередь событий, §2.13) и `WorldBody.thermalState` (температурное
+состояние тела, §2.15) опциональны: отсутствие = «не
+инициализировано», миграции их НЕ создают (миграция сохранений
+1.2→1.3 не создаёт thermalState). Ключевое разделение:
 
 - `gravity: Record<bodyId, parentId | null>` — гравитационная иерархия;
 - `radiationSources` — источники излучения.
@@ -345,7 +365,9 @@ legacy, note }. `scheduling` (динамика процессов и очере�
 гравитации, некорректные часы, несовпадение версий, пустой worldId;
 ревизия 4.2.1: некорректное scheduling (включая события с
 некорректным временем в очереди) — invalid_scheduling /
-invalid_event.
+invalid_event; ревизия 4.2.2: некорректное thermalState тела
+(включая профиль атмосферы) — invalid_thermal_state, некорректная
+reservoirTemperature резервуара — invalid_reservoir.
 
 ### 2.8 SolverBackend — контракт без блефа
 
@@ -533,6 +555,71 @@ untimed-записи в ограниченной временной област
 нового состояния: обязательные нарушенные инварианты отклоняют шаг
 без продвижения времени и без потери исходного состояния.
 
+### 2.15 thermalState — температурная иерархия (4.2.2)
+
+Слой реализует иерархию РАЗДЕЛЬНЫХ температурных величин
+(PHYSICS_ARCHITECTURE §5.1; проблемы аудита 2.2/2.3 закрыты в
+типизированной части). Шесть понятий НЕ сводятся к одному полю:
+
+- `effectiveTemperature` — эффективная температура ИСТОЧНИКА
+  излучения (звезда, компактный остаток, субзвёздный объект);
+  для планеты — not_applicable (получатель излучения);
+- `equilibriumTemperature` — T_eq серого тела из энергетического
+  бюджета (known при известном потоке; радиационная оценка с
+  допущениями A/f/ε, НЕ температура поверхности);
+- `surfaceTemperature` — температура физической поверхности;
+  до появления RCM (этап 4.8) — ЯВНО unknown, не подменяется
+  T_eq и пресетом;
+- `atmosphericTemperatureProfile` — профиль атмосферы со
+  статусами unknown / single_layer_estimate (ровно 1 слой +
+  обязательные limitations: «НЕ расчётный вертикальный профиль») /
+  partial_profile / complete_profile;
+- `reservoirTemperature` (`ReservoirRecord`) — температура
+  резервуара, где идёт процесс, с provenance; отсутствие ≠
+  температуре поверхности;
+- локальная температура реакции/фазового перехода — результат
+  `resolveLocalReactionTemperature`.
+
+Контракты и правила честности:
+
+- термодинамическая температура — ТОЛЬКО единица 'K' с размерностью
+  Θ (validateThermalScientificValue: known/estimated конечны и ≥ 0;
+  invalid — только диагностика; unknown без чисел);
+- `resolveLocalReactionTemperature(state, {bodyId, reservoirId |
+  layerId})` читает ТОЛЬКО явно указанную область; T_eq, глобальная
+  surfaceTemperature, соседние резервуары/слои и
+  AtmosphereState.temperature НЕ являются fallback ни при каких
+  условиях; отсутствие/чужая область/непригодные данные →
+  синтезированный unknown с причиной; заявленные
+  unknown/not_applicable/not_implemented сохраняются с provenance;
+  некорректное место → ThermalStateError 'invalid_place';
+- `diagnosePresetEquilibriumDivergence` — честная диагностика
+  расхождения пресетной температуры с T_eq (not_comparable /
+  noted / threshold_exceeded; порог только явный, иначе
+  'invalid_threshold'; температуры не изменяются);
+- адаптеры (§2.10): пресетная температура → ScientificValue с
+  provenance (historical_game → estimated «игровое допущение
+  (game_assumption)», observational_reference → «справочное, НЕ
+  измерение этого мира»); `planetThermalStateFromLegacy`:
+  T_eq known отдельно, surfaceTemperature unknown, effective
+  not_applicable; центральные объекты: T_eff known или unknown —
+  среднее по классу НЕ подставляется;
+- схема CoreWorldState 1.2.0: `WorldBody.thermalState?`
+  (validateWorldState → invalid_thermal_state), `ReservoirRecord.
+  reservoirTemperature?` (invalid_reservoir); миграция сохранений
+  1.2→1.3 thermalState НЕ создаёт;
+- фазовый скрининг: `analyzeAtmospherePhasesWithProvenance(model,
+  temperature: ScientificValue)` (PhaseEquilibrium) — делегирует
+  числовой анализ, добавляет temperatureBasis {temperature, note};
+  подстановка T_eq или температуры поверхности запрещена и
+  отмечена в примечании. WorldModel больше НЕ присваивает
+  пресетную температуру в characteristics.surfaceTemperature.
+
+RCM, вертикальный профиль, гидростатика, парниковый эффект и
+вычисление surfaceTemperature НЕ реализованы и не выдаются за
+реализованные (этап 4.8); легаси-химия продолжает работать на
+пресетной температуре (перевод на Scheduler — 4.2.3).
+
 ## 3. Интеграция (точки контакта с легаси)
 
 1. `GeneratedWorld.coreWorldState?: CoreWorldState` — опциональное поле.
@@ -560,8 +647,15 @@ untimed-записи в ограниченной временной област
 3. Баррель `Tests/index.ts` реэкспортирует 9 тест-файлов ядра Stage
    4.1; тест-файлы Stage 4.2.1 (coreChemicalGoldenBaseline,
    coreWorldClock, coreProcessRegistry, coreScheduler,
-   coreInvariantAuditor) запускаются Vitest напрямую (баррель никем
-   не импортируется и не расширялся — несвязанный код не трогался).
+   coreInvariantAuditor) и Stage 4.2.2 (coreThermalState.test)
+   запускаются Vitest напрямую (баррель никем не импортируется
+   и не расширялся — несвязанный код не трогался).
+4. Баррель ядра `Core/index.ts` реэкспортирует thermalState (4.2.2);
+   PhaseEquilibrium дополнился типизированной функцией
+   `analyzeAtmospherePhasesWithProvenance` (числовой API и его
+   результат НЕ изменены); Generator передаёт в фазовый скрининг
+   типизированную температуру через адаптер; WorldModel больше не
+   копирует пресетную температуру в surfaceTemperature.
 
 Чего интеграция НЕ делает: UI не переключён на ядро (задача Stage 4.2);
 легаси-вычисления (Generator, ChemicalEvolution, Atmosphere, PhaseEquilibrium,
@@ -574,7 +668,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (414 тестов, 14 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2)
+## 4. Тесты ядра (490 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2)
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -592,8 +686,11 @@ golden-траектория 100 шагов воспроизводится чис
 | coreProcessRegistry.test | 21 | 4.2.1: уникальные id, τ с размерностью времени и provenance, unknown τ ≠ число, disabled/без solver не запускаются автоматически, мост легаси-химии (11 процессов, честное состояние); 4.2.1.2: числовое τ строго положительно (0/−1 s и −1 ч → invalid_descriptor после перевода в секунды), fail-closed tauSeconds (τ ≤ 0 → null, не autorunnable, эвристика шага не назначается) |
 | coreScheduler.test | 30 | 4.2.1: детерминированный порядок, sub-cycling, Lie и Strang A(dt/2) → B(dt) → A(dt/2) (ровно 2 оператора), один macro-шаг — одно продвижение WorldClock, атомарный отказ шага, очередь событий (сортировка, tie-break, повторная обработка запрещена), сериализация bookkeeping; 4.2.1.2: дубликаты processId (processIds и operators) — duplicate_process_id до первого вызова оператора, мир/часы не тронуты, физические подынтервалы Strang внутри [0, dt] (A [0,dt/2], B [0,dt], A [dt/2,dt]) в вызовах и журнале, неположительное τ не запускается даже при прямом вызове |
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
+| coreThermalState.test | 76 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown) |
 
-Всего в проекте 26 тест-файлов, 685 тестов (после Stage 4.2.1.2 —
+Всего в проекте 27 тест-файлов, 761 тест (после Stage 4.2.2 —
+фактические итоги Vitest «Test Files 27 passed (27) / Tests 761
+passed (761)» из CI; после 4.2.1.2 — 685 (26 файлов),
 фактические итоги Vitest «Test Files 26 passed (26) / Tests 685
 passed (685)» из CI; после 4.2.1 — 672,
 фактические итоги Vitest «Test Files 26 passed (26) / Tests 672
@@ -620,13 +717,25 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   процесс не активируется автоматически;
 - перевод ChemicalEvolution на Scheduler — Stage 4.2.3 (легаси-химия
   продолжает работать как есть, golden-траектория воспроизводится);
-  температурная иерархия — Stage 4.2.2 (не начата);
 - кинетика, термодинамика видов, EOS, равновесие смесей;
-- сэмплирование звезды из класса (аудит §2.1), иерархия температурных
-  величин (§2.2/2.3) — контракты ScientificValue/Reservoir к ним
-  готовы, физика придет на этапах 4.2–4.8;
+- сэмплирование звезды из класса (аудит §2.1) — контракты
+  ScientificValue/Reservoir готовы, физика придёт на этапах
+  4.6–4.8;
+- температурная иерархия (Stage 4.2.2): реализованы КОНТРАКТЫ —
+  валидация «только K», BodyThermalState, профиль атмосферы со
+  статусами, reservoirTemperature, resolver локальной температуры,
+  адаптеры provenance, диагностика пресет/T_eq. НЕ реализовано и не
+  выдаётся за реализованное: RCM и вертикальный профиль (этап 4.8),
+  гидростатика, парниковый эффект, вычисление surfaceTemperature
+  (остаётся ЯВНО unknown); ни один резервуар/слой не получил
+  физическую модель температуры — известные значения приходят
+  ТОЛЬКО из явных данных (пресет, фикстура) с provenance;
+  легаси-химия продолжает использовать пресетную температуру
+  (перевод на локальную температуру — вместе с Scheduler, 4.2.3);
 - перевод UI на ядро, перенос форматтеров из App.tsx, удаление
-  легаси-ветки bodyPhysics (§2.6) и дублей (§2.7) — Stage 4.2;
+  легаси-ветки bodyPhysics (§2.6) и дублей (§2.7) — в рамках
+  Stage 4.2.2 НЕ выполнялись (следующие шаги этапа 4.2: 4.2.3 —
+  химия на Scheduler, затем 4.2.4);
 - сами миграции создают только версии — значения в старых сохранениях
   не пересчитываются и не «дозаполняются»;
 - массово-молярные пересчёты требуют молярной массы вида: неизвестная
