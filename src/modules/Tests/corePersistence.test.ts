@@ -17,7 +17,8 @@ import {
   saveWorld,
   deleteWorld,
   importWorldFromJSON,
-  getStorageHealth
+  getStorageHealth,
+  StorageError
 } from '../Storage';
 import {
   legacyUnitToCore,
@@ -866,5 +867,101 @@ describe('Stage 4.1.1 Storage: изоляция ошибок и защита н�
     expect(importWorldFromJSON(json)).toBeNull();
     // мусорный JSON — тоже честный null
     expect(importWorldFromJSON('not json at all')).toBeNull();
+  });
+});
+
+
+// ============================================
+// STAGE 4.1.1.2 — STORAGE НЕ ПЕРЕЗАПИСЫВАЕТ ПОВРЕЖДЁННОЕ ХРАНИЛИЩЕ (ISSUE D)
+// ============================================
+
+describe('Stage 4.1.1.2 Storage: повреждённое хранилище не перезаписывается (ISSUE D)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('корректный массив: новый мир сохраняется', () => {
+    writeRawEntries([rawEntry('w1', '1.0')]);
+    saveWorld(makeGeneratedWorld('w-new'), fixtureSettings);
+    const raw = readRawEntries();
+    expect(raw.length).toBe(2);
+    expect(raw.some((entry) => entry.id === 'w-new')).toBe(true);
+    expect(raw.some((entry) => entry.id === 'w1')).toBe(true);
+  });
+
+  it('массив с будущей версией 2.0: новая запись добавляется, несовместимая сохраняется как raw', () => {
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0')]);
+    saveWorld(makeGeneratedWorld('w-next'), fixtureSettings);
+    const raw = readRawEntries();
+    expect(raw.length).toBe(3);
+    const future = raw.find((entry) => entry.id === 'future');
+    expect(future).toBeDefined();
+    expect(future?.version).toBe('2.0');
+    const health = getStorageHealth();
+    expect(health.parseError).toBeNull();
+    expect(health.incompatibleEntries.length).toBe(1);
+  });
+
+  it('повреждённая JSON-строка: saveWorld отказывает, исходная строка не меняется', () => {
+    const broken = '{broken json';
+    localStorage.setItem(STORAGE_TEST_KEY, broken);
+    let thrown: unknown = null;
+    try {
+      saveWorld(makeGeneratedWorld('w-new'), fixtureSettings);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(StorageError);
+    const storageError = thrown as StorageError;
+    expect(storageError.code).toBe('storage_unreadable');
+    expect(storageError.parseError).not.toBeNull();
+    // исходные данные не уничтожены
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(broken);
+  });
+
+  it('корневой JSON-объект вместо массива: запись отказывает, исходные данные сохраняются', () => {
+    const notArray = '{"not":"an array"}';
+    localStorage.setItem(STORAGE_TEST_KEY, notArray);
+    expect(() => saveWorld(makeGeneratedWorld('w-new'), fixtureSettings)).toThrow(StorageError);
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(notArray);
+  });
+
+  it('getStorageHealth сообщает parseError для обоих видов повреждения', () => {
+    localStorage.setItem(STORAGE_TEST_KEY, '{broken json');
+    const healthBroken = getStorageHealth();
+    expect(healthBroken.parseError).not.toBeNull();
+    expect(healthBroken.rawEntryCount).toBe(0);
+
+    localStorage.setItem(STORAGE_TEST_KEY, '{"not":"an array"}');
+    const healthObject = getStorageHealth();
+    expect(healthObject.parseError).not.toBeNull();
+    expect(healthObject.parseError).toContain('не массив');
+    expect(healthObject.rawEntryCount).toBe(0);
+  });
+
+  it('deleteWorld не перезаписывает повреждённое хранилище', () => {
+    const broken = '{broken json';
+    localStorage.setItem(STORAGE_TEST_KEY, broken);
+    expect(deleteWorld('any-id')).toBe(false);
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(broken);
+
+    const notArray = '{"not":"an array"}';
+    localStorage.setItem(STORAGE_TEST_KEY, notArray);
+    expect(deleteWorld('any-id')).toBe(false);
+    expect(localStorage.getItem(STORAGE_TEST_KEY)).toBe(notArray);
+  });
+
+  it('регрессия: обычная загрузка, миграции и удаление продолжают работать', () => {
+    writeRawEntries([rawEntry('w1', '1.0'), rawEntry('w2', '1.1'), rawEntry('w3', '1.2')]);
+    const worlds = getAllWorlds();
+    expect(worlds.length).toBe(3);
+    expect(worlds.every((world) => world.version === CURRENT_SAVE_SCHEMA_VERSION)).toBe(true);
+    expect(deleteWorld('w2')).toBe(true);
+    const raw = readRawEntries();
+    expect(raw.length).toBe(2);
+    expect(raw.some((entry) => entry.id === 'w2')).toBe(false);
+    const health = getStorageHealth();
+    expect(health.parseError).toBeNull();
+    expect(health.loadedWorldCount).toBe(2);
   });
 });

@@ -888,3 +888,345 @@ describe('Stage 4.1.1 FluxLedger: validateFluxLedger (форма записей 
     expect(problems.some((p) => p.includes('ghost'))).toBe(true);
   });
 });
+
+
+// ============================================
+// STAGE 4.1.1.2 — ПОЛНОТА БАЛАНСОВ И ЧЕСТНЫЕ СТАТУСЫ (ISSUE A/B/C)
+// ============================================
+
+describe('Stage 4.1.1.2 FluxLedger: неизвестный инвентарь ≠ ноль (ISSUE A)', () => {
+  it('резервуар без material делает материальный баланс not_verifiable (запас неизвестен, а не ноль)', () => {
+    const catalog = speciesFixture();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 100 }),
+      b: createReservoir('b', 'x') // материальный инвентарь не задан — неизвестно
+    };
+    const audit = auditSubstanceConservation(catalog, createFluxLedger(), before, before);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.exclusions.some((e) => e.key === 'b' && e.reason.includes('не задан'))).toBe(true);
+  });
+
+  it('элементный и зарядовый балансы также не закрывают глаза на неизвестный резервуар', () => {
+    const catalog = speciesFixture();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 1 }),
+      unknown: createReservoir('unknown', 'x')
+    };
+    expect(auditElementConservation(catalog, createFluxLedger(), before, before).status).toBe('not_verifiable');
+    expect(auditChargeConservation(catalog, createFluxLedger(), before, before).status).toBe('not_verifiable');
+  });
+
+  it('явно заданный пустой инвентарь (entries = {}) — известная пустота, баланс проходит', () => {
+    const catalog = speciesFixture();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 5 }),
+      b: setMaterialInventory(createReservoir('b', 'x'), 'amount', {})
+    };
+    const audit = auditSubstanceConservation(catalog, createFluxLedger(), before, before);
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
+    expect(audit.exclusions).toEqual([]);
+  });
+
+  it('нулевой известный запас (entries[species] = 0) не превращается в неизвестность', () => {
+    const catalog = speciesFixture();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 0 })
+    };
+    const audit = auditSubstanceConservation(catalog, createFluxLedger(), before, before);
+    expect(audit.status).toBe('balanced');
+    expect(audit.exclusions).toEqual([]);
+    // 0 моль CO2 = 0 кг CO2: известный ноль проходит и basis-aware проверки
+    expect(auditElementConservation(catalog, createFluxLedger(), before, before).status).toBe('balanced');
+  });
+
+  it('неизвестный резервуар не создаёт ложный успешный баланс при внешнем входе', () => {
+    const catalog = speciesFixture();
+    let ledger = createFluxLedger();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 100 }),
+      b: createReservoir('b', 'x')
+    };
+    ledger = registerFlux(ledger, {
+      id: 'in-x', kind: 'external_input', from: EXTERNAL, to: 'a',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 10, basis: 'amount' }
+    });
+    const applied = applyFlux(ledger, before, 'in-x');
+    const audit = auditSubstanceConservation(catalog, applied.ledger, before, applied.reservoirs);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    expect(audit.exclusions.some((e) => e.key === 'b')).toBe(true);
+  });
+
+  it('materialApplicability: not_applicable — явное право исключить резервуар из материального баланса', () => {
+    const catalog = speciesFixture();
+    const energyOnly = setEnergyInventory(createReservoir('buffer', 'x'), { storedJ: 1000, netPowerW: null, fluxW_m2: null });
+    const buffer: ReservoirRecord = { ...energyOnly, materialApplicability: 'not_applicable' };
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 5 }),
+      buffer
+    };
+    const audit = auditSubstanceConservation(catalog, createFluxLedger(), before, before);
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
+    // законное исключение не диагностируется как проблема
+    expect(audit.exclusions.some((e) => e.key === 'buffer')).toBe(false);
+  });
+
+  it('нормальные mass/amount/column_amount сценарии 4.1.1 продолжают работать после ужесточения', () => {
+    const catalog = speciesFixture();
+    // mass + amount: внешний вход 0.044 кг CO2 = 1 моль
+    let ledger = createFluxLedger();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 2 }),
+      b: setMaterialInventory(createReservoir('b', 'x'), 'mass', { co2: 0 })
+    };
+    ledger = registerFlux(ledger, {
+      id: 'm3', kind: 'external_input', from: EXTERNAL, to: 'b',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 0.044, basis: 'mass' }
+    });
+    const applied = applyFlux(ledger, before, 'm3');
+    expect(auditSubstanceConservation(catalog, applied.ledger, before, applied.reservoirs).status).toBe('balanced');
+    // column_amount: внутренний перенос в одном столбовом основании
+    let ledger2 = createFluxLedger();
+    const before2: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'column_amount', { co2: 10 }),
+      b: setMaterialInventory(createReservoir('b', 'x'), 'column_amount', { co2: 0 })
+    };
+    ledger2 = registerFlux(ledger2, {
+      id: 'col3', kind: 'internal_transfer', from: 'a', to: 'b',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 4, basis: 'column_amount' }
+    });
+    const applied2 = applyFlux(ledger2, before2, 'col3');
+    expect(auditSubstanceConservation(catalog, applied2.ledger, before2, applied2.reservoirs).status).toBe('balanced');
+  });
+});
+
+describe('Stage 4.1.1.2 FluxLedger: пофазовый аудит проверяет ВСЕ резервуары (ISSUE B)', () => {
+  it('изменение резервуара без записи потока выявляется (A→B применён, C изменился «из ниоткуда»)', () => {
+    const ledger: FluxLedger = {
+      records: [
+        {
+          id: 'ab', kind: 'internal_transfer', from: 'a', to: 'b',
+          subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 10, basis: 'amount' },
+          time: null, status: 'applied'
+        }
+      ]
+    };
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 100 }),
+      b: setMaterialInventory(createReservoir('b', 'x'), 'amount', { co2: 0 }),
+      c: setMaterialInventory(createReservoir('c', 'x'), 'amount', { co2: 0 })
+    };
+    const after: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 90 }),
+      b: setMaterialInventory(createReservoir('b', 'x'), 'amount', { co2: 10 }),
+      c: setMaterialInventory(createReservoir('c', 'x'), 'amount', { co2: 50 })
+    };
+    const perReservoir = auditReservoirFluxes(ledger, before, after);
+    expect(perReservoir.status).toBe('imbalanced');
+    expect(perReservoir.balanced).toBe(false);
+    const cDiscrepancy = perReservoir.discrepancies.find((d) => d.key === 'c:co2');
+    expect(cDiscrepancy).toBeDefined();
+    expect(cDiscrepancy?.expected).toBe(0);
+    expect(cDiscrepancy?.actual).toBe(50);
+    expect(cDiscrepancy?.reservoirId).toBe('c');
+  });
+
+  it('резервуар без потоков с неизменным запасом проходит проверку (ожидаемое Δ = 0)', () => {
+    let ledger = createFluxLedger();
+    const before = reservoirsFixture();
+    ledger = registerFlux(ledger, {
+      id: 'ab4', kind: 'internal_transfer', from: 'atm', to: 'ocean',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 10, basis: 'amount' }
+    });
+    const applied = applyFlux(ledger, before, 'ab4');
+    const perReservoir = auditReservoirFluxes(applied.ledger, before, applied.reservoirs);
+    expect(perReservoir.status).toBe('balanced');
+    expect(perReservoir.discrepancies).toEqual([]);
+    expect(perReservoir.exclusions).toEqual([]);
+  });
+
+  it('изменение энергии резервуара без энергетического потока выявляется', () => {
+    const ledger = createFluxLedger();
+    const before = energyFixture(100, 200);
+    const after = energyFixture(100, 260);
+    const perReservoir = auditReservoirFluxes(ledger, before, after);
+    expect(perReservoir.status).toBe('imbalanced');
+    const eDiscrepancy = perReservoir.discrepancies.find((d) => d.key === 'r2:energy');
+    expect(eDiscrepancy).toBeDefined();
+    expect(eDiscrepancy?.expected).toBe(200);
+    expect(eDiscrepancy?.actual).toBe(260);
+    expect(eDiscrepancy?.reservoirId).toBe('r2');
+  });
+
+  it('непроверяемый вклад даёт not_verifiable, а не balanced: у затронутого резервуара нет инвентаря', () => {
+    const ledger: FluxLedger = {
+      records: [
+        {
+          id: 'into-void', kind: 'internal_transfer', from: 'a', to: 'b',
+          subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 5, basis: 'amount' },
+          time: null, status: 'applied'
+        }
+      ]
+    };
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 10 }),
+      b: createReservoir('b', 'x')
+    };
+    const after: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 5 }),
+      b: createReservoir('b', 'x') // инвентарь так и не появился: вклад b неизвестен
+    };
+    const perReservoir = auditReservoirFluxes(ledger, before, after);
+    expect(perReservoir.status).toBe('not_verifiable');
+    expect(perReservoir.balanced).toBe(false);
+    expect(perReservoir.exclusions.some((e) => e.key === 'b' && e.reason.includes('не задан'))).toBe(true);
+  });
+
+  it('энергетические резервуары без материального инвентаря не мешают энергетической проверке', () => {
+    let ledger = createFluxLedger();
+    const before = energyFixture(100, 200);
+    ledger = registerFlux(ledger, {
+      id: 'heat2', kind: 'internal_transfer', from: 'r1', to: 'r2',
+      subject: { subjectType: 'energy', quantityKind: 'integrated', energyJ: 30 }
+    });
+    const applied = applyFlux(ledger, before, 'heat2');
+    const perReservoir = auditReservoirFluxes(applied.ledger, before, applied.reservoirs);
+    expect(perReservoir.status).toBe('balanced');
+    expect(perReservoir.exclusions).toEqual([]);
+  });
+});
+
+describe('Stage 4.1.1.2 FluxLedger: untimed-записи не маскируются как balanced (ISSUE C)', () => {
+  function untimedInternalFixture() {
+    let ledger = createFluxLedger();
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 100 }),
+      b: setMaterialInventory(createReservoir('b', 'x'), 'amount', { co2: 0 })
+    };
+    ledger = registerFlux(ledger, {
+      id: 'silent-move', kind: 'internal_transfer', from: 'a', to: 'b',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 10, basis: 'amount' },
+      time: null
+    });
+    const applied = applyFlux(ledger, before, 'silent-move');
+    return { catalog: speciesFixture(), state: applied, before };
+  }
+  const boundedScope = { after: { segmentIndex: 0, localTimeS: 5 }, upTo: { segmentIndex: 0, localTimeS: 20 } };
+
+  it('внутренний перенос без времени: ограниченный общий аудит — not_verifiable, а не ложный balanced', () => {
+    const { catalog, state, before } = untimedInternalFixture();
+    const audit = auditSubstanceConservation(catalog, state.ledger, before, state.reservoirs, { scope: boundedScope });
+    expect(audit.untimedRecords).toContain('silent-move');
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+    // численно итог «сходится» (внутренний перенос сохраняет сумму) —
+    // именно поэтому сбалансированный статус был бы обманом
+  });
+
+  it('внутренний перенос без времени: пофазовый аудит тоже не объявляет успех', () => {
+    const { state, before } = untimedInternalFixture();
+    const perReservoir = auditReservoirFluxes(state.ledger, before, state.reservoirs, { scope: boundedScope });
+    expect(perReservoir.untimedRecords).toContain('silent-move');
+    expect(perReservoir.balanced).toBe(false);
+  });
+
+  it('внешний поток без времени: ограниченный аудит не проходит', () => {
+    const catalog = speciesFixture();
+    let ledger = createFluxLedger();
+    const before = reservoirsFixture();
+    ledger = registerFlux(ledger, {
+      id: 'late-in', kind: 'external_input', from: EXTERNAL, to: 'atm',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 9, basis: 'amount' },
+      time: null
+    });
+    const state = applyFlux(ledger, before, 'late-in');
+    const audit = auditSubstanceConservation(catalog, state.ledger, before, state.reservoirs, { scope: boundedScope });
+    expect(audit.untimedRecords).toContain('late-in');
+    expect(audit.balanced).toBe(false);
+    // 9 моль не объяснены в области: численное расхождение
+    expect(audit.status).toBe('imbalanced');
+    expect(audit.discrepancies.some((d) => d.key === 'co2')).toBe(true);
+  });
+
+  it('includeUntimed: true — непривязанные записи учитываются на ответственность вызывающего', () => {
+    const { catalog, state, before } = untimedInternalFixture();
+    const audit = auditSubstanceConservation(catalog, state.ledger, before, state.reservoirs, {
+      scope: { ...boundedScope, includeUntimed: true }
+    });
+    expect(audit.untimedRecords).toEqual([]);
+    expect(audit.status).toBe('balanced');
+    const perReservoir = auditReservoirFluxes(state.ledger, before, state.reservoirs, {
+      scope: { ...boundedScope, includeUntimed: true }
+    });
+    expect(perReservoir.status).toBe('balanced');
+    expect(perReservoir.untimedRecords).toEqual([]);
+  });
+
+  it('перенос ВНУТРИ диапазона: ограниченный аудит честно проходит', () => {
+    const catalog = speciesFixture();
+    let ledger = createFluxLedger();
+    const before = reservoirsFixture();
+    ledger = registerFlux(ledger, {
+      id: 'in-range', kind: 'internal_transfer', from: 'atm', to: 'ocean',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 8, basis: 'amount' },
+      time: { segmentIndex: 0, localTimeS: 10 }
+    });
+    const state = applyFlux(ledger, before, 'in-range');
+    const audit = auditSubstanceConservation(catalog, state.ledger, before, state.reservoirs, { scope: boundedScope });
+    expect(audit.status).toBe('balanced');
+    expect(audit.untimedRecords).toEqual([]);
+    const perReservoir = auditReservoirFluxes(state.ledger, before, state.reservoirs, { scope: boundedScope });
+    expect(perReservoir.status).toBe('balanced');
+    expect(perReservoir.untimedRecords).toEqual([]);
+  });
+
+  it('перенос ЗА пределами диапазона: другая диагностика, не untimed', () => {
+    const catalog = speciesFixture();
+    let ledger = createFluxLedger();
+    const before = reservoirsFixture();
+    ledger = registerFlux(ledger, {
+      id: 'long-ago', kind: 'internal_transfer', from: 'atm', to: 'ocean',
+      subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 7, basis: 'amount' },
+      time: { segmentIndex: 0, localTimeS: 1 } // до нижней границы области (5, 20]
+    });
+    const state = applyFlux(ledger, before, 'long-ago');
+    const audit = auditSubstanceConservation(catalog, state.ledger, before, state.reservoirs, { scope: boundedScope });
+    // запись с временем — это НЕ untimed: событие относится к другому
+    // интервалу и не отравляет статус аудита
+    expect(audit.untimedRecords).toEqual([]);
+    // внутренний перенос не меняет итог системы: для итогового аудита
+    // области (5, 20] ничего и не должно было измениться
+    expect(audit.status).toBe('balanced');
+    // пофазовый аудит для пары состояний, охватывающей внесённое
+    // изменение, честно видит необъяснённую разницу (область — зона
+    // ответственности вызывающего кода)
+    const perReservoir = auditReservoirFluxes(state.ledger, before, state.reservoirs, { scope: boundedScope });
+    expect(perReservoir.status).toBe('imbalanced');
+    expect(perReservoir.untimedRecords).toEqual([]);
+  });
+
+  it('untimed-исключения вместе с exclusions никогда не дают balanced', () => {
+    const catalog = speciesFixture();
+    const ledger: FluxLedger = {
+      records: [
+        {
+          id: 'ghost-move', kind: 'internal_transfer', from: 'a', to: 'b',
+          subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 3, basis: 'amount' },
+          time: null, status: 'applied'
+        }
+      ]
+    };
+    const before: Record<string, ReservoirRecord> = {
+      a: setMaterialInventory(createReservoir('a', 'x'), 'amount', { co2: 10 }),
+      b: createReservoir('b', 'x') // нет инвентаря: вклад неизвестен
+    };
+    const audit = auditSubstanceConservation(catalog, ledger, before, before, { scope: boundedScope });
+    expect(audit.untimedRecords.length).toBeGreaterThan(0);
+    expect(audit.exclusions.length).toBeGreaterThan(0);
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+  });
+});

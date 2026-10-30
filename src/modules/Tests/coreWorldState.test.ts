@@ -341,3 +341,62 @@ describe('Stage 4.1.1 WorldState: строгая проверка версии �
     expect(validateWorldState(state)).toEqual([]);
   });
 });
+
+
+// ============================================
+// STAGE 4.1.1.2 — WORLDSTATE: ОБЯЗАТЕЛЬНЫЕ ПОЛЯ RESERVOIRRECORD
+// ============================================
+
+describe('Stage 4.1.1.2 WorldState: обязательные поля ReservoirRecord', () => {
+  it('резервуар без properties → invalid_reservoir (обязательное поле)', () => {
+    const state = validState();
+    state.reservoirs.push({
+      id: 'no-props', kind: 'ocean'
+    } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    const reservoirIssues = issues.filter((i) => i.code === 'invalid_reservoir');
+    expect(reservoirIssues.length).toBeGreaterThan(0);
+    expect(reservoirIssues.some((i) => i.message.includes('properties'))).toBe(true);
+  });
+
+  it('properties не-объект (42) → invalid_reservoir', () => {
+    const state = validState();
+    state.reservoirs.push({
+      id: 'num-props', kind: 'ocean', properties: 42
+    } as unknown as ReservoirRecord);
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reservoir' && i.message.includes('properties'))).toBe(true);
+  });
+
+  it('голый резервуар c properties = {} без material/energy валиден (отсутствие инвентаря ≠ ошибка)', () => {
+    const state = validState();
+    state.reservoirs.push({
+      id: 'bare', kind: 'ocean', properties: {}
+    } as unknown as ReservoirRecord);
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('materialApplicability: not_applicable валиден, мусор и конфликт — invalid_reservoir', () => {
+    // явное «материя неприменима по природе» — законно
+    const okState = validState();
+    okState.reservoirs.push({
+      id: 'radiation-buffer', kind: 'buffer', properties: {}, materialApplicability: 'not_applicable'
+    } as unknown as ReservoirRecord);
+    expect(validateWorldState(okState)).toEqual([]);
+
+    // неизвестное значение маркера — ошибка
+    const junkState = validState();
+    junkState.reservoirs.push({
+      id: 'junk-marker', kind: 'buffer', properties: {}, materialApplicability: 'sometimes'
+    } as unknown as ReservoirRecord);
+    expect(validateWorldState(junkState).some((i) => i.code === 'invalid_reservoir' && i.message.includes('materialApplicability'))).toBe(true);
+
+    // одновременный инвентарь и «неприменимость» — противоречие
+    const conflictState = validState();
+    conflictState.reservoirs.push({
+      id: 'conflict', kind: 'buffer', properties: {}, materialApplicability: 'not_applicable',
+      material: { basis: 'amount', entries: {} }
+    } as unknown as ReservoirRecord);
+    expect(validateWorldState(conflictState).some((i) => i.code === 'invalid_reservoir' && i.message.includes('противоречат'))).toBe(true);
+  });
+});
