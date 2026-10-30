@@ -36,6 +36,11 @@ jobs:
           SUMMARY="$(grep -E 'Test Files|Tests ' vitest-output.log | head -n 4 | tr '\n' ' ')"
           echo "Vitest totals: ${SUMMARY}"
           echo "::notice title=Vitest totals::${SUMMARY}"
+          # Stage 4.2.1 §0.1: фактический golden baseline химии
+          # (SHA-256 контрольной траектории) публикуется notice-аннотацией.
+          GOLDEN="$(grep -E 'GOLDEN-BASELINE' vitest-output.log | head -n 1)"
+          echo "Golden baseline: ${GOLDEN}"
+          echo "::notice title=Golden baseline::${GOLDEN}"
 
       - name: Lint
         run: npm run lint
