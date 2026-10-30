@@ -376,36 +376,51 @@ export function atmospherePresetTemperatureToScientificValue(
   }
   const raw = atmosphere.temperature;
   const presetKind = atmosphere.presetKind ?? null;
+  const presetNotes =
+    atmosphere.presetNotes !== undefined && atmosphere.presetNotes !== ''
+      ? atmosphere.presetNotes
+      : null;
   const provenance: DataProvenance = {
     rawInput: { presetTemperatureK: raw === null ? null : raw, presetKind }
   };
-  if (atmosphere.presetNotes !== undefined && atmosphere.presetNotes !== '') {
-    provenance.sourceName = atmosphere.presetNotes;
+  // Stage 4.2.2.1: presetNotes — ПОЯСНЕНИЕ пресета, а не название
+  // источника. sourceName заполняется только когда пресет явно
+  // заявляет наблюдательный источник (observational_reference):
+  // игровое допущение (historical_game) и гипотеза НЕ изображаются
+  // наблюдательным измерением. Выдумывать библиографию запрещено.
+  if (presetNotes !== null && presetKind === 'observational_reference') {
+    provenance.sourceName = presetNotes;
   }
+  const noteWithPreset = (baseNote: string): DataProvenance => ({
+    ...provenance,
+    note:
+      presetNotes !== null && presetKind !== 'observational_reference'
+        ? `${baseNote}; пояснение пресета: ${presetNotes}`
+        : baseNote
+  });
   if (raw === null) {
-    return unknownValue('температура атмосферы не заявлена (null)', provenance);
+    return unknownValue('температура атмосферы не заявлена (null)', noteWithPreset('температура не заявлена'));
   }
   if (typeof raw !== 'number' || !Number.isFinite(raw)) {
     return invalidValue(
       `пресетная температура атмосферы непригодна как число: ${String(raw)}`,
       undefined,
-      provenance
+      noteWithPreset('непригодное значение пресета')
     );
   }
   if (raw < 0) {
     return invalidValue(
       `пресетная температура атмосферы отрицательна (${raw} K) — термодинамическая температура неотрицательна`,
       undefined,
-      provenance
+      noteWithPreset('отрицательное значение пресета')
     );
   }
   const q = quantity(raw, 'K');
   if (presetKind === 'historical_game') {
     return estimatedValue(q, 'игровое допущение пресета атмосферы (game_assumption)', {
-      provenance: {
-        ...provenance,
-        note: 'игровое допущение исторического сценария: значение пресета НЕ является научным измерением'
-      }
+      provenance: noteWithPreset(
+        'игровое допущение исторического сценария: значение пресета НЕ является научным измерением'
+      )
     });
   }
   if (presetKind === 'observational_reference') {
@@ -418,17 +433,11 @@ export function atmospherePresetTemperatureToScientificValue(
   }
   if (presetKind === 'hypothetical') {
     return estimatedValue(q, 'гипотетическая оценка пресета атмосферы', {
-      provenance: {
-        ...provenance,
-        note: 'гипотетический сценарий: подтверждённых данных нет'
-      }
+      provenance: noteWithPreset('гипотетический сценарий: подтверждённых данных нет')
     });
   }
   return estimatedValue(q, 'пользовательской конфигурацией атмосферы', {
-    provenance: {
-      ...provenance,
-      note: 'температура задана пользователем без указания происхождения пресета'
-    }
+    provenance: noteWithPreset('температура задана пользователем без указания происхождения пресета')
   });
 }
 
@@ -452,6 +461,11 @@ export function atmosphericProfileFromPreset(
     provenance.rawInput = temperature.provenance.rawInput;
     if (temperature.provenance.sourceName !== undefined) {
       provenance.sourceName = temperature.provenance.sourceName;
+    }
+    // Stage 4.2.2.1: пояснение пресета (note) переносится вместе
+    // с остальным происхождением и не теряется на пути в профиль.
+    if (temperature.provenance.note !== undefined) {
+      provenance.note = temperature.provenance.note;
     }
   }
   return {
@@ -527,12 +541,32 @@ export function centralThermalStateFromLegacy(input: LegacyWorldInput): BodyTher
   const kind = system.kind;
   if (kind === 'star' || kind === 'substellar') {
     const teff = system.effectiveTemperatureK ?? null;
-    const effective =
-      teff !== null && teff.value !== null
-        ? physValueToScientificValue(teff)
-        : unknownValue(
-            'эффективная температура источника неизвестна: значение класса не задано; среднее по классу НЕ подставляется'
-          );
+    let effective: ScientificValue;
+    if (teff !== null && teff.value !== null) {
+      effective = physValueToScientificValue(teff);
+    } else if (
+      teff !== null &&
+      teff.range !== undefined &&
+      Number.isFinite(teff.range.min) &&
+      Number.isFinite(teff.range.max) &&
+      teff.range.min <= teff.range.max
+    ) {
+      // Stage 4.2.2.1: известен только ДИАПАЗОН класса — он НЕ
+      // превращается в среднее или конкретную температуру
+      // (оценка не становится измерением и не «схлопывается» в
+      // число). Диапазон сохраняется в provenance: rawInput несёт
+      // границы, note объясняет отказ от подстановки среднего.
+      const rangeNote = `известен только диапазон значений класса: ${teff.range.min}–${teff.range.max} K; среднее по классу НЕ подставляется как конкретная эффективная температура`;
+      effective = unknownValue('эффективная температура источника неизвестна', {
+        note: rangeNote,
+        rawInput: { rangeMinK: teff.range.min, rangeMaxK: teff.range.max },
+        ...(teff.source !== undefined && teff.source !== '' ? { sourceName: teff.source } : {})
+      });
+    } else {
+      effective = unknownValue(
+        'эффективная температура источника неизвестна: значение класса не задано; среднее по классу НЕ подставляется'
+      );
+    }
     return {
       effectiveTemperature: effective,
       equilibriumTemperature: unknownValue('равновесная температура для центрального объекта не определена'),

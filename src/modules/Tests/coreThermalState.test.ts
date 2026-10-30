@@ -295,6 +295,41 @@ describe('Stage 4.2.2: термодинамическая валидация т�
     expect(hasUsableTemperature(knownValue(quantity(5, 'kg')))).toBe(false);
   });
 
+  it('hasUsableTemperature: estimated без method НЕ пригоден (4.2.2.1 — строгая форма)', () => {
+    // Оценка без следа метода — не температура: как и неизвестность,
+    // она не превращается в число. Форма проверяется так же строго,
+    // как единица и размерность.
+    const brokenEstimated = { status: 'estimated' as const, quantity: pv(300) };
+    expect(hasUsableTemperature(brokenEstimated)).toBe(false);
+    expect(temperatureValueOrNull(brokenEstimated)).toBeNull();
+  });
+
+  it('hasUsableTemperature: известные числовые пороки не проходят', () => {
+    // Неизвестная единица
+    const unknownUnit = { status: 'known' as const, quantity: { value: 300, unit: 'furlong' } };
+    expect(hasUsableTemperature(unknownUnit)).toBe(false);
+    expect(temperatureValueOrNull(unknownUnit)).toBeNull();
+    // NaN и Infinity
+    const nanValue = { status: 'known' as const, quantity: { value: Number.NaN, unit: 'K' } };
+    expect(hasUsableTemperature(nanValue)).toBe(false);
+    const infValue = { status: 'known' as const, quantity: { value: Infinity, unit: 'K' } };
+    expect(hasUsableTemperature(infValue)).toBe(false);
+    // Отрицательная
+    expect(hasUsableTemperature(knownTemp(-1))).toBe(false);
+    // known без quantity — форма испорчена
+    const noQuantity = { status: 'known' as const } as unknown as ScientificValue;
+    expect(hasUsableTemperature(noQuantity)).toBe(false);
+  });
+
+  it('hasUsableTemperature/temperatureValueOrNull: статусы без числа не превращаются в число', () => {
+    // unknown/not_applicable/not_implemented/invalid никогда не
+    // становятся числом — даже если несут quantity в нарушение формы.
+    expect(hasUsableTemperature(notImplemented('RCM не реализована'))).toBe(false);
+    const contradictory = { status: 'unknown' as const, quantity: pv(300) };
+    expect(hasUsableTemperature(contradictory)).toBe(false);
+    expect(temperatureValueOrNull(contradictory)).toBeNull();
+  });
+
   it('temperatureValueOrNull возвращает число или null', () => {
     expect(temperatureValueOrNull(knownTemp(277.15))).toBe(277.15);
     expect(temperatureValueOrNull(unknownValue())).toBeNull();
@@ -568,6 +603,32 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
     expect(thermal.equilibriumTemperature.status).toBe('unknown');
   });
 
+  it('T_eq из реального EnergyBalance (confidence estimated) НЕ повышается до known (4.2.2.1)', () => {
+    // Реальный computeEnergyBudget даёт equilibriumTemperature с
+    // confidence 'estimated': светимость класса репрезентативна,
+    // а не измерена — T_eq остаётся ОЦЕНКОЙ и после адаптации.
+    const thermal = planetThermalStateFromLegacy(
+      legacyInput({
+        energyBudget: {
+          incidentFlux: phys(1361, 'Вт/м²'),
+          equilibriumTemperature: {
+            value: 255,
+            unit: 'K',
+            confidence: 'estimated',
+            method: 'T_eq = [F(1-A)·f / (4εσ)]^(1/4) при A=0.3, f=1, ε=1',
+            note: 'репрезентативная светимость класса — оценочная T_eq'
+          }
+        }
+      })
+    );
+    expect(thermal.equilibriumTemperature.status).toBe('estimated');
+    expect(temperatureValueOrNull(thermal.equilibriumTemperature)).toBe(255);
+    if (thermal.equilibriumTemperature.status === 'estimated') {
+      expect(thermal.equilibriumTemperature.method).toContain('T_eq');
+      expect(thermal.equilibriumTemperature.provenance?.method).toContain('T_eq');
+    }
+  });
+
   it('centralThermalStateFromLegacy: null без centralObjectSystem', () => {
     expect(centralThermalStateFromLegacy(legacyInput({ centralObjectSystem: null }))).toBeNull();
     expect(centralThermalStateFromLegacy(legacyInput({ centralObjectSystem: undefined }))).toBeNull();
@@ -584,6 +645,42 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
     if (withoutTeff && withoutTeff.effectiveTemperature.status === 'unknown') {
       expect(withoutTeff.effectiveTemperature.note).toContain('НЕ подставляется');
     }
+  });
+
+  it('диапазон класса при teff=null сохраняется в provenance и НЕ схлопывается в среднее (4.2.2.1)', () => {
+    // Известен только диапазон значений класса: среднее НЕ подставляется
+    // как конкретная эффективная температура; границы и происхождение
+    // сохраняются в допустимом provenance.
+    const withRange = centralThermalStateFromLegacy(
+      legacyInput({
+        centralObjectSystem: {
+          kind: 'star',
+          effectiveTemperatureK: {
+            value: null,
+            unit: 'K',
+            confidence: 'unknown',
+            range: { min: 2500, max: 4000 },
+            source: 'справочник фикстуры'
+          }
+        }
+      })
+    );
+    expect(withRange?.effectiveTemperature.status).toBe('unknown');
+    if (withRange && withRange.effectiveTemperature.status === 'unknown') {
+      expect(withRange.effectiveTemperature.note).toContain('2500');
+      expect(withRange.effectiveTemperature.note).toContain('4000');
+      expect(withRange.effectiveTemperature.note).toContain('НЕ подставляется');
+    }
+    expect(temperatureValueOrNull(withRange?.effectiveTemperature as ScientificValue)).toBeNull();
+    if (withRange && withRange.effectiveTemperature.status === 'unknown') {
+      expect(withRange.effectiveTemperature.provenance?.rawInput).toEqual({
+        rangeMinK: 2500,
+        rangeMaxK: 4000
+      });
+      expect(withRange.effectiveTemperature.provenance?.sourceName).toBe('справочник фикстуры');
+    }
+    // Фиктивного числа из середины диапазона (3250) не появилось
+    expect(temperatureValueOrNull(withRange?.effectiveTemperature as ScientificValue)).not.toBe(3250);
   });
 
   it('centralThermalStateFromLegacy: substellar обрабатывается как источник', () => {
@@ -637,7 +734,12 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
     });
     if (value.status === 'estimated') {
       expect(value.provenance?.rawInput).toEqual({ presetTemperatureK: 95, presetKind: 'historical_game' });
-      expect(value.provenance?.sourceName).toBe('историческая миссия');
+      // Stage 4.2.2.1: пояснение пресета живёт в note, а НЕ в
+      // sourceName: игровое допущение не изображается источником
+      // наблюдательного измерения.
+      expect(value.provenance?.sourceName).toBeUndefined();
+      expect(value.provenance?.note).toContain('пояснение пресета');
+      expect(value.provenance?.note).toContain('историческая миссия');
       const state = coreWorldStateFromLegacyWorld(
         legacyInput({ atmosphere: { temperature: 95, presetKind: 'historical_game', presetNotes: 'историческая миссия' } })
       );
@@ -646,6 +748,9 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
       expect(layer?.temperature.status).toBe('estimated');
       if (layer && layer.temperature.status === 'estimated') {
         expect(layer.temperature.provenance?.rawInput?.presetKind).toBe('historical_game');
+        // note перенесён и в профиль слоя (не теряется на пути)
+        expect(layer.temperature.provenance?.note).toContain('историческая миссия');
+        expect(layer.temperature.provenance?.sourceName).toBeUndefined();
       }
     }
   });
@@ -768,6 +873,72 @@ describe('Stage 4.2.2: resolver локальной температуры', () =
     }
     expect(thrown).toBeInstanceOf(ThermalStateError);
     expect((thrown as ThermalStateError).code).toBe('invalid_place');
+  });
+
+  it('пустые/пробельные идентификаторы области отклоняются (4.2.2.1)', () => {
+    const state = thermalWorld();
+    // Пустая строка — не идентификатор области
+    expect(() =>
+      resolveLocalReactionTemperature(state, { bodyId: 'planet', reservoirId: '' })
+    ).toThrowError(ThermalStateError);
+    expect(() =>
+      resolveLocalReactionTemperature(state, { bodyId: 'planet', reservoirId: '   ' })
+    ).toThrowError(ThermalStateError);
+    expect(() =>
+      resolveLocalReactionTemperature(state, { bodyId: 'planet', layerId: '' })
+    ).toThrowError(ThermalStateError);
+    expect(() =>
+      resolveLocalReactionTemperature(state, { bodyId: 'planet', layerId: ' ' })
+    ).toThrowError(ThermalStateError);
+    let thrown: unknown = null;
+    try {
+      resolveLocalReactionTemperature(state, { bodyId: 'planet', reservoirId: '' });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(ThermalStateError);
+    expect((thrown as ThermalStateError).code).toBe('invalid_place');
+  });
+
+  it('orphan-резервуар (без существующего тела) не является областью мира (4.2.2.1)', () => {
+    const state = thermalWorld();
+    // Резервуар ссылается на тело 'ghost', которого нет в bodies:
+    // сам резервуар не делает это место областью существующего мира.
+    state.reservoirs.push({
+      ...createReservoir('orphan-res', 'ocean', { bodyId: 'ghost' }),
+      reservoirTemperature: knownTemp(300, 'фикстура orphan')
+    });
+    const r = resolveLocalReactionTemperature(state, { bodyId: 'ghost', reservoirId: 'orphan-res' });
+    expect(r.temperature.status).toBe('unknown');
+    expect(resolutionK(r)).toBeNull();
+    if (r.temperature.status === 'unknown') {
+      expect(r.temperature.note).toContain('не найдено');
+      expect(r.temperature.note).toContain('orphan');
+    }
+    expect(r.source).toBe('none');
+  });
+
+  it('слой из профиля со статусом unknown не читается (4.2.2.1)', () => {
+    const state = thermalWorld();
+    // Профиль спутника ЗАЯВЛЕН неизвестным: даже если в слоях
+    // что-то оказалось, заявленная неизвестность не изображается
+    // данными — слои не читаются.
+    const moon = state.bodies.find((b) => b.id === 'moon');
+    if (moon && moon.thermalState) {
+      moon.thermalState.atmosphericTemperatureProfile = {
+        status: 'unknown',
+        layers: [{ layerId: 'sneaky-layer', temperature: knownTemp(500, 'фикстура') }]
+      };
+    }
+    const r = resolveLocalReactionTemperature(state, { bodyId: 'moon', layerId: 'sneaky-layer' });
+    expect(r.temperature.status).toBe('unknown');
+    expect(resolutionK(r)).toBeNull();
+    if (r.temperature.status === 'unknown') {
+      expect(r.temperature.note).toContain('unknown');
+      expect(r.temperature.note).toContain('не читаются');
+    }
+    // Число 500 из незаявленного слоя НЕ подставлено
+    expect(resolutionK(r)).not.toBe(500);
   });
 
   it('resolver чист: состояние мира не изменяется (JSON-снимок)', () => {
@@ -899,6 +1070,42 @@ describe('Stage 4.2.2: фазовый скрининг с происхожден
     // Компоненты перечислены для всех газов модели.
     const gasIds = legacy.components.map((c) => c.gasId).sort();
     expect(gasIds).toEqual(['ch4', 'n2']);
+  });
+
+  it('слой атмосферы (4.2.2.1): контекст локальной области, числа идентичны', () => {
+    const model = makeAtmosphereModel();
+    // Location-aware контекст: слой surface_boundary из профиля
+    const layer = {
+      layerId: 'surface_boundary',
+      temperature: estimatedValue(pv(95), 'игровое допущение пресета атмосферы (game_assumption)', {
+        provenance: { rawInput: { presetTemperatureK: 95, presetKind: 'historical_game' } }
+      }),
+      note: 'единственная оценка из пресета атмосферы (приповерхностный слой)'
+    };
+    const typed = analyzeAtmospherePhasesWithProvenance(model, layer);
+    const legacy = analyzeAtmospherePhases(model, 95);
+    // Числовой паритет: результат скрининга идентичен
+    expect(typed.temperatureK).toBe(95);
+    expect(typed.components).toEqual(legacy.components);
+    expect(typed.warnings).toEqual(legacy.warnings);
+    // Базис: тот же ScientificValue со статусом и provenance
+    expect(typed.temperatureBasis?.temperature).toBe(layer.temperature);
+    expect(typed.temperatureBasis?.note).toContain('surface_boundary');
+    expect(typed.temperatureBasis?.note).toContain('НЕ глобальная surfaceTemperature');
+    expect(typed.temperatureBasis?.note).toContain('НЕ T_eq');
+  });
+
+  it('слой с unknown температурой (4.2.2.1): скрининг остаётся unknown без fallback', () => {
+    const model = makeAtmosphereModel();
+    const layer = {
+      layerId: 'surface_boundary',
+      temperature: unknownValue('локальная температура слоя неизвестна — пресета нет')
+    };
+    const typed = analyzeAtmospherePhasesWithProvenance(model, layer);
+    expect(typed.temperatureK).toBeNull();
+    expect(typed.components.every((c) => c.state === 'unknown')).toBe(true);
+    expect(typed.temperatureBasis?.note).toContain('surface_boundary');
+    expect(typed.temperatureBasis?.note).toContain('подстановка');
   });
 });
 

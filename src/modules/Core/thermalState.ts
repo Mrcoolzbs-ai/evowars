@@ -138,15 +138,24 @@ export function validateThermalScientificValue(v: unknown, label = 'темпер
   return issues;
 }
 
-/** Пригодно ли значение как числовая температура (known/estimated, 'K', конечная, неотрицательная). */
+/**
+ * Пригодно ли значение как числовая температура (Stage 4.2.2.1).
+ *
+ * Строгая проверка: статус known/estimated + полная пригодность по
+ * validateThermalScientificValue — то есть не только единица 'K',
+ * размерность, конечность и неотрицательность, но и КОРРЕКТНОСТЬ ФОРМЫ:
+ * - estimated без method (безследная оценка) НЕ пригоден;
+ * - known/estimated с искажённой формой (пропущенные обязательные
+ *   поля статуса) НЕ используется;
+ * - неизвестная единица, неверная размерность, NaN, Infinity и
+ *   отрицательные значения не проходят;
+ * - unknown/not_applicable/not_implemented/invalid не превращаются
+ *   в число.
+ */
 export function hasUsableTemperature(v: ScientificValue | null | undefined): boolean {
   if (v === null || v === undefined) return false;
   if (v.status !== 'known' && v.status !== 'estimated') return false;
-  const q = v.quantity;
-  if (q === undefined) return false;
-  if (q.unit !== TEMPERATURE_UNIT) return false;
-  if (!sameDimension(dimensionOf(q), THERMODYNAMIC_TEMPERATURE_DIMENSION)) return false;
-  return typeof q.value === 'number' && Number.isFinite(q.value) && q.value >= 0;
+  return validateThermalScientificValue(v).length === 0;
 }
 
 /** Числовое значение температуры в K или null (unknown/непригодное). */
@@ -388,6 +397,20 @@ function resolvePlaceKind(place: LocalReactionTemperaturePlace): 'reservoir' | '
   if (hasLayer && typeof place.layerId !== 'string') {
     throw new ThermalStateError('invalid_place', 'layerId должен быть строкой');
   }
+  // Stage 4.2.2.1: пустые/пробельные идентификаторы области — не область.
+  // Пустая строка — это «область не указана», а не «первый попавшийся».
+  if (hasReservoir && (place.reservoirId as string).trim() === '') {
+    throw new ThermalStateError(
+      'invalid_place',
+      'reservoirId не может быть пустой или пробельной строкой — укажите реальный идентификатор резервуара'
+    );
+  }
+  if (hasLayer && (place.layerId as string).trim() === '') {
+    throw new ThermalStateError(
+      'invalid_place',
+      'layerId не может быть пустой или пробельной строкой — укажите реальный идентификатор слоя'
+    );
+  }
   return hasReservoir ? 'reservoir' : 'atmosphere_layer';
 }
 
@@ -450,6 +473,21 @@ export function resolveLocalReactionTemperature(
 
   if (placeKind === 'reservoir') {
     const reservoirId = place.reservoirId as string;
+    // Stage 4.2.2.1: orphan-резервуар (привязан к несуществующему телу)
+    // не является областью существующего мира. Резервуар имеет смысл
+    // только вместе со своим телом.
+    if (body === null) {
+      return {
+        temperature: unknownValue(
+          `температура неизвестна: тело «${bodyId}» не найдено в состоянии мира — резервуар «${reservoirId}» без тела (orphan) не является областью существующего мира, подстановка чужих температур запрещена`
+        ),
+        bodyId,
+        placeKind,
+        placeId: reservoirId,
+        source: 'none',
+        reason: `тело «${bodyId}» не найдено — резервуар «${reservoirId}» не читается как область`
+      };
+    }
     const reservoir =
       state.reservoirs.find((r) => r.id === reservoirId && r.bodyId === bodyId) ?? null;
     if (reservoir === null) {
@@ -542,6 +580,22 @@ export function resolveLocalReactionTemperature(
       placeId: layerId,
       source: 'none',
       reason: `тело «${bodyId}» без thermalState`
+    };
+  }
+  // Stage 4.2.2.1: профиль, ЗАЯВЛЕННЫЙ неизвестным, не читается по слоям:
+  // если весь профиль объявлен «unknown», его слои (если вдруг есть)
+  // не являются заявленными данными — неизвестность не изображается
+  // числами из незаявленного источника.
+  if (profile.status === 'unknown') {
+    return {
+      temperature: unknownValue(
+        `температура неизвестна: профиль температур тела «${bodyId}» заявлен со статусом «unknown» — слои не читаются как данные, температура слоя «${layerId}» не подставляется`
+      ),
+      bodyId,
+      placeKind,
+      placeId: layerId,
+      source: 'none',
+      reason: `профиль температур тела «${bodyId}» заявлен unknown — слои не читаются`
     };
   }
   const layer = profile.layers.find((l) => l.layerId === layerId) ?? null;
