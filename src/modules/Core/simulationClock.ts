@@ -130,7 +130,8 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
     ...clock,
     localTimeS,
     stepCount: clock.stepCount + 1,
-    representableStepS: representableStep({ segmentIndex: clock.segmentIndex, localTimeS })
+    // представимость шага оценивается по новому локальному времени
+    representableStepS: representableStep({ localTimeS })
   };
 }
 
@@ -139,7 +140,7 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
  * null — не определено (локальное время 0: любой конечный шаг представим
  * при разумных величинах).
  */
-export function representableStep(clock: SimulationClockState): number | null {
+export function representableStep(clock: Pick<SimulationClockState, 'localTimeS'>): number | null {
   if (clock.localTimeS === 0) return null;
   // machine epsilon для double: следующий представимый после t.
   return Math.max(Math.abs(clock.localTimeS) * Number.EPSILON, Number.MIN_VALUE * 2);

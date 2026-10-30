@@ -22,12 +22,11 @@
 import type { PhysValue, ScientificConfidence } from '../../types/physics';
 import type { ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import { quantity, isKnownUnit } from './physicalQuantity';
-import type { PhysicalQuantity } from './physicalQuantity';
 import type { DataProvenance, ScientificValue } from './scientificValue';
 import { estimatedValue, invalidValue, knownValue, unknownValue } from './scientificValue';
-import type { MaterialInventory, ReservoirRecord } from './reservoir';
+import type { MaterialInventory } from './reservoir';
 import { createReservoir, setMaterialInventory } from './reservoir';
-import type { ScientificSpecies, SpeciesCatalog, SpeciesPhase } from './species';
+import type { ScientificSpecies, SpeciesCatalog } from './species';
 import { createSpeciesCatalog } from './species';
 import type { CoreWorldState, WorldBody } from './worldState';
 import { CORE_WORLD_STATE_SCHEMA_VERSION } from './worldState';

@@ -103,7 +103,7 @@ describe('Stage 4.1 FluxLedger: регистрация потоков', () => {
     const rec = {
       id: 'f', kind: 'external_input', from: EXTERNAL, to: 'atm',
       subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 1, basis: 'amount' as const }
-    };
+    } as const;
     ledger = registerFlux(ledger, rec);
     expect(() => registerFlux(ledger, rec)).toThrowError(/уже зарегистрирован/);
   });

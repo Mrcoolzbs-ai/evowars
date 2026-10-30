@@ -28,8 +28,26 @@ import type { PhysValue, ChemicalEvolutionState, InventoryMode } from '../../typ
 // Фикстуры
 // ============================================
 
+/**
+ * Тип фикстуры: включает опциональное migration (история миграций
+ * может присутствовать в реальных сохранениях) — доступ к полю
+ * в тестах типобезопасен без привязки к полной схеме SavedWorld.
+ */
+interface LegacySaveFixture {
+  id: string;
+  seed: string;
+  savedAt: string;
+  version: string | undefined;
+  customMarker: string;
+  atmosphere: { totalPressure: number | null };
+  /** История миграций (присутствует в реальных сохранениях после 1.1). */
+  migration?: { from: string; notes: string[] };
+  /** Поле ядра этапа 4.1: отсутствие = «ядро не инициализировано». */
+  coreWorldState?: unknown;
+}
+
 /** Минимальное легаси-сохранение схемы 1.0 с кастомными полями. */
-function makeLegacySave(version: string | undefined, extra?: Record<string, unknown>) {
+function makeLegacySave(version: string | undefined, extra?: Record<string, unknown>): LegacySaveFixture {
   return {
     id: 'world-1',
     seed: 'seed-1',
@@ -40,7 +58,7 @@ function makeLegacySave(version: string | undefined, extra?: Record<string, unkn
     // легаси-давление null: НЕ должно превратиться в 0 при миграции
     atmosphere: { totalPressure: null as number | null },
     ...extra
-  };
+  } as LegacySaveFixture;
 }
 
 function physValue(pv: PhysValue): PhysValue {

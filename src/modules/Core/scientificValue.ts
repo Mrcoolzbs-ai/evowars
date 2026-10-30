@@ -298,7 +298,11 @@ export function invalidValue(reason: string, quantity?: PhysicalQuantity, proven
 export function convertScientificValueUnit(v: ScientificValue, targetUnit: string): ScientificValue {
   if (v.status === 'known' || v.status === 'estimated') {
     const q = convertQuantity(v.quantity, targetUnit);
-    const uncertainty = v.uncertainty ? convertUncertainty(v.uncertainty, v.quantity.unit, targetUnit) : undefined;
+    // convertUncertainty может вернуть null (неопределимый пересчёт):
+    // null нормализуется в «неопределённость неизвестна» (undefined),
+    // а не допускается в поле, где null означает «есть значение».
+    const converted = v.uncertainty ? convertUncertainty(v.uncertainty, v.quantity.unit, targetUnit) : undefined;
+    const uncertainty = converted ?? undefined;
     if (v.status === 'estimated') {
       return { status: 'estimated', quantity: q, method: v.method, uncertainty, provenance: v.provenance };
     }
