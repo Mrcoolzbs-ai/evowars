@@ -498,9 +498,10 @@ function WorldDisplay(props: {
               <div><span>Давление:</span> {world.chemicalState.surfacePressurePa.toExponential(4)} Па</div>
             )}
             <div>
-              <span>Баланс O₂:</span> производство {world.chemicalState.oxygenBalance.production.toExponential(2)},
+              <span>Баланс O₂ (за последний шаг):</span> производство {world.chemicalState.oxygenBalance.production.toExponential(2)},
               потребление {world.chemicalState.oxygenBalance.consumption.toExponential(2)},
-              итог {world.chemicalState.oxygenBalance.net.toExponential(2)}
+              итог {world.chemicalState.oxygenBalance.net.toExponential(2)}{' '}
+              {world.chemicalState.mode === 'column_inventory' ? 'моль/м²' : 'нормированные игровые единицы'}
             </div>
           </div>
           <p className="model-note">ℹ {world.chemicalState.unitsNote}</p>

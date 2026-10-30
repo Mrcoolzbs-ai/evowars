@@ -271,14 +271,14 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
 
   describe('глобальный шаг: время и кислородный баланс', () => {
     /** Синтетический мир с химическим состоянием (unit-уровень, без генератора). */
-    function makeWorld(fractions: Record<string, number>): GeneratedWorld {
+    function makeWorld(fractions: Record<string, number>, temperatureK = 600): GeneratedWorld {
       const model = makeModel(fractions);
       const chemicalState = createChemicalState({ atmospherePhysicalModel: model });
       return {
         chemicalState,
         atmospherePhysics: model,
-        atmosphere: { temperature: 600 },
-        phaseAnalysis: { temperatureK: 600 },
+        atmosphere: { temperature: temperatureK },
+        phaseAnalysis: { temperatureK },
         energyBudget: { incidentFlux: { value: 1361 } },
         energySources: { primary: [], secondary: [] }
       } as unknown as GeneratedWorld;
@@ -319,26 +319,164 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       }
     });
 
-    it('oxygenBalance состояния синхронизирован с финальным балансом шага', () => {
+    it('баланс (сценарий A): первый шаг показывает расход именно этого шага', () => {
+      // До первого шага баланс нулевой (инициализация состояния).
       const world = makeWorld({ ch4: 0.6, o2: 0.4 });
+      expect(world.chemicalState.oxygenBalance.consumption).toBe(0);
       const result = runChemicalEvolutionStep(world);
       const state = result.world.chemicalState!;
-      const balance = computeOxygenBalance(state);
-      expect(state.oxygenBalance.production).toBe(balance.production);
-      expect(state.oxygenBalance.consumption).toBeCloseTo(balance.consumption, 12);
-      expect(state.oxygenBalance.net).toBeCloseTo(balance.net, 12);
-      // Расход кислорода зафиксирован, искусственного производства нет.
-      expect(balance.consumption).toBeGreaterThan(0);
-      expect(balance.production).toBe(0);
+      // Инвентарь: ch4=60, o2=40 → лимитирующий реагент o2 (40/2=20),
+      // степень превращения 0.1×20=2 → потреблено 2×2=4 O₂.
+      // Проверяем СМЫСЛ величин (расход шага), а не сравнение
+      // oxygenBalance с результатом computeOxygenBalance.
+      expect(state.oxygenBalance.consumption).toBeCloseTo(4, 6);
+      expect(state.oxygenBalance.production).toBe(0);
+      expect(state.oxygenBalance.net).toBeCloseTo(-4, 6);
+      // Единственная применённая запись шага несёт тот же расход O₂.
+      const appliedRecords = state.history.filter(r => r.applied);
+      expect(appliedRecords.length).toBe(1);
+      expect(appliedRecords[0].changes['o2']).toBeCloseTo(-4, 6);
     });
 
-    it('баланс отражает все реакции шага, а не только последнюю', () => {
+    it('баланс (сценарий B): второй шаг без применимых реакций — нулевой, не накопительный', () => {
+      // Шаг 1 при 600 K: окисление метана применилось, расход 4.
+      let world = runChemicalEvolutionStep(makeWorld({ ch4: 0.6, o2: 0.4 })).world;
+      expect(world.chemicalState!.oxygenBalance.consumption).toBeCloseTo(4, 6);
+      const lenAfterStep1 = world.chemicalState!.history.length;
+      // Шаг 2 при 200 K: окисление метана вне диапазона (300–2000 K),
+      // других реагентов каталога в составе нет → 0 применимых реакций.
+      const worldCold = {
+        ...world,
+        atmosphere: { temperature: 200 },
+        phaseAnalysis: { temperatureK: 200 }
+      } as GeneratedWorld;
+      world = runChemicalEvolutionStep(worldCold).world;
+      const state = world.chemicalState!;
+      const appliedStep2 = state.history.slice(lenAfterStep1).filter(r => r.applied).length;
+      expect(appliedStep2).toBe(0);
+      // Баланс шага 2 — нулевой, а НЕ накопленный расход истории (4).
+      expect(state.oxygenBalance.consumption).toBe(0);
+      expect(state.oxygenBalance.production).toBe(0);
+      expect(state.oxygenBalance.net).toBe(0);
+      // Время всё равно продвинулось ровно на один шаг.
+      expect(state.modelTimeYears).toBeCloseTo(2e6, 6);
+    });
+
+    it('баланс: единицы соответствуют режиму инвентаря, скорость не заявляется', () => {
+      // Нормированный игровой инвентарь.
+      const normalized = runChemicalEvolutionStep(makeWorld({ ch4: 0.6, o2: 0.4 })).world;
+      const noteNormalized = normalized.chemicalState!.oxygenBalance.note;
+      expect(noteNormalized).toContain('нормированные игровые единицы');
+      expect(noteNormalized).toContain('НЕ кинетическая скорость');
+      // Инвентарь моль/м²: модель столба с известной гравитацией.
+      const columnModel = makeModel(
+        { ch4: 0.6, o2: 0.4 },
+        { columnMolM2: { value: 1e5, unit: 'моль/м²', confidence: 'derived' } }
+      );
+      const columnWorld = {
+        chemicalState: createChemicalState({
+          atmospherePhysicalModel: columnModel,
+          surfaceGravityMs2: G_EARTH_MS2
+        }),
+        atmospherePhysics: columnModel,
+        atmosphere: { temperature: 600 },
+        phaseAnalysis: { temperatureK: 600 },
+        energyBudget: { incidentFlux: { value: 1361 } },
+        energySources: { primary: [], secondary: [] }
+      } as unknown as GeneratedWorld;
+      expect(columnWorld.chemicalState.mode).toBe('column_inventory');
+      const columnResult = runChemicalEvolutionStep(columnWorld).world;
+      const noteColumn = columnResult.chemicalState!.oxygenBalance.note;
+      expect(noteColumn).toContain('моль');
+    });
+
+    it('баланс (сценарий C): несколько реакций шага суммируются в расход шага', () => {
       const world = makeWorld({ ch4: 0.15, c2h6: 0.15, h2: 0.15, co: 0.15, o2: 0.4 });
       const result = runChemicalEvolutionStep(world);
       const state = result.world.chemicalState!;
-      const balance = computeOxygenBalance(state);
-      expect(state.oxygenBalance.consumption).toBeCloseTo(balance.consumption, 12);
-      expect(balance.consumption).toBeGreaterThan(0);
+      const appliedRecords = state.history.filter(r => r.applied);
+      expect(appliedRecords.length).toBeGreaterThanOrEqual(3);
+      // Смысл: расход шага = сумма расходов O₂ по применённым записям
+      // ЭТОГО шага (вычисляется из записей, а не из computeOxygenBalance).
+      const expected = appliedRecords.reduce(
+        (sum, r) => sum + Math.max(0, -(r.changes['o2'] ?? 0)),
+        0
+      );
+      expect(expected).toBeGreaterThan(4); // действительно несколько реакций
+      expect(state.oxygenBalance.consumption).toBeCloseTo(expected, 10);
+      expect(state.oxygenBalance.net).toBeCloseTo(-expected, 10);
+    });
+
+    it('баланс (сценарий D): расходы последовательных шагов считаются отдельно', () => {
+      let world = makeWorld({ ch4: 0.6, o2: 0.4 });
+      world = runChemicalEvolutionStep(world).world;
+      const lenAfterStep1 = world.chemicalState!.history.length;
+      expect(world.chemicalState!.oxygenBalance.consumption).toBeCloseTo(4, 6);
+      world = runChemicalEvolutionStep(world).world;
+      const state = world.chemicalState!;
+      // Записи шага 2 — только добавленные после шага 1.
+      const step2Records = state.history.slice(lenAfterStep1);
+      expect(step2Records.length).toBeGreaterThan(0);
+      const appliedStep2 = step2Records.filter(r => r.applied);
+      expect(appliedStep2.length).toBeGreaterThan(0);
+      const expectedStep2 = appliedStep2.reduce(
+        (sum, r) => sum + Math.max(0, -(r.changes['o2'] ?? 0)),
+        0
+      );
+      // Расход шага 2 — собственный, а НЕ накопленный за историю
+      // (накопленный = 4 + расход шага 2, строго больше расхода шага 2).
+      const cumulative = state.history.reduce(
+        (sum, r) => sum + Math.max(0, -(r.changes['o2'] ?? 0)),
+        0
+      );
+      expect(expectedStep2).toBeGreaterThan(0);
+      expect(state.oxygenBalance.consumption).toBeCloseTo(expectedStep2, 10);
+      expect(cumulative).toBeCloseTo(4 + expectedStep2, 10);
+      expect(state.oxygenBalance.consumption).toBeLessThan(cumulative);
+    });
+
+    it('баланс (сценарий E): прямой applyReaction не создаёт несогласованного состояния', () => {
+      // Ответственность разделена явно: applyReaction применяет реакцию
+      // и добавляет запись в history; поле oxygenBalance отражает итог
+      // последнего ЗАВЕРШЁННОГО глобального шага (обновляет его только
+      // runChemicalEvolutionStep) и не претендует на учёт отдельной реакции.
+      const state = createChemicalState({
+        atmospherePhysicalModel: makeModel({ ch4: 0.6, o2: 0.4 })
+      });
+      const { state: after } = applyReaction(state, findReaction('ch4_oxidation'), {
+        extentFraction: 0.1,
+        temperatureK: 500,
+        pressureAtm: 1
+      });
+      // Запись уже в истории и несёт расход O₂ — она гарантированно
+      // учтена балансом следующего глобального шага:
+      const record = after.history.find(r => r.applied);
+      expect(record).toBeDefined();
+      expect(record!.changes['o2']).toBeLessThan(0);
+      // Баланс по записям истории с первой записи реакцию учитывает:
+      expect(computeOxygenBalance(after, 0).consumption).toBeCloseTo(4, 6);
+      // Поле состояния — семантика последнего завершённого шага
+      // (нулевая инициализация), а не «актуальный» баланс,
+      // забывший про только что применённую реакцию.
+      expect(after.oxygenBalance.consumption).toBe(0);
+      expect(after.oxygenBalance.production).toBe(0);
+      expect(after.oxygenBalance.net).toBe(0);
+    });
+
+    it('баланс (сценарий F): производство O₂ остаётся нулевым без источников', () => {
+      let world = makeWorld({ ch4: 0.15, c2h6: 0.15, h2: 0.15, co: 0.15, o2: 0.4 });
+      for (let step = 1; step <= 3; step++) {
+        world = runChemicalEvolutionStep(world).world;
+        const state = world.chemicalState!;
+        expect(state.oxygenBalance.production).toBe(0);
+        expect(state.oxygenBalance.net).toBeCloseTo(-state.oxygenBalance.consumption, 12);
+      }
+      // Источники реестра отключены и без выдуманных скоростей.
+      const registry = createDefaultProcessRegistry();
+      const bio = registry.find(p => p.id === 'biological_o2_production');
+      expect(bio).toBeDefined();
+      expect(bio!.enabled).toBe(false);
+      expect(bio!.ratePerStep).toBeNull();
     });
 
     it('элементный состав сохраняется на последовательных шагах (повторного применения нет)', () => {
@@ -386,7 +524,10 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       expect(balance.consumption).toBeCloseTo(4, 10); // −4 O2 за шаг
       expect(balance.production).toBe(0);
       expect(balance.net).toBeCloseTo(-4, 10);
-      expect(balance.note).toContain('положительном');
+      // Итог дискретного шага, а не кинетическая скорость d(O₂)/dt:
+      expect(balance.note).toContain('НЕ кинетическая скорость');
+      // Баланс считается по записям истории с указанного индекса;
+      // по умолчанию — по всей истории (здесь одна запись).
     });
 
     it('O2 не накапливается без источников: структура ждёт будущих организмов', () => {

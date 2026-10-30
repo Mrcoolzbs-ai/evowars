@@ -162,7 +162,7 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
       production: 0,
       consumption: 0,
       net: 0,
-      note: 'биологическое производство O₂ по умолчанию равно нулю: генератор ещё не создаёт живые виды; структура позволяет подключить кислородопроизводителей в будущем'
+      note: 'баланс последнего ЗАВЕРШЁННОГО глобального шага; до первого шага — нулевой. Биологическое производство O₂ по умолчанию равно нулю: генератор ещё не создаёт живые виды; структура позволяет подключить кислородопроизводителей в будущем'
     },
     notes: [
       `длительность шага — ${stepDurationYears} лет: игровое допущение, а не рассчитанное время`,
@@ -371,10 +371,14 @@ export function applyReaction(
 
   recomputeFractions(next);
 
-  // 7. Кислородный баланс пересчитывается по всей истории шагов:
-  // после каждой реакции состояние содержит консистентный баланс,
-  // а не результат только последней выполненной реакции.
-  next.oxygenBalance = computeOxygenBalance(next);
+  // 7. Кислородный баланс на уровне отдельной реакции НЕ обновляется:
+  // он определяется и записывается только глобальным шагом
+  // runChemicalEvolutionStep по записям ТЕКУЩЕГО шага. Ответственность
+  // разделена явно: поле oxygenBalance всегда отражает итог последнего
+  // ЗАВЕРШЁННОГО глобального шага, а запись только что применённой
+  // реакции уже находится в history и будет учтена следующим
+  // глобальным шагом. Состояния «баланс выглядит актуальным, но не
+  // учитывает последнюю реакцию» не возникает.
 
   const record: ChemicalStepRecord = {
     ...baseRecord,
@@ -419,9 +423,20 @@ export function runKineticStep(reaction: ChemicalReaction): { applied: boolean; 
 // 6. КИСЛОРОДНЫЙ БАЛАНС
 // ============================================
 
+/**
+ * Кислородный баланс ЗА ОДИН ГЛОБАЛЬНЫЙ ШАГ — дискретный итог
+ * стехиометрического игрового шага, а НЕ кинетическая скорость
+ * d(O₂)/dt (кинетических констант модель не содержит).
+ * Единицы соответствуют режиму инвентаря: column_inventory —
+ * моль O₂/м² за шаг, game_normalized — нормированные игровые
+ * единицы за шаг.
+ */
 export interface OxygenBalanceSummary {
+  /** Произведено O₂ за последний глобальный шаг (без источников = 0) */
   production: number;
+  /** Потреблено O₂ за последний глобальный шаг */
   consumption: number;
+  /** Итоговое изменение количества O₂ за последний глобальный шаг */
   net: number;
   note: string;
 }
@@ -432,9 +447,17 @@ export interface OxygenBalanceSummary {
  * реестр процессов; по умолчанию производство равно нулю. O₂
  * накапливается только при устойчиво положительном балансе.
  */
-export function computeOxygenBalance(state: ChemicalEvolutionState): OxygenBalanceSummary {
+export function computeOxygenBalance(
+  state: ChemicalEvolutionState,
+  fromRecordIndex = 0
+): OxygenBalanceSummary {
   let consumption = 0;
-  for (const record of state.history) {
+  // Баланс считается по записям истории начиная с указанного индекса:
+  // runChemicalEvolutionStep передаёт индекс первой записи ТЕКУЩЕГО
+  // шага, поэтому в состояние попадает итог именно последнего шага,
+  // а не накопленный расход за всю историю мира.
+  const startIndex = Math.max(0, fromRecordIndex);
+  for (const record of state.history.slice(startIndex)) {
     const o2Change = record.changes['o2'] ?? 0;
     if (o2Change < 0) {
       consumption += -o2Change;
@@ -443,12 +466,18 @@ export function computeOxygenBalance(state: ChemicalEvolutionState): OxygenBalan
   // Производство O₂: биологических видов нет (генератор их не создаёт),
   // фотохимическое производство задаётся процессами реестра (отключены).
   const production = 0;
+  const stepUnits =
+    state.mode === 'column_inventory'
+      ? 'моль O₂ на м² атмосферного столба за шаг'
+      : 'нормированные игровые единицы O₂ за шаг (абсолютное физическое количество неизвестно)';
   return {
     production,
     consumption,
     net: production - consumption,
     note:
-      'd(O2) = производство − потребление. Производство по умолчанию нулевое: накопление O₂ возможно только при положительном суммарном балансе после подключения источников.'
+      `изменение количества O₂ за последний глобальный шаг (${stepUnits}); ` +
+      'производство по умолчанию нулевое — источники без подтверждённых численных скоростей не подключены; ' +
+      'итог дискретного стехиометрического шага, а НЕ кинетическая скорость d(O₂)/dt.'
   };
 }
 
@@ -576,6 +605,10 @@ export function runChemicalEvolutionStep(
   }
 
   let state: ChemicalEvolutionState = world.chemicalState;
+  // Граница текущего глобального шага в истории: все записи с индексами
+  // >= stepStartRecordIndex добавлены ЭТИМ вызовом и относятся к
+  // текущему шагу. Кислородный баланс шага считается только по ним.
+  const stepStartRecordIndex = state.history.length;
 
   const temperatureK = world.phaseAnalysis?.temperatureK ?? world.atmosphere.temperature ?? null;
   const surfacePressurePa = state.surfacePressurePa ?? world.atmospherePhysics.surfacePressurePa?.value ?? null;
@@ -607,10 +640,10 @@ export function runChemicalEvolutionStep(
     modelTimeYears: state.modelTimeYears + state.stepDurationYears
   };
 
-  // Кислородный баланс вычисляется по окончательному состоянию шага
-  // и сохраняется в состоянии мира (актуален для UI, а не только
-  // для промежуточной реакции).
-  const oxygen = computeOxygenBalance(state);
+  // Кислородный баланс — итог ИМЕННО ЭТОГО шага: только записи,
+  // добавленные текущим вызовом (индексы >= stepStartRecordIndex).
+  // Расход кислорода предыдущих шагов НЕ добавляется к текущему шагу.
+  const oxygen = computeOxygenBalance(state, stepStartRecordIndex);
   state = { ...state, oxygenBalance: oxygen };
   log.push(
     `кислородный баланс: производство ${oxygen.production.toFixed(6)}, потребление ${oxygen.consumption.toFixed(6)}, итог ${oxygen.net.toFixed(6)}`

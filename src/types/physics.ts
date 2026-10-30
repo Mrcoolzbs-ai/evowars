@@ -401,7 +401,15 @@ export interface ChemicalEvolutionState {
   /** Длительность шага, лет (игровое допущение, задаётся явно) */
   stepDurationYears: number;
   history: ChemicalStepRecord[];
-  /** Кислородный баланс dO2/dt за последний шаг */
+  /**
+   * Изменение количества O₂ за последний ЗАВЕРШЁННЫЙ глобальный шаг
+   * (записывается только runChemicalEvolutionStep; отдельные реакции
+   * поле не обновляют), в единицах режима инвентаря:
+   * column_inventory — моль O₂/м² за шаг, game_normalized —
+   * нормированные игровые единицы за шаг. Это итог дискретного
+   * стехиометрического игрового шага, а НЕ кинетическая скорость
+   * d(O₂)/dt: модель не содержит кинетических данных.
+   */
   oxygenBalance: {
     production: number;
     consumption: number;
