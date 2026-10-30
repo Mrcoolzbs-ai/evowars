@@ -1251,3 +1251,184 @@ export function auditReservoirFluxes(
       const expectedAmount = beforeAmount + spec.delta;
       if (Math.abs(expectedAmount - afterAmount) > tolerance) {
         discrepancies.push({
+          key: `${reservoirId}:${speciesId}`,
+          expected: expectedAmount,
+          actual: afterAmount,
+          reservoirId
+        });
+      }
+    }
+    if (delta.hasEnergy) {
+      const beforeEnergy = beforeRes.energy;
+      const afterEnergy = afterRes.energy;
+      if (!beforeEnergy || beforeEnergy.storedJ === null || !afterEnergy || afterEnergy.storedJ === null) {
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: запас энергии неизвестен в состоянии «${!beforeEnergy || beforeEnergy.storedJ === null ? 'до' : 'после'}» — пофазовая проверка энергии невозможна` });
+        continue;
+      }
+      const expectedStoredJ = beforeEnergy.storedJ + delta.energyJ;
+      if (Math.abs(expectedStoredJ - (afterEnergy.storedJ as number)) > tolerance) {
+        discrepancies.push({
+          key: `${reservoirId}:energy`,
+          expected: expectedStoredJ,
+          actual: afterEnergy.storedJ as number,
+          reservoirId
+        });
+      }
+    }
+  }
+
+  return {
+    status: discrepancies.length === 0 ? 'balanced' : 'imbalanced',
+    balanced: discrepancies.length === 0,
+    discrepancies,
+    exclusions,
+    untimedRecords: untimed,
+    tolerance
+  };
+}
+
+// ============================================
+// 5. ВАЛИДАЦИЯ РЕЕСТРА
+// ============================================
+
+/**
+ * Валидация формы записей реестра (Stage 4.1.1): записи могут
+ * приходить из JSON/сохранений, поэтому проверяется runtime-форма:
+ * - id непуст и уникален;
+ * - kind/status из допустимых наборов;
+ * - from/to согласованы с kind (external-граница, from ≠ to);
+ * - subject согласован с типом (положительные конечные величины);
+ * - time: segmentIndex — неотрицательное целое, localTimeS —
+ *   неотрицательное конечное число;
+ * - при переданном reservoirIds ссылки from/to должны существовать.
+ * Возвращает список проблем (пустой = реестр корректен).
+ */
+export function validateFluxLedger(ledger: unknown, opts?: { reservoirIds?: readonly string[] }): string[] {
+  const problems: string[] = [];
+  if (typeof ledger !== 'object' || ledger === null) {
+    return ['реестр потоков должен быть объектом с полем records'];
+  }
+  const rec = ledger as Record<string, unknown>;
+  if (!Array.isArray(rec.records)) {
+    return ['реестр потоков: поле records должно быть массивом'];
+  }
+  const seen = new Set<string>();
+  const records = rec.records as unknown[];
+  records.forEach((entry, index) => {
+    const at = (message: string): string => `запись #${index}: ${message}`;
+    if (typeof entry !== 'object' || entry === null) {
+      problems.push(at('запись потока должна быть объектом'));
+      return;
+    }
+    const r = entry as Record<string, unknown>;
+    if (typeof r.id !== 'string' || r.id.trim() === '') {
+      problems.push(at('id потока должен быть непустой строкой'));
+    } else if (seen.has(r.id)) {
+      problems.push(at(`дублирующийся id потока «${r.id}»`));
+    } else {
+      seen.add(r.id);
+    }
+    if (typeof r.kind !== 'string' || !(FLUX_KINDS as readonly string[]).includes(r.kind)) {
+      problems.push(at(`kind потока должен быть одним из ${FLUX_KINDS.join(' | ')}, получено «${String(r.kind)}»`));
+    }
+    if (typeof r.status !== 'string' || !(FLUX_STATUSES as readonly string[]).includes(r.status)) {
+      problems.push(at(`status потока должен быть одним из ${FLUX_STATUSES.join(' | ')}, получено «${String(r.status)}»`));
+    }
+    const from = r.from;
+    const to = r.to;
+    if (typeof from !== 'string' || from.trim() === '' || typeof to !== 'string' || to.trim() === '') {
+      problems.push(at('from/to потока должны быть непустыми строками'));
+    } else if (r.kind === 'internal_transfer') {
+      if (from === EXTERNAL || to === EXTERNAL) {
+        problems.push(at(`внутренний перенос не может пересекать внешнюю границу (from=${from}, to=${to})`));
+      } else if (from === to) {
+        problems.push(at(`перенос в самого себя (${from}) не является переносом`));
+      }
+    } else if (r.kind === 'external_input') {
+      if (from !== EXTERNAL || to === EXTERNAL) {
+        problems.push(at(`external_input требует from=${EXTERNAL} и внутреннего получателя (from=${from}, to=${to})`));
+      }
+    } else if (r.kind === 'external_output') {
+      if (to !== EXTERNAL || from === EXTERNAL) {
+        problems.push(at(`external_output требует to=${EXTERNAL} и внутреннего источника (from=${from}, to=${to})`));
+      }
+    }
+    const subject = r.subject;
+    if (typeof subject !== 'object' || subject === null) {
+      problems.push(at('subject потока должен быть объектом'));
+    } else {
+      const s = subject as Record<string, unknown>;
+      if (s.subjectType !== 'substance' && s.subjectType !== 'energy') {
+        problems.push(at(`subjectType должен быть 'substance' или 'energy', получено «${String(s.subjectType)}»`));
+      }
+      if (s.quantityKind !== 'integrated' && s.quantityKind !== 'rate') {
+        problems.push(at(`quantityKind должен быть 'integrated' или 'rate', получено «${String(s.quantityKind)}»`));
+      }
+      if (s.subjectType === 'substance') {
+        if (typeof s.speciesId !== 'string' || s.speciesId.trim() === '') {
+          problems.push(at('speciesId должен быть непустой строкой'));
+        }
+        if (typeof s.basis !== 'string' || !isKnownBasis(s.basis)) {
+          problems.push(at(`basis должен быть известным основанием, получено «${String(s.basis)}»`));
+        }
+        const amount = s.quantityKind === 'integrated' ? s.amount : s.ratePerSecond;
+        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+          problems.push(at(`переносимое количество/скорость должно быть конечным положительным числом, получено ${String(amount)}`));
+        }
+      } else if (s.subjectType === 'energy') {
+        const amount = s.quantityKind === 'integrated' ? s.energyJ : s.powerW;
+        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+          problems.push(at(`энергия/мощность должна быть конечным положительным числом, получено ${String(amount)}`));
+        }
+      }
+    }
+    if (r.time !== null && r.time !== undefined) {
+      if (typeof r.time !== 'object' || r.time === null) {
+        problems.push(at('time потока должен быть объектом или null'));
+      } else {
+        const t = r.time as Record<string, unknown>;
+        if (typeof t.segmentIndex !== 'number' || !Number.isInteger(t.segmentIndex) || t.segmentIndex < 0) {
+          problems.push(at('time.segmentIndex должен быть неотрицательным целым числом'));
+        }
+        if (typeof t.localTimeS !== 'number' || !Number.isFinite(t.localTimeS) || t.localTimeS < 0) {
+          problems.push(at('time.localTimeS должен быть неотрицательным конечным числом'));
+        }
+      }
+    }
+    if (opts?.reservoirIds) {
+      for (const side of [from, to]) {
+        if (typeof side === 'string' && side !== EXTERNAL && !opts.reservoirIds.includes(side)) {
+          problems.push(at(`ссылка на несуществующий резервуар «${side}»`));
+        }
+      }
+    }
+  });
+  return problems;
+}
+
+/**
+ * Проверка целостности записей реестра относительно набора резервуаров:
+ * все from/to (кроме EXTERNAL) должны существовать, форма записей
+ * должна быть корректной. Возвращает список проблем
+ * (пустой = реестр согласован).
+ */
+export function validateLedgerReferences(
+  ledger: FluxLedger,
+  reservoirs: Record<string, ReservoirRecord>
+): string[] {
+  return validateFluxLedger(ledger, { reservoirIds: Object.keys(reservoirs) });
+}
+
+/** Проверка валидности всех материальных инвентарей набора резервуаров. */
+export function validateReservoirInventories(reservoirs: Record<string, ReservoirRecord>): string[] {
+  const problems: string[] = [];
+  for (const res of Object.values(reservoirs)) {
+    if (res.material) {
+      const check = validateMaterialInventory(res.material);
+      if (!check.valid) {
+        problems.push(`резервуар «${res.id}»: ${check.errors.join('; ')}`);
+      }
+    }
+  }
+  return problems;
+}
