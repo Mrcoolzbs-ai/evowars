@@ -37,7 +37,8 @@ describe('Физическая модель атмосферы (этап 3)', ()
       const pN2 = model.partialPressuresPa['n2'].value as number;
       expect(pN2).toBeCloseTo(model.molarFractions['n2'] * totalPa, 6);
       // Справочное значение: 78.08% от 1 атм.
-      expect(pN2).toBeCloseTo(0.7808 * 101325, 0);
+      // Точность -1: нормализация долей (состав каталога 100.0035%) даёт ~0.003% сдвига
+      expect(pN2).toBeCloseTo(0.7808 * 101325, -1);
     });
 
     it('парциальные давления суммируются в общее давление (идеальный газ)', () => {

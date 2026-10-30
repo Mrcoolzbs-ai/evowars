@@ -574,10 +574,14 @@ export function computeAtmospherePhysicalModel(
 ): AtmospherePhysicalModel {
   const gravity = options.surfaceGravityMs2 ?? null;
 
-  // 1. Молярные доли x_i = percentage / 100.
+  // 1. Молярные доли x_i = percentage_i / Σ percentage: доли обязаны
+  // суммироваться в 1, даже если каталог задаёт состав с погрешностью
+  // округления суммы процентов (например, справочный пресет Венеры 100.0276%).
+  const percentageSum = atmosphere.components.reduce((sum, c) => sum + c.percentage, 0);
   const molarFractions: Record<string, number> = {};
   for (const component of atmosphere.components) {
-    molarFractions[component.gasId] = component.percentage / 100;
+    molarFractions[component.gasId] =
+      percentageSum > 0 ? component.percentage / percentageSum : 0;
   }
 
   // 2. Поверхностное давление в Па (миграция легаси-поля atm → Pa).
@@ -726,4 +730,3 @@ export default {
   getGasById,
   computeAtmospherePhysicalModel
 };
-

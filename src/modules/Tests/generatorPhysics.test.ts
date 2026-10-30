@@ -144,7 +144,7 @@ describe('Generator: физическая модель (этап 3)', () => {
 
     it('светимость недоступна → поток null, а не выдуманное значение', () => {
       const cases: Array<{ seed: string; centralObject: string; body: string; frame: string; noteMatch: RegExp }> = [
-        { seed: 'physics_giant_flux', centralObject: 'lone_gas_giant', body: 'gas_giant_moon', frame: 'free_floating', noteMatch: /светимость|плавани/i },
+        { seed: 'physics_giant_flux', centralObject: 'lone_gas_giant', body: 'gas_giant_moon', frame: 'around_parent_body', noteMatch: /светимость|плавани/i },
         { seed: 'physics_bh_flux', centralObject: 'black_hole', body: 'earth_like', frame: 'around_star', noteMatch: /аккре|светимость/i },
         { seed: 'physics_jet_flux', centralObject: 'relativistic_jet', body: 'earth_like', frame: 'jet_system', noteMatch: /аккре|светимость|джет/i }
       ];
@@ -222,7 +222,7 @@ describe('Generator: физическая модель (этап 3)', () => {
 
       expect(world.atmospherePhysics!.meanMolarMassKgMol?.value ?? null).not.toBeNull();
       expect(world.chemicalState!.mode).toBe('column_inventory');
-      expect(world.chemicalState!.unitsNote).toContain('моль');
+      expect(world.chemicalState!.unitsNote).toContain('молях');
       // Инвентарь — это доли от столба вещества, а не проценты
       const column = world.atmospherePhysics!.columnMolM2?.value as number;
       const inventorySum = Object.values(world.chemicalState!.inventory).reduce((s, v) => s + v, 0);

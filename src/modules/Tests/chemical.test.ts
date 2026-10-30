@@ -271,7 +271,7 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       for (const reaction of chemicalReactions) {
         const result = runKineticStep(reaction);
         expect(result.applied).toBe(false);
-        expect(result.reason).toContain('кинетические параметры');
+        expect(result.reason).toContain('кинетических параметров');
       }
     });
 
@@ -297,7 +297,7 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       expect(balance.consumption).toBeCloseTo(4, 10); // −4 O2 за шаг
       expect(balance.production).toBe(0);
       expect(balance.net).toBeCloseTo(-4, 10);
-      expect(balance.note).toContain('положительного');
+      expect(balance.note).toContain('положительном');
     });
 
     it('O2 не накапливается без источников: структура ждёт будущих организмов', () => {

@@ -520,6 +520,12 @@ function determineEnergySources(
     }
   });
   cradle.availableEnergySources.forEach(source => {
+    // Геотермальная энергия колыбели — не автоматическое свойство мира:
+    // она входит в источники мира, только если геологический анализ
+    // подтвердил доступное внутреннее тепло (этап 3).
+    if (source === 'geothermal' && !geologyAnalysis?.geothermalEnergyAvailable) {
+      return;
+    }
     if (!primary.includes(source) && !secondary.includes(source)) {
       secondary.push(source);
     }
@@ -688,4 +694,3 @@ export function generateRandomSeed(): string {
   }
   return result;
 }
-

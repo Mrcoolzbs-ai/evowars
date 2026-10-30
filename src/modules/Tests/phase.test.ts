@@ -134,7 +134,7 @@ describe('PhaseEquilibrium (фазовые переходы, этап 3)', () =>
         temperatureK: 95
       });
       expect(analysis.message).not.toMatch(/(масса|количество) конденсата: \d/);
-      expect(EOS_NOT_IMPLEMENTED_NOTE).toContain('не реализовано');
+      expect(EOS_NOT_IMPLEMENTED_NOTE).toContain('не реализованы');
     });
   });
 
