@@ -498,8 +498,8 @@ describe('Data Validation', () => {
       expect(firstWarning?.message).toBe(secondWarning?.message);
       // Сами величины не изменяются диагностикой
       expect(first.atmosphere.temperature).toBe(second.atmosphere.temperature);
-      expect(first.energyBudget.equilibriumTemperature.value)
-        .toBe(second.energyBudget.equilibriumTemperature.value);
+      expect(first.energyBudget!.equilibriumTemperature.value)
+        .toBe(second.energyBudget!.equilibriumTemperature.value);
     });
 
     it('фазовый скрининг привязан к слою surface_boundary с сохранением статуса и provenance', () => {
@@ -510,13 +510,13 @@ describe('Data Validation', () => {
 
       // Скрининг основан на явно обозначенной локальной области —
       // приповерхностном слое (однослойная модель текущего этапа)
-      expect(world.phaseAnalysis.temperatureBasis.note).toContain('surface_boundary');
-      expect(world.phaseAnalysis.temperatureBasis.note).toContain('НЕ глобальная surfaceTemperature');
+      expect(world.phaseAnalysis!.temperatureBasis!.note).toContain('surface_boundary');
+      expect(world.phaseAnalysis!.temperatureBasis!.note).toContain('НЕ глобальная surfaceTemperature');
       // Температура НЕ называется surfaceTemperature и НЕ T_eq
-      expect(world.phaseAnalysis.temperatureBasis.note).toContain('НЕ T_eq');
+      expect(world.phaseAnalysis!.temperatureBasis!.note).toContain('НЕ T_eq');
       // Пресет 288 K (earth): статус и provenance сохранены
-      expect(world.phaseAnalysis.temperatureBasis.temperature.status).toBe('estimated');
-      expect(world.phaseAnalysis.temperatureBasis.temperature.provenance?.rawInput).toMatchObject({
+      expect(world.phaseAnalysis!.temperatureBasis!.temperature.status).toBe('estimated');
+      expect(world.phaseAnalysis!.temperatureBasis!.temperature.provenance?.rawInput).toMatchObject({
         presetTemperatureK: 288,
         presetKind: 'observational_reference'
       });
@@ -532,10 +532,10 @@ describe('Data Validation', () => {
       // В любом сгенерированном мире числовой результат скрининга
       // соответствует именно базовой температуре скрининга, а не T_eq
       // (паритет: компоненты вычислены при базовой температуре слоя)
-      const basisK = world.phaseAnalysis.temperatureBasis.temperature.status;
+      const basisK = world.phaseAnalysis!.temperatureBasis!.temperature.status;
       expect(['known', 'estimated', 'unknown', 'not_applicable', 'invalid']).toContain(basisK);
       // note всегда объясняет контекст локальной области
-      expect(world.phaseAnalysis.temperatureBasis.note).toContain('Stage 4.2.2.1');
+      expect(world.phaseAnalysis!.temperatureBasis!.note).toContain('Stage 4.2.2.1');
     });
   });
 });

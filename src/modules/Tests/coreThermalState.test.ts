@@ -299,7 +299,7 @@ describe('Stage 4.2.2: термодинамическая валидация т�
     // Оценка без следа метода — не температура: как и неизвестность,
     // она не превращается в число. Форма проверяется так же строго,
     // как единица и размерность.
-    const brokenEstimated = { status: 'estimated' as const, quantity: pv(300) };
+    const brokenEstimated = { status: 'estimated' as const, quantity: pv(300) } as unknown as ScientificValue;
     expect(hasUsableTemperature(brokenEstimated)).toBe(false);
     expect(temperatureValueOrNull(brokenEstimated)).toBeNull();
   });
