@@ -94,6 +94,10 @@ describe('Stage 4.1 ScientificValue: семантика статусов', () =>
 describe('Stage 4.1 ScientificValue: неопределённость', () => {
   it('отсутствие uncertainty означает «неизвестна», а не «ноль»', () => {
     const v = knownValue(quantity(100, 'K'));
+    // сужение union-типа: uncertainty есть только у числовых статусов
+    if (v.status !== 'known') {
+      throw new Error('knownValue должен возвращать статус known');
+    }
     expect(v.uncertainty).toBeUndefined();
     // отсутствие ≠ нулевая погрешность: нулевую нужно задать явно
     const zero = knownValue(quantity(100, 'K'), { uncertainty: { kind: 'stddev', sigma: 0 } });
