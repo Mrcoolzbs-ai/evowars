@@ -68,6 +68,28 @@
 > из них ядро — 490 (76 новых в coreThermalState.test). Коммиты:
 > d706841 → 7dc91ea → 7248b38 → a5888c6 (последний — фикс tsc:
 > provenanceOfValue; CI зелёный, golden baseline химии совпадает).
+> Stage 4.2.2.1 (2026-10-30): ревизия интеграции по итогам
+> независимого аудита 4.2.2 — жёсткая валидация формы температур
+> (hasUsableTemperature/temperatureValueOrNull: estimated без
+> method, NaN/±Inf/отрицательные, неизвестная единица/размерность
+> не пригодны; unknown/not_applicable/not_implemented/invalid не
+> превращаются в число), защита resolver (пустые/пробельные id —
+> invalid_place; orphan-резервуар; слой из профиля со статусом
+> unknown не читается), provenance адаптеров (пояснение пресета —
+> в provenance.note, sourceName — только действительный источник;
+> teff-диапазон класса не схлопывается в среднее; T_eq из
+> EnergyBalance с confidence estimated НЕ повышается до known),
+> Compatibility-ревизия «отсутствие локальной температуры — НЕ
+> доказанная совместимость» (новое правило
+> cradle_temperature_unproven: conditionally_compatible, warning),
+> диагностика «пресет vs T_eq» подключена к реальной генерации
+> (verdict noted, порог не выдуман), фазовый скрининг —
+> location-aware слой surface_boundary
+> (PhaseScreeningTemperatureContext). Golden baseline (877e17d3…bc0a)
+> совпадает. После 4.2.2.1 — 783 теста (27 файлов), из них ядро —
+> 500. Коммиты: a62b7dd → d916fb7 → 59c4ca1 → fcb0876 →
+> 78c032a (последние три — корректирующие: tsc-строгости в тестах
+> и выравнивание сообщений).
 > НЕ завершено в 4.2: 4.2.3–4.2.4 не начаты; химия НЕ на Scheduler;
 > RCM не реализована (surfaceTemperature = unknown).
 
@@ -302,6 +324,23 @@
   пресетная температура (288/95 K) больше НЕ появляется в
   physicalCharacteristics.surfaceTemperature. CI зелёный:
   tsc 0 ошибок, vitest, oxlint, build.
+- **Stage 4.2.2.1**: 27 файлов, 783 теста (+22: 8 compatibility.test,
+  10 coreThermalState.test, 4 generator.test), из них ядро — 500.
+  Ревизия интеграции: Compatibility cradle_temperature_unproven
+  (отсутствие локальной температуры → conditionally_compatible
+  warning, а НЕ молчаливый true; вне диапазона → error; known /
+  estimated / unknown различимы; isWorldCompatible различает
+  условную совместимость и отсутствие проверки), диагностика
+  «пресет vs T_eq» в реальной генерации (детерминизм, температуры
+  не изменяются), location-aware фазовый скрининг (слой
+  surface_boundary, статус/provenance сохранены, без fallback на
+  T_eq), строгая форма температур, orphan-резервуар, unknown-профиль
+  резолвера, provenance адаптеров (presetNotes → note,
+  teff-диапазон, T_eq estimated не повышается до known).
+  Фактические итоги Vitest «Test Files 27 passed (27) / Tests 783
+  passed (783)» сверяются с notice-аннотацией шага Tests; golden
+  baseline (877e17d3…bc0a) совпадает. CI зелёный: tsc, vitest,
+  oxlint, build.
 
 ### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
 
@@ -549,6 +588,48 @@
      неизменен, temperatureBasis с примечанием). Пресетная
      температура (288/95 K) больше не появляется в
      physicalCharacteristics.surfaceTemperature.
+- **Stage 4.2.2.1 — ревизия интеграции температурной иерархии**
+  (+22 теста: 8 compatibility.test, 10 coreThermalState.test,
+  4 generator.test):
+  N. строгая форма в hasUsableTemperature/temperatureValueOrNull:
+     estimated без method непригоден; числовые пороки
+     (NaN/±Inf/отрицательные/неизвестная единица) не проходят;
+     unknown/not_applicable/not_implemented/invalid никогда не
+     становятся числом; resolver отклоняет пустые/пробельные
+     reservoirId/layerId (invalid_place), orphan-резервуар не
+     является областью существующего мира, слой из профиля со
+     статусом unknown не читается;
+  O. provenance адаптеров: пояснение пресета (presetNotes) живёт в
+     provenance.note, sourceName — только при действительном
+     источнике (observational_reference); teff-диапазон класса при
+     value=null сохраняется в provenance.rawInput и НЕ
+     схлопывается в среднее; T_eq из реального EnergyBalance
+     (confidence estimated — репрезентативная светимость класса)
+     остаётся estimated после адаптации, не повышаясь до known;
+  P. Compatibility: cradle_temperature_compatibility больше не
+     возвращает молчаливый true при отсутствии локальной
+     температуры — новое правило cradle_temperature_unproven
+     (категория cradle_temperature, conditionally_compatible,
+     warning) различает «условная совместимость» и «нет
+     проверки»; известная локальная температура вне диапазона —
+     по-прежнему error; атмосферная среда читается через
+     типизированное значение (atmospherePresetTemperatureToScientificValue
+     + temperatureValueOrNull), историческое игровое допущение не
+     изображается наблюдательным измерением; температура другого
+     резервуара или T_eq не подставляется;
+  Q. диагностика «пресет vs T_eq» подключена к реальному
+     генерационному контуру (шаг 10e): исходная пресетная
+     температура и исходная T_eq сохранены отдельно, абсолютная
+     разница вычислена, запись severity info явно называет их
+     РАЗНЫМИ физическими величинами и не объявляет противоречием;
+     порог не задаётся скрытым значением по умолчанию;
+  R. фазовый скрининг — location-aware: контекст
+     PhaseScreeningTemperatureContext (ScientificValue или слой
+     AtmosphereTemperatureLayer) привязывает скрининг к явно
+     обозначенной локальной области surface_boundary (однослойная
+     модель текущего этапа); статус и provenance сохранены; при
+     отсутствии пригодной локальной температуры скрининг
+     остаётся unknown без fallback на T_eq.
 
 ### 1.15 App.tsx (966 строк)
 
@@ -583,6 +664,14 @@
   Scheduler и локальную температуру — 4.2.3): легаси-химия
   продолжает использовать пресетную температуру как рабочую,
   что остаётся честно задокументированным.
+- **Статус (Stage 4.2.2.1)**: диагностика «пресет vs T_eq»
+  подключена к реальному генерационному контуру (запись severity
+  info в warnings мира, verdict noted без выдуманного порога;
+  сами температуры не изменяются); T_eq из EnergyBalance с
+  confidence estimated остаётся estimated после адаптации
+  (оценка не повышается до измерения); типизированный контекст
+  фазового скрининга привязан к локальной области
+  surface_boundary.
 
 ### 2.3 Пресетная температура — скрытый вход скрининга [средний риск]
 
@@ -601,6 +690,13 @@
   порогом НЕ добавлялось (чтобы не менять поведение легаси-совместимости
   и RNG); правило совместимости появится при переводе UI/совместимости
   на ядро.
+- **Статус (Stage 4.2.2.1)**: фазовый скрининг генератора привязан к
+  явно обозначенной локальной области surface_boundary
+  (PhaseScreeningTemperatureContext): статус и provenance
+  температуры сохранены, температура скрининга НЕ называется
+  surfaceTemperature и НЕ использует T_eq как fallback; при
+  отсутствии пригодной локальной температуры скрининг остаётся
+  unknown.
 
 ### 2.4 Температурные диапазоны реакций каталога — игровые [низкий риск, гигиена данных]
 
@@ -614,6 +710,12 @@
   (resolveLocalReactionTemperature) с honest-статусами, и при
   появлении проверенных диапазонов реакции смогут читать температуру
   своей области, а не пресет атмосферы.
+- **Статус (Stage 4.2.2.1)**: типизированный путь подтверждён
+  ревизией — provenance адаптеров очищен (пояснение пресета
+  живёт в provenance.note, sourceName только для действительного
+  источника; teff-диапазон класса сохраняется в rawInput и не
+  схлопывается в среднее); сами provenance-метки диапазонов
+  реакций остаются Stage 4.5.
 
 ### 2.5 Однонаправленная стехиометрия [архитектурное ограничение]
 

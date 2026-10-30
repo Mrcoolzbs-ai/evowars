@@ -108,6 +108,31 @@
 > (27 файлов), из них ядро — 490 (15 файлов, +76 в
 > coreThermalState.test). Коммиты: d706841 → 7dc91ea → 7248b38 →
 > a5888c6 (CI зелёный; golden baseline химии совпадает).
+>
+> Ревизия Stage 4.2.2.1 (2026-10-30): ревизия интеграции
+> температурной иерархии по итогам независимого аудита — строгая
+> форма температур в hasUsableTemperature/temperatureValueOrNull
+> (estimated без method, NaN/±Inf/отрицательные, неизвестная
+> единица не пригодны; unknown/not_applicable/not_implemented/
+> invalid не превращаются в число), защита resolver (пустые/
+> пробельные id — invalid_place; orphan-резервуар; слой из профиля
+> со статусом unknown не читается), provenance-дисциплина
+> адаптеров (пояснение пресета — в provenance.note, sourceName —
+> только действительный источник; teff-диапазон класса не
+> схлопывается в среднее; T_eq из EnergyBalance с confidence
+> estimated НЕ повышается до known), Compatibility: новое правило
+> cradle_temperature_unproven — отсутствие локальной температуры
+> есть УСЛОВНАЯ совместимость (warning), а НЕ доказанная
+> (известная температура вне диапазона — по-прежнему error);
+> диагностика «пресет vs T_eq» подключена к реальной генерации
+> (запись severity info, порог не выдуман); фазовый скрининг —
+> location-aware слой surface_boundary
+> (PhaseScreeningTemperatureContext: ScientificValue | слой
+> AtmosphereTemperatureLayer). Golden baseline химии совпадает.
+> После 4.2.2.1 — 783 теста (27 файлов), из них ядро — 500.
+> Коммиты: a62b7dd → d916fb7 → 59c4ca1 → fcb0876 → 78c032a
+> (последние три — корректирующие: tsc-строгости в тестах и
+> выравнивание фактических сообщений; CI зелёный).
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -609,11 +634,47 @@ untimed-записи в ограниченной временной област
   reservoirTemperature?` (invalid_reservoir); миграция сохранений
   1.2→1.3 thermalState НЕ создаёт;
 - фазовый скрининг: `analyzeAtmospherePhasesWithProvenance(model,
-  temperature: ScientificValue)` (PhaseEquilibrium) — делегирует
-  числовой анализ, добавляет temperatureBasis {temperature, note};
-  подстановка T_eq или температуры поверхности запрещена и
-  отмечена в примечании. WorldModel больше НЕ присваивает
+  temperature: PhaseScreeningTemperatureContext)` (PhaseEquilibrium;
+  контекст — ScientificValue ИЛИ слой AtmosphereTemperatureLayer) —
+  делегирует числовой анализ, добавляет temperatureBasis
+  {temperature, note}; подстановка T_eq или температуры поверхности
+  запрещена и отмечена в примечании. WorldModel больше НЕ присваивает
   пресетную температуру в characteristics.surfaceTemperature.
+
+Ревизия 4.2.2.1 (строгость форм и интеграция):
+
+- `hasUsableTemperature`/`temperatureValueOrNull` проверяют ФОРМУ
+  значения так же строго, как единицу и размерность: estimated без
+  method непригоден; NaN/±Inf/отрицательные и неизвестная
+  единица/размерность не проходят; unknown/not_applicable/
+  not_implemented/invalid никогда не превращаются в число;
+- resolver отклоняет пустые/пробельные reservoirId/layerId
+  (invalid_place); orphan-резервуар (тело отсутствует в bodies)
+  не является областью существующего мира; слой из профиля со
+  статусом unknown не читается — заявленная неизвестность не
+  изображается данными;
+- адаптеры: пояснение пресета (presetNotes) живёт в
+  provenance.note; sourceName — только при действительном
+  источнике (observational_reference); teff-диапазон класса при
+  value=null сохраняется в provenance.rawInput и НЕ схлопывается
+  в среднее; T_eq из реального EnergyBalance (confidence
+  estimated — репрезентативная светимость класса) остаётся
+  estimated после адаптации;
+- диагностика «пресет vs T_eq» вызывается реальным
+  генерационным контуром (запись severity info в warnings мира;
+  verdict noted; порог по умолчанию НЕ выдуман);
+- фазовый скрининг генератора получает location-aware контекст —
+  слой surface_boundary (однослойная модель текущего этапа):
+  температура скрининга НЕ называется surfaceTemperature и НЕ
+  является T_eq; при отсутствии пригодной локальной температуры
+  скрининг остаётся unknown;
+- Compatibility: cradle_temperature_compatibility больше не
+  возвращает молчаливый true при отсутствии локальной температуры;
+  правило cradle_temperature_unproven (conditionally_compatible,
+  warning) различает «условная совместимость» и «нет проверки»;
+  атмосферная среда читается через типизированное значение
+  адаптера (historical_game не изображается наблюдательным
+  измерением); известная температура вне диапазона — error.
 
 RCM, вертикальный профиль, гидростатика, парниковый эффект и
 вычисление surfaceTemperature НЕ реализованы и не выдаются за
@@ -655,7 +716,14 @@ RCM, вертикальный профиль, гидростатика, парн
    `analyzeAtmospherePhasesWithProvenance` (числовой API и его
    результат НЕ изменены); Generator передаёт в фазовый скрининг
    типизированную температуру через адаптер; WorldModel больше не
-   копирует пресетную температуру в surfaceTemperature.
+   копирует пресетную температуру в surfaceTemperature. Ревизия
+   4.2.2.1: Generator передаёт в скрининг location-aware контекст
+   (слой surface_boundary) и вызывает диагностику «пресет vs T_eq»
+   (запись severity info в warnings); Compatibility читает
+   атмосферную температуру через типизированный адаптер и
+   различает отсутствие доказательства
+   (cradle_temperature_unproven, warning) и ошибку диапазона
+   (error).
 
 Чего интеграция НЕ делает: UI не переключён на ядро (задача Stage 4.2);
 легаси-вычисления (Generator, ChemicalEvolution, Atmosphere, PhaseEquilibrium,
@@ -668,7 +736,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (490 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2)
+## 4. Тесты ядра (500 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1)
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -686,9 +754,11 @@ golden-траектория 100 шагов воспроизводится чис
 | coreProcessRegistry.test | 21 | 4.2.1: уникальные id, τ с размерностью времени и provenance, unknown τ ≠ число, disabled/без solver не запускаются автоматически, мост легаси-химии (11 процессов, честное состояние); 4.2.1.2: числовое τ строго положительно (0/−1 s и −1 ч → invalid_descriptor после перевода в секунды), fail-closed tauSeconds (τ ≤ 0 → null, не autorunnable, эвристика шага не назначается) |
 | coreScheduler.test | 30 | 4.2.1: детерминированный порядок, sub-cycling, Lie и Strang A(dt/2) → B(dt) → A(dt/2) (ровно 2 оператора), один macro-шаг — одно продвижение WorldClock, атомарный отказ шага, очередь событий (сортировка, tie-break, повторная обработка запрещена), сериализация bookkeeping; 4.2.1.2: дубликаты processId (processIds и operators) — duplicate_process_id до первого вызова оператора, мир/часы не тронуты, физические подынтервалы Strang внутри [0, dt] (A [0,dt/2], B [0,dt], A [dt/2,dt]) в вызовах и журнале, неположительное τ не запускается даже при прямом вызове |
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
-| coreThermalState.test | 76 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown) |
+| coreThermalState.test | 86 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback) |
 
-Всего в проекте 27 тест-файлов, 761 тест (после Stage 4.2.2 —
+Всего в проекте 27 тест-файлов, 783 теста (после ревизии 4.2.2.1 —
+фактические итоги Vitest «Test Files 27 passed (27) / Tests 783
+passed (783)» из CI; после 4.2.2 — 761,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 761
 passed (761)» из CI; после 4.2.1.2 — 685 (26 файлов),
 фактические итоги Vitest «Test Files 26 passed (26) / Tests 685
@@ -724,7 +794,14 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
 - температурная иерархия (Stage 4.2.2): реализованы КОНТРАКТЫ —
   валидация «только K», BodyThermalState, профиль атмосферы со
   статусами, reservoirTemperature, resolver локальной температуры,
-  адаптеры provenance, диагностика пресет/T_eq. НЕ реализовано и не
+  адаптеры provenance, диагностика пресет/T_eq. Ревизия 4.2.2.1
+  добавила строгую проверку формы значений, защиту resolver
+  (orphan / unknown-профиль / пустые id), provenance-дисциплину
+  адаптеров (T_eq estimated не повышается; teff-диапазон не
+  схлопывается) и подключила диагностику и location-aware
+  фазовый скрининг к реальному контуру генерации и
+  Compatibility (отсутствие локальной температуры — НЕ
+  доказанная совместимость). НЕ реализовано и не
   выдаётся за реализованное: RCM и вертикальный профиль (этап 4.8),
   гидростатика, парниковый эффект, вычисление surfaceTemperature
   (остаётся ЯВНО unknown); ни один резервуар/слой не получил
