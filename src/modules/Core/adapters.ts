@@ -18,12 +18,16 @@
 // - GeneratedWorld (физические поля этапа 3) → CoreWorldState:
 //   гравитационная иерархия и источники излучения строятся по
 //    CentralObjectSystem, а не по одному полю «центральный объект».
+// - легаси химические процессы (createDefaultProcessRegistry)
+//   → дескрипторы ProcessRegistry ядра в честном состоянии:
+//   без выдуманных τ, скоростей, констант и решателей (Stage 4.2.1).
 
 import type { PhysValue, ScientificConfidence } from '../../types/physics';
 import type { ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import { quantity, isKnownUnit } from './physicalQuantity';
 import type { DataProvenance, ScientificValue } from './scientificValue';
 import { estimatedValue, invalidValue, knownValue, unknownValue } from './scientificValue';
+import type { ProcessDescriptor } from './processRegistry';
 import type { MaterialInventory } from './reservoir';
 import { createReservoir, setMaterialInventory } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
@@ -437,4 +441,71 @@ export function coreWorldStateFromLegacyWorld(input: LegacyWorldInput): CoreWorl
   }
 
   return state;
+}
+
+// ============================================
+// 6. ЛЕГАСИ ХИМИЧЕСКИЕ ПРОЦЕССЫ → PROCESS REGISTRY ЯДРА
+// ============================================
+
+/**
+ * Минимальный контур легаси-процесса, нужный мосту реестра
+ * Stage 4.2.1. Берётся структурно (как LegacyGasRecord выше):
+ * полный тип ChemicalProcess этапа 3 здесь не требуется.
+ */
+export interface LegacyChemicalProcessInput {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Текстовый масштаб легаси («миллионы лет») — НЕ число. */
+  timescaleNote?: string;
+  source?: string;
+  note?: string;
+}
+
+/**
+ * Мост легаси-химических процессов (createDefaultProcessRegistry,
+ * этап 3) в дескрипторы ProcessRegistry ядра.
+ *
+ * Честное состояние сохраняется (Stage 4.2.1):
+ * - числового τ в легаси-реестре нет → tau = unknownValue:
+ *   текстовые timescaleNote НЕ преобразуются в числа автоматически;
+ * - численный решатель процессов химии в ядре не реализован →
+ *   solverAvailability = 'not_implemented';
+ * - enabled переносится как есть: процессы легаси-реестра
+ *   отключены и этим мостом НЕ активируются;
+ * - скорости, константы и физическая доступность не назначаются.
+ */
+export function chemicalProcessesToCoreDescriptors(
+  processes: readonly LegacyChemicalProcessInput[]
+): ProcessDescriptor[] {
+  return processes.map((p): ProcessDescriptor => ({
+    id: p.id,
+    name: p.name,
+    processKind: 'chemical',
+    tau: unknownValue(
+      p.timescaleNote !== undefined && p.timescaleNote !== ''
+        ? 'числовое характерное время неизвестно; легаси-описание масштаба: «' +
+          p.timescaleNote +
+          '» — текст, а не число'
+        : 'числовое характерное время неизвестно: в легаси-реестре числового τ нет',
+      {
+        sourceName:
+          p.source !== undefined && p.source !== ''
+            ? p.source
+            : 'легаси-реестр химических процессов (этап 3)',
+        note: 'текстовые описания масштаба времени не преобразуются в числа автоматически (Stage 4.2.1)'
+      }
+    ),
+    stepPolicy: { kind: 'unspecified' },
+    solverAvailability: 'not_implemented',
+    enabled: p.enabled,
+    provenance: {
+      sourceName: 'легаси createDefaultProcessRegistry (ChemicalEvolution, этап 3)',
+      note: 'мост Stage 4.2.1: процессы перенесены в честном состоянии — без назначенных скоростей, τ, констант и решателей'
+    },
+    applicability:
+      'химическая эволюция легаси-модуля; численный решатель процесса в ядре не реализован (интеграция — будущий подэтап 4.2.3)',
+    assumptions: p.note,
+    timescaleNote: p.timescaleNote
+  }));
 }

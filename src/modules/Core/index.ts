@@ -15,6 +15,8 @@
 //   reservoir         — материальные и энергетические резервуары;
 //   fluxLedger        — потоки и балансы сохранения;
 //   simulationClock   — время симуляции;
+//   worldClock        — мировая временная система поверх часов;
+//   processRegistry   — реестр физических процессов (τ, политики шага);
 //   worldState        — каноническое состояние мира;
 //   solverBackend     — контракты численных решателей;
 //   migrations        — версии схем, датасетов и миграции сохранений;
@@ -26,6 +28,8 @@ export * from './species';
 export * from './reservoir';
 export * from './fluxLedger';
 export * from './simulationClock';
+export * from './worldClock';
+export * from './processRegistry';
 export * from './worldState';
 export * from './solverBackend';
 export * from './migrations';
