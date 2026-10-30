@@ -693,13 +693,6 @@ export interface MolarCountResult {
   scope: 'amount' | 'column' | null;
 }
 
-const BASIS_TO_MOLAR_SCOPE: Partial<Record<InventoryBasis, 'amount' | 'column'>> = {
-  amount: 'amount',
-  mass: 'amount',
-  column_amount: 'column',
-  column_mass: 'column'
-};
-
 /**
  * Молярная масса вида с учётом статуса данных (Stage 4.1.1):
  * отсутствие данных (null) или некорректный статус делают перевод

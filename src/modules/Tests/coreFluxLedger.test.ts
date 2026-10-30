@@ -866,7 +866,7 @@ describe('Stage 4.1.1 FluxLedger: validateFluxLedger (форма записей 
     ).toBeGreaterThan(0);
     expect(
       validateFluxLedger(
-        rawLedger((r) => ({ subject: { ...(r.subject as object), basis: 'quarts' } as FluxRecord['subject'] }))
+        rawLedger((r) => ({ subject: { ...(r.subject as object), basis: 'quarts' } as unknown as FluxRecord['subject'] }))
       ).length
     ).toBeGreaterThan(0);
     expect(

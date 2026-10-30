@@ -242,7 +242,8 @@ export function migrateSavedWorld<T extends MigrationTarget>(world: T, target: S
       target
     );
   } else {
-    from = rawVersion;
+    // Формат уже проверен VERSION_PATTERN и реестром версий.
+    from = rawVersion as SaveSchemaVersion;
   }
   // Уже целевая схема: возвращаем как есть (идемпотентность —
   // повторная миграция не переписывает историю и не плодит записи).
