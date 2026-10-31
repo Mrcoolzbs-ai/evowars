@@ -1403,3 +1403,65 @@ describe('Stage 4.2.3.3.2 Scheduler: валидация нового журна�
     }
   });
 });
+
+describe('Stage 4.2.3.3.3 Scheduler: циклические данные и разреженные участники', () => {
+  /** Мир без журнала реакций (поле отсутствует). */
+  function worldWithoutLedger(): CoreWorldState {
+    const world = testWorld();
+    delete world.reactionLedger;
+    return world;
+  }
+
+  it('существующая запись с циклическим дополнительным полем: обычный шаг — контролируемый rejected, без исключения', () => {
+    const world = worldWithHistory();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    (world.reactionLedger?.records[0] as unknown as { extra?: unknown }).extra = cyclic;
+    const pristine = structuredClone(world);
+    const originalLedger = world.reactionLedger;
+    const originalRecord = originalLedger?.records[0];
+    const originalReservoir = world.reservoirs[0];
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    // цикл делает равенство недоказуемым: fail-closed — нарушение
+    // append-only, а не RangeError; аудит не выполняется
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('изменена или сдвинута'))).toBe(true);
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger).toBe(originalLedger);
+    expect(world.reactionLedger?.records[0]).toBe(originalRecord);
+    expect(world.reservoirs[0]).toBe(originalReservoir);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world).toEqual(pristine);
+  });
+
+  it('новая запись с разреженным массивом участников: reject до аудита, исходный мир нетронут', () => {
+    const world = worldWithoutLedger();
+    const pristine = structuredClone(world);
+    const addingSparse: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: { records: [{ ...schedulerReaction('rxn-sparse'), reactants: new Array(1) }] }
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [addingSparse], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    // форма нового журнала отклоняется ДО стехиометрического аудита
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('некорректен'))).toBe(true);
+    expect(result.diagnostics.some((d) => d.includes('разреженный массив'))).toBe(true);
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger).toBeUndefined();
+    expect(world.clock.stepCount).toBe(0);
+    expect(world).toEqual(pristine);
+  });
+});

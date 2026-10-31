@@ -1549,3 +1549,70 @@ describe('Stage 4.2.3.3.2 Persistence: явный null и форма coreWorldSt
   });
 });
 
+describe('Stage 4.2.3.3.3 Persistence: миграция внешней схемы 1.3 с coreWorldState: null', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  /** Валидная реакционная запись для первого резервуара ядра. */
+  function validRecord(id: string): ReactionRecord {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    const reservoirId = core.reservoirs[0]?.id ?? 'atm';
+    return {
+      id,
+      reactionId: 'water-formation',
+      reactants: [
+        { reservoirId, speciesId: 'h2', coefficient: 2 },
+        { reservoirId, speciesId: 'o2', coefficient: 1 }
+      ],
+      products: [{ reservoirId, speciesId: 'h2o', coefficient: 2 }],
+      extent: 1,
+      extentBasis: 'amount',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      processId: 'proc-a',
+      note: 'корректная транзакция'
+    };
+  }
+
+  /** Сохранение текущей версии с корректным журналом из одной записи. */
+  function validSavedWorld(id: string): SavedWorld {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    core.reactionLedger = { records: [validRecord('rxn-a')] };
+    return {
+      ...makeGeneratedWorld(id),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+  }
+
+  it('миграция 1.3 с coreWorldState: null — без TypeError; null не превращается в отсутствие или пустой объект', () => {
+    const save = makeLegacySave('1.3', { coreWorldState: null });
+    const migrated = migrateSavedWorld(save);
+    expect((migrated.world as { version?: string }).version).toBe('1.4');
+    expect((migrated.world as { coreWorldState?: unknown }).coreWorldState).toBeNull();
+    expect(migrated.notes.some((n) => n.includes('null'))).toBe(true);
+    expect(migrated.notes.some((n) => n.includes('оставлено без изменений'))).toBe(true);
+  });
+
+  it('Storage отклоняет его как некорректную форму: причина в health, raw нетронут, сосед грузится', () => {
+    const save = makeLegacySave('1.3', { coreWorldState: null });
+    writeRawEntries([save, validSavedWorld('w-good')]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-good']);
+    const health = getStorageHealth();
+    expect(health.incompatibleEntries.length).toBe(1);
+    expect(health.incompatibleEntries[0]?.reason).toContain('coreWorldState');
+    expect(health.incompatibleEntries[0]?.reason).toContain('null');
+    const raw = readRawEntries().find((entry) => entry.id === 'world-1') as { coreWorldState?: unknown } | undefined;
+    expect(raw).toBeDefined();
+    expect(raw?.coreWorldState).toBeNull();
+  });
+
+  it('соседнее корректное сохранение старой схемы (1.3 без ядра) продолжает загружаться', () => {
+    const broken = makeLegacySave('1.3', { coreWorldState: null });
+    const legacyGood = makeLegacySave('1.3', { id: 'legacy-good' });
+    writeRawEntries([broken, legacyGood, validSavedWorld('w-good')]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['legacy-good', 'w-good']);
+  });
+});

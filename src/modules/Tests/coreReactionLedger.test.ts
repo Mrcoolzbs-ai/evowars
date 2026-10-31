@@ -1172,23 +1172,29 @@ describe('Stage 4.2.3.3.2 ReactionLedger: форма нового журнала
 });
 
 describe('Stage 4.2.3.3.2 ReactionLedger: глубокое сравнение различает виды объектов', () => {
-  it('пустая запись и new Date(0) — разные данные, а не одинаковые Object.keys', () => {
-    const before = { records: [{} as unknown as ReactionRecord] };
-    const after = { records: [new Date(0) as unknown as ReactionRecord] };
+  it('пустое дополнительное поле и new Date(0) — разные данные, а не одинаковые Object.keys', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: unknown }).extra = {};
+    const after = registerReaction(createReactionLedger(), makeRecord());
+    (after.records[0] as unknown as { extra?: unknown }).extra = new Date(0);
     const issues = reactionLedgerAppendOnlyIssues(before, after);
     expect(issues.length).toBe(1);
     expect(issues[0]).toContain('изменена или сдвинута');
   });
 
-  it('Date с другим временем — изменение', () => {
-    const before = { records: [new Date(0) as unknown as ReactionRecord] };
-    const after = { records: [new Date(1000) as unknown as ReactionRecord] };
+  it('Date в дополнительном поле с другим временем — изменение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: unknown }).extra = new Date(0);
+    const after = registerReaction(createReactionLedger(), makeRecord());
+    (after.records[0] as unknown as { extra?: unknown }).extra = new Date(1000);
     expect(reactionLedgerAppendOnlyIssues(before, after).length).toBe(1);
   });
 
-  it('Date с тем же временем — изменением не считается (structuredClone-семантика)', () => {
-    const before = { records: [new Date(0) as unknown as ReactionRecord] };
-    const after = { records: [new Date(0) as unknown as ReactionRecord] };
+  it('Date в дополнительном поле с тем же временем — изменением не считается (structuredClone-семантика)', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: unknown }).extra = new Date(0);
+    const after = registerReaction(createReactionLedger(), makeRecord());
+    (after.records[0] as unknown as { extra?: unknown }).extra = new Date(0);
     expect(reactionLedgerAppendOnlyIssues(before, after)).toEqual([]);
   });
 
@@ -1250,5 +1256,141 @@ describe('Stage 4.2.3.3.2 ReactionLedger: глубокое сравнение р
     (withUndef as unknown as { note?: unknown }).note = undefined;
     expect(reactionLedgerAppendOnlyIssues(before, { records: [withUndef] })).toEqual([]);
     expect(reactionLedgerAppendOnlyIssues(before, { records: [makeRecord({ note: 'появилась' })] }).length).toBe(1);
+  });
+});
+
+describe('Stage 4.2.3.3.3 ReactionLedger: разреженные массивы, циклы и строгая форма', () => {
+  /** Журнал из одной корректной записи с дополнительным полем extra. */
+  function ledgerWithExtra(extra: unknown): ReactionLedger {
+    const ledger = registerReaction(createReactionLedger(), makeRecord());
+    (ledger.records[0] as unknown as { extra?: unknown }).extra = extra;
+    return ledger;
+  }
+
+  it('разреженный массив и [new Date(0)] в дополнительном поле — разные данные, а не одинаковые', () => {
+    const before = ledgerWithExtra(new Array(1));
+    const after = ledgerWithExtra([new Date(0)]);
+    const issues = reactionLedgerAppendOnlyIssues(before, after);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('изменена или сдвинута');
+  });
+
+  it('сравнение симметрично: [new Date(0)] против разреженного массива — тоже изменение', () => {
+    const before = ledgerWithExtra([new Date(0)]);
+    const after = ledgerWithExtra(new Array(1));
+    expect(reactionLedgerAppendOnlyIssues(before, after).length).toBe(1);
+  });
+
+  it('отсутствующий индекс равносилен явному undefined (JSON: [null])', () => {
+    const before = ledgerWithExtra(new Array(1));
+    const after = ledgerWithExtra([undefined]);
+    expect(reactionLedgerAppendOnlyIssues(before, after)).toEqual([]);
+  });
+
+  it('одинаковые разреженные массивы — изменением не считаются', () => {
+    expect(reactionLedgerAppendOnlyIssues(ledgerWithExtra(new Array(2)), ledgerWithExtra(new Array(2)))).toEqual([]);
+  });
+
+  it('порядок элементов массива с Date значим', () => {
+    const before = ledgerWithExtra([new Date(0), new Date(1000)]);
+    const after = ledgerWithExtra([new Date(1000), new Date(0)]);
+    expect(reactionLedgerAppendOnlyIssues(before, after).length).toBe(1);
+  });
+
+  it('массивы Date: одинаковые времена — не изменение, разные — изменение', () => {
+    expect(reactionLedgerAppendOnlyIssues(ledgerWithExtra([new Date(0)]), ledgerWithExtra([new Date(0)]))).toEqual([]);
+    expect(reactionLedgerAppendOnlyIssues(ledgerWithExtra([new Date(0)]), ledgerWithExtra([new Date(1)])).length).toBe(1);
+  });
+
+  it('циклическое дополнительное поле — fail-closed изменение, а не необработанный RangeError', () => {
+    const cyclicA: Record<string, unknown> = {};
+    cyclicA.self = cyclicA;
+    const cyclicB: Record<string, unknown> = {};
+    cyclicB.self = cyclicB;
+    const issues = reactionLedgerAppendOnlyIssues(ledgerWithExtra(cyclicA), ledgerWithExtra(cyclicB));
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('изменена или сдвинута');
+  });
+
+  it('повторная ссылка в независимых ветвях — не цикл: равные данные сравниваются повторно', () => {
+    const shared = { marker: 'same' };
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: unknown }).extra = shared;
+    (before.records[0] as unknown as { extra2?: unknown }).extra2 = shared;
+    const after = registerReaction(createReactionLedger(), makeRecord());
+    const copy = { marker: 'same' };
+    (after.records[0] as unknown as { extra?: unknown }).extra = copy;
+    (after.records[0] as unknown as { extra2?: unknown }).extra2 = copy;
+    expect(reactionLedgerAppendOnlyIssues(before, after)).toEqual([]);
+  });
+
+  it('журнал-массив и журнал-Date не проходят валидацию (typeof object недостаточен)', () => {
+    const problemsArray = validateReactionLedger([{ records: [] }]);
+    expect(problemsArray.length).toBe(1);
+    expect(problemsArray[0]).toContain('журналом не являются');
+    const problemsDate = validateReactionLedger(new Date(0));
+    expect(problemsDate.length).toBe(1);
+    expect(problemsDate[0]).toContain('журналом не являются');
+  });
+
+  it('запись-массив и запись-Date не проходят валидацию, даже с дорисованными обязательными полями', () => {
+    const paintedArray = Object.assign([makeRecord()], makeRecord());
+    const problemsArray = validateReactionRecord(paintedArray);
+    expect(problemsArray.length).toBe(1);
+    expect(problemsArray[0]).toContain('объектом-записью');
+    const problemsDate = validateReactionRecord(new Date(0));
+    expect(problemsDate.length).toBe(1);
+    expect(problemsDate[0]).toContain('объектом-записью');
+  });
+
+  it('участник-массив и участник-Date отклоняются (plain record обязателен)', () => {
+    const paintedArray = Object.assign([{ reservoirId: 'atm' }], { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 });
+    const problemsArray = validateReactionRecord({ ...makeRecord(), reactants: [paintedArray] });
+    expect(problemsArray.some((p) => p.includes('reactants[0]'))).toBe(true);
+    expect(problemsArray.some((p) => p.includes('объектом-записью участника'))).toBe(true);
+    const problemsDate = validateReactionRecord({ ...makeRecord(), reactants: [new Date(0)] });
+    expect(problemsDate.some((p) => p.includes('reactants[0]'))).toBe(true);
+    expect(problemsDate.some((p) => p.includes('объектом-записью участника'))).toBe(true);
+  });
+
+  it('запись с прототипом null — допустимая строгая форма', () => {
+    const nullProtoRecord = Object.assign(Object.create(null), makeRecord());
+    expect(validateReactionRecord(nullProtoRecord)).toEqual([]);
+  });
+
+  it('records: new Array(1) отклоняется: дырка — структурная ошибка, а не отсутствие данных', () => {
+    const problems = validateReactionLedger({ records: new Array(1) });
+    expect(problems.length).toBe(1);
+    expect(problems[0]).toContain('запись #0');
+    expect(problems[0]).toContain('разреженный массив records');
+  });
+
+  it('каждая дырка в records даёт отдельную проблему (длина массива учитывается)', () => {
+    const problems = validateReactionLedger({ records: new Array(2) });
+    expect(problems.length).toBe(2);
+    expect(problems.every((p) => p.includes('разреженный массив records'))).toBe(true);
+  });
+
+  it('разреженные reactants и products отклоняются: каждый индекс обязан содержать участника', () => {
+    const problemsReactants = validateReactionRecord({ ...makeRecord(), reactants: new Array(1) });
+    expect(problemsReactants.some((p) => p.includes('reactants[0] отсутствует'))).toBe(true);
+    expect(problemsReactants.some((p) => p.includes('разреженный массив'))).toBe(true);
+    const problemsProducts = validateReactionRecord({ ...makeRecord(), products: new Array(1) });
+    expect(problemsProducts.some((p) => p.includes('products[0] отсутствует'))).toBe(true);
+    expect(problemsProducts.some((p) => p.includes('разреженный массив'))).toBe(true);
+  });
+
+  it('auditReactionStoichiometry при разреженных участниках — контролируемый invalid, без обращения к speciesId', () => {
+    const audit = auditReactionStoichiometry({ ...makeRecord(), reactants: new Array(1) }, createSpeciesCatalog());
+    expect(audit.status).toBe('invalid');
+    expect(audit.formIssues.some((p) => p.includes('reactants[0] отсутствует'))).toBe(true);
+    expect(audit.diagnostics.some((d) => d.includes('валидацию формы'))).toBe(true);
+  });
+
+  it('auditReactionLedger при разреженном records — invalid с диагностикой, без исключения', () => {
+    const audit = auditReactionLedger({ records: new Array(1) }, createSpeciesCatalog());
+    expect(audit.status).toBe('invalid');
+    expect(audit.formIssues.some((p) => p.includes('разреженный массив records'))).toBe(true);
+    expect(audit.diagnostics.some((d) => d.includes('разреженный массив records'))).toBe(true);
   });
 });
