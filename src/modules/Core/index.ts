@@ -14,6 +14,7 @@
 //   species           — каталог химических видов;
 //   reservoir         — материальные и энергетические резервуары;
 //   fluxLedger        — потоки и балансы сохранения;
+//   reactionLedger    — журнал реакционных транзакций и стехиометрический аудит (4.2.3.2);
 //   simulationClock   — время симуляции;
 //   worldClock        — мировая временная система поверх часов;
 //   processRegistry   — реестр физических процессов (τ, политики шага);
@@ -30,6 +31,7 @@ export * from './scientificValue';
 export * from './species';
 export * from './reservoir';
 export * from './fluxLedger';
+export * from './reactionLedger';
 export * from './simulationClock';
 export * from './worldClock';
 export * from './processRegistry';
