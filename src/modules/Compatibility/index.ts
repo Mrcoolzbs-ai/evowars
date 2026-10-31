@@ -16,6 +16,7 @@ import type {
   CompatibilityRule,
   RuleCategory,
   CradleLocalEnvironment,
+  CradleLocationType,
   CentralObjectOption,
   AtmosphereState,
   PhysicalCharacteristics
@@ -96,6 +97,52 @@ export const CRADLE_RELATED_CATEGORIES: RuleCategory[] = [
   'geological_requirements',
   'energy_sources'
 ];
+
+/**
+ * Stage 4.2.2.4: соответствие типа расположения локальной среды
+ * (CradleLocationType) ДОПУСТИМЫМ видам резервуаров ядра
+ * (ReservoirRecord.kind), температура которых может ДОКАЗЫВАТЬ
+ * температуру именно этой локальной области.
+ *
+ * Таксономия видов НЕ изобретается: используются только виды,
+ * документированные контрактом ReservoirRecord («atmosphere |
+ * ocean | ice | crust | mantle | core | ...» — расширяемая
+ * строка) и реально применяемые в проекте значения (вид 'ocean' —
+ * единственный вид резервуара, реально используемый проектом,
+ * включая фикстуры глубинных гидротермальных резервуаров).
+ *
+ * - 'ocean': океанская локальная среда доказывается только
+ *   резервуарами вида 'ocean';
+ * - 'subsurface_reservoir': глубинная среда — резервуарами вида
+ *   'ocean' (глубинные гидротермальные/жидкостные резервуары
+ *   представлены этим видом) и 'crust' (коровые резервуары —
+ *   задокументированный вид);
+ * - 'deep_planetary_layers': глубинные планетные слои —
+ *   резервуарами видов 'mantle' и 'core' (задокументированные
+ *   виды глубинных слоёв);
+ * - 'surface': null — поверхность доказывается thermalState.
+ *   surfaceTemperature тела, а не резервуаром;
+ * - 'atmosphere': null — атмосферная среда читается отдельной
+ *   веткой пресета и резервуарным доказательством не является;
+ * - 'other': null — физическая природа области из одного ID
+ *   не выводится: без документируемого соответствия доказательство
+ *   недоступно (fail-closed).
+ *
+ * Несоответствие вида резервуара локальной области — НЕ физическая
+ * ошибка, а НЕДОКАЗАННОСТЬ (fail-closed): температура резервуара
+ * не используется ни как доказательство совместимости, ни как её
+ * опровержение; другой резервуар автоматически не выбирается.
+ */
+export const LOCATION_TYPE_RESERVOIR_KINDS: Readonly<
+  Record<CradleLocationType, readonly string[] | null>
+> = {
+  ocean: ['ocean'],
+  subsurface_reservoir: ['ocean', 'crust'],
+  deep_planetary_layers: ['mantle', 'core'],
+  surface: null,
+  atmosphere: null,
+  other: null
+};
 
 /**
  * Stage 4.2.2.2: типизированная температура поверхности мира — ТОЛЬКО
@@ -211,6 +258,12 @@ function isProvenTemperatureEvidence(v: ScientificValue | null | undefined): boo
  *   произвольный резервуар по совпадению kind НЕ выбирается,
  *   температура поверхности/T_eq/атмосферы/соседнего резервуара
  *   как fallback НЕ используется;
+ * - Stage 4.2.2.4 (reservoir kind validation): вид (kind) резервуара
+ *   должен СООТВЕТСТВОВАТЬ локальной среде (см.
+ *   LOCATION_TYPE_RESERVOIR_KINDS): резервуар атмосферы температурой
+ *   океана не является. Несовпадение вида — недоказанность
+ *   (fail-closed), не физическая ошибка; другой резервуар
+ *   автоматически не выбирается;
  * - locationType 'atmosphere': обрабатывается отдельной веткой
  *   пресета (адаптер никогда не возвращает known) — здесь null.
  *
@@ -233,6 +286,27 @@ function typedLocalTemperatureOfWorld(
   }
   const core = world.coreWorldState;
   if (!core) return null;
+  // Stage 4.2.2.4 (reservoir kind validation): температура резервуара
+  // доказывает локальную среду ТОЛЬКО при принадлежности резервуара
+  // телу 'planet' И согласованности его вида с locationType. Проверка
+  // выполняется ДО признания known-значения доказательством.
+  const reservoir = core.reservoirs.find(
+    (r) => r.id === reservoirId && r.bodyId === 'planet'
+  );
+  if (!reservoir) {
+    // Пары (тело 'planet', reservoirId) нет: чужие/несуществующие
+    // резервуары не читаются — это недоказанность, не ошибка.
+    return null;
+  }
+  const admissibleKinds = LOCATION_TYPE_RESERVOIR_KINDS[env.locationType];
+  if (admissibleKinds === null || !admissibleKinds.includes(reservoir.kind)) {
+    // Вид резервуара не соответствует локальной области (например,
+    // резервуар атмосферы как «доказательство» океана): температура
+    // не используется ни как доказательство, ни как опровержение.
+    // Fail-closed: cradle_temperature_unproven, НЕ incompatible/error;
+    // другой резервуар автоматически НЕ выбирается.
+    return null;
+  }
   try {
     const resolution = resolveLocalReactionTemperature(core, { bodyId: 'planet', reservoirId });
     return resolution.temperature;

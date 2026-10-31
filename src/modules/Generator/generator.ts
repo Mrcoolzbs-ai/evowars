@@ -428,8 +428,19 @@ function selectCelestialBody(
  *
  * Если пользователь зафиксировал колыбель вручную, она используется
  * как есть: несовместимость фиксируется предупреждениями совместимости.
+ *
+ * Stage 4.2.2.4: функция экспортирована для интеграционных тестов
+ * САМОГО selector'а (не только predicate isCradleSupportedOnWorld) и
+ * принимает ОПЦИОНАЛЬНЫЙ типизированный контекст доказательств
+ * (coreWorldState, cradleLocalEnvironment), который передаётся в
+ * isCradleSupportedOnWorld → checkCompatibility. В реальном
+ * генерационном контуре эти поля НЕ передаются: научное ядро строится
+ * ПОСЛЕ выбора колыбели, доказанных температурных ошибок на этапе
+ * выбора не существует, и selector не выдумывает доказательств —
+ * температурный результат остаётся условным
+ * (cradle_temperature_unproven).
  */
-function selectCradle(
+export function selectCradle(
   rng: ReturnType<typeof createRandom>,
   settings: GenerationSettings,
   context: {
@@ -438,6 +449,21 @@ function selectCradle(
     celestialBody: CelestialBodyOption;
     atmosphere: AtmosphereState;
     bodyCharacteristics: PhysicalCharacteristics;
+    /**
+     * Stage 4.2.2.4: типизированное состояние ядра (optional typed
+     * evidence). Передаётся в isCradleSupportedOnWorld →
+     * checkCompatibility; в реальном генерационном контуре ядро ещё
+     * не построено и поле не передаётся.
+     */
+    coreWorldState?: CoreWorldState;
+    /**
+     * Stage 4.2.2.4: локальная среда колыбели, если она уже известна
+     * вызывающей стороне. Переданная среда применяется ко ВСЕМ
+     * кандидатам без пересчёта по каждому кандидату: связанность
+     * среды с каждым кандидатом — ответственность вызывающей
+     * стороны. В реальном контуре не передаётся.
+     */
+    cradleLocalEnvironment?: CradleLocalEnvironment;
   }
 ): { cradle: CradleOption; cradleWarnings: GenerationWarning[] } {
   const cradleWarnings: GenerationWarning[] = [];
