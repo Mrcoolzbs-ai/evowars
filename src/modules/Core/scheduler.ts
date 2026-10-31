@@ -51,6 +51,14 @@
 // - событие мира не теряется: ошибка обработки фиксируется
 //   статусом 'failed' с причиной; повторная обработка
 //   выполненного события запрещена.
+// - append-only история реакций (Stage 4.2.3.3.1): записи
+//   reactionLedger, существовавшие до macro-шага, неизменяемы —
+//   совпадающий id не доказывает неизменности записи; разрешено
+//   только добавление новых записей в конец журнала; правка,
+//   удаление, перестановка старых записей и удаление журнала
+//   отклоняют шаг; новые записи обязаны пройти стехиометрический
+//   аудит до фиксации — шаг с новыми реакциями требует
+//   запрошенного аудита инвариантов (speciesCatalog);
 //
 // Тесты композиции операторов доказывают правильность ПОРЯДКА
 // вызовов, а не точность физического решателя: готовых
@@ -64,6 +72,7 @@ import type { SimulationClockState } from './simulationClock';
 import { advance, comparePoints, totalElapsedSeconds } from './simulationClock';
 import { isPlainRecord } from './reservoir';
 import { auditWorldTransition } from './invariantAuditor';
+import { reactionLedgerAppendOnlyIssues } from './reactionLedger';
 import type { BoundaryCompleteness, WorldTransitionAudit } from './invariantAuditor';
 import type { SpeciesCatalog } from './species';
 
@@ -663,6 +672,15 @@ function snapshotWorldState(world: CoreWorldState): CoreWorldState {
  * невозможно (неклонируемое значение), шаг завершается
  * контролируемым отказом ДО вызова первого оператора.
  *
+ * Append-only журнал реакций (Stage 4.2.3.3.1): записи, существовавшие
+ * до шага, остаются неизменными — содержимое, порядок и количество;
+ * разрешено только добавление новых записей в конец. Нарушение
+ * (правка при сохранённом id, удаление, перестановка, удаление
+ * журнала) отклоняет шаг ещё до аудита. Новые реакционные записи
+ * требуют запрошенного аудита инвариантов (speciesCatalog): без
+ * него шаг с новыми реакциями отклоняется — стехиометрический
+ * аудит новых транзакций обязателен до фиксации.
+ *
  * Мировое время продвигается РОВНО один раз — после успеха всех
  * операторов и (если запрошен) аудита. Любая ошибка оператора,
  * самовольное продвижение часов оператором или нарушение
@@ -880,19 +898,68 @@ export function runMacroStep(
     current = next;
   }
 
+  // --- Stage 4.2.3.3.1: append-only контракт журнала реакций ---
+  // Записи, существовавшие до macro-шага, остаются неизменными (по
+  // всему содержимому — участники, коэффициенты, extent, extentBasis,
+  // time, processId, note), в том же порядке и количестве; разрешено
+  // только добавление новых записей в конец журнала. Совпадающий id
+  // не является доказательством неизменности: подмена содержимого
+  // при сохранённом id, удаление и перестановка старых записей,
+  // удаление журнала — нарушение контракта. Проверка выполняется на
+  // КАЖДОМ шаге, независимо от того, запрошен аудит инвариантов.
+  const reactionAppendOnlyIssues = reactionLedgerAppendOnlyIssues(world.reactionLedger, current.reactionLedger);
+  if (reactionAppendOnlyIssues.length > 0) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: rejectedLog(plan),
+      diagnostics: [
+        ...reactionAppendOnlyIssues,
+        'нарушение append-only контракта журнала реакций: шаг отклонён, состояние мира и его журнал не изменены'
+      ]
+    };
+  }
+  // Реакционные транзакции шага — ТОЛЬКО записи, добавленные в конец
+  // журнала поверх неизменной истории (префикс проверен выше). Мир
+  // без журнала до шага: все записи «после» — новые.
+  const beforeReactionCount =
+    world.reactionLedger !== undefined && Array.isArray(world.reactionLedger.records)
+      ? world.reactionLedger.records.length
+      : 0;
+  const afterReactionRecords =
+    current.reactionLedger !== undefined && Array.isArray(current.reactionLedger.records)
+      ? current.reactionLedger.records
+      : [];
+  const stepReactions = afterReactionRecords.slice(beforeReactionCount);
+  // Новые записи обязаны пройти стехиометрический аудит ДО фиксации
+  // шага: аудит требует каталог видов (speciesCatalog). Шаг, который
+  // добавил реакционные транзакции, но не запросил аудит инвариантов,
+  // отклоняется — незаверенные реакции не фиксируются молча.
+  if (stepReactions.length > 0 && opts.audit === undefined) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: rejectedLog(plan),
+      diagnostics: [
+        'шаг добавил ' + String(stepReactions.length) + ' реакционных транзакций, но аудит инвариантов не запрошен: новые записи обязаны пройти стехиометрический аудит (speciesCatalog) до фиксации шага — шаг отклонён, состояние мира не изменено'
+      ]
+    };
+  }
+
   // --- аудит инвариантов до фиксации ---
   let audit: WorldTransitionAudit | undefined;
   if (opts.audit !== undefined) {
     const beforeIds = new Set(world.fluxLedger.records.map((r) => r.id));
     const stepRecords = current.fluxLedger.records.filter((r) => !beforeIds.has(r.id));
-    // Stage 4.2.3.3: реакционные транзакции шага — записи, добавленные
-    // операторами в журнал реакций (идентификаторы исходного мира
-    // исключаются так же, как у потоков). Операторы, не работающие с
-    // реакциями, не добавляют записей: аудит получает пустой журнал
-    // (не ошибка). Журнал проверяется аудитом ОТДЕЛЬНО от потоков;
-    // автоматически записи не создаются.
-    const beforeReactionIds = new Set(world.reactionLedger?.records.map((r) => r.id) ?? []);
-    const stepReactions = current.reactionLedger?.records.filter((r) => !beforeReactionIds.has(r.id)) ?? [];
+    // Stage 4.2.3.3/4.2.3.3.1: реакционные транзакции шага — записи,
+    // добавленные В КОНЕЦ журнала поверх неизменной истории (фильтр
+    // по id из 4.2.3.3 не замечал правку/удаление/перестановку
+    // старых записей и заменён префиксной append-only проверкой).
+    // Операторы, не работающие с реакциями, не добавляют записей:
+    // аудит получает пустой журнал (не ошибка). Журнал проверяется
+    // аудитом ОТДЕЛЬНО от потоков; автоматически записи не создаются.
     audit = auditWorldTransition(world, current, { records: stepRecords }, {
       speciesCatalog: opts.audit.speciesCatalog,
       boundary: opts.audit.boundary,

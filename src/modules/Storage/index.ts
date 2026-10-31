@@ -18,6 +18,7 @@ import {
   migrateSavedWorld,
   SAVE_SCHEMA_VERSIONS
 } from '../Core/migrations';
+import { validateReactionLedger } from '../Core/reactionLedger';
 
 const STORAGE_KEY = 'evowars_worlds';
 const SETTINGS_KEY = 'evowars_settings';
@@ -38,12 +39,15 @@ const SETTINGS_KEY = 'evowars_settings';
  *   (динамика процессов планировщика, очередь событий мира, журнал
  *   шагов); отсутствие означает «планировщик не инициализирован»,
  *   значения не пересоздаются;
- * - 1.4 (этап 4.2.3.3) — опциональное поле
- *   coreWorldState.reactionLedger (журнал реакционных транзакций):
- *   у существующего coreWorldState миграция создаёт ПУСТОЙ журнал
- *   (старый код реакций не записывал), схема состояния ядра
- *   поднимается до 1.3.0; существующий журнал не перезаписывается;
- *   значения не пересчитываются.
+ * - 1.4 (этап 4.2.3.3, корректирующая ревизия 4.2.3.3.1) —
+ *   опциональное поле coreWorldState.reactionLedger (журнал
+ *   реакционных транзакций): у существующего coreWorldState с
+ *   ИЗВЕСТНОЙ схемой миграция создаёт ПУСТОЙ журнал (старый код
+ *   реакций не записывал), схема состояния ядра поднимается до
+ *   1.3.0; существующий журнал не перезаписывается; при
+ *   неизвестной схеме ядра coreWorldState не изменяется вообще;
+ *   некорректный журнал отклоняется при загрузке и импорте
+ *   (4.2.3.3.1), а не «чинится» молча; значения не пересчитываются.
  */
 export const STORAGE_FORMAT_VERSION: string = CURRENT_SAVE_SCHEMA_VERSION;
 
@@ -65,6 +69,61 @@ export const SUPPORTED_SAVE_VERSIONS: readonly string[] = SAVE_SCHEMA_VERSIONS;
 function migrateWorld(world: SavedWorld): SavedWorld {
   if (world.version === CURRENT_SAVE_SCHEMA_VERSION) return world;
   return migrateSavedWorld(world).world;
+}
+
+/**
+ * Проблемы журнала реакций в сохранении (Stage 4.2.3.3.1).
+ * Минимальная достаточная граница проверки при загрузке: валидируется
+ * ТОЛЬКО явно заданный coreWorldState.reactionLedger (форма журнала и
+ * каждой записи, уникальность id, ссылки участников на резервуары
+ * ядра). Отсутствие журнала или ядра — не ошибка; полный
+ * validateWorldState здесь НЕ выполняется: его правила относятся к
+ * живому состоянию ядра и не должны менять контракт загрузки старых
+ * сохранений. Некорректный журнал не «чинится» и не подменяется
+ * пустым: проблемы возвращаются диагностикой.
+ */
+function reactionLedgerProblemsOfWorld(world: SavedWorld): string[] {
+  const core: unknown = (world as { coreWorldState?: unknown }).coreWorldState;
+  if (typeof core !== 'object' || core === null) {
+    return [];
+  }
+  const coreRecord = core as Record<string, unknown>;
+  const ledger: unknown = coreRecord.reactionLedger;
+  if (ledger === undefined || ledger === null) {
+    return [];
+  }
+  const rawReservoirs: unknown = coreRecord.reservoirs;
+  const reservoirIds = Array.isArray(rawReservoirs)
+    ? rawReservoirs
+        .map((reservoir) =>
+          typeof reservoir === 'object' && reservoir !== null
+            ? (reservoir as Record<string, unknown>).id
+            : undefined
+        )
+        .filter((id): id is string => typeof id === 'string')
+    : undefined;
+  const problems =
+    reservoirIds !== undefined
+      ? validateReactionLedger(ledger, { reservoirIds })
+      : validateReactionLedger(ledger);
+  return problems.map((problem) => 'coreWorldState.reactionLedger: ' + problem);
+}
+
+/**
+ * Миграция + проверка журнала реакций (Stage 4.2.3.3.1): некорректный
+ * reactionLedger не может незаметно попасть в приложение как успешно
+ * загруженное состояние. Бросает Error с диагностикой; вызывается из
+ * loadSingleEntry (запись становится несовместимой с точной причиной
+ * отказа, но НЕ удаляется из хранилища) и из saveWorld (повреждённая
+ * запись сохраняется как raw, без «лечения» и перезаписи).
+ */
+function migrateAndCheckWorld(entry: Record<string, unknown>): SavedWorld {
+  const migrated = migrateWorld(entry as unknown as SavedWorld);
+  const problems = reactionLedgerProblemsOfWorld(migrated);
+  if (problems.length > 0) {
+    throw new Error('некорректный журнал реакций: ' + problems.join('; '));
+  }
+  return migrated;
 }
 
 // ============================================
@@ -152,13 +211,20 @@ function isObjectEntry(entry: unknown): entry is Record<string, unknown> {
  *   диагностикой, НЕ удаляется);
  * - прочие ошибки → запись пропускается с диагностикой.
  * Одна плохая запись больше не прячет все остальные миры.
+ *
+ * Stage 4.2.3.3.1: после миграции проверяется журнал реакций
+ * (migrateAndCheckWorld): сохранение с некорректным
+ * coreWorldState.reactionLedger НЕ возвращается как валидно
+ * загруженный мир — запись становится несовместимой с точной
+ * причиной в diagnostics, но остаётся в хранилище как есть
+ * (исходные данные сохраняются для диагностики и восстановления).
  */
 function loadSingleEntry(entry: unknown, index: number): { world: SavedWorld | null; incompatible: IncompatibleEntry | null } {
   if (!isObjectEntry(entry)) {
     return { world: null, incompatible: { index, version: '—', reason: 'запись не является объектом' } };
   }
   try {
-    return { world: migrateWorld(entry as unknown as SavedWorld), incompatible: null };
+    return { world: migrateAndCheckWorld(entry), incompatible: null };
   } catch (error) {
     return {
       world: null,
@@ -209,8 +275,9 @@ export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): 
     throw new StorageError(parseError);
   }
 
-  // Совместимые миры — загружаются и мигрируются;
-  // несовместимые — сохраняются как есть (см. контракт выше).
+  // Совместимые миры — загружаются и мигрируются; записи с
+  // некорректным журналом реакций (4.2.3.3.1) и прочие
+  // несовместимые — сохраняются как raw (см. контракт выше).
   const compatible: SavedWorld[] = [];
   const untouched: unknown[] = [];
   entries.forEach((entry) => {
@@ -219,7 +286,7 @@ export function saveWorld(world: GeneratedWorld, settings: GenerationSettings): 
       return;
     }
     try {
-      compatible.push(migrateWorld(entry as unknown as SavedWorld));
+      compatible.push(migrateAndCheckWorld(entry));
     } catch {
       untouched.push(entry);
     }
@@ -661,36 +728,72 @@ export function exportWorldToMarkdown(world: SavedWorld): string {
 }
 
 /**
- * Импорт мира из JSON
+ * Результат импорта сохранения из JSON с диагностикой (Stage
+ * 4.2.3.3.1): world === null при отказе, reason поясняет причину
+ * (null при успехе). Некорректное сохранение не возвращается как
+ * валидно загруженный мир только потому, что его JSON удалось
+ * разобрать.
  */
-export function importWorldFromJSON(json: string): SavedWorld | null {
+export interface WorldImportResult {
+  world: SavedWorld | null;
+  /** Причина отказа (null, если сохранение импортировано). */
+  reason: string | null;
+}
+
+/**
+ * Импорт мира из JSON с диагностикой отказа (Stage 4.2.3.3.1).
+ * Повторяет контракт importWorldFromJSON, но возвращает причину:
+ * некорректный coreWorldState.reactionLedger, неподдерживаемая
+ * версия схемы и другие проблемы получают явное объяснение вместо
+ * молчаливого null.
+ */
+export function importWorldFromJSONDetailed(json: string): WorldImportResult {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(json);
-    
-    // Проверяем обязательные поля
-    if (!parsed.id || !parsed.seed || !parsed.cosmology || !parsed.epoch || 
-        !parsed.centralObject || !parsed.celestialBody || !parsed.cradle) {
-      return null;
-    }
-    
+    parsed = JSON.parse(json);
+  } catch (error) {
+    return { world: null, reason: 'JSON не разбирается: ' + (error instanceof Error ? error.message : String(error)) };
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return { world: null, reason: 'сохранение не является JSON-объектом' };
+  }
+  const candidate = parsed as Record<string, unknown>;
+  if (
+    !candidate.id || !candidate.seed || !candidate.cosmology || !candidate.epoch ||
+    !candidate.centralObject || !candidate.celestialBody || !candidate.cradle
+  ) {
+    return { world: null, reason: 'отсутствуют обязательные поля сохранения (id, seed, cosmology, epoch, centralObject, celestialBody, cradle)' };
+  }
+  try {
     // Импортированный мир мигрируется к актуальной версии формата
     // (отсутствующие физические поля остаются неизвестными).
     // Stage 4.1.1: сохранение несовместимой/будущей версии
     // отклоняется ЯВНО (MigrationError) — import не должен возвращать
     // «мигрированный» мир из выдуманной версии.
-    try {
-      return migrateWorld(parsed as SavedWorld);
-    } catch (error) {
-      if (error instanceof MigrationError) {
-        // Сохранение из будущего формата: импорт невозможен,
-        // ошибка проглатывается осознанно — контракт функции null.
-        return null;
-      }
-      throw error;
+    const migrated = migrateWorld(candidate as unknown as SavedWorld);
+    // Stage 4.2.3.3.1: некорректный журнал реакций не возвращается
+    // как валидно загруженный мир — причина отказа возвращается
+    // диагностикой, оригинальный JSON остаётся у вызывающей стороны.
+    const problems = reactionLedgerProblemsOfWorld(migrated);
+    if (problems.length > 0) {
+      return { world: null, reason: 'некорректный журнал реакций: ' + problems.join('; ') };
     }
-  } catch {
-    return null;
+    return { world: migrated, reason: null };
+  } catch (error) {
+    if (error instanceof MigrationError) {
+      return { world: null, reason: error.message };
+    }
+    return { world: null, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Импорт мира из JSON. Возвращает мир или null; причина отказа
+ * доступна через importWorldFromJSONDetailed (Stage 4.2.3.3.1):
+ * контракт SavedWorld | null сохранён для совместимости.
+ */
+export function importWorldFromJSON(json: string): SavedWorld | null {
+  return importWorldFromJSONDetailed(json).world;
 }
 
 /**
@@ -836,6 +939,7 @@ export default {
   exportWorldToJSON,
   exportWorldToMarkdown,
   importWorldFromJSON,
+  importWorldFromJSONDetailed,
   getStorageStats,
   getStorageHealth
 };

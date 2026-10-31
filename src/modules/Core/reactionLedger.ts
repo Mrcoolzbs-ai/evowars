@@ -725,3 +725,104 @@ export function auditReactionLedger(
   }
   return { status, formIssues, recordAudits, diagnostics };
 }
+
+// ============================================
+// 7. APPEND-ONLY КОНТРАКТ ЖУРНАЛА (Stage 4.2.3.3.1)
+// ============================================
+
+/**
+ * Глубокое структурное сравнение JSON-подобных данных: порядок ключей
+ * объектов не важен (запись, пересобранная с иным порядком ключей, но
+ * тем же содержимым, изменением не считается), порядок массивов —
+ * важен (порядок участников — часть данных записи). Собственные
+ * свойства читаются без обращения к прототипу.
+ */
+function deepJsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((value, index) => deepJsonEqual(value, b[index]));
+  }
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) {
+    return false;
+  }
+  return keysA.every((key) =>
+    Object.prototype.hasOwnProperty.call(b, key) &&
+    deepJsonEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])
+  );
+}
+
+/** id записи для диагностики (null — если id нечитаем). */
+function recordIdOf(record: unknown): string | null {
+  if (typeof record !== 'object' || record === null) {
+    return null;
+  }
+  const id = (record as Record<string, unknown>).id;
+  return typeof id === 'string' && id.trim() !== '' ? id : null;
+}
+
+/**
+ * Проверка append-only контракта журнала реакций (Stage 4.2.3.3.1):
+ * записи, существовавшие до macro-шага, обязаны остаться в журнале
+ * НЕИЗМЕННЫМИ — по всему содержимому (участники, коэффициенты,
+ * extent, extentBasis, time, processId, note), в том же порядке и в
+ * том же количестве. Разрешено ТОЛЬКО добавление новых записей в
+ * конец журнала. Одинаковый id НЕ считается доказательством
+ * неизменности: подмена содержимого при сохранённом id, удаление,
+ * перестановка и правка любых полей старой записи — нарушение.
+ *
+ * Семантика «до → после»: undefined до шага — журнала не было, все
+ * записи «после» считаются новыми (нарушения нет); undefined после
+ * шага при существовавшем журнале — нарушение (журнал исключён из
+ * состояния мира). Некорректная форма журнала (records не массив) —
+ * нарушение: контракт невозможно проверить.
+ *
+ * Возвращает список нарушений (пустой = контракт соблюдён).
+ * Функция чистая: входные данные не изменяются.
+ */
+export function reactionLedgerAppendOnlyIssues(
+  before: ReactionLedger | undefined,
+  after: ReactionLedger | undefined
+): string[] {
+  const issues: string[] = [];
+  if (before === undefined) {
+    return issues;
+  }
+  if (after === undefined) {
+    issues.push('журнал реакций удалён из состояния мира: существовавший до шага журнал нельзя исключать');
+    return issues;
+  }
+  if (!Array.isArray(before.records)) {
+    issues.push('журнал реакций до шага некорректен (records не является массивом): append-only-контракт невозможно проверить');
+    return issues;
+  }
+  if (!Array.isArray(after.records)) {
+    issues.push('журнал реакций после шага некорректен (records не является массивом)');
+    return issues;
+  }
+  if (after.records.length < before.records.length) {
+    issues.push(
+      'старые записи журнала реакций удалены: было ' + String(before.records.length) +
+      ', стало ' + String(after.records.length) + ' — удаление истории запрещено'
+    );
+  }
+  const limit = Math.min(before.records.length, after.records.length);
+  for (let i = 0; i < limit; i++) {
+    if (!deepJsonEqual(before.records[i], after.records[i])) {
+      const id = recordIdOf(before.records[i]) ?? recordIdOf(after.records[i]) ?? ('запись #' + String(i));
+      issues.push(
+        'старая запись «' + id + '» (позиция ' + String(i) + ') изменена или сдвинута: содержимое, порядок и количество записей до шага обязаны сохраниться — сохранение id не является доказательством неизменности'
+      );
+    }
+  }
+  return issues;
+}
