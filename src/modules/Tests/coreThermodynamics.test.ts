@@ -12,6 +12,13 @@
 //   величины, битые сегменты и provenance);
 // - per-value provenance отдельных Cp-точек (ThermoDataProvenance).
 //
+// Заключительная проверка валидатора 4.3.1:
+// - повреждённая bounded-неопределённость (без direction) у
+//   known/estimated-значений отклоняется;
+// - величина с несовместимой размерностью вызывает диагностику и НЕ
+//   используется в дальнейших проверках (порядок температур,
+//   положительность, пересечение диапазонов, контрольные точки).
+//
 // Все значения в фикстурах — СИНТЕТИЧЕСКИЕ тестовые числа с
 // фиктивными источниками («тестовый источник (фикция для тестов)»):
 // это не реальные термохимические данные. Реальный импорт значений
@@ -1015,5 +1022,131 @@ describe('Stage 4.3.1 (hardening): provenance отдельных Cp-точек',
     expect(
       validateThermodynamicProperties(thermo).some((e) => e.includes('неизвестный origin'))
     ).toBe(true);
+  });
+});
+
+// ============================================
+// ЗАКЛЮЧИТЕЛЬНАЯ ПРОВЕРКА ВАЛИДАТОРА 4.3.1:
+// BOUNDED-НЕОПРЕДЕЛЁННОСТЬ И ЧУЖАЯ РАЗМЕРНОСТЬ
+// ============================================
+
+describe('Stage 4.3.1 (заключительная проверка): bounded-неопределённость и чужая размерность', () => {
+  it('повреждённая bounded-неопределённость (без direction) у known-значения — диагностика', () => {
+    const thermo = validKnownThermo();
+    thermo.standardFormationEnthalpy = {
+      status: 'known',
+      quantity: quantity(-241800, 'J_mol'),
+      provenance: testProvenance('experimental'),
+      uncertainty: { kind: 'bounded', bound: 1000 }
+    } as unknown as ScientificValue;
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('неопределённость') && e.includes('above'))).toBe(true);
+  });
+
+  it('повреждённая bounded-неопределённость (посторонний direction) у estimated-значения — диагностика', () => {
+    const thermo = validKnownThermo();
+    thermo.standardEntropy = {
+      status: 'estimated',
+      quantity: quantity(188.8, 'J_mol_K'),
+      method: 'тестовая оценка',
+      provenance: testProvenance('theoretical_estimate', { method: 'тестовая корреляция' }),
+      uncertainty: { kind: 'bounded', direction: 'вбок', bound: 5 }
+    } as unknown as ScientificValue;
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('неопределённость') && e.includes('направление'))).toBe(true);
+  });
+
+  it('температура Cp-точки в чужой размерности — диагностика; значение не используется для порядка', () => {
+    const thermo = validKnownThermo();
+    thermo.heatCapacity = {
+      status: 'known',
+      tabulated: {
+        points: [
+          { temperature: quantity(300, 'Pa') as unknown as PhysicalQuantity, cp: quantity(33.6, 'J_mol_K') },
+          { temperature: quantity(200, 'K'), cp: quantity(31.0, 'J_mol_K') }
+        ],
+        provenance: testProvenance('experimental')
+      }
+    };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('точка 0: температура') && e.includes('размерность'))).toBe(true);
+    // число в паскалях не используется как температура: ложных
+    // ошибок порядка/дубликата от чужой размерности нет
+    expect(errors.some((e) => e.includes('строго по возрастанию'))).toBe(false);
+    expect(errors.some((e) => e.includes('дубликат температуры'))).toBe(false);
+  });
+
+  it('граница rangeK в чужой размерности — диагностика; границы не используются в дальнейших проверках', () => {
+    const thermo = validKnownThermo();
+    const segment = nasa7FittedSegment();
+    segment.rangeK = { min: quantity(200, 'Pa') as unknown as PhysicalQuantity, max: quantity(1000, 'K') };
+    // контрольная точка заведомо за пределами «числовых» границ:
+    // если валидатор использовал бы значение в паскалях как
+    // температуру, появилась бы ложная ошибка «вне диапазона»
+    segment.derivation.checkPoints = [
+      { temperature: quantity(1500, 'K'), sourceCpOverR: 4.5 }
+    ];
+    thermo.heatCapacity = {
+      status: 'known',
+      tabulated: testCpTable(),
+      nasa7: { segments: [segment] }
+    };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('нижняя граница') && e.includes('размерность'))).toBe(true);
+    // границы в чужой размерности не используются как числа: ложного
+    // «вне диапазона» для контрольной точки и проверок стыка нет
+    expect(errors.some((e) => e.includes('вне диапазона сегмента'))).toBe(false);
+    expect(errors.some((e) => e.includes('пересекается'))).toBe(false);
+    expect(errors.some((e) => e.includes('упорядочены'))).toBe(false);
+  });
+
+  it('температура reference state в чужой размерности — диагностика; положительность по ней не проверяется', () => {
+    const thermo = validKnownThermo();
+    const ref = thermo.referenceState;
+    if (ref === undefined) throw new Error('фикстура должна содержать reference state');
+    thermo.referenceState = { ...ref, temperature: quantity(-101325, 'Pa') as unknown as PhysicalQuantity };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('температура') && e.includes('размерность'))).toBe(true);
+    // значение в паскалях не проверяется на положительность как
+    // температура: диагностика — только о размерности
+    expect(errors.some((e) => e.includes('положительной'))).toBe(false);
+  });
+
+  it('валидация таких повреждённых входов детерминирована и без исключений', () => {
+    const thermo = validKnownThermo();
+    thermo.standardFormationEnthalpy = {
+      status: 'known',
+      quantity: quantity(-241800, 'J_mol'),
+      provenance: testProvenance('experimental'),
+      uncertainty: { kind: 'bounded', bound: 1000 }
+    } as unknown as ScientificValue;
+    const table = testCpTable();
+    table.points[0].temperature = quantity(300, 'Pa') as unknown as PhysicalQuantity;
+    thermo.heatCapacity = { status: 'known', tabulated: table };
+    let first: string[] = [];
+    let second: string[] = [];
+    expect(() => {
+      first = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(() => {
+      second = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(first.length).toBeGreaterThan(0);
+    expect(first).toEqual(second);
   });
 });

@@ -1,6 +1,9 @@
 // ============================================
 // STAGE 4.1 - Тесты научных значений: статусы, неопределённость,
 // происхождение (provenance)
+// Заключительная проверка валидатора 4.3.1: bounded-неопределённость
+// требует направление direction ('above' | 'below') — отсутствие,
+// null и посторонние значения отклоняются валидацией и конструкторами.
 // ============================================
 
 import { describe, it, expect } from 'vitest';
@@ -19,7 +22,7 @@ import {
   validateUncertainty,
   ScientificValueError
 } from '../Core/scientificValue';
-import type { ScientificValue } from '../Core/scientificValue';
+import type { ScientificValue, Uncertainty } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 
 describe('Stage 4.1 ScientificValue: семантика статусов', () => {
@@ -168,5 +171,65 @@ describe('Stage 4.1 ScientificValue: provenance и преобразование 
   it('преобразование в несовместимую единицу отвергается', () => {
     const v = knownValue(quantity(1, 'kg'));
     expect(() => convertScientificValueUnit(v, 'K')).toThrow();
+  });
+});
+
+// ============================================
+// ЗАКЛЮЧИТЕЛЬНАЯ ПРОВЕРКА ВАЛИДАТОРА 4.3.1:
+// BOUNDED-НЕОПРЕДЕЛЁННОСТЬ ТРЕБУЕТ НАПРАВЛЕНИЕ
+// ============================================
+
+describe('Stage 4.1 (заключительная проверка): bounded-неопределённость', () => {
+  it('корректная bounded-неопределённость с направлением above принимается', () => {
+    const u = { kind: 'bounded' as const, direction: 'above' as const, bound: 5 };
+    expect(validateUncertainty(u)).toEqual([]);
+    const v = knownValue(quantity(100, 'K'), { uncertainty: u });
+    expect(v.status).toBe('known');
+    if (v.status === 'known' && v.uncertainty && v.uncertainty.kind === 'bounded') {
+      expect(v.uncertainty.direction).toBe('above');
+      expect(v.uncertainty.bound).toBe(5);
+    }
+  });
+
+  it('корректная bounded-неопределённость с направлением below принимается', () => {
+    const u = { kind: 'bounded' as const, direction: 'below' as const, bound: 3 };
+    expect(validateUncertainty(u)).toEqual([]);
+    const v = knownValue(quantity(100, 'K'), { uncertainty: u });
+    expect(v.status).toBe('known');
+    if (v.status === 'known' && v.uncertainty && v.uncertainty.kind === 'bounded') {
+      expect(v.uncertainty.direction).toBe('below');
+    }
+  });
+
+  it('отсутствие direction — ошибка валидации', () => {
+    // runtime-повреждение (данные из JSON): поле отсутствует
+    const missing = { kind: 'bounded', bound: 5 } as unknown as Uncertainty;
+    const issues = validateUncertainty(missing);
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((e) => e.includes('above'))).toBe(true);
+  });
+
+  it('недопустимое значение direction — ошибка валидации', () => {
+    const wrong = { kind: 'bounded', direction: 'вбок', bound: 5 } as unknown as Uncertainty;
+    expect(validateUncertainty(wrong).some((e) => e.includes('направление'))).toBe(true);
+    const nullDirection = { kind: 'bounded', direction: null, bound: 5 } as unknown as Uncertainty;
+    expect(validateUncertainty(nullDirection).length).toBeGreaterThan(0);
+  });
+
+  it('конструкторы отклоняют некорректную bounded-неопределённость (ScientificValueError)', () => {
+    const bad = { kind: 'bounded', bound: 5 } as unknown as Uncertainty;
+    expect(() => knownValue(quantity(1, 'K'), { uncertainty: bad })).toThrow(ScientificValueError);
+    try {
+      knownValue(quantity(1, 'K'), { uncertainty: bad });
+      expect.unreachable('knownValue должен отклонить bounded без direction');
+    } catch (e) {
+      const err = e as ScientificValueError;
+      expect(err.code).toBe('invalid_uncertainty');
+      expect(err.message).toContain('above');
+    }
+    expect(() => estimatedValue(quantity(1, 'K'), 'тестовая оценка', { uncertainty: bad })).toThrow(ScientificValueError);
+    // существующая проверка конечности bound сохранена
+    const nanBound = { kind: 'bounded' as const, direction: 'above' as const, bound: Number.NaN };
+    expect(validateUncertainty(nanBound).some((e) => e.includes('конечным'))).toBe(true);
   });
 });
