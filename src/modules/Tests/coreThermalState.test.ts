@@ -437,8 +437,10 @@ describe('Stage 4.2.2: профиль температур атмосферы', 
 // ============================================
 
 describe('Stage 4.2.2: CoreWorldState 1.2.0 и валидация', () => {
-  it('версия схемы 1.2.0 с тепловым состоянием валидна', () => {
-    expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.2.0');
+  // Stage 4.2.3.3: версия схемы ядра поднята до 1.3.0 (опциональное
+  // поле reactionLedger); контракт 4.2.2 (тепловое состояние) не изменён.
+  it('версия схемы 1.3.0 с тепловым состоянием валидна', () => {
+    expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.3.0');
     const state = thermalWorld();
     expect(validateWorldState(state)).toEqual([]);
   });
