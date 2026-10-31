@@ -744,7 +744,7 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
       expect(thermal.equilibriumTemperature.provenance?.rawInput).toMatchObject({
         'A (альбедо Бонда)': 0.3,
         f: 1,
-        'ε (эмиссивность)': 1
+        ε: 1
       });
     }
     // surfaceTemperature НЕ заполняется T_eq: RCM не реализована
