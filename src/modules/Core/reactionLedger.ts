@@ -115,11 +115,29 @@
 // - стехиометрия здесь НЕ проверяется (ею занимается секция
 //   reactions): запись с неверным балансом всё равно даёт вклады,
 //   несоответствие инвентарей ловит отдельная секция;
-// - форма записи проверяется validateReactionRecord: вклады
+// - форма записи проверяется полной валидацией журнала
+//   (validateReactionLedger, см. ревизию 4.2.3.4.1 ниже): вклады
 //   структурно некорректных записей не рассчитываются;
 // - время реакции НЕ выводится из длительности шага, time: null
 //   не подменяется текущими часами; append-only контракт журнала
 //   и позиционная проверка истории не меняются.
+//
+// Корректирующая ревизия Stage 4.2.3.4.1 (prototype-safe агрегация,
+// численная устойчивость и полная валидация вкладов):
+// - reactionInventoryDeltas использует ПОЛНУЮ валидацию журнала
+//   (validateReactionLedger), а не только форму отдельных записей:
+//   собственные индексы records (унаследованный из prototype chain
+//   элемент своей записью не является), дубликаты id транзакций,
+//   форма каждой записи. Журнал, не прошедший полную валидацию,
+//   не даёт даже частичных вкладов — правдоподобный результат из
+//   структурно некорректного журнала не создаётся; численная
+//   диагностика непредставимых вкладов (NaN/переполнение, смешение
+//   оснований) — отдельный слой для структурно корректных журналов;
+// - resolveAuditTolerance — единая политика tolerance —
+//   экспортирована и применяется секцией reaction_inventory:
+//   некорректный tolerance (NaN, ±Infinity, отрицательный) не может
+//   дать balanced даже при пустом журнале (контролируемый invalid);
+//   допустимый диапазон не меняется: конечное неотрицательное число.
 //
 // Стехиометрический аудит (auditReactionStoichiometry) проверяет
 // алгебраическое сохранение явно заданного состава и заряда по
@@ -483,8 +501,12 @@ export const DEFAULT_REACTION_AUDIT_TOLERANCE = 1e-9;
  * значения — контролируемый invalid (некорректный tolerance не
  * может привести к ложному balanced). Отсутствие значения —
  * политика по умолчанию DEFAULT_REACTION_AUDIT_TOLERANCE.
+ *
+ * Stage 4.2.3.4.1: политика экспортирована и применяется секцией
+ * reaction_inventory (auditReactionInventory) — некорректный
+ * tolerance не может дать balanced даже при пустом журнале.
  */
-function resolveAuditTolerance(value: number | undefined): { tolerance: number; problem: string | null } {
+export function resolveAuditTolerance(value: number | undefined): { tolerance: number; problem: string | null } {
   if (value === undefined) {
     return { tolerance: DEFAULT_REACTION_AUDIT_TOLERANCE, problem: null };
   }
@@ -1128,7 +1150,6 @@ export interface ReactionInventoryDeltas {
  * диагностированное исключение пары, а не выдуманный итог.
  */
 export function reactionInventoryDeltas(ledger: unknown): ReactionInventoryDeltas {
-  const formIssues: string[] = [];
   const unverifiableIssues: string[] = [];
   if (!isPlainRecord(ledger) || !Array.isArray(ledger.records)) {
     return {
@@ -1137,15 +1158,23 @@ export function reactionInventoryDeltas(ledger: unknown): ReactionInventoryDelta
       unverifiableIssues: []
     };
   }
-  const records: unknown[] = ledger.records;
+  // Stage 4.2.3.4.1: полная валидация журнала (validateReactionLedger)
+  // — helper не расходится с контрактом ReactionLedger: собственные
+  // индексы records (унаследованный из prototype chain элемент своей
+  // записью не является), дубликаты id транзакций, форма каждой
+  // записи. Журнал, не прошедший ПОЛНУЮ валидацию, не даёт даже
+  // частичных вкладов: правдоподобный результат, рассчитанный из
+  // структурно некорректного журнала, — выдумка. Численная
+  // диагностика непредставимых вкладов (переполнение произведения
+  // или суммы, смешение оснований по одной паре) — ОТДЕЛЬНЫЙ слой
+  // для структурно корректных журналов и сохраняется без изменений.
+  const formIssues = validateReactionLedger(ledger);
+  if (formIssues.length > 0) {
+    return { contributions: [], formIssues, unverifiableIssues: [] };
+  }
+  const records = ledger.records as ReactionRecord[];
   const pairs = new Map<string, ReactionInventoryContribution>();
-  for (let i = 0; i < records.length; i++) {
-    const recordIssues = validateReactionRecord(records[i]);
-    if (recordIssues.length > 0) {
-      formIssues.push('запись #' + String(i) + ': ' + recordIssues.join('; '));
-      continue;
-    }
-    const record = records[i] as ReactionRecord;
+  for (const record of records) {
     const sides: Array<{ participants: ReactionParticipant[]; sign: 1 | -1 }> = [
       { participants: record.reactants, sign: -1 },
       { participants: record.products, sign: 1 }
@@ -1198,3 +1227,4 @@ export function reactionInventoryDeltas(ledger: unknown): ReactionInventoryDelta
   }
   return { contributions: [...pairs.values()], formIssues, unverifiableIssues };
 }
+

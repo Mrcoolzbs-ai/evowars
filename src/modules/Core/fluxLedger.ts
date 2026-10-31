@@ -87,6 +87,32 @@
 //   глобальное сохранение элементов и заряда продолжает
 //   проверяться независимо — сбалансированная реакция не маскирует
 //   его нарушение.
+//
+// Корректирующая ревизия Stage 4.2.3.4.1 (prototype-safe накопление
+// и численная устойчивость объединения вкладов):
+// - speciesId — произвольная непустая строка: накопление вкладов по
+//   видам (reactionMolarCounts, ExpectedDelta.species в
+//   auditReservoirFluxes) ведётся в Map, а не в обычном объекте —
+//   присваивание '__proto__' в {} не создаёт собственного ключа и
+//   вклад терялся, а унаследованные свойства ('constructor',
+//   'toString') не являются количествами; чтение количества вида из
+//   инвентаря (ownEntryAmount) учитывает только СОБСТВЕННЫЕ ключи:
+//   отсутствие собственного ключа — известный ноль, унаследованное
+//   свойство количеством не считается, нечисловое собственное
+//   значение непредставимо (NaN-диагностика, а не выдуманный ноль);
+// - конечность проверяется после КАЖДОГО сложения при объединении
+//   вкладов FluxLedger и ReactionLedger (не только Number.isNaN —
+//   Infinity и -Infinity тоже непригодны): непредставимый вклад
+//   становится явным исключением (exclusion → not_verifiable), а
+//   не обычным численным расхождением; в auditSubstanceConservation
+//   конечность проверяется у каждого компонента и каждой
+//   промежуточной суммы expected = before + netFlux + reactionDelta,
+//   включая ожидаемый итоговый запас и фактический счёт;
+//   настоящий конечный дисбаланс сверх tolerance по-прежнему даёт
+//   imbalanced — проверка не ослаблена;
+// - энергетическое измерение auditReservoirFluxes следует тому же
+//   правилу: непредставимый ожидаемый или фактический запас —
+//   исключение (not_verifiable), а не расхождение из Infinity.
 
 import type { InventoryBasis, MaterialInventory, ReservoirRecord } from './reservoir';
 import { addMaterial, describeRecordCandidate, isKnownBasis, isPlainRecord, removeMaterial, validateMaterialInventory } from './reservoir';
@@ -831,14 +857,22 @@ export function inventoryToMolarCounts(catalog: SpeciesCatalog, inv: { basis: st
     };
   }
   const basis = inv.basis;
+  // Stage 4.2.3.4.1 (prototype-safe накопление): speciesId —
+  // произвольная непустая строка; счёт ведётся на null-prototype
+  // записи: собственный ключ '__proto__' сохраняется как данные
+  // (spread сохранял бы его, но последующее чтение отсутствующего
+  // ключа обычного объекта возвращало бы унаследованные 'constructor'/
+  // 'toString'/'__proto__', которые количеством не являются).
   if (basis === 'amount') {
-    return { status: 'exact', counts: { ...inv.entries }, exclusions: [], scope: 'amount' };
+    const counts: Record<string, number> = Object.assign(Object.create(null), inv.entries);
+    return { status: 'exact', counts, exclusions: [], scope: 'amount' };
   }
   if (basis === 'column_amount') {
-    return { status: 'exact', counts: { ...inv.entries }, exclusions: [], scope: 'column' };
+    const counts: Record<string, number> = Object.assign(Object.create(null), inv.entries);
+    return { status: 'exact', counts, exclusions: [], scope: 'column' };
   }
   if (basis === 'mass' || basis === 'column_mass') {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number> = Object.create(null);
     let approximate = false;
     for (const [id, amount] of Object.entries(inv.entries)) {
       const mm = molarMassOf(catalog, id);
@@ -925,7 +959,11 @@ export function fluxAmountToMolarCount(
 /** Слияние молярных счётов: исключения копятся, статусы объединяются. */
 function mergeMolarCounts(results: MolarCountResult[]): MolarCountResult {
   const exclusions: AuditExclusion[] = [];
-  const counts: Record<string, number> = {};
+  // Stage 4.2.3.4.1 (prototype-safe): счёт — null-prototype запись:
+  // присваивание '__proto__' в обычный объект {} молча теряло вклад,
+  // а чтение отсутствующего 'constructor'/'toString' возвращало
+  // унаследованное свойство вместо известного нуля.
+  const counts: Record<string, number> = Object.create(null);
   let approximate = false;
   let scope: 'amount' | 'column' | null = null;
   for (const result of results) {
@@ -997,7 +1035,9 @@ export function reservoirsToMolarCounts(catalog: SpeciesCatalog, reservoirs: Rec
 
 /** Чистый внешний перенос в молярных счётах (basis-aware, по области). */
 export function netExternalMolarCounts(catalog: SpeciesCatalog, ledger: FluxLedger, scope?: FluxAuditScope): MolarCountResult {
-  const counts: Record<string, number> = {};
+  // Stage 4.2.3.4.1 (prototype-safe): счёт — null-prototype запись
+  // (speciesId — произвольная непустая строка, включая '__proto__').
+  const counts: Record<string, number> = Object.create(null);
   const exclusions: AuditExclusion[] = [];
   let approximate = false;
   let countScope: 'amount' | 'column' | null = null;
@@ -1032,11 +1072,18 @@ export function netExternalMolarCounts(catalog: SpeciesCatalog, ledger: FluxLedg
  * основаниями нет; моли и моли/м² не смешиваются — смешение даёт
  * честное not_verifiable. Непредставимый вклад (не конечное число
  * или переполнение суммы) — тоже not_verifiable, а не ноль.
+ *
+ * Stage 4.2.3.4.1 (prototype-safe накопление): speciesId —
+ * произвольная непустая строка; накопление ведётся в Map, а не в
+ * обычном объекте: присваивание '__proto__' в {} не создаёт
+ * собственного ключа и вклад теряется, унаследованные свойства
+ * ('constructor', 'toString') не являются количествами. Ключи Map —
+ * ровно те виды, чьи вклады реально учтены.
  */
 function reactionMolarCounts(
   deltas: readonly ReactionInventoryContribution[]
-): { ok: true; counts: Record<string, number>; scope: 'amount' | 'column' | null } | { ok: false; exclusion: AuditExclusion } {
-  const counts: Record<string, number> = {};
+): { ok: true; counts: Map<string, number>; scope: 'amount' | 'column' | null } | { ok: false; exclusion: AuditExclusion } {
+  const counts = new Map<string, number>();
   let scope: 'amount' | 'column' | null = null;
   for (const contribution of deltas) {
     if (!Number.isFinite(contribution.delta)) {
@@ -1054,14 +1101,14 @@ function reactionMolarCounts(
         exclusion: { key: 'reaction_bases', reason: 'смешение реакционных оснований: вклады в «моли» и «моли/м²» не сопоставимы без площади' }
       };
     }
-    const next = (counts[contribution.speciesId] ?? 0) + contribution.delta;
+    const next = (counts.get(contribution.speciesId) ?? 0) + contribution.delta;
     if (!Number.isFinite(next)) {
       return {
         ok: false,
         exclusion: { key: contribution.speciesId, reason: 'реакционный вклад вида «' + contribution.speciesId + '» непредставим (переполнение суммы)' }
       };
     }
-    counts[contribution.speciesId] = next;
+    counts.set(contribution.speciesId, next);
   }
   return { ok: true, counts, scope };
 }
@@ -1069,6 +1116,23 @@ function reactionMolarCounts(
 // ============================================
 // 4б. АУДИТЫ СОХРАНЕНИЯ
 // ============================================
+
+/**
+ * Собственное количество вида в инвентаре (Stage 4.2.3.4.1,
+ * prototype-safe чтение). speciesId — произвольная непустая строка:
+ * отсутствие СОБСТВЕННОГО ключа означает известный ноль, но
+ * унаследованное свойство прототипа (Object.prototype.toString,
+ * 'constructor', '__proto__') количеством НЕ является и чтением не
+ * подменяется. Собственное значение обязано быть числом: значение
+ * иного типа не выдаётся за количество (NaN — непредставимо).
+ */
+export function ownEntryAmount(entries: Record<string, unknown>, speciesId: string): number {
+  if (!Object.prototype.hasOwnProperty.call(entries, speciesId)) {
+    return 0;
+  }
+  const value = entries[speciesId];
+  return typeof value === 'number' ? value : Number.NaN;
+}
 
 function molarBasisOfAudit(catalog: SpeciesCatalog, ledger: FluxLedger, before: Record<string, ReservoirRecord>, after: Record<string, ReservoirRecord>, opts?: AuditOptions): { ok: true; before: MolarCountResult; after: MolarCountResult; net: MolarCountResult } | { ok: false; exclusions: AuditExclusion[] } {
   const beforeCounts = reservoirsToMolarCounts(catalog, before);
@@ -1126,33 +1190,74 @@ export function auditSubstanceConservation(
     );
   }
   const discrepancies: BalanceDiscrepancy[] = [];
+  const overflowExclusions: AuditExclusion[] = [];
   const ids = new Set([
     ...Object.keys(basis.before.counts),
     ...Object.keys(basis.after.counts),
     ...Object.keys(basis.net.counts),
-    ...Object.keys(reaction.counts)
+    ...reaction.counts.keys()
   ]);
   for (const id of ids) {
-    const expected = (basis.before.counts[id] ?? 0) + (basis.net.counts[id] ?? 0) + (reaction.counts[id] ?? 0);
+    // Stage 4.2.3.4.1 (численная устойчивость): конечность каждого
+    // компонента и КАЖДОЙ промежуточной суммы проверяется явно.
+    // Непредставимое ожидаемое количество — честное not_verifiable
+    // с исключением, а не ложный imbalanced из Infinity/NaN: NaN и
+    // бесконечности не сравниваются с tolerance и прежде молча
+    // проходили проверку. Настоящий конечный дисбаланс сверх
+    // tolerance по-прежнему даёт imbalanced — проверка не ослаблена.
+    const beforeCount = basis.before.counts[id] ?? 0;
+    const netCount = basis.net.counts[id] ?? 0;
+    const reactionCount = reaction.counts.get(id) ?? 0;
+    if (!Number.isFinite(beforeCount) || !Number.isFinite(netCount) || !Number.isFinite(reactionCount)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'молярный счёт вида «' + id + '» непредставим (компонент не является конечным числом) — сопоставление невозможно'
+      });
+      continue;
+    }
+    const withNet = beforeCount + netCount;
+    if (!Number.isFinite(withNet)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'ожидаемый молярный счёт вида «' + id + '» непредставим (переполнение суммы до + netFlux) — сопоставление невозможно'
+      });
+      continue;
+    }
+    const expected = withNet + reactionCount;
+    if (!Number.isFinite(expected)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'ожидаемый молярный счёт вида «' + id + '» непредставим (переполнение суммы до + netFlux + reactionDelta) — сопоставление невозможно'
+      });
+      continue;
+    }
     const actual = basis.after.counts[id] ?? 0;
+    if (!Number.isFinite(actual)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'фактический молярный счёт вида «' + id + '» непредставим (не конечное число) — сопоставление невозможно'
+      });
+      continue;
+    }
     if (Math.abs(expected - actual) > tolerance) {
       discrepancies.push({ key: id, expected, actual });
     }
   }
   if (discrepancies.length > 0) {
-    return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: [], tolerance, untimedRecords: untimed };
+    return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: overflowExclusions, tolerance, untimedRecords: untimed };
   }
-  if (untimed.length > 0) {
+  if (overflowExclusions.length > 0 || untimed.length > 0) {
     // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
     // времени, исключённые из ограниченной области, — это реальные
     // изменения, которые нельзя отнести к интервалу. Аудит не может
     // объявить полный успех — только честную непроверяемость.
-    return auditFrame(
-      'not_verifiable',
-      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
-      untimed,
-      tolerance
-    );
+    // Stage 4.2.3.4.1: непредставимые суммы — такие же явные
+    // исключения: ни ноль, ни расхождение.
+    const exclusions = [...overflowExclusions];
+    if (untimed.length > 0) {
+      exclusions.push({ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' });
+    }
+    return auditFrame('not_verifiable', exclusions, untimed, tolerance);
   }
   const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
   return {
@@ -1428,16 +1533,32 @@ export function auditReservoirFluxes(
   const tolerance = opts?.tolerance ?? 1e-9;
   const untimed = untimedRecordsOf(ledger, opts?.scope);
 
+  // Stage 4.2.3.4.1 (prototype-safe накопление): speciesId —
+  // произвольная непустая строка, поэтому накопление Δ по видам
+  // ведётся в Map, а не в обычном объекте: присваивание '__proto__'
+  // в {} не создаёт собственного ключа (вклад терялся), унаследованные
+  // 'constructor'/'toString' количеством не являются. reason в
+  // значении — диагностика непредставимой Δ: конечность проверяется
+  // после КАЖДОГО сложения (не только Number.isNaN — Infinity и
+  // -Infinity тоже непригодны); непредставимый вклад становится
+  // явным исключением (not_verifiable), а не численным
+  // расхождением из Infinity.
+  interface ExpectedSpeciesDelta {
+    delta: number;
+    basis: string;
+    reason?: string;
+  }
   interface ExpectedDelta {
-    species: Record<string, { delta: number; basis: string }>;
+    species: Map<string, ExpectedSpeciesDelta>;
     energyJ: number;
     hasEnergy: boolean;
+    energyReason: string | null;
   }
   const expected = new Map<string, ExpectedDelta>();
   const deltaOf = (reservoirId: string): ExpectedDelta => {
     let d = expected.get(reservoirId);
     if (!d) {
-      d = { species: {}, energyJ: 0, hasEnergy: false };
+      d = { species: new Map(), energyJ: 0, hasEnergy: false, energyReason: null };
       expected.set(reservoirId, d);
     }
     return d;
@@ -1456,20 +1577,38 @@ export function auditReservoirFluxes(
       const subject = rec.subject as Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }>;
       for (const side of sides) {
         const d = deltaOf(side.reservoirId);
-        const prev = d.species[subject.speciesId];
+        const prev = d.species.get(subject.speciesId);
         if (prev && prev.basis !== subject.basis) {
           // несогласованные основания одного вида у одного резервуара
-          d.species[subject.speciesId] = { delta: NaN, basis: prev.basis };
+          d.species.set(subject.speciesId, {
+            delta: Number.NaN,
+            basis: prev.basis,
+            reason: `резервуар «${side.reservoirId}»: вклады вида «${subject.speciesId}» (потоки и/или реакции) имеют несовместимые основания`
+          });
         } else {
-          d.species[subject.speciesId] = { delta: (prev?.delta ?? 0) + side.sign * subject.amount, basis: subject.basis };
+          const next = (prev?.delta ?? 0) + side.sign * subject.amount;
+          if (!Number.isFinite(next)) {
+            d.species.set(subject.speciesId, {
+              delta: Number.NaN,
+              basis: subject.basis,
+              reason: `резервуар «${side.reservoirId}»: накопленный вклад вида «${subject.speciesId}» непредставим (не конечное число или переполнение суммы)`
+            });
+          } else {
+            d.species.set(subject.speciesId, { delta: next, basis: subject.basis });
+          }
         }
       }
     } else {
       const subject = rec.subject as Extract<FluxSubject, { subjectType: 'energy'; quantityKind: 'integrated' }>;
       for (const side of sides) {
         const d = deltaOf(side.reservoirId);
-        d.energyJ += side.sign * subject.energyJ;
         d.hasEnergy = true;
+        const next = d.energyJ + side.sign * subject.energyJ;
+        if (!Number.isFinite(next)) {
+          d.energyReason = `резервуар «${side.reservoirId}»: накопленный энергетический вклад непредставим (не конечное число или переполнение суммы) — пофазовая проверка энергии невозможна`;
+        } else {
+          d.energyJ = next;
+        }
       }
     }
   }
@@ -1483,11 +1622,24 @@ export function auditReservoirFluxes(
   // обязательным (materialMandatory) тем же правилом, что и потоки.
   for (const contribution of opts?.reactionDeltas ?? []) {
     const d = deltaOf(contribution.reservoirId);
-    const prev = d.species[contribution.speciesId];
+    const prev = d.species.get(contribution.speciesId);
     if (prev && prev.basis !== contribution.basis) {
-      d.species[contribution.speciesId] = { delta: NaN, basis: prev.basis };
+      d.species.set(contribution.speciesId, {
+        delta: Number.NaN,
+        basis: prev.basis,
+        reason: `резервуар «${contribution.reservoirId}»: вклады вида «${contribution.speciesId}» (потоки и/или реакции) имеют несовместимые основания`
+      });
     } else {
-      d.species[contribution.speciesId] = { delta: (prev?.delta ?? 0) + contribution.delta, basis: contribution.basis };
+      const next = (prev?.delta ?? 0) + contribution.delta;
+      if (!Number.isFinite(next)) {
+        d.species.set(contribution.speciesId, {
+          delta: Number.NaN,
+          basis: contribution.basis,
+          reason: `резервуар «${contribution.reservoirId}»: накопленный вклад вида «${contribution.speciesId}» непредставим (не конечное число или переполнение суммы)`
+        });
+      } else {
+        d.species.set(contribution.speciesId, { delta: next, basis: contribution.basis });
+      }
     }
   }
 
@@ -1508,8 +1660,9 @@ export function auditReservoirFluxes(
       continue;
     }
     const delta = expected.get(reservoirId);
-    const fluxSpecies: Record<string, { delta: number; basis: string }> = delta ? delta.species : {};
-    const fluxEnergyJ = delta && delta.hasEnergy ? delta.energyJ : null;
+    const fluxSpecies = delta?.species;
+    const energyTouched = delta !== undefined && delta.hasEnergy;
+    const fluxEnergyJ = delta !== undefined && delta.hasEnergy && delta.energyReason === null ? delta.energyJ : null;
 
     // --- МАТЕРИАЛЬНОЕ ИЗМЕРЕНИЕ ---
     // Обязательно, если инвентарь задан хотя бы в одном состоянии
@@ -1526,7 +1679,7 @@ export function auditReservoirFluxes(
     const beforeNotApplicable = beforeRes.materialApplicability === 'not_applicable';
     const afterNotApplicable = afterRes.materialApplicability === 'not_applicable';
     const materialMandatory =
-      beforeInv !== undefined || afterInv !== undefined || Object.keys(fluxSpecies).length > 0;
+      beforeInv !== undefined || afterInv !== undefined || (fluxSpecies !== undefined && fluxSpecies.size > 0);
     if (materialMandatory) {
       if (!beforeInv || !afterInv) {
         exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: материальный инвентарь не задан в состоянии «${!beforeInv ? 'до' : 'после'}» — пофазовая проверка невозможна (запас неизвестен, а не ноль)` });
@@ -1544,21 +1697,39 @@ export function auditReservoirFluxes(
         const speciesIds = new Set<string>([
           ...Object.keys(beforeInv.entries),
           ...Object.keys(afterInv.entries),
-          ...Object.keys(fluxSpecies)
+          ...(fluxSpecies !== undefined ? [...fluxSpecies.keys()] : [])
         ]);
         for (const speciesId of speciesIds) {
-          const spec = fluxSpecies[speciesId];
-          if (spec && Number.isNaN(spec.delta)) {
-            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: вклады вида «${speciesId}» (потоки и/или реакции) имеют несовместимые основания` });
+          const spec = fluxSpecies?.get(speciesId);
+          // Stage 4.2.3.4.1: непредставимая Δ (переполнение суммы
+          // вкладов или конфликт оснований) — явное исключение
+          // (not_verifiable), а не численное расхождение; Infinity
+          // не превращается в обычный дисбаланс.
+          if (spec && !Number.isFinite(spec.delta)) {
+            exclusions.push({
+              key: `${reservoirId}:${speciesId}`,
+              reason: spec.reason ?? `резервуар «${reservoirId}»: вклады вида «${speciesId}» (потоки и/или реакции) имеют несовместимые основания`
+            });
             continue;
           }
           if (spec && spec.basis !== beforeInv.basis) {
             exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: основание вклада (потока или реакции) «${spec.basis}» не совпадает с основанием инвентаря «${beforeInv.basis}»` });
             continue;
           }
-          const beforeAmount = beforeInv.entries[speciesId] ?? 0;
-          const afterAmount = afterInv.entries[speciesId] ?? 0;
+          // Stage 4.2.3.4.1 (prototype-safe чтение): собственный ключ
+          // отсутствует — известный ноль; унаследованное свойство
+          // количеством не является. Нечисловое собственное значение
+          // непредставимо.
+          const beforeAmount = ownEntryAmount(beforeInv.entries, speciesId);
+          const afterAmount = ownEntryAmount(afterInv.entries, speciesId);
           const expectedAmount = beforeAmount + (spec ? spec.delta : 0);
+          if (!Number.isFinite(expectedAmount) || !Number.isFinite(afterAmount)) {
+            exclusions.push({
+              key: `${reservoirId}:${speciesId}`,
+              reason: `резервуар «${reservoirId}»: ожидаемый запас вида «${speciesId}» (до + поток + реакция) непредставим (не конечное число или переполнение суммы) — пофазовая проверка невозможна`
+            });
+            continue;
+          }
           if (Math.abs(expectedAmount - afterAmount) > tolerance) {
             discrepancies.push({
               key: `${reservoirId}:${speciesId}`,
@@ -1599,17 +1770,27 @@ export function auditReservoirFluxes(
     const beforeEnergy = beforeRes.energy;
     const afterEnergy = afterRes.energy;
     const energyMandatory =
-      beforeEnergy !== undefined || afterEnergy !== undefined || fluxEnergyJ !== null;
+      beforeEnergy !== undefined || afterEnergy !== undefined || energyTouched;
     if (energyMandatory) {
       if (!beforeEnergy || !afterEnergy || beforeEnergy.storedJ === null || afterEnergy.storedJ === null) {
         exclusions.push({ key: `${reservoirId}:energy`, reason: `резервуар «${reservoirId}»: запас энергии неизвестен (нет инвентаря или storedJ = null) — пофазовая проверка энергии невозможна` });
+      } else if (delta !== undefined && delta.energyReason !== null) {
+        // Stage 4.2.3.4.1: непредставимый энергетический вклад —
+        // явное исключение, а не расхождение из Infinity.
+        exclusions.push({ key: `${reservoirId}:energy`, reason: delta.energyReason });
       } else {
         const expectedStoredJ = beforeEnergy.storedJ + (fluxEnergyJ ?? 0);
-        if (Math.abs(expectedStoredJ - (afterEnergy.storedJ as number)) > tolerance) {
+        const actualStoredJ = afterEnergy.storedJ as number;
+        if (!Number.isFinite(expectedStoredJ) || !Number.isFinite(actualStoredJ)) {
+          exclusions.push({
+            key: `${reservoirId}:energy`,
+            reason: `резервуар «${reservoirId}»: ожидаемый или фактический запас энергии непредставим (не конечное число или переполнение суммы) — пофазовая проверка энергии невозможна`
+          });
+        } else if (Math.abs(expectedStoredJ - actualStoredJ) > tolerance) {
           discrepancies.push({
             key: `${reservoirId}:energy`,
             expected: expectedStoredJ,
-            actual: afterEnergy.storedJ as number,
+            actual: actualStoredJ,
             reservoirId
           });
         }
@@ -1783,4 +1964,5 @@ export function validateReservoirInventories(reservoirs: Record<string, Reservoi
   }
   return problems;
 }
+
 

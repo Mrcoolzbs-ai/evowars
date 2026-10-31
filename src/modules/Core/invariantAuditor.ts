@@ -43,6 +43,25 @@
 //   НЕ являются; внешние источники и стоки учитываются явно;
 // - balanced = true только при полном статусе balanced и полной
 //   границе системы (boundary = 'complete').
+//
+// Корректирующая ревизия Stage 4.2.3.4.1 (секция reaction_inventory:
+// prototype-safe speciesId, численная устойчивость, tolerance):
+// - speciesId — произвольная непустая строка ('__proto__',
+//   'constructor', 'toString'): количество вида в инвентаре
+//   читается только по СОБСТВЕННОМУ ключу (ownEntryAmount) —
+//   отсутствие собственного ключа означает известный ноль,
+//   унаследованное свойство прототипа количеством не является;
+// - конечность проверяется у потокового вклада, реакционного
+//   вклада, их суммы, фактического изменения запаса и ожидаемого
+//   итогового количества (до + ожидаемое Δ): непредставимое число —
+//   честное not_verifiable с диагностикой, а не imbalanced —
+//   NaN/Infinity не доказывают нарушения закона сохранения;
+//   настоящий конечный дисбаланс сверх tolerance по-прежнему
+//   imbalanced;
+// - tolerance — конечное неотрицательное число (единая политика
+//   resolveAuditTolerance с auditReactionLedger): NaN, ±Infinity и
+//   отрицательные значения — контролируемый invalid, который не
+//   может дать balanced даже при пустом журнале реакций.
 
 import type { CoreWorldState } from './worldState';
 import { validateWorldState } from './worldState';
@@ -55,13 +74,14 @@ import {
   auditReservoirFluxes,
   auditSubstanceConservation,
   excludedUntimed,
+  ownEntryAmount,
   recordInScope,
   validateFluxLedger,
   validateLedgerReferences,
   validateReservoirInventories
 } from './fluxLedger';
 import type { ReactionInventoryDeltas, ReactionLedger } from './reactionLedger';
-import { auditReactionLedger, reactionInventoryDeltas } from './reactionLedger';
+import { auditReactionLedger, reactionInventoryDeltas, resolveAuditTolerance } from './reactionLedger';
 import type { ReservoirRecord } from './reservoir';
 import { isPlainRecord } from './reservoir';
 import { comparePoints, now, validateClock } from './simulationClock';
@@ -358,7 +378,10 @@ export interface ReactionInventoryAuditResult {
  *
  * Статусы:
  * - invalid — структурные проблемы записей (форма) или ссылка
- *   на резервуар, отсутствующий в состоянии;
+ *   на резервуар, отсутствующий в состоянии; некорректный
+ *   tolerance (NaN, ±Infinity, отрицательный) — тоже invalid:
+ *   контролируемый отказ, а не ложный balanced (Stage 4.2.3.4.1,
+ *   единая политика с auditReactionLedger);
  * - imbalanced — известное фактическое изменение не совпало с
  *   ожидаемым (в том числе неверный размер или знак изменения);
  * - not_verifiable — инвентарь не задан (запас неизвестен, а не
@@ -375,6 +398,14 @@ export function auditReactionInventory(
   deltas: ReactionInventoryDeltas,
   opts?: AuditOptions
 ): ReactionInventoryAuditResult {
+  // Stage 4.2.3.4.1: tolerance — конечное неотрицательное число,
+  // единая политика с auditReactionLedger (resolveAuditTolerance).
+  // Некорректный tolerance не может дать balanced даже при пустом
+  // журнале: проверка выполняется ДО каких-либо результатов.
+  const { tolerance, problem: toleranceProblem } = resolveAuditTolerance(opts?.tolerance);
+  if (toleranceProblem !== null) {
+    return { status: 'invalid', issues: [toleranceProblem] };
+  }
   if (deltas.formIssues.length > 0) {
     return { status: 'invalid', issues: [...deltas.formIssues] };
   }
@@ -384,7 +415,6 @@ export function auditReactionInventory(
     }
     return { status: 'balanced', issues: [] };
   }
-  const tolerance = opts?.tolerance ?? 1e-9;
   const invalidIssues: string[] = [];
   const unverifiableIssues: string[] = [...deltas.unverifiableIssues];
   const discrepancies: string[] = [];
@@ -432,13 +462,43 @@ export function auditReactionInventory(
       unverifiableIssues.push('запись «' + contribution.recordId + '»: ' + flux.reason);
       continue;
     }
-    const beforeAmount = beforeInv.entries[contribution.speciesId] ?? 0;
-    const afterAmount = afterInv.entries[contribution.speciesId] ?? 0;
-    const actualDelta = afterAmount - beforeAmount;
-    const expectedDelta = flux.delta + contribution.delta;
-    if (!Number.isFinite(expectedDelta) || !Number.isFinite(actualDelta)) {
+    // Stage 4.2.3.4.1 (prototype-safe чтение): speciesId — произвольная
+    // непустая строка. Отсутствие СОБСТВЕННОГО ключа entries означает
+    // известный ноль; унаследованное свойство прототипа ('__proto__',
+    // 'constructor', 'toString') количеством не является и чтением
+    // не подменяется.
+    const beforeAmount = ownEntryAmount(beforeInv.entries, contribution.speciesId);
+    const afterAmount = ownEntryAmount(afterInv.entries, contribution.speciesId);
+    // Stage 4.2.3.4.1 (численная устойчивость): конечность проверяется
+    // у КАЖДОЙ составляющей — потокового вклада, реакционного вклада
+    // (выше), их суммы, фактического изменения запаса и ожидаемого
+    // итогового количества (до + ожидаемое Δ). Непредставимое число —
+    // честное not_verifiable с диагностикой, а не imbalanced: NaN и
+    // бесконечности не доказывают нарушения закона сохранения.
+    if (!Number.isFinite(flux.delta)) {
       unverifiableIssues.push(
-        'запись «' + contribution.recordId + '»: суммарный ожидаемый вклад вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставим (переполнение суммы)'
+        'запись «' + contribution.recordId + '»: потоковый вклад вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставим — сопоставление с инвентарём невозможно'
+      );
+      continue;
+    }
+    const expectedDelta = flux.delta + contribution.delta;
+    if (!Number.isFinite(expectedDelta)) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: суммарный ожидаемый вклад (поток + реакция) вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставим (переполнение суммы)'
+      );
+      continue;
+    }
+    const actualDelta = afterAmount - beforeAmount;
+    if (!Number.isFinite(actualDelta)) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: фактическое изменение запаса вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставимо (не числовое значение в инвентаре)'
+      );
+      continue;
+    }
+    const expectedAmount = beforeAmount + expectedDelta;
+    if (!Number.isFinite(expectedAmount)) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: ожидаемый итоговый запас вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставим (переполнение суммы до + ожидаемое Δ) — сопоставление с фактическим запасом невозможно'
       );
       continue;
     }
@@ -531,3 +591,4 @@ function formatDiscrepancy(d: BalanceDiscrepancy): string {
   const place = d.reservoirId !== undefined ? ' (резервуар «' + d.reservoirId + '»)' : '';
   return d.key + place + ': ожидалось ' + String(d.expected) + ', фактически ' + String(d.actual);
 }
+
