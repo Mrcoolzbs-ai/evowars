@@ -201,7 +201,7 @@ describe('Stage 4.3.1 Thermodynamics: происхождение значени�
   it('origin derived_computed требует метода; с методом — проходит', () => {
     const thermo = validKnownThermo();
     thermo.standardFormationEnthalpy = knownValue(quantity(-241800, 'J_mol'), {
-      provenance: { origin: 'derived_computed', sourceName: 'тест', datasetId: 'тест-набор' }
+      provenance: { origin: 'derived_computed', sourceName: 'тест', datasetId: 'тест-набор' } as ThermoDataProvenance
     });
     expect(
       validateThermodynamicProperties(thermo).some((e) => e.includes('требует непустой метод'))
@@ -212,7 +212,7 @@ describe('Stage 4.3.1 Thermodynamics: происхождение значени�
         sourceName: 'тест',
         datasetId: 'тест-набор',
         method: 'расчёт по тестовой корреляции'
-      }
+      } as ThermoDataProvenance
     });
     expect(validateThermodynamicProperties(thermo)).toEqual([]);
   });
