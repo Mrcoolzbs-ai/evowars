@@ -180,6 +180,19 @@
 > реального selector’а. Golden baseline совпадает. После 4.2.2.4 —
 > 848 тестов (27 файлов), из них ядро — 505 (новых core-тестов
 > нет). Коммиты: 6e7708d1 → 42ab6acc; CI run 41189806931 зелёный.
+>
+> Ревизия Stage 4.2.2.5 (2026-10-31): корректирующая ревизия —
+> candidate-specific локальные среды selector’а (карта
+> cradleLocalEnvironmentsById по ID кандидата; per-candidate
+> вычисление при отсутствии явной среды; перенос
+> locationType/состава/localReservoirId между кандидатами
+> исключён); семантика видов: subsurface_reservoir — только kind
+> ’crust’ (вид ’ocean’ убран — недостаточно данных, фикстура не
+> обоснование); runtime-гейт неизвестного locationType —
+> fail-closed без исключений. Golden baseline совпадает. После
+> 4.2.2.5 — 862 теста (27 файлов), из них ядро — 505 (новых
+> core-тестов нет). Коммиты: 44e93b71 → 356da6e5 → b527aa1f →
+> ff810acd; CI run 41192420708 зелёный.
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -835,6 +848,38 @@ untimed-записи в ограниченной временной област
 - +18 тестов к 4.2.2.3 (11 compatibility.test, 7 generator.test),
   всего 848 (27 файлов), ядро — 505 (новых core-тестов нет).
 
+Ревизия 4.2.2.5 (candidate-specific локальные среды selector’а и
+семантика видов):
+
+- контекст selectCradle: карта cradleLocalEnvironmentsById
+  (Partial<Record<ID, CradleLocalEnvironment>>) — каждый
+  кандидат проверяется по СВОЕЙ локальной среде: явной по ID
+  либо вычисленной per-candidate через
+  determineCradleLocalEnvironment (тот же путь, что и в
+  реальном контуре); coreWorldState общий для всех кандидатов;
+  перенос locationType/состава/localReservoirId с одного
+  кандидата на другой исключён; температура одной области не
+  выводится из другой; fixedCategories.cradle — прежняя
+  семантика; generateWorld evidence не передаёт (ядро строится
+  после выбора колыбели), фиктивное ядро не создаётся;
+- LOCATION_TYPE_RESERVOIR_KINDS.subsurface_reservoir = [’crust’]
+  (вид ’ocean’ убран: схема ReservoirRecord не различает
+  поверхностный и подземный океан; тестовая фикстура физическим
+  обоснованием таксономии не служит; новые виды не введены);
+- runtime-безопасность kind-гейта: lookup по неизвестному
+  locationType (внешние данные/сохранения) даёт undefined —
+  без исключения, без доказательства, без выбора другого
+  резервуара: cradle_temperature_unproven (fail-closed);
+- +14 тестов к 4.2.2.4 (12 generator.test — selector-интеграция
+  четырёх локаций в одном вызове, исключение только своего
+  кандидата при known-нарушении, состав/давление/matter_state
+  по собственной среде, условность estimated/unknown, отсутствие
+  подстановки без reservoir ID, fallback, нулевые веса, ручная
+  фиксация, детерминизм повторного вызова; 2 compatibility.test —
+  недоказанность subsurface+kind ’ocean’ и runtime-неизвестный
+  locationType), всего 862 (27 файлов), ядро — 505 (новых
+  core-тестов нет).
+
 RCM, вертикальный профиль, гидростатика, парниковый эффект и
 вычисление surfaceTemperature НЕ реализованы и не выдаются за
 реализованные (этап 4.8); легаси-химия продолжает работать на
@@ -895,7 +940,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 (обе ревизии — без новых core-тестов))
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 (все эти ревизии — без новых core-тестов))
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -915,7 +960,9 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 27 тест-файлов, 848 тестов (после ревизии 4.2.2.4 —
+Всего в проекте 27 тест-файлов, 862 теста (после ревизии 4.2.2.5 —
+фактические итоги Vitest «Test Files 27 passed (27) / Tests 862
+passed (862)» из CI; после 4.2.2.4 — 848,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 848
 passed (848)» из CI; после 4.2.2.3 — 830,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 830
@@ -983,7 +1030,16 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   и интеграцию selectCradle с опциональным typed evidence
   (generateWorld evidence по-прежнему не передаёт — ядро
   строится после выбора колыбели; интеграционные тесты проверяют
-  сам selector, а не только predicate). НЕ реализовано и не
+  сам selector, а не только predicate). Ревизия 4.2.2.5 сделала
+  локальные среды selector’а candidate-specific (карта
+  cradleLocalEnvironmentsById по ID кандидата; без явной среды —
+  per-candidate вычисление determineCradleLocalEnvironment;
+  перенос locationType/состава/localReservoirId между
+  кандидатами исключён), убрала вид ’ocean’ из
+  subsurface_reservoir (доказывается только ’crust’) и сделала
+  kind-гейт runtime-безопасным (неизвестный locationType —
+  недоказанность без исключений, другой резервуар не
+  выбирается). НЕ реализовано и не
   выдаётся за реализованное: RCM и вертикальный профиль (этап 4.8),
   гидростатика, парниковый эффект, вычисление surfaceTemperature
   (остаётся ЯВНО unknown); ни один резервуар/слой не получил
