@@ -1349,7 +1349,10 @@ describe('Cradle Local Environment Compatibility', () => {
 
     it('экспортированное соответствие фиксирует допустимые виды без изобретения таксономии', () => {
       expect(LOCATION_TYPE_RESERVOIR_KINDS.ocean).toEqual(['ocean']);
-      expect(LOCATION_TYPE_RESERVOIR_KINDS.subsurface_reservoir).toEqual(['ocean', 'crust']);
+      // Stage 4.2.2.5: вид 'ocean' убран из subsurface_reservoir —
+      // схема ReservoirRecord не различает поверхностный и подземный
+      // океан: поверхностный океан не доказывает глубинную среду.
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.subsurface_reservoir).toEqual(['crust']);
       expect(LOCATION_TYPE_RESERVOIR_KINDS.deep_planetary_layers).toEqual(['mantle', 'core']);
       expect(LOCATION_TYPE_RESERVOIR_KINDS.surface).toBeNull();
       expect(LOCATION_TYPE_RESERVOIR_KINDS.atmosphere).toBeNull();
@@ -1497,6 +1500,62 @@ describe('Cradle Local Environment Compatibility', () => {
           provenance: { sourceName: 'зонд фикстуры: чужой резервуар' }
         })
       });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+  });
+
+
+  // Stage 4.2.2.5 (§4–5 ТЗ): семантика видов резервуаров и runtime-
+  // безопасность kind-гейта. Тестовая фикстура физическим
+  // обоснованием таксономии НЕ является: subsurface_reservoir
+  // доказывается только видом 'crust' (схема ReservoirRecord не
+  // различает поверхностный и подземный океан); неизвестное
+  // runtime-расположение — fail-closed без исключений.
+  describe('Stage 4.2.2.5: семантика видов и runtime-безопасность kind-гейта', () => {
+    const subsurfaceWorld = () =>
+      makeWorld('supercritical_water', {
+        ...baseWorld(),
+        atmosphere: makeAtmosphere([['n2', 100]], null, null)
+      });
+
+    it("вид 'ocean' больше не доказывает подземную среду: недоказанность, не ошибка", () => {
+      // 700 K внутри диапазона 647–1000 с known + provenance, но
+      // ReservoirRecord не различает поверхностный и подземный
+      // океан: допущение 'ocean' позволяло бы поверхностному
+      // океану «доказывать» глубинную среду. Достаточных данных
+      // для такого соответствия нет — доказательство убрано
+      // (fail-closed), новые виды не вводятся, фикстура таксономию
+      // не обосновывает.
+      const world = withOceanReservoir(subsurfaceWorld(), {
+        reservoirKind: 'ocean',
+        reservoirTemperature: knownValue(quantity(700, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры: глубинный резервуар' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('runtime-неизвестный locationType не выбрасывает и не доказывает температуру', () => {
+      // Некорректное runtime-значение поступает через явно
+      // приведённую фикстуру (внешние данные/сохранения). Lookup
+      // таблицы видов даёт undefined: без исключения, без
+      // доказательства, без выбора другого резервуара —
+      // недоказанность (fail-closed).
+      const world = withLocationType(
+        withOceanReservoir(subsurfaceWorld(), {
+          reservoirKind: 'crust',
+          reservoirTemperature: knownValue(quantity(700, 'K'), {
+            provenance: { sourceName: 'скважина фикстуры: коровый резервуар' }
+          })
+        }),
+        'hydrothermal_sinter' as unknown as CradleLocalEnvironment['locationType']
+      );
+      // Прямой вызов = no-throw assert: гейт обязан вернуть
+      // недоказанность, а не выбросить TypeError на undefined.
       const warnings = checkCompatibility(world, 'realistic');
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
       expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
