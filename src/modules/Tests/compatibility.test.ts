@@ -1298,13 +1298,18 @@ describe('Cradle Local Environment Compatibility', () => {
       // Сверхкритическая вода (647–1000 K, глубинный резервуар):
       // локальная среда subsurface_reservoir, связанная с резервуаром
       // ядра, доказывается его температурой — доказательство через
-      // резервуар работает и для неокеанских областей
+      // резервуар работает и для неокеанских областей.
+      // Stage 4.2.2.5 (фикс): вид резервуара должен быть допустим для
+      // subsurface_reservoir — 'crust'; вид 'ocean' больше не
+      // принимается (схема ReservoirRecord не различает поверхностный
+      // и подземный океан).
       const world = withOceanReservoir(
         makeWorld('supercritical_water', {
           ...baseWorld(),
           atmosphere: makeAtmosphere([['n2', 100]], null, null)
         }),
         {
+          reservoirKind: 'crust',
           reservoirTemperature: knownValue(quantity(700, 'K'), {
             provenance: { sourceName: 'скважина фикстуры: сверхкритический резервуар' }
           })
