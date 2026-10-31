@@ -45,6 +45,33 @@
 //   себя — сравнение покрывает ВСЮ сохраняемую историю, включая
 //   дополнительные поля записей, а не только известные поля.
 //
+// Корректирующая ревизия Stage 4.2.3.3.3 (fail-closed сравнение и
+// строгая валидация массивов):
+// - deepJsonEqual сравнивает КАЖДЫЙ индекс массива явно: every и
+//   forEach пропускают отсутствующие индексы, из-за чего new Array(1)
+//   ошибочно считалась равной [new Date(0)], хотя JSON различает [null]
+//   и ISO-строку времени; появление определённого значения на месте
+//   дырки — изменение, порядок элементов значим, отсутствующий индекс
+//   равносилен явному undefined (оба сериализуются в массиве как null),
+//   сравнение симметрично;
+// - обход обнаруживает циклы по АКТИВНОМУ рекурсивному пути: повторный
+//   вход в объект, сравниваемый выше по стеку, — недоказуемое
+//   равенство, fail-closed — изменение, а не необработанный
+//   RangeError; повторное использование той же ссылки в независимых
+//   ветвях графа циклом НЕ считается;
+// - строгая форма: журнал, запись и участник — только настоящие plain
+//   records (прототип Object.prototype или null): массив и Date
+//   проходят typeof === 'object', но сериализуемыми данными не
+//   являются; дополнительные поля корректных записей допустимы
+//   (вложенная Date сравнивается по времени, как в 4.2.3.3.2);
+// - дырки в records/reactants/products — структурная ошибка, а не
+//   отсутствие данных: каждый индекс обязан содержать существующую
+//   корректную запись/участника (forEach пропускал отсутствующие
+//   индексы, и undefined из дырки доходил до аудита с падением на
+//   p.speciesId); аудит таких входов — контролируемый invalid с
+//   диагностикой; правила стехиометрии, численные tolerance и статусы
+//   известных/неизвестных составов не меняются.
+//
 // Стехиометрический аудит (auditReactionStoichiometry) проверяет
 // алгебраическое сохранение явно заданного состава и заряда по
 // числу частиц: коэффициент — число частиц в уравнении, extent
@@ -172,6 +199,9 @@ export class ReactionLedgerError extends Error {
  * Валидация одной записи реакции (unknown на входе — можно подавать
  * данные из сохранений). Возвращает список проблем (пустой = запись
  * корректна). Правила:
+ * - запись — настоящий plain record (прототип Object.prototype или
+ *   null): массив, Date, Map, Set, RegExp и экземпляры классов
+ *   записью не являются (Stage 4.2.3.3.3);
  * - id и reactionId — непустые строки;
  * - reactants и products — непустые массивы;
  * - участник: reservoirId и speciesId непусты; коэффициент —
@@ -188,8 +218,12 @@ export class ReactionLedgerError extends Error {
  */
 export function validateReactionRecord(record: unknown): string[] {
   const problems: string[] = [];
-  if (typeof record !== 'object' || record === null) {
-    return ['запись реакции должна быть объектом'];
+  // Stage 4.2.3.3.3: запись — только настоящий plain record (прототип
+  // Object.prototype или null): массив и Date проходят проверку
+  // typeof === 'object', но сериализуемой записью истории не
+  // являются; дополнительные поля корректной записи допустимы.
+  if (!isPlainRecord(record)) {
+    return ['запись реакции должна быть объектом-записью (plain record), а не массивом/Date/Map/Set/RegExp/экземпляром класса или значением не-объектного типа'];
   }
   const r = record as Record<string, unknown>;
   if (typeof r.id !== 'string' || r.id.trim() === '') {
@@ -240,12 +274,25 @@ function validateSide(value: unknown, side: 'reactants' | 'products', problems: 
     return;
   }
   const seen = new Set<string>();
-  value.forEach((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) {
-      problems.push(side + '[' + index + '] должен быть объектом');
-      return;
+  // Stage 4.2.3.3.3: forEach пропускает отсутствующие индексы —
+  // дырка в reactants/products — структурная ошибка, а не отсутствие
+  // данных: каждый индекс обязан содержать участника (undefined из
+  // дырки прежде доходил до аудита и падал на обращении к
+  // p.speciesId).
+  for (let index = 0; index < value.length; index++) {
+    if (!(index in value)) {
+      problems.push(side + '[' + index + '] отсутствует (разреженный массив): каждый индекс обязан содержать участника');
+      continue;
     }
-    const p = entry as Record<string, unknown>;
+    const entry = value[index];
+    // Stage 4.2.3.3.3: участник — только настоящий plain record:
+    // массив и Date проходят typeof === 'object', но участником
+    // реакции не являются.
+    if (!isPlainRecord(entry)) {
+      problems.push(side + '[' + index + '] должен быть объектом-записью участника (plain record), а не массивом/Date/Map/Set/RegExp/экземпляром класса');
+      continue;
+    }
+    const p = entry;
     if (typeof p.reservoirId !== 'string' || p.reservoirId.trim() === '') {
       problems.push(side + '[' + index + ']: reservoirId должен быть непустой строкой');
     }
@@ -265,7 +312,7 @@ function validateSide(value: unknown, side: 'reactants' | 'products', problems: 
         seen.add(key);
       }
     }
-  });
+  }
 }
 
 /**
@@ -276,21 +323,33 @@ function validateSide(value: unknown, side: 'reactants' | 'products', problems: 
  */
 export function validateReactionLedger(ledger: unknown, opts?: { reservoirIds?: readonly string[] }): string[] {
   const problems: string[] = [];
-  if (typeof ledger !== 'object' || ledger === null) {
-    return ['журнал реакций должен быть объектом с полем records'];
+  // Stage 4.2.3.3.3: журнал — только настоящий plain record (прототип
+  // Object.prototype или null): массив и Date проходят проверку
+  // typeof === 'object' с искусственно добавленными полями, но
+  // сериализуемым журналом не являются.
+  if (!isPlainRecord(ledger)) {
+    return ['журнал реакций должен быть объектом-записью с полем records: массив, Date, Map, Set, RegExp и экземпляры классов журналом не являются'];
   }
-  const rec = ledger as Record<string, unknown>;
+  const rec = ledger;
   if (!Array.isArray(rec.records)) {
     return ['журнал реакций: поле records должно быть массивом'];
   }
   const seen = new Set<string>();
   const records = rec.records as unknown[];
-  records.forEach((entry, index) => {
+  // Stage 4.2.3.3.3: forEach пропускал отсутствующие индексы — дырка
+  // в records — структурная ошибка, а не отсутствие данных: каждый
+  // индекс обязан содержать корректную запись.
+  for (let index = 0; index < records.length; index++) {
+    if (!(index in records)) {
+      problems.push('запись #' + index + ' отсутствует (разреженный массив records): каждый индекс обязан содержать запись');
+      continue;
+    }
+    const entry = records[index];
     const at = (message: string): string => 'запись #' + index + ': ' + message;
     for (const problem of validateReactionRecord(entry)) {
       problems.push(at(problem));
     }
-    const r = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : null;
+    const r = isPlainRecord(entry) ? entry : null;
     if (r && typeof r.id === 'string' && r.id.trim() !== '') {
       if (seen.has(r.id)) {
         problems.push(at('дублирующийся id транзакции «' + r.id + '»'));
@@ -314,7 +373,7 @@ export function validateReactionLedger(ledger: unknown, opts?: { reservoirIds?: 
         }
       }
     }
-  });
+  }
   return problems;
 }
 
@@ -778,6 +837,18 @@ export function auditReactionLedger(
  *   (fail-closed): недоказанная неизменность — изменение, не
  *   наоборот.
  *
+ * Stage 4.2.3.3.3: сравнение массивов — по каждому индексу явно
+ * (every пропускал отсутствующие индексы: new Array(1) ошибочно
+ * равнялась [new Date(0)], хотя JSON различает [null] и ISO-строку):
+ * отсутствующий индекс равносилен явному undefined (оба
+ * сериализуются как null), появление определённого значения на
+ * месте дырки — изменение, порядок элементов значим, сравнение
+ * симметрично. Обход обнаруживает циклы по АКТИВНОМУ рекурсивному
+ * пути: повторный вход в объект, который уже сравнивается выше по
+ * стеку, — недоказуемое равенство (fail-closed: изменение), а не
+ * необработанный RangeError; повторное использование той же
+ * ссылки в независимых ветвях графа циклом НЕ считается.
+ *
  * Гарантия покрывает ВСЮ сохраняемую историю, а не только известные
  * типизированные поля: сравниваются все собственные перечисляемые
  * ключи, включая дополнительные поля записей (их запрет не
@@ -785,17 +856,54 @@ export function auditReactionLedger(
  * сравнением так же, как изменение известного).
  */
 function deepJsonEqual(a: unknown, b: unknown): boolean {
+  return deepJsonEqualWithPaths(a, b, new Set(), new Set());
+}
+
+/**
+ * Stage 4.2.3.3.3: обход с явной проверкой каждого индекса массива
+ * и обнаружением циклов. activeA/activeB — объекты соответствующей
+ * стороны, которые сравниваются СЕЙЧАС (активный рекурсивный путь),
+ * а не «когда-либо посещённые»: повторное использование той же
+ * ссылки в независимых ветвях графа циклом НЕ считается и
+ * сравнивается повторно. Повторный вход в объект активного пути —
+ * цикл: сериализуемое равенство недоказуемо, fail-closed —
+ * изменение, а не необработанный RangeError.
+ */
+function deepJsonEqualWithPaths(a: unknown, b: unknown, activeA: Set<object>, activeB: Set<object>): boolean {
   if (a === b) {
     return true;
   }
   if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
     return false;
   }
+  if (activeA.has(a) || activeB.has(b)) {
+    return false;
+  }
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
       return false;
     }
-    return a.every((value, index) => deepJsonEqual(value, b[index]));
+    activeA.add(a);
+    activeB.add(b);
+    // Stage 4.2.3.3.3: every пропускает отсутствующие индексы —
+    // new Array(1) ошибочно считалась равной [new Date(0)], хотя
+    // JSON-представления различаются ([null] против ISO-строки).
+    // Каждый индекс сравнивается явно: отсутствующий индекс
+    // равносилен явному undefined (оба сериализуются в массиве как
+    // null), появление определённого значения — изменение; порядок
+    // элементов значим; сравнение симметрично.
+    let equal = true;
+    for (let index = 0; index < a.length; index++) {
+      const left = index in a ? a[index] : undefined;
+      const right = index in b ? b[index] : undefined;
+      if (!deepJsonEqualWithPaths(left, right, activeA, activeB)) {
+        equal = false;
+        break;
+      }
+    }
+    activeA.delete(a);
+    activeB.delete(b);
+    return equal;
   }
   // Stage 4.2.3.3.2: вид объекта — часть данных. Date без
   // перечисляемых ключей не равна пустой записи; прочие
@@ -808,15 +916,23 @@ function deepJsonEqual(a: unknown, b: unknown): boolean {
   if (!isPlainRecord(a) || !isPlainRecord(b)) {
     return false;
   }
+  activeA.add(a);
+  activeB.add(b);
   const keysA = Object.keys(a).filter((key) => (a as Record<string, unknown>)[key] !== undefined);
   const keysB = Object.keys(b).filter((key) => (b as Record<string, unknown>)[key] !== undefined);
-  if (keysA.length !== keysB.length) {
-    return false;
+  let equal = keysA.length === keysB.length;
+  for (const key of keysA) {
+    if (
+      !Object.prototype.hasOwnProperty.call(b, key) ||
+      !deepJsonEqualWithPaths((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], activeA, activeB)
+    ) {
+      equal = false;
+      break;
+    }
   }
-  return keysA.every((key) =>
-    Object.prototype.hasOwnProperty.call(b, key) &&
-    deepJsonEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])
-  );
+  activeA.delete(a);
+  activeB.delete(b);
+  return equal;
 }
 
 /** id записи для диагностики (null — если id нечитаем). */
