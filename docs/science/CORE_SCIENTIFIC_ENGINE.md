@@ -342,6 +342,31 @@
 > реализованы; Storage и PRNG не тронуты; golden baseline не тронут;
 > итоговые количества тестов — по фактическому CI этапа.
 
+> Ревизия Stage 4.2.3.4.1 (2026-10-31): корректирующая ревизия
+> согласования ReactionLedger с инвентарями — prototype-safe
+> speciesId, численная устойчивость сумм и полная валидация журнала.
+> speciesId — произвольная непустая строка: накопление реакционных
+> вкладов в Map (reactionMolarCounts, ExpectedDelta.species),
+> молярные счёты на null-prototype записях, чтение количества вида
+> из инвентаря только по СОБСТВЕННОМУ ключу (ownEntryAmount: нет
+> собственного ключа — известный ноль; унаследованное свойство
+> прототипа количеством не является; нечисловое собственное
+> значение — NaN, непредставимо). Конечность каждой составляющей
+> и каждой промежуточной суммы (поток + реакция; before + netFlux +
+> reactionDelta; до + ожидаемое Δ; фактический счёт/запас; в
+> auditReservoirFluxes — после каждого сложения, Infinity непригоден
+> как NaN): непредставимое — явное исключение → not_verifiable, а
+> не imbalanced; конечный дисбаланс сверх tolerance — по-прежнему
+> imbalanced. reactionInventoryDeltas выполняет ПОЛНУЮ валидацию
+> журнала (validateReactionLedger): унаследованные индексы, дубликаты
+> id, форма записи → formIssues и пустые contributions. tolerance
+> секции 'reaction_inventory' — единая политика resolveAuditTolerance
+> с auditReactionLedger: NaN/±Infinity/отрицательный → invalid даже
+> при пустом журнале. Реакции не превращаются в FluxRecord;
+> ∓coefficient × extent, ReactionExtentBasis, append-only и политика
+> Scheduler не изменены; Storage и PRNG не тронуты; golden baseline
+> не тронут; итоговые количества тестов — по фактическому CI этапа.
+
 ## 1. Слои ядра (`src/modules/Core/`)
 
 | Файл | Слой | Ответственность |
@@ -1201,6 +1226,37 @@ RCM, вертикальный профиль, гидростатика, парн
   скорости и выполнение legacy ChemicalEvolution на Scheduler НЕ
   реализованы.
 
+- Корректирующая ревизия 4.2.3.4.1 (2026-10-31): (1) prototype-safe
+  speciesId — накопление вкладов в Map, молярные счёты на
+  null-prototype записях, чтение запаса из инвентаря только по
+  собственному ключу (ownEntryAmount: отсутствие собственного ключа
+  — известный ноль, унаследованное свойство прототипа количеством
+  не является); вклады видов '__proto__'/'constructor'/'toString'
+  не теряются и не подменяются прототипом; (2) конечность каждой
+  суммы — потоковый вклад, реакционный вклад, их сумма, фактическое
+  изменение запаса, ожидаемый итоговый запас (до + ожидаемое Δ),
+  каждая промежуточная сумма before + netFlux + reactionDelta, в
+  auditReservoirFluxes — после каждого сложения (Infinity и
+  -Infinity непригодны так же, как NaN): непредставимое — явное
+  исключение → not_verifiable, а не imbalanced; конечный дисбаланс
+  сверх tolerance — по-прежнему imbalanced; (3) полная валидация
+  журнала в reactionInventoryDeltas (validateReactionLedger):
+  собственные индексы records (унаследованный из prototype chain
+  элемент своей записью не является), дубликаты id транзакций,
+  форма каждой записи → formIssues и ПУСТЫЕ contributions —
+  частичный правдоподобный результат из некорректного журнала не
+  создаётся; численная диагностика непредставимых вкладов —
+  отдельный слой для структурно корректных журналов; (4) tolerance
+  секции 'reaction_inventory' — единая политика с
+  auditReactionLedger (экспортированная resolveAuditTolerance):
+  NaN, ±Infinity, отрицательный → invalid даже при пустом журнале;
+  диапазон (конечное неотрицательное число) не меняется. Реакции
+  не превращаются в FluxRecord; формулы ∓coefficient × extent,
+  ReactionExtentBasis, append-only и политика Scheduler не
+  изменены; Storage/PRNG/golden baseline не тронуты. Тесты —
+  coreReactionLedger / coreInvariantAuditor / coreScheduler;
+  итоговые количества тестов — по фактическому CI этапа.
+
 ## 3. Интеграция (точки контакта с легаси)
 
 1. `GeneratedWorld.coreWorldState?: CoreWorldState` — опциональное поле.
@@ -1381,3 +1437,4 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   или неподтверждённая масса → not_verifiable, оценочная (estimated) →
   approximate; концентрации, доли и arbitrary_units не пересчитываются
   в моль без дополнительных данных (объём, общий запас).
+
