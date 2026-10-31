@@ -27,8 +27,14 @@
 // Каталог НЕ заменяет легаси Data/gases + Data/elementCompositions:
 // createSpeciesCatalogFromLegacy() строит его из существующих данных,
 // не дублируя значения вручную.
+//
+// Stage 4.3.1: опциональное поле thermodynamics — термодинамические
+// свойства записи (вид + фаза): ΔfH°, ΔfG°, S°, Cp-таблицы и NASA-7
+// с собственным происхождением каждого значения (см. thermodynamics.ts).
 
 import type { DataProvenance, DataStatus } from './scientificValue';
+import type { ThermodynamicProperties } from './thermodynamics';
+import { validateThermodynamicProperties } from './thermodynamics';
 
 // ============================================
 // 1. ТИПЫ
@@ -79,6 +85,13 @@ export interface ScientificSpecies {
   provenance?: DataProvenance;
   /** Статус данных самого описания вида. */
   dataStatus: DataStatus;
+  /**
+   * Термодинамические свойства записи (Stage 4.3.1). Отсутствие поля
+   * означает, что термохимические свойства ещё не предоставлены:
+   * это неизвестность, а НЕ нулевые значения и НЕ молчаливый
+   * fallback на качественные описания легаси-каталога газов.
+   */
+  thermodynamics?: ThermodynamicProperties;
   /** Особые случаи: радикал, изотоп, переменный состав твёрдой фазы. */
   note?: string;
 }
@@ -129,6 +142,15 @@ export function validateSpecies(species: ScientificSpecies): string[] {
     const m = species.molarMassKgMol;
     if (!Number.isFinite(m) || m <= 0) {
       errors.push(`молярная масса должна быть конечным положительным числом, получено ${m}`);
+    }
+  }
+  if (species.thermodynamics !== undefined) {
+    const thermoIssues = validateThermodynamicProperties(species.thermodynamics, {
+      speciesId: species.id,
+      expectedPhase: species.phase
+    });
+    for (const issue of thermoIssues) {
+      errors.push(`термодинамика: ${issue}`);
     }
   }
   return errors;

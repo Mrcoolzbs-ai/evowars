@@ -204,6 +204,10 @@ const UNIT_TABLE: UnitDefinition[] = [
   { id: 'J_m3', name: 'джоуль на кубический метр', dimension: dimension(1, -1, -2), factor: 1 },
   { id: 'kg_mol', name: 'килограмм на моль', dimension: dimension(1, 0, 0, 0, 0, -1), factor: 1 },
   { id: 'g_mol', name: 'грамм на моль', dimension: dimension(1, 0, 0, 0, 0, -1), factor: 1e-3 },
+  // --- термодинамические молярные величины (Stage 4.3) ---
+  { id: 'J_mol', name: 'джоуль на моль', dimension: dimension(1, 2, -2, 0, 0, -1), factor: 1, note: 'молярная энергия (ΔfH°, ΔfG°)' },
+  { id: 'kJ_mol', name: 'килоджоуль на моль', dimension: dimension(1, 2, -2, 0, 0, -1), factor: 1e3, note: 'молярная энергия (ΔfH°, ΔfG°)' },
+  { id: 'J_mol_K', name: 'джоуль на моль-кельвин', dimension: dimension(1, 2, -2, -1, 0, -1), factor: 1, note: 'молярная теплоёмкость Cp° и молярная энтропия S°' },
   // --- механика ---
   { id: 'm_s', name: 'метр в секунду', dimension: dimension(0, 1, -1), factor: 1 },
   { id: 'm_s2', name: 'метр на секунду в квадрате', dimension: dimension(0, 1, -2), factor: 1 },
