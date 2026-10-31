@@ -114,6 +114,17 @@
 > (27 файлов), из них ядро — 505. Коммиты: d9a37be → 78526d6 →
 > 03ffd69 (последний — корректирующий: rawInput-ключи T_eq);
 > CI run 41172263279 зелёный.
+> Stage 4.2.2.3 (2026-10-31): provenance gate и location-specific
+> evidence — известное (known) без содержательного provenance —
+> недоказанность (cradle_temperature_unproven), не ошибка; поверхность
+> и океанский резервуар — РАЗНЫЕ источники
+> (CradleLocalEnvironment.localReservoirId + resolver, без fallback
+> на surface/T_eq/атмосферу/соседние резервуары); легаси-число
+> поверхности не используется даже как оценка океана; при пригодном
+> typed known легаси-скаляр не читается (нет дублирующего
+> предупреждения). Golden baseline совпадает. После 4.2.2.3 — 830
+> тестов (27 файлов), ядро — 505. Коммиты: c0e2fb8 → cdfef76; CI run
+> 41174155913 зелёный.
 > НЕ завершено в 4.2: 4.2.3–4.2.4 не начаты; химия НЕ на Scheduler;
 > RCM не реализована (surfaceTemperature = unknown).
 
@@ -390,6 +401,23 @@
   (800)» сверяются с notice-аннотацией шага Tests; golden baseline
   (877e17d3…bc0a) совпадает. CI зелёный: tsc, vitest, oxlint,
   build (run 41172263279).
+- **Stage 4.2.2.3**: 27 файлов, 830 тестов (+30 к 4.2.2.2: 26
+  compatibility.test, 4 generator.test), из них ядро — 505 (новых
+  core-тестов нет). Покрытие: evidence gate (known без provenance /
+  пустой {} / note-только — недоказанность, не ошибка; непригодные
+  формы (invalid, не та единица, NaN, отрицательные) не
+  доказательство; method/rawInput — валидное происхождение;
+  estimated не повышается), поверхность ≠ океан (surface known не
+  подтверждает/не опровергает океан; резервуар known ± provenance
+  вне/в диапазоне; без reservoir ID / без температуры / unknown /
+  estimated / чужое тело / несуществующий ID → недоказанность или
+  предупреждение; subsurface через резервуар), приоритет typed над
+  легаси-скаляром (нет дублирующего предупреждения), запрет
+  fallback, реальный путь isCradleSupportedOnWorld (доказанное
+  known-нарушение исключает колыбель из автоматического выбора;
+  оценка/unknown — нет). Фактические итоги Vitest «Test Files
+  27 passed (27) / Tests 830 passed (830)»; tsc, oxlint, build
+  зелёные (run 41174155913); golden baseline (877e17d3…bc0a) совпал.
 
 ### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
 
@@ -719,6 +747,51 @@
      правдоподобность выбранных объектов и полноту знания о
      локальной среде (архитектурное следствие задокументировано,
      семантика статуса НЕ менялась).
+- **Stage 4.2.2.3 — provenance gate и location-specific evidence**
+  (+30 тестов: 26 compatibility.test, 4 generator.test; коммиты
+  c0e2fb8 → cdfef76; CI run 41174155913 зелёный):
+  W. evidence gate: известная (known) температура — доказательство
+     совместимости ТОЛЬКО при содержательном provenance — непустое
+     одно из sourceName/sourceId/datasetId/recordId/reference/
+     method/modelVersion ИЛИ непустой rawInput (проверяемый расчёт
+     не требует библиографии); note/applicability/limitations/
+     conditions/license/retrievedAt и пустой {} происхождением НЕ
+     считаются; known без происхождения — cradle_temperature_unproven
+     (правило 6a, warning), НЕ ошибка правила 6; непригодные формы
+     (invalid, не та единица, NaN, отрицательные) доказательством не
+     являются; estimated до known не повышается; gate не меняет
+     глобальную семантику knownValue — только использование known
+     как доказательства температурной совместимости;
+  X. поверхность ≠ резервуар: typedLocalTemperatureOfWorld —
+     surface: typedSurfaceTemperatureOfWorld (coreWorldState →
+     тело 'planet' → thermalState.surfaceTemperature);
+     ocean/subsurface_reservoir/deep_planetary_layers и прочие
+     резервуарные среды: resolveLocalReactionTemperature(core,
+     {bodyId: 'planet', reservoirId: env.localReservoirId}) — только
+     явная ссылка CradleLocalEnvironment.localReservoirId; без ID,
+     у чужого тела, при несуществующем ID или без пригодной
+     температуры → недоказанность (warning, не физическая
+     ошибка); произвольный резервуар по совпадению kind не
+     выбирается; surfaceTemperature, T_eq, температура атмосферы и
+     соседних резервуаров — НЕ fallback; океанская колыбель не
+     подтверждается и не опровергается температурой поверхности;
+  Y. правило 6b (приоритет typed): при пригодном typed known
+     легаси-скаляр physicalCharacteristics.surfaceTemperature не
+     читается — доказанное вне диапазона = ОДНА ошибка
+     cradle_temperature_compatibility без дублирующего
+     cradle_temperature_estimate_outside_range; доказанное в
+     диапазоне — без error/warning/unproven; при typed estimated
+     используется именно оценка; легаси-скаляр — оценочный сценарий
+     ТОЛЬКО поверхности и ТОЛЬКО без typed evidence, никогда error;
+     для океана не используется даже как оценка;
+  Z. старые сохранения: CradleLocalEnvironment.localReservoirId —
+     необязательное поле (миграции не заполняют, автозаполнение
+     запрещено), легаси-числа не становятся ScientificValue;
+     isCradleSupportedOnWorld: контекст расширен опциональными
+     coreWorldState/cradleLocalEnvironment (тесты РЕАЛЬНОГО пути
+     автоматического выбора — доказанное known-нарушение исключает
+     колыбель, оценка/unknown — нет; генерация не меняется);
+     measured: 830 тестов, CI 41174155913 зелёный, golden совпал.
 
 ### 1.15 App.tsx (966 строк)
 
@@ -770,6 +843,16 @@
   неизвестным; оценка вне диапазона — предупреждение
   cradle_temperature_estimate_outside_range, не ошибка;
   T_eq по-прежнему не подставляется как температура поверхности.
+- **Статус (Stage 4.2.2.3)**: известная (known) температура
+  подтверждает/опровергает совместимость только при содержательном
+  provenance И принадлежности именно указанной локальной области
+  (evidence gate; известное число без происхождения —
+  недоказанность, не ошибка); поверхность не подменяет температуру
+  океанского/глубинного резервуара — явная ссылка
+  CradleLocalEnvironment.localReservoirId + resolver, без fallback;
+  при пригодном typed known легаси-скаляр не читается (доказанное
+  вне диапазона — одна ошибка, без дублирующего оценочного
+  предупреждения).
 
 ### 2.3 Пресетная температура — скрытый вход скрининга [средний риск]
 
@@ -803,6 +886,11 @@
   подставлена); layerId доступен структурно через
   temperatureBasis.location ({kind:'atmosphere_layer',
   layerId:'surface_boundary'}), а не только в свободном тексте.
+- **Статус (Stage 4.2.2.3)**: без изменений для фазового скрининга —
+  этап его не трогал (численный API и корреляции Антуана прежние);
+  strict-семантика локальной области Compatibility теперь применена и
+  к резервуарным средам через явный localReservoirId (без ID —
+  недоказанность, не ошибка).
 
 ### 2.4 Температурные диапазоны реакций каталога — игровые [низкий риск, гигиена данных]
 
@@ -830,6 +918,11 @@
   классификация происхождения пресета, не библиография);
   provenance не теряется в AtmosphericTemperatureProfile;
   provenance-метки диапазонов реакций остаются Stage 4.5.
+- **Статус (Stage 4.2.2.3)**: provenance-метки диапазонов реакций
+  по-прежнему не тронуты (Stage 4.5); evidence gate применяется
+  только к использованию known-температуры как доказательства
+  совместимости колыбели, глобальная семантика ScientificValue не
+  менялась.
 
 ### 2.5 Однонаправленная стехиометрия [архитектурное ограничение]
 

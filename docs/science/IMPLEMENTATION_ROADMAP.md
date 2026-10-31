@@ -78,7 +78,14 @@
 > поле для реального источника (presetNotes — только пояснение);
 > PhaseTemperatureBasis.location — структурированное место контекста.
 > Golden-траектория стабильна. Тесты: 800 (27 файлов), ядро — 505.
-> Статус — см. §4.2.
+> Stage 4.2.2.3 (2026-10-31): provenance gate — известное (known) без
+> содержательного provenance — недоказанность
+> (cradle_temperature_unproven), НЕ ошибка; раздельные источники
+> surface/ocean (явная ссылка localReservoirId + resolver, без
+> fallback на surface/T_eq/атмосферу/соседние резервуары);
+> приоритет typed known над легаси-скаляром (легаси не
+> перечитывается, предупреждение не дублируется). Golden-траектория
+> стабильна. Тесты: 830 (27 файлов), ядро — 505. Статус — см. §4.2.
 
 ## Карта этапов
 
@@ -260,6 +267,49 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   passed (800)» из CI (run 41172263279); tsc, oxlint, build зелёные.
   НЕ начато: перевод химии на расписание (4.2.3), перевод UI на
   ядро, удаление легаси-ветки 2.6, устранение дублей 2.7, ревизия
+  текстов 2.9, ярлык CODATA 2022; RCM/вертикальный профиль — этап 4.8.
+- **Статус (31.10.2026, Stage 4.2.2.3 выполнен)**: provenance gate и
+  location-specific evidence — известная (known) температура
+  подтверждает/опровергает совместимость ТОЛЬКО при содержательном
+  provenance (непустое одно из sourceName/sourceId/datasetId/
+  recordId/reference/method/modelVersion ИЛИ непустой rawInput;
+  note/applicability/limitations/conditions/license/retrievedAt и
+  пустой {} — НЕ происхождение; проверяемый расчёт (method/rawInput)
+  библиографией не обременяется): known без происхождения —
+  cradle_temperature_unproven (warning), НЕ incompatible/error;
+  непригодные формы (invalid, не та единица, NaN, отрицательные)
+  физическим доказательством не становятся; estimated до known не
+  повышается; gate ограничен использованием known как доказательства
+  совместимости колыбели (глобальная семантика ScientificValue не
+  менялась). Поверхность ≠ океан: typedLocalTemperatureOfWorld —
+  surface: типизированная surfaceTemperature тела 'planet'; ocean/
+  subsurface_reservoir/deep_planetary_layers: резервуар по явной
+  ссылке CradleLocalEnvironment.localReservoirId через
+  resolveLocalReactionTemperature (пара id + bodyId 'planet'); без
+  однозначного reservoir или пригодной температуры резервуара —
+  недоказанность (warning, не физическая ошибка); произвольный
+  резервуар по kind, чужие тела и несуществующие id не выбираются;
+  surfaceTemperature/T_eq/атмосфера/соседние резервуары — НЕ
+  fallback. Правило 6b: при пригодном typed known легаси-скаляр не
+  читается (доказанное вне диапазона — ОДНА ошибка без
+  дублирующего оценочного предупреждения; доказанное в диапазоне —
+  без error/warning/unproven); легаси-скаляр — оценочный сценарий
+  только поверхности и только без typed evidence (никогда error; для
+  океана не используется даже как оценка).
+  CradleLocalEnvironment.localReservoirId — необязательное поле;
+  старые сохранения без миграций, автозаполнение запрещено,
+  легаси-числа не становятся ScientificValue.
+  isCradleSupportedOnWorld: контекст расширен опциональными
+  coreWorldState/cradleLocalEnvironment (тесты реального пути
+  автоматического выбора: доказанное known-нарушение исключает
+  колыбель; оценка/unknown — нет; генерация не меняется — ядро
+  строится после выбора колыбели). Golden-траектория стабильна
+  (877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20). Тесты: 830 (27 файлов; +30 к 4.2.2.2: 26
+  compatibility.test, 4 generator.test), ядро — 505. Фактические
+  итоги Vitest «Test Files 27 passed (27) / Tests 830 passed (830)»
+  из CI (run 41174155913); tsc, oxlint, build зелёные. НЕ начато:
+  перевод химии на расписание (4.2.3), перевод UI на ядро,
+  удаление легаси-ветки 2.6, устранение дублей 2.7, ревизия
   текстов 2.9, ярлык CODATA 2022; RCM/вертикальный профиль — этап 4.8.
 
 ## 4.3 Каталог веществ и термодинамики видов

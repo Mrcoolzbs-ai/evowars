@@ -155,6 +155,21 @@
 > Коммиты: d9a37be → 78526d6 → 03ffd69 (последний —
 > корректирующий: rawInput-ключи T_eq; CI run 41172263279
 > зелёный).
+>
+> Ревизия Stage 4.2.2.3 (2026-10-31): provenance gate и
+> location-specific evidence — известная (known) температура
+> считается доказательством совместимости колыбели ТОЛЬКО при
+> содержательном provenance (sourceName/sourceId/datasetId/
+> recordId/reference/method/modelVersion или непустой rawInput;
+> note/пустой {} — НЕ происхождение): known без происхождения —
+> cradle_temperature_unproven (warning), НЕ ошибка; estimated до
+> known не повышается; поверхность и резервуар — РАЗНЫЕ источники
+> (CradleLocalEnvironment.localReservoirId + resolver, без
+> fallback); при пригодном typed known легаси-скаляр не читается
+> (одна доказанная ошибка, без дублирующего предупреждения).
+> Golden baseline совпадает. После 4.2.2.3 — 830 тестов (27
+> файлов), из них ядро — 505 (новых core-тестов нет). Коммиты:
+> c0e2fb8 → cdfef76; CI run 41174155913 зелёный.
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -739,6 +754,49 @@ untimed-записи в ограниченной временной област
   локальной среде (задокументировано; предупреждение не
   ослаблено; семантика scientificStatus НЕ менялась).
 
+Ревизия 4.2.2.3 (provenance gate и location-specific evidence):
+
+- evidence gate для known-доказательства совместимости колыбели:
+  содержательное provenance = непустое одно из sourceName/
+  sourceId/datasetId/recordId/reference/method/modelVersion ИЛИ
+  непустой rawInput (проверяемый расчёт не требует библиографии);
+  note/applicability/limitations/conditions/license/retrievedAt и
+  пустой {} происхождением не считаются; known без происхождения —
+  cradle_temperature_unproven (warning), НЕ incompatible/error;
+  непригодные формы (invalid, не та единица, NaN, отрицательные)
+  не доказательство; estimated до known не повышается; глобальная
+  семантика knownValue/ScientificValue не менялась — gate ограничен
+  использованием значения как доказательства температурной
+  совместимости;
+- поверхность ≠ резервуар: typedLocalTemperatureOfWorld — surface:
+  typedSurfaceTemperatureOfWorld (coreWorldState → тело 'planet' →
+  thermalState.surfaceTemperature); ocean/subsurface_reservoir/
+  deep_planetary_layers и прочие резервуарные среды:
+  resolveLocalReactionTemperature(core, {bodyId: 'planet',
+  reservoirId: env.localReservoirId}) — только явная ссылка
+  CradleLocalEnvironment.localReservoirId; без ID, у чужого тела,
+  при несуществующем ID или без пригодной температуры →
+  недоказанность (warning); произвольный резервуар по kind не
+  выбирается; surfaceTemperature/T_eq/атмосфера/соседние
+  резервуары — НЕ fallback; океанская колыбель не подтверждается и
+  не опровергается температурой поверхности;
+- правило 6b (приоритет typed): при пригодном typed known
+  легаси-скаляр physicalCharacteristics.surfaceTemperature не
+  читается — доказанное вне диапазона = ОДНА ошибка
+  cradle_temperature_compatibility без дублирующего
+  cradle_temperature_estimate_outside_range; доказанное в
+  диапазоне — без error/warning/unproven; при typed estimated
+  используется именно оценка; легаси-скаляр — оценочный сценарий
+  ТОЛЬКО поверхности и ТОЛЬКО без typed evidence, никогда error;
+  для океана не используется даже как оценка;
+- CradleLocalEnvironment.localReservoirId — необязательное поле
+  (старые сохранения без миграций; автозаполнение запрещено;
+  легаси-числа не становятся ScientificValue);
+  isCradleSupportedOnWorld — контекст расширен опциональными
+  coreWorldState/cradleLocalEnvironment (тесты реального пути
+  автоматического выбора: доказанное known-нарушение исключает
+  колыбель; оценка/unknown — нет; генерация не меняется).
+
 RCM, вертикальный профиль, гидростатика, парниковый эффект и
 вычисление surfaceTemperature НЕ реализованы и не выдаются за
 реализованные (этап 4.8); легаси-химия продолжает работать на
@@ -799,7 +857,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2)
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 (без новых core-тестов))
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -819,7 +877,9 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 27 тест-файлов, 800 тестов (после ревизии 4.2.2.2 —
+Всего в проекте 27 тест-файлов, 830 тестов (после ревизии 4.2.2.3 —
+фактические итоги Vitest «Test Files 27 passed (27) / Tests 830
+passed (830)» из CI; после 4.2.2.2 — 800,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 800
 passed (800)» из CI; после 4.2.2.1 — 783,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 783
@@ -872,7 +932,11 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   предупреждение cradle_temperature_estimate_outside_range),
   явное поле presetSourceName для реальных источников и
   структурированное PhaseTemperatureBasis.location температурного
-  контекста. НЕ реализовано и не
+  контекста. Ревизия 4.2.2.3 добавила evidence gate для
+  known-доказательства совместимости (содержательное provenance;
+  известное число без происхождения — недоказанность, НЕ ошибка) и
+  раздельные источники surface vs резервуар (явная ссылка
+  localReservoirId, resolver без fallback). НЕ реализовано и не
   выдаётся за реализованное: RCM и вертикальный профиль (этап 4.8),
   гидростатика, парниковый эффект, вычисление surfaceTemperature
   (остаётся ЯВНО unknown); ни один резервуар/слой не получил

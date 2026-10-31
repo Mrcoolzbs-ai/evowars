@@ -24,6 +24,13 @@
 > PhaseTemperatureBasis.location — структурированное место
 > температурного контекста — см. блок «Реализация Stage 4.2.2.2»
 > в §5.1.
+> Ревизия Stage 4.2.2.3 (2026-10-31): provenance gate и
+> location-specific evidence — известное (known) без содержательного
+> происхождения не является доказательством (недоказанность, НЕ
+> ошибка); поверхность и резервуар — РАЗНЫЕ источники (явная ссылка
+> localReservoirId, resolver без fallback); легаси-скаляр при
+> пригодном typed known не читается — см. блок «Реализация
+> Stage 4.2.2.3» в §5.1.
 
 ## 1. Разделение слоёв
 
@@ -322,6 +329,65 @@ interface Integrator {
   Архитектурное следствие: текущий scientificStatus смешивает
   физическую правдоподобность выбранных объектов и полноту знания
   о локальной среде; предупреждение НЕ ослабляется ради статуса.
+
+**Реализация Stage 4.2.2.3 (сделано; provenance gate и location-specific
+evidence).** По итогам независимого аудита ревизии 4.2.2.2 доказательная
+семантика температурной совместимости доведена до строгого evidence gate:
+
+- evidence gate для known: известная температура считается
+  доказательством физической совместимости колыбели ТОЛЬКО при
+  содержательном provenance — непустое одно из sourceName/sourceId/
+  datasetId/recordId/reference/method/modelVersion ИЛИ непустой
+  rawInput (проверяемый расчёт не требует библиографии);
+  note/applicability/limitations/conditions/license/retrievedAt и
+  пустой объект {} происхождением НЕ считаются; статус known сам по
+  себе доказательством не является; known без содержательного
+  provenance — cradle_temperature_unproven (warning), НЕ
+  incompatible/error; estimated до known не повышается; глобальная
+  семантика knownValue не менялась — gate применяется только к
+  использованию значения как доказательства температурной
+  совместимости колыбели;
+- раздельные источники surface/ocean: локальная среда колыбели
+  читается через typedLocalTemperatureOfWorld — surface:
+  типизированная surfaceTemperature тела 'planet';
+  ocean/subsurface_reservoir/deep_planetary_layers: температура
+  конкретного резервуара по явной ссылке
+  CradleLocalEnvironment.localReservoirId через
+  resolveLocalReactionTemperature (пара reservoirId + bodyId
+  'planet'); без однозначного reservoir ID, у чужого тела, при
+  несуществующем ID или без пригодной температуры резервуара —
+  недоказанность (warning, НЕ физическая ошибка); произвольный
+  резервуар по совпадению kind НЕ выбирается; surfaceTemperature,
+  T_eq, температура атмосферы и соседних резервуаров fallback'ом НЕ
+  являются; океанская колыбель не подтверждается и не опровергается
+  температурой поверхности;
+- правило 6b (приоритет typed): при пригодном typed known
+  легаси-скаляр physicalCharacteristics.surfaceTemperature не
+  читается — доказанное значение вне диапазона порождает ОДНУ ошибку
+  cradle_temperature_compatibility без дублирующего оценочного
+  предупреждения; доказанное в диапазоне — без error/warning/
+  unproven; при typed estimated используется именно она;
+  легаси-скаляр — оценочный сценарий ТОЛЬКО поверхности и ТОЛЬКО без
+  typed evidence (вне диапазона — warning
+  cradle_temperature_estimate_outside_range, никогда error; для
+  океана не используется даже как оценка);
+- старые сохранения: CradleLocalEnvironment.localReservoirId —
+  необязательное поле, миграции его не заполняют, автозаполнение
+  запрещено; легаси-числа локальной среды не становятся
+  ScientificValue автоматически;
+- regression coverage: 30 новых тестов (26 compatibility.test,
+  4 generator.test), всего 830 (27 файлов), ядро — 505; проверен
+  РЕАЛЬНЫЙ путь isCradleSupportedOnWorld (доказанное known-нарушение
+  исключает колыбель из автоматического выбора; оценочное
+  расхождение и unknown — нет); CI зелёный, golden baseline
+  совпадает.
+
+Вывод Stage 4.2.2.2 о 25 seed (каждый мир реалистичного режима несёт
+cradle_temperature_unproven — physically_plausible недостижим;
+scientificStatus смешивает правдоподобность объектов и полноту знания о
+локальной среде) сохранён без изменений; предупреждение не ослаблено.
+RCM, вертикальный профиль и термодинамика океанов НЕ реализованы и не
+выдаются за реализованные (этап 4.8).
 
 Что осталось до RCM (уровень ≥1, этап 4.8): вертикальный профиль,
 гидростатика, парниковый эффект, вычисление surfaceTemperature — всё это
