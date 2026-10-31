@@ -26,7 +26,7 @@ import {
   reactionLedgerAppendOnlyIssues,
   ReactionLedgerError
 } from '../Core/reactionLedger';
-import type { ReactionRecord, ReactionExtentBasis } from '../Core/reactionLedger';
+import type { ReactionLedger, ReactionRecord, ReactionExtentBasis } from '../Core/reactionLedger';
 import { createSpeciesCatalog } from '../Core/species';
 import type { ScientificSpecies, SpeciesCatalog } from '../Core/species';
 
