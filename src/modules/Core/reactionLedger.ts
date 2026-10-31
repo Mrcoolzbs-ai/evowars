@@ -36,6 +36,32 @@
 // (например ux:element_x) имеет точно проверяемый алгебраический
 // баланс; реалистичность сущности и математическая сохранность
 // заданного состава — независимые характеристики.
+//
+// Корректирующая ревизия Stage 4.2.3.2.1 (узкие дефекты реализации,
+// БЕЗ расширения до Scheduler-интеграции):
+// - time — ОБЯЗАТЕЛЬНОЕ поле: null | FluxTime; отсутствующее поле
+//   (undefined) — invalid: registerReaction не превращает его в
+//   отсутствующий ключ через object spread;
+// - накопление состава — Map + Object.fromEntries: произвольные
+//   идентификаторы компонентов ('constructor', 'toString',
+//   'hasOwnProperty', '__proto__') — обычные ключи данных без
+//   чтения/изменения свойств прототипа; компонент не исчезает из
+//   отчёта и не даёт ложный balanced;
+// - форма состава — только объектная запись (plain record, в т.ч.
+//   с прототипом null): Map/Set/Date/RegExp/массив/экземпляр класса
+//   → not_verifiable (Object.entries по ним молча пуст — состав не
+//   считается известным пустым); численную пригодность подтверждают
+//   только dataStatus 'known' | 'estimated';
+// - NaN/Infinity в промежуточных итогах (переполнение произведения
+//   или накопления при конечных входных числах) → not_verifiable с
+//   диагностикой: NaN не трактуется как отсутствие расхождения;
+// - tolerance — конечное неотрицательное число; NaN/±Infinity/
+//   отрицательное → контролируемый invalid (единая политика для
+//   аудита записи и журнала);
+// - note, если задан, — непустая строка; пара (reservoirId,
+//   speciesId) сравнивается однозначно через JSON.stringify —
+//   конкатенация с пробелом допускала коллизии ('r x'+'y' против
+//   'r'+'x y').
 
 import type { ConservationStatus, FluxTime } from './fluxLedger';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
@@ -137,8 +163,9 @@ export class ReactionLedgerError extends Error {
  * - один и тот же вид в разных резервуарах допустим;
  * - extent — конечное положительное число;
  * - extentBasis — 'amount' | 'column_amount';
- * - time — null или корректная метка FluxTime;
- * - processId, если задан, — непустая строка.
+ * - time — ОБЯЗАТЕЛЬНОЕ поле: null или корректная метка FluxTime;
+ *   отсутствующее поле (undefined) недопустимо;
+ * - processId и note, если заданы, — непустые строки.
  */
 export function validateReactionRecord(record: unknown): string[] {
   const problems: string[] = [];
@@ -160,7 +187,9 @@ export function validateReactionRecord(record: unknown): string[] {
   if (typeof r.extentBasis !== 'string' || !(REACTION_EXTENT_BASES as readonly string[]).includes(r.extentBasis)) {
     problems.push('extentBasis должен быть одним из ' + REACTION_EXTENT_BASES.join(' | ') + ', получено «' + String(r.extentBasis) + '»');
   }
-  if (r.time !== null && r.time !== undefined) {
+  if (r.time === undefined) {
+    problems.push('time обязателен: null или корректная метка FluxTime — отсутствующее поле недопустимо');
+  } else if (r.time !== null) {
     if (typeof r.time !== 'object') {
       problems.push('time должен быть объектом FluxTime или null');
     } else {
@@ -175,6 +204,9 @@ export function validateReactionRecord(record: unknown): string[] {
   }
   if (r.processId !== undefined && (typeof r.processId !== 'string' || r.processId.trim() === '')) {
     problems.push('processId, если задан, должен быть непустой строкой');
+  }
+  if (r.note !== undefined && (typeof r.note !== 'string' || r.note.trim() === '')) {
+    problems.push('note, если задан, должен быть непустой строкой');
   }
   return problems;
 }
@@ -205,7 +237,9 @@ function validateSide(value: unknown, side: 'reactants' | 'products', problems: 
       problems.push(side + '[' + index + ']: коэффициент должен быть конечным положительным числом, получено ' + String(p.coefficient));
     }
     if (typeof p.reservoirId === 'string' && p.reservoirId.trim() !== '' && typeof p.speciesId === 'string' && p.speciesId.trim() !== '') {
-      const key = p.reservoirId + ' ' + p.speciesId;
+      // Однозначное кодирование пары: конкатенация с пробелом
+      // допускала коллизии ('r x' + 'y' против 'r' + 'x y').
+      const key = JSON.stringify([p.reservoirId, p.speciesId]);
       if (seen.has(key)) {
         problems.push(side + ': пара резервуар «' + p.reservoirId + '» + вид «' + p.speciesId + '» встречается дважды — коэффициенты должны быть объединены заранее');
       } else {
@@ -311,6 +345,23 @@ export function registerReaction(ledger: ReactionLedger, record: ReactionRecord)
 export const DEFAULT_REACTION_AUDIT_TOLERANCE = 1e-9;
 
 /**
+ * Единая политика tolerance для аудита записи и журнала: конечное
+ * неотрицательное число. NaN, +Infinity, -Infinity и отрицательные
+ * значения — контролируемый invalid (некорректный tolerance не
+ * может привести к ложному balanced). Отсутствие значения —
+ * политика по умолчанию DEFAULT_REACTION_AUDIT_TOLERANCE.
+ */
+function resolveAuditTolerance(value: number | undefined): { tolerance: number; problem: string | null } {
+  if (value === undefined) {
+    return { tolerance: DEFAULT_REACTION_AUDIT_TOLERANCE, problem: null };
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return { tolerance: DEFAULT_REACTION_AUDIT_TOLERANCE, problem: 'tolerance должен быть конечным неотрицательным числом, получено ' + String(value) };
+  }
+  return { tolerance: value, problem: null };
+}
+
+/**
  * Статус проверки записи: различимые исходы, НЕ один boolean.
  * 'invalid' — запись не проходит валидацию формы (проверка состава
  * невозможна); остальные — существующая система ConservationStatus.
@@ -364,14 +415,20 @@ export interface ReactionStoichiometryAudit {
  * - dataStatus 'estimated' при численно согласованном балансе →
  *   approximate;
  * - молярная масса не нужна: элементы и заряд считаются по числу
- *   частиц (сопоставление с массовым инвентарём — будущие этапы).
+ *   частиц (сопоставление с массовым инвентарём — будущие этапы);
+ * - NaN/Infinity в промежуточных итогах (переполнение произведения
+ *   или накопления при конечных входных числах) → not_verifiable с
+ *   диагностикой: NaN не трактуется как отсутствие расхождения;
+ * - tolerance — конечное неотрицательное число; NaN, ±Infinity,
+ *   отрицательное значение → invalid (единая политика с аудитом
+ *   журнала).
  */
 export function auditReactionStoichiometry(
   record: ReactionRecord,
   catalog: SpeciesCatalog,
   options?: { tolerance?: number }
 ): ReactionStoichiometryAudit {
-  const tolerance = options?.tolerance ?? DEFAULT_REACTION_AUDIT_TOLERANCE;
+  const { tolerance, problem: toleranceProblem } = resolveAuditTolerance(options?.tolerance);
   const audit: ReactionStoichiometryAudit = {
     status: 'not_verifiable',
     formIssues: [],
@@ -387,6 +444,13 @@ export function auditReactionStoichiometry(
     diagnostics: []
   };
 
+  if (toleranceProblem !== null) {
+    audit.status = 'invalid';
+    audit.formIssues.push(toleranceProblem);
+    audit.diagnostics.push('некорректный tolerance: ' + toleranceProblem);
+    return audit;
+  }
+
   const formIssues = validateReactionRecord(record);
   if (formIssues.length > 0) {
     audit.status = 'invalid';
@@ -401,12 +465,25 @@ export function auditReactionStoichiometry(
     missing: string[];
     unproven: string[];
     estimated: string[];
+    nonFinite: boolean;
   } => {
     const counts = new Map<string, number>();
     for (const p of participants) {
       counts.set(p.speciesId, (counts.get(p.speciesId) ?? 0) + p.coefficient);
     }
-    const elements: Record<string, number> = {};
+    // Сумма коэффициентов одного вида из разных резервуаров может
+    // переполниться при конечных слагаемых — конечность входных чисел
+    // не гарантирует конечности результатов.
+    let nonFinite = false;
+    for (const sum of counts.values()) {
+      if (!Number.isFinite(sum)) {
+        nonFinite = true;
+      }
+    }
+    // Накопление состава — Map: произвольные идентификаторы
+    // компонентов ('constructor', '__proto__' и т.п.) обрабатываются
+    // как обычные ключи данных, без чтения/изменения прототипа.
+    const elements = new Map<string, number>();
     let charge = 0;
     const missing: string[] = [];
     const unproven: string[] = [];
@@ -417,19 +494,29 @@ export function auditReactionStoichiometry(
         missing.push(speciesId);
         continue;
       }
-      if (!isProvenComposition(species)) {
+      const composition = readProvenComposition(species);
+      if (composition === null) {
         unproven.push(speciesId);
         continue;
       }
       if (species.dataStatus === 'estimated') {
         estimated.push(speciesId);
       }
-      for (const [element, count] of Object.entries(species.elements)) {
-        elements[element] = (elements[element] ?? 0) + count * coefficient;
+      for (const [element, count] of Object.entries(composition)) {
+        const product = count * coefficient;
+        const total = (elements.get(element) ?? 0) + product;
+        elements.set(element, total);
+        if (!Number.isFinite(product) || !Number.isFinite(total)) {
+          nonFinite = true;
+        }
       }
-      charge += species.charge * coefficient;
+      const chargePart = species.charge * coefficient;
+      charge += chargePart;
+      if (!Number.isFinite(chargePart) || !Number.isFinite(charge)) {
+        nonFinite = true;
+      }
     }
-    return { elements, charge, missing, unproven, estimated };
+    return { elements: safeElementsRecord(elements), charge, missing, unproven, estimated, nonFinite };
   };
 
   const left = side(record.reactants);
@@ -442,6 +529,22 @@ export function auditReactionStoichiometry(
   audit.missingSpecies = dedupe([...left.missing, ...right.missing]);
   audit.unprovenSpecies = dedupe([...left.unproven, ...right.unproven]);
   audit.estimatedSpecies = dedupe([...left.estimated, ...right.estimated]);
+
+  // Переполнение (NaN/Infinity в промежуточных итогах при конечных
+  // входных числах): численная проверка невозможна. Обе стороны,
+  // равные Infinity, НЕ считаются сбалансированными (Infinity -
+  // Infinity = NaN не трактуется как отсутствие расхождения).
+  if (left.nonFinite || right.nonFinite) {
+    audit.status = 'not_verifiable';
+    audit.diagnostics.push('численная проверка невозможна: в промежуточных итогах состава/заряда NaN или Infinity (переполнение произведения/суммирования при конечных входных числах) — проблема вычислимости, а не физического баланса');
+    if (audit.missingSpecies.length > 0) {
+      audit.diagnostics.push('вид(ы) не зарегистрированы в каталоге — вклад неизвестен: ' + audit.missingSpecies.join(', '));
+    }
+    if (audit.unprovenSpecies.length > 0) {
+      audit.diagnostics.push('описание состава непроверяемо (статус данных или форма состава): ' + audit.unprovenSpecies.join(', '));
+    }
+    return audit;
+  }
 
   // Частичные расхождения по проверяемым видам (диагностические данные).
   const elementKeys = new Set([...Object.keys(left.elements), ...Object.keys(right.elements)]);
@@ -485,23 +588,54 @@ export function auditReactionStoichiometry(
 }
 
 /**
- * Описание состава вида доказательно, только если данные вида
- * известны или оценочны и сам состав допустим по форме
- * (неотрицательные целые числа атомов, целочисленный заряд).
+ * Доказательный численно пригодный состав вида или null, если состав
+ * непроверяем. Правила:
+ * - численную пригодность подтверждают ТОЛЬКО dataStatus 'known' и
+ *   'estimated'; 'unknown', 'not_implemented', 'invalid',
+ *   'not_applicable' и любой непредусмотренный runtime-статус →
+ *   null (неизвестный статус не считается известным);
+ * - форма состава — ТОЛЬКО настоящая объектная запись (plain record),
+ *   в том числе с прототипом null: Map, Set, Date, RegExp, массивы и
+ *   экземпляры пользовательских классов НЕ являются составом —
+ *   Object.entries по ним молча даёт пустоту, и состав «исчезал» бы
+ *   из аудита; такие формы → null (not_verifiable), без исключений;
+ * - пустая запись {} легитимна (например электрон): доказательность
+ *   решает dataStatus, а не непустота;
+ * - ключи — непустые строки, значения — неотрицательные целые числа;
+ *   заряд — целое число.
  */
-function isProvenComposition(species: ScientificSpecies): boolean {
-  if (species.dataStatus === 'unknown' || species.dataStatus === 'not_implemented' || species.dataStatus === 'invalid' || species.dataStatus === 'not_applicable') {
-    return false;
+function readProvenComposition(species: ScientificSpecies): Record<string, number> | null {
+  if (species.dataStatus !== 'known' && species.dataStatus !== 'estimated') {
+    return null;
   }
   if (!Number.isInteger(species.charge)) {
-    return false;
+    return null;
   }
-  for (const [element, count] of Object.entries(species.elements)) {
+  const raw: unknown = species.elements;
+  if (typeof raw !== 'object' || raw === null) {
+    return null;
+  }
+  const prototype = Object.getPrototypeOf(raw);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return null;
+  }
+  for (const [element, count] of Object.entries(raw)) {
     if (element.trim() === '' || !Number.isInteger(count) || count < 0) {
-      return false;
+      return null;
     }
   }
-  return true;
+  return raw as Record<string, number>;
+}
+
+/**
+ * Публичный состав сторон — объектная запись, построенная БЕЗ
+ * обращения к свойствам прототипа: Object.fromEntries создаёт
+ * СОБСТВЕННЫЕ свойства данных, включая ключи '__proto__',
+ * 'constructor', 'toString', 'hasOwnProperty' — они сохраняются
+ * буквально, не читаются и не изменяются через прототип.
+ */
+function safeElementsRecord(map: Map<string, number>): Record<string, number> {
+  return Object.fromEntries(map);
 }
 
 function dedupe(values: string[]): string[] {
@@ -535,13 +669,24 @@ export interface ReactionLedgerAudit {
  * приблизительность): структурные проблемы → invalid; иначе любой
  * imbalanced → imbalanced; иначе любой not_verifiable →
  * not_verifiable; иначе любой approximate → approximate; иначе
- * balanced. Аудит не изменяет входные данные.
+ * balanced. Некорректный tolerance (NaN/±Infinity/отрицательное)
+ * → invalid всего аудита без проверки записей. Аудит не изменяет
+ * входные данные.
  */
 export function auditReactionLedger(
   ledger: unknown,
   catalog: SpeciesCatalog,
   options?: { tolerance?: number; reservoirIds?: readonly string[] }
 ): ReactionLedgerAudit {
+  const { problem: toleranceProblem } = resolveAuditTolerance(options?.tolerance);
+  if (toleranceProblem !== null) {
+    return {
+      status: 'invalid',
+      formIssues: [toleranceProblem],
+      recordAudits: [],
+      diagnostics: ['некорректный tolerance: ' + toleranceProblem]
+    };
+  }
   const formIssues = validateReactionLedger(ledger, { reservoirIds: options?.reservoirIds });
   const records = typeof ledger === 'object' && ledger !== null && Array.isArray((ledger as Record<string, unknown>).records)
     ? ((ledger as Record<string, unknown>).records as unknown[])
