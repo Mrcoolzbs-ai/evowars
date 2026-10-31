@@ -124,6 +124,13 @@ export function validateUncertainty(u: Uncertainty): string[] {
       }
       break;
     case 'bounded':
+      // Направление обязательно: значение известно только снизу/сверху,
+      // без него граница бессмысленна. Данные могут приходить из JSON,
+      // поэтому поле проверяется на runtime-повреждения (отсутствие,
+      // null, постороннее значение).
+      if (u.direction !== 'above' && u.direction !== 'below') {
+        errors.push(`bounded-неопределённость требует направление 'above' или 'below', получено ${String(u.direction)}`);
+      }
       if (!Number.isFinite(u.bound)) {
         errors.push('граница должна быть конечным числом');
       }
