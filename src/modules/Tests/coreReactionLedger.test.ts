@@ -24,6 +24,7 @@ import {
   auditReactionStoichiometry,
   auditReactionLedger,
   reactionLedgerAppendOnlyIssues,
+  reactionInventoryDeltas,
   ReactionLedgerError
 } from '../Core/reactionLedger';
 import type { ReactionLedger, ReactionRecord, ReactionExtentBasis } from '../Core/reactionLedger';
@@ -1447,5 +1448,94 @@ describe('Stage 4.2.3.3.4 ReactionLedger: собственные индексы 
   it('обычные плотные массивы продолжают проходить валидацию', () => {
     expect(validateReactionRecord(makeRecord())).toEqual([]);
     expect(validateReactionLedger({ records: [makeRecord()] })).toEqual([]);
+  });
+});
+
+describe('Stage 4.2.3.4 ReactionLedger: реакционные вклады в инвентари (reactionInventoryDeltas)', () => {
+  it('2 H2 + O2 → 2 H2O при extent 1: вклады −2/−1/+2 по парам (reservoirId, speciesId)', () => {
+    const deltas = reactionInventoryDeltas({ records: [makeRecord({ extent: 1 })] });
+    expect(deltas.formIssues).toEqual([]);
+    expect(deltas.unverifiableIssues).toEqual([]);
+    expect(deltas.contributions.length).toBe(3);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    const o2 = deltas.contributions.find((c) => c.speciesId === 'o2');
+    const h2o = deltas.contributions.find((c) => c.speciesId === 'h2o');
+    expect(h2?.delta).toBe(-2);
+    expect(h2?.basis).toBe('amount');
+    expect(h2?.recordId).toBe('rxn-1');
+    expect(o2?.delta).toBe(-1);
+    expect(h2o?.delta).toBe(2);
+  });
+
+  it('катализатор на обеих сторонах и несколько записей агрегируются: нетто-вклад, в том числе нулевой', () => {
+    const catalyst = makeRecord({
+      id: 'rxn-cat',
+      extent: 1,
+      reactants: [
+        { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 },
+        { reservoirId: 'atm', speciesId: 'cat', coefficient: 1 }
+      ],
+      products: [
+        { reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 },
+        { reservoirId: 'atm', speciesId: 'cat', coefficient: 1 }
+      ]
+    });
+    const deltas = reactionInventoryDeltas({ records: [catalyst, makeRecord({ id: 'rxn-2', extent: 1 })] });
+    expect(deltas.contributions.length).toBe(4);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    const cat = deltas.contributions.find((c) => c.speciesId === 'cat');
+    const o2 = deltas.contributions.find((c) => c.speciesId === 'o2');
+    const h2o = deltas.contributions.find((c) => c.speciesId === 'h2o');
+    expect(h2?.delta).toBe(-4);
+    expect(cat?.delta).toBe(0);
+    expect(o2?.delta).toBe(-1);
+    expect(h2o?.delta).toBe(4);
+  });
+
+  it('переполнение произведения — непредставимый вклад и честная диагностика, а не ложный ноль', () => {
+    const deltas = reactionInventoryDeltas({
+      records: [makeRecord({ extent: 10, reactants: [{ reservoirId: 'atm', speciesId: 'h2', coefficient: 1e308 }] })]
+    });
+    expect(deltas.formIssues).toEqual([]);
+    expect(deltas.unverifiableIssues.some((i) => i.includes('непредставим'))).toBe(true);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    expect(h2 !== undefined && Number.isNaN(h2.delta)).toBe(true);
+    const h2o = deltas.contributions.find((c) => c.speciesId === 'h2o');
+    expect(h2o?.delta).toBe(20);
+  });
+
+  it('структурно некорректный журнал и записи вкладов не дают', () => {
+    const bad = makeRecord();
+    delete (bad as unknown as Record<string, unknown>).time;
+    const noTime = reactionInventoryDeltas({ records: [bad] });
+    expect(noTime.formIssues.length).toBe(1);
+    expect(noTime.formIssues[0]).toContain('запись #0');
+    expect(noTime.contributions).toEqual([]);
+    const notArray = reactionInventoryDeltas({ records: 'nope' } as unknown as ReactionLedger);
+    expect(notArray.formIssues.some((i) => i.includes('некорректен'))).toBe(true);
+    expect(reactionInventoryDeltas(undefined).formIssues.some((i) => i.includes('некорректен'))).toBe(true);
+  });
+
+  it('смешение оснований по одной паре — непроверяемость без пересчёта', () => {
+    const column = makeRecord({
+      id: 'rxn-col-mix',
+      extent: 1,
+      extentBasis: 'column_amount',
+      reactants: [{ reservoirId: 'atm', speciesId: 'h2', coefficient: 2 }],
+      products: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 }]
+    });
+    const deltas = reactionInventoryDeltas({ records: [makeRecord({ id: 'rxn-amt', extent: 1 }), column] });
+    expect(deltas.formIssues).toEqual([]);
+    expect(deltas.unverifiableIssues.some((i) => i.includes('разных основаниях'))).toBe(true);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    expect(h2 !== undefined && Number.isNaN(h2.delta)).toBe(true);
+  });
+
+  it('пустой журнал — пустые вклады без проблем', () => {
+    expect(reactionInventoryDeltas(createReactionLedger())).toEqual({
+      contributions: [],
+      formIssues: [],
+      unverifiableIssues: []
+    });
   });
 });

@@ -35,6 +35,8 @@ import { createReservoir, setEnergyInventory, setMaterialInventory } from '../Co
 import { createSpeciesCatalog } from '../Core/species';
 import { registerReaction } from '../Core/reactionLedger';
 import type { ReactionLedger, ReactionRecord } from '../Core/reactionLedger';
+import { applyFlux, createFluxLedger, EXTERNAL, registerFlux } from '../Core/fluxLedger';
+import type { ReservoirRecord } from '../Core/reservoir';
 
 function descriptor(id: string, overrides?: Partial<ProcessDescriptor>): ProcessDescriptor {
   return {
@@ -627,13 +629,46 @@ function schedulerReaction(id: string, productCoefficient = 2): ReactionRecord {
   };
 }
 
+/**
+ * Мир с известным материальным инвентарём для реакции
+ * 2 H2 + O2 → 2 H2O в резервуаре «atm» (Stage 4.2.3.4).
+ */
+function reactiveWorld(): CoreWorldState {
+  const reservoir = setEnergyInventory(
+    setMaterialInventory(createReservoir('atm', 'atmosphere'), 'amount', { co2: 100, h2: 2, o2: 1, h2o: 0 }),
+    { storedJ: 0, netPowerW: null, fluxW_m2: null }
+  );
+  return { ...createCoreWorldState('w'), reservoirs: [reservoir] };
+}
+
+/**
+ * Иммутабельно применить завершённое превращение
+ * 2 H2 + O2 → 2 H2O (extent 1, основание amount) к резервуару «atm».
+ */
+function applyWaterFormation(w: CoreWorldState): CoreWorldState {
+  return {
+    ...w,
+    reservoirs: w.reservoirs.map((r) => {
+      if (r.id !== 'atm' || r.material === undefined) {
+        return r;
+      }
+      const entries = { ...r.material.entries };
+      entries['h2'] = (entries['h2'] ?? 0) - 2;
+      entries['o2'] = (entries['o2'] ?? 0) - 1;
+      entries['h2o'] = (entries['h2o'] ?? 0) + 2;
+      return { ...r, material: { ...r.material, entries } };
+    })
+  };
+}
+
 describe('Stage 4.2.3.3 Scheduler: журнал реакционных транзакций', () => {
   it('оператор регистрирует реакцию: commit фиксирует журнал, аудит balanced', () => {
-    const world = testWorld();
+    // Stage 4.2.3.4: запись описывает завершённое превращение — инвентарь обязан измениться ожидаемым образом
+    const world = reactiveWorld();
     const registry = makeRegistry([descriptor('a')]);
     const reacting: ProcessOperator = {
       processId: 'a',
-      apply: (w) => ({
+      apply: (w) => applyWaterFormation({
         ...w,
         reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-1'))
       })
@@ -651,13 +686,14 @@ describe('Stage 4.2.3.3 Scheduler: журнал реакционных тран�
   });
 
   it('snapshot-изоляция: записи журнала в результате — копии, ссылки с исходным миром не разделяются', () => {
-    const world = testWorld();
+    // Stage 4.2.3.4: запись описывает завершённое превращение — инвентарь обязан измениться ожидаемым образом
+    const world = reactiveWorld();
     const existing: ReactionLedger = { records: [schedulerReaction('rxn-0')] };
     world.reactionLedger = existing;
     const registry = makeRegistry([descriptor('a')]);
     const reacting: ProcessOperator = {
       processId: 'a',
-      apply: (w) => ({
+      apply: (w) => applyWaterFormation({
         ...w,
         reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-1'))
       })
@@ -742,9 +778,9 @@ describe('Stage 4.2.3.3 Scheduler: журнал реакционных тран�
 // пройти стехиометрический аудит: шаг с новыми реакциями без
 // запрошенного аудита не фиксируется.
 
-/** Мир с одной старой записью журнала реакций. */
+/** Мир с одной старой записью журнала реакций и инвентарём для превращения (Stage 4.2.3.4). */
 function worldWithHistory(): CoreWorldState {
-  const world = testWorld();
+  const world = reactiveWorld();
   world.reactionLedger = { records: [schedulerReaction('rxn-0')] };
   return world;
 }
@@ -756,11 +792,15 @@ function worldWithTwoRecords(): CoreWorldState {
   return world;
 }
 
-/** Оператор, добавляющий новую сбалансированную запись в конец журнала. */
+/**
+ * Оператор, добавляющий новую сбалансированную запись в конец журнала.
+ * Stage 4.2.3.4: запись описывает ЗАВЕРШЁННОЕ превращение — оператор
+ * изменяет материальный инвентарь ожидаемым образом.
+ */
 function appendingOperator(): ProcessOperator {
   return {
     processId: 'a',
-    apply: (w) => ({
+    apply: (w) => applyWaterFormation({
       ...w,
       reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-new'))
     })
@@ -784,7 +824,8 @@ function tamperOperator(tamper: (record: ReactionRecord) => ReactionRecord): Pro
 
 describe('Stage 4.2.3.3.1 Scheduler: append-only контракт журнала реакций', () => {
   it('новая сбалансированная запись при пустой истории — commit с аудитом balanced', () => {
-    const world = testWorld();
+    // Stage 4.2.3.4: завершённая транзакция подтверждается изменением инвентаря
+    const world = reactiveWorld();
     const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
       durationS: 10,
       splitting: 'lie',
@@ -808,7 +849,8 @@ describe('Stage 4.2.3.3.1 Scheduler: append-only контракт журнала
   });
 
   it('мир без журнала до шага: все записи после шага — новые, commit', () => {
-    const world = testWorld();
+    // Stage 4.2.3.4: завершённая транзакция подтверждается изменением инвентаря
+    const world = reactiveWorld();
     delete world.reactionLedger;
     const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
       durationS: 10,
@@ -1263,9 +1305,9 @@ describe('Stage 4.2.3.1 Scheduler: snapshot-изоляция состояния 
 // валидные новые записи по-прежнему требуют аудита.
 
 describe('Stage 4.2.3.3.2 Scheduler: валидация нового журнала при отсутствии старого', () => {
-  /** Мир без журнала реакций (поле отсутствует). */
+  /** Мир без журнала реакций (поле отсутствует) и с инвентарём для превращения 4.2.3.4. */
   function worldWithoutLedger(): CoreWorldState {
-    const world = testWorld();
+    const world = reactiveWorld();
     delete world.reactionLedger;
     return world;
   }
@@ -1505,5 +1547,164 @@ describe('Stage 4.2.3.3.4 Scheduler: унаследованные индексы
     expect(world.reactionLedger).toBeUndefined();
     expect(world.clock.stepCount).toBe(0);
     expect(world).toEqual(pristine);
+  });
+});
+
+describe('Stage 4.2.3.4 Scheduler: согласование реакций с инвентарями', () => {
+  it('подтверждённое превращение: commit, секция reaction_inventory balanced, инвентарь изменён', () => {
+    const world = reactiveWorld();
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.audit?.status).toBe('balanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('balanced');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-new']);
+    expect(result.world.reservoirs[0]?.material?.entries['h2o']).toBe(2);
+    expect(result.world.reservoirs[0]?.material?.entries['h2']).toBe(0);
+  });
+
+  it('запись без изменения инвентаря — reject с известным несоответствием; атомарность сохранена', () => {
+    const world = reactiveWorld();
+    const pristine = structuredClone(world);
+    const recordOnly: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-no-inv'))
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [recordOnly], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('imbalanced');
+    // исходный CoreWorldState, часы, журнал и материальные инвентари нетронуты
+    expect(result.world).toBe(world);
+    expect(world).toEqual(pristine);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world.reactionLedger?.records).toEqual([]);
+    expect(world.reservoirs[0]?.material?.entries['h2']).toBe(2);
+    expect(result.bookkeeping.stepCount).toBe(0);
+  });
+
+  it('неверный размер изменения — reject; исходное состояние нетронуто', () => {
+    const world = reactiveWorld();
+    const wrongAmount: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reservoirs: w.reservoirs.map((r) => {
+          if (r.id !== 'atm' || r.material === undefined) {
+            return r;
+          }
+          return { ...r, material: { ...r.material, entries: { ...r.material.entries, h2o: 1 } } };
+        }),
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-wrong'))
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [wrongAmount], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('imbalanced');
+    expect(result.world).toBe(world);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world.reservoirs[0]?.material?.entries['h2o']).toBe(0);
+  });
+
+  it('поток и реакция в одном шаге: вклады складываются ровно один раз', () => {
+    const world = reactiveWorld();
+    const fluxAndReaction: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const fluxLedger = registerFlux(createFluxLedger(), {
+          id: 'flux-h2o',
+          kind: 'external_input',
+          from: EXTERNAL,
+          to: 'atm',
+          subject: { subjectType: 'substance', speciesId: 'h2o', quantityKind: 'integrated', amount: 3, basis: 'amount' }
+        });
+        const map: Record<string, ReservoirRecord> = {};
+        for (const r of w.reservoirs) {
+          map[r.id] = r;
+        }
+        const applied = applyFlux(fluxLedger, map, 'flux-h2o');
+        return applyWaterFormation({
+          ...w,
+          reservoirs: [applied.reservoirs['atm']],
+          fluxLedger: applied.ledger,
+          reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-with-flux'))
+        });
+      }
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [fluxAndReaction], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.audit?.status).toBe('balanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('balanced');
+    // реакция не превратилась в поток: один поток и одна запись реакции
+    expect(result.world.fluxLedger.records.length).toBe(1);
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-with-flux']);
+    expect(result.world.reservoirs[0]?.material?.entries['h2o']).toBe(5);
+  });
+
+  it('две реакции в одном шаге: повторное участие вида агрегируется', () => {
+    const world = reactiveWorld();
+    const twoReactions: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const reverse: ReactionRecord = {
+          ...schedulerReaction('rxn-rev'),
+          reactants: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 }],
+          products: [
+            { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 },
+            { reservoirId: 'atm', speciesId: 'o2', coefficient: 1 }
+          ],
+          extent: 0.5
+        };
+        const reactionLedger = registerReaction(
+          registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-fwd')),
+          reverse
+        );
+        return {
+          ...w,
+          reservoirs: w.reservoirs.map((r) => {
+            if (r.id !== 'atm' || r.material === undefined) {
+              return r;
+            }
+            const entries = { ...r.material.entries };
+            entries['h2'] = (entries['h2'] ?? 0) - 2 + 1;
+            entries['o2'] = (entries['o2'] ?? 0) - 1 + 0.5;
+            entries['h2o'] = (entries['h2o'] ?? 0) + 2 - 1;
+            return { ...r, material: { ...r.material, entries } };
+          }),
+          reactionLedger
+        };
+      }
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [twoReactions], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.audit?.status).toBe('balanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('balanced');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-fwd', 'rxn-rev']);
+    expect(result.world.reservoirs[0]?.material?.entries['h2o']).toBe(1);
+    expect(result.world.reservoirs[0]?.material?.entries['h2']).toBe(1);
+    expect(result.world.reservoirs[0]?.material?.entries['o2']).toBe(0.5);
   });
 });

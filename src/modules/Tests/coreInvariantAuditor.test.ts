@@ -350,14 +350,16 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
   });
 
   it('сбалансированная реакция при явных составах всех участников — итог balanced', () => {
-    const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
-    const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    // Stage 4.2.3.4: запись описывает завершённое превращение — инвентарь обязан измениться ожидаемым образом
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 2 })]);
     const audit = auditWorldTransition(before, after, createFluxLedger(), {
       speciesCatalog: reactionCatalog(),
       boundary: 'complete',
       reactionLedger: { records: [reactionRecord()] }
     });
     expect(sectionOf(audit, 'reactions')?.status).toBe('balanced');
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
     expect(audit.status).toBe('balanced');
     expect(audit.balanced).toBe(true);
   });
@@ -380,8 +382,9 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
   });
 
   it('неизвестный вид → not_verifiable, а не ложный balanced', () => {
-    const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
-    const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    // Stage 4.2.3.4: завершённое превращение подтверждается изменением инвентаря
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, x_gas: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, x_gas: 0, o2: 0, h2o: 2 })]);
     const audit = auditWorldTransition(before, after, createFluxLedger(), {
       speciesCatalog: reactionCatalog(),
       boundary: 'complete',
@@ -430,7 +433,8 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
   });
 
   it('совместно: перенос потока + сбалансированная реакция — balanced без двойного счёта', () => {
-    const before = worldOf([res('atm', 'atmosphere', { co2: 100 }), res('ocn', 'ocean', { co2: 0 })]);
+    // Stage 4.2.3.4: завершённое превращение подтверждается изменением инвентаря
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 }), res('ocn', 'ocean', { co2: 0 })]);
     let ledger = createFluxLedger();
     ledger = registerFlux(ledger, {
       id: 'f1',
@@ -442,7 +446,10 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
     const applied = applyFlux(ledger, reservoirsMap(before), 'f1');
     const after: CoreWorldState = {
       ...before,
-      reservoirs: [applied.reservoirs['atm'], applied.reservoirs['ocn']],
+      reservoirs: [
+        { ...applied.reservoirs['atm'], material: { basis: 'amount', entries: { co2: 60, h2: 0, o2: 0, h2o: 2 } } },
+        applied.reservoirs['ocn']
+      ],
       fluxLedger: applied.ledger
     };
     const audit = auditWorldTransition(before, after, applied.ledger, {
@@ -455,11 +462,13 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
     expect(sectionOf(audit, 'substance')?.status).toBe('balanced');
     expect(sectionOf(audit, 'ledger')?.status).toBe('balanced');
     expect(sectionOf(audit, 'reactions')?.status).toBe('balanced');
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
   });
 
   it('оценочный состав (dataStatus estimated) → approximate, не balanced', () => {
-    const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
-    const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    // Stage 4.2.3.4: завершённое превращение подтверждается изменением инвентаря
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 2 })]);
     const audit = auditWorldTransition(before, after, createFluxLedger(), {
       speciesCatalog: reactionCatalog('estimated'),
       boundary: 'complete',
@@ -471,8 +480,9 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
   });
 
   it('неполная граница: даже сбалансированная реакция не даёт доказанного balanced', () => {
-    const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
-    const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    // Stage 4.2.3.4: завершённое превращение подтверждается изменением инвентаря
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 2 })]);
     const audit = auditWorldTransition(before, after, createFluxLedger(), {
       speciesCatalog: reactionCatalog(),
       boundary: 'incomplete',
@@ -497,3 +507,185 @@ describe('Stage 4.2.3.3 InvariantAuditor: секция reactions', () => {
   });
 });
 
+describe('Stage 4.2.3.4 InvariantAuditor: секция reaction_inventory', () => {
+  it('корректное превращение подтверждается инвентарём — секция и итог balanced', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 2 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+    expect(audit.status).toBe('balanced');
+    expect(audit.balanced).toBe(true);
+  });
+
+  it('запись без изменения инвентаря — imbalanced: превращение не подтверждено состоянием', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(sectionOf(audit, 'reactions')?.status).toBe('balanced');
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('imbalanced');
+    expect(audit.status).toBe('imbalanced');
+  });
+
+  it('неверный размер изменения — imbalanced с фактическим значением в диагностике', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 1 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('imbalanced');
+    expect(sectionOf(audit, 'reaction_inventory')?.issues.some((i) => i.includes('фактически'))).toBe(true);
+    expect(audit.status).toBe('imbalanced');
+  });
+
+  it('изменение противоположного знака — imbalanced', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 4, o2: 2, h2o: 0 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('imbalanced');
+    expect(audit.status).toBe('imbalanced');
+  });
+
+  it('необъяснённое изменение постороннего вида не маскируется секцией reaction_inventory', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 99, h2: 0, o2: 0, h2o: 2 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+    expect(sectionOf(audit, 'substance')?.status).toBe('imbalanced');
+    expect(sectionOf(audit, 'reservoir_fluxes')?.status).toBe('imbalanced');
+    expect(audit.status).toBe('imbalanced');
+  });
+
+  it('несколько реакций: повторное участие вида агрегируется по паре (резервуар, вид)', () => {
+    const forward = reactionRecord();
+    const reverse: ReactionRecord = {
+      ...reactionRecord({
+        id: 'rxn-2',
+        reactants: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 }],
+        products: [
+          { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 },
+          { reservoirId: 'atm', speciesId: 'o2', coefficient: 1 }
+        ]
+      }),
+      extent: 0.5
+    };
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 1, o2: 0.5, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 1 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [forward, reverse] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+    expect(audit.status).toBe('balanced');
+  });
+
+  it('поток и реакция одного вида: вклады складываются ровно один раз, реакция не становится потоком', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    let ledger = createFluxLedger();
+    ledger = registerFlux(ledger, {
+      id: 'in-h2o',
+      kind: 'external_input',
+      from: EXTERNAL,
+      to: 'atm',
+      subject: { subjectType: 'substance', speciesId: 'h2o', quantityKind: 'integrated', amount: 3, basis: 'amount' }
+    });
+    const applied = applyFlux(ledger, reservoirsMap(before), 'in-h2o');
+    const after: CoreWorldState = {
+      ...before,
+      reservoirs: [{ ...applied.reservoirs['atm'], material: { basis: 'amount', entries: { co2: 100, h2: 0, o2: 0, h2o: 5 } } }],
+      fluxLedger: applied.ledger
+    };
+    const audit = auditWorldTransition(before, after, applied.ledger, {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(audit.status).toBe('balanced');
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+    // реакция НЕ превратилась в поток: в журнале потоков — только внешний вход
+    expect(applied.ledger.records.length).toBe(1);
+    expect(applied.ledger.records[0]?.id).toBe('in-h2o');
+  });
+
+  it('column_amount: совпадающее основание записи и инвентаря подтверждается', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 }, { basis: 'column_amount' })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 2 }, { basis: 'column_amount' })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [{ ...reactionRecord(), extentBasis: 'column_amount' }] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+    expect(audit.status).toBe('balanced');
+  });
+
+  it('несовпадающие основания записи и инвентаря — not_verifiable без пересчёта', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 0, o2: 0, h2o: 2 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [{ ...reactionRecord(), extentBasis: 'column_amount' }] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('not_verifiable');
+    expect(sectionOf(audit, 'reaction_inventory')?.issues.some((i) => i.includes('пересчёт между основаниями не выполняется'))).toBe(true);
+    expect(audit.status).toBe('not_verifiable');
+  });
+
+  it('отсутствующий материальный инвентарь — not_verifiable: запас неизвестен, а не ноль', () => {
+    const before = worldOf([setEnergyInventory(createReservoir('atm', 'atmosphere'), { storedJ: 0, netPowerW: null, fluxW_m2: null })]);
+    const after = worldOf([setEnergyInventory(createReservoir('atm', 'atmosphere'), { storedJ: 0, netPowerW: null, fluxW_m2: null })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [reactionRecord()] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('not_verifiable');
+    expect(sectionOf(audit, 'reaction_inventory')?.issues.some((i) => i.includes('запас неизвестен'))).toBe(true);
+    expect(audit.status).toBe('not_verifiable');
+  });
+
+  it('ссылка на отсутствующий резервуар — invalid, итог imbalanced', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100, h2: 2, o2: 1, h2o: 0 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: {
+        records: [reactionRecord({ products: [{ reservoirId: 'ghost', speciesId: 'h2o', coefficient: 2 }] })]
+      }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('invalid');
+    expect(audit.status).toBe('imbalanced');
+  });
+
+  it('пустой журнал: вкладов нет — секция balanced, без ложного дисбаланса', () => {
+    const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: reactionCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [] }
+    });
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+    expect(audit.status).toBe('balanced');
+  });
+});
