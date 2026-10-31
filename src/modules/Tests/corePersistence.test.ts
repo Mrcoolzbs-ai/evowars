@@ -35,7 +35,7 @@ import {
 import type { LegacyGasRecord, LegacyCompositionRecord, LegacyWorldInput } from '../Core/adapters';
 import { validateWorldState } from '../Core/worldState';
 import type { CoreWorldState } from '../Core/worldState';
-import type { ReactionRecord } from '../Core/reactionLedger';
+import type { ReactionLedger, ReactionRecord } from '../Core/reactionLedger';
 import { createRandom } from '../Generator/random';
 import type { PhysValue, ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import type {
@@ -1360,6 +1360,192 @@ describe('Stage 4.2.3.3.1 Persistence: некорректный журнал н�
     // чужие данные не перезаписаны и не «полечены» пустым журналом
     expect(core?.reactionLedger?.records).toEqual([{ id: 'rxn-bad' }]);
     expect(result.notes.some((n) => n.includes('не перезаписаны'))).toBe(true);
+  });
+});
+
+// ============================================
+// STAGE 4.2.3.3.2 - ЯВНЫЙ NULL И ФОРМА coreWorldState В STORAGE
+// ============================================
+//
+// Отсутствие поля (undefined) и явный null различаются:
+// null-журнал и null/не-объектное coreWorldState не маскируются
+// под отсутствие и не загружаются как валидные миры — они
+// получают точную причину в диагностике и остаются в
+// raw-хранилище нетронутыми.
+
+describe('Stage 4.2.3.3.2 Persistence: явный null и форма coreWorldState не маскируются под отсутствие', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  /** Валидная реакционная запись для первого резервуара ядра. */
+  function validRecord(id: string): ReactionRecord {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    const reservoirId = core.reservoirs[0]?.id ?? 'atm';
+    return {
+      id,
+      reactionId: 'water-formation',
+      reactants: [
+        { reservoirId, speciesId: 'h2', coefficient: 2 },
+        { reservoirId, speciesId: 'o2', coefficient: 1 }
+      ],
+      products: [{ reservoirId, speciesId: 'h2o', coefficient: 2 }],
+      extent: 1,
+      extentBasis: 'amount',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      processId: 'proc-a',
+      note: 'корректная транзакция'
+    };
+  }
+
+  /** Сохранение текущей версии с ядром и произвольным значением журнала. */
+  function savedWorldWithRawLedger(id: string, ledger: unknown): SavedWorld {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    core.reactionLedger = ledger as ReactionLedger;
+    return {
+      ...makeGeneratedWorld(id),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+  }
+
+  /** Сохранение текущей версии с произвольным значением coreWorldState. */
+  function savedWorldWithRawCore(id: string, coreValue: unknown): SavedWorld {
+    return {
+      ...makeGeneratedWorld(id),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: coreValue
+    } as unknown as SavedWorld;
+  }
+
+  /** Сохранение текущей версии с корректным журналом из одной записи. */
+  function validSavedWorld(id: string): SavedWorld {
+    return savedWorldWithRawLedger(id, { records: [validRecord('rxn-a')] });
+  }
+
+  it('отсутствие поля reactionLedger в ядре — допустимо: сохранение загружается и импортируется', () => {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    delete core.reactionLedger;
+    const save = {
+      ...makeGeneratedWorld('w-no-ledger'),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+    writeRawEntries([save]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-no-ledger']);
+    const imported = importWorldFromJSONDetailed(exportWorldToJSON(save));
+    expect(imported.world).not.toBeNull();
+    expect(imported.reason).toBeNull();
+  });
+
+  it('reactionLedger: null — отклоняется; валидный сосед загружается; причина в диагностике', () => {
+    writeRawEntries([savedWorldWithRawLedger('w-ledger-null', null), validSavedWorld('w-good')]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-good']);
+    const health = getStorageHealth();
+    expect(health.incompatibleEntries.length).toBe(1);
+    expect(health.incompatibleEntries[0]?.reason).toContain('reactionLedger');
+    expect(health.incompatibleEntries[0]?.reason).toContain('null');
+  });
+
+  it('coreWorldState: null — не маскируется под отсутствие поля', () => {
+    writeRawEntries([savedWorldWithRawCore('w-core-null', null), validSavedWorld('w-good')]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-good']);
+    const health = getStorageHealth();
+    expect(health.incompatibleEntries.length).toBe(1);
+    expect(health.incompatibleEntries[0]?.reason).toContain('coreWorldState');
+    expect(health.incompatibleEntries[0]?.reason).toContain('null');
+  });
+
+  it('coreWorldState: не-объектные значения (строка, массив) — отклоняются с точной причиной', () => {
+    writeRawEntries([savedWorldWithRawCore('w-core-str', 'мусор'), savedWorldWithRawCore('w-core-arr', [1, 2])]);
+    expect(getAllWorlds()).toEqual([]);
+    const health = getStorageHealth();
+    expect(health.incompatibleEntries.length).toBe(2);
+    expect(health.incompatibleEntries.every((entry) => entry.reason.includes('coreWorldState'))).toBe(true);
+  });
+
+  it('текущая схема с reactionLedger: null не импортируется как валидное сохранение', () => {
+    const bad = savedWorldWithRawLedger('w-import-null', null);
+    const detailed = importWorldFromJSONDetailed(exportWorldToJSON(bad));
+    expect(detailed.world).toBeNull();
+    expect(detailed.reason).toContain('reactionLedger');
+    expect(importWorldFromJSON(exportWorldToJSON(bad))).toBeNull();
+  });
+
+  it('старая известная схема (1.3, ядро 1.2.0) с reactionLedger: null после миграции не загружается как валидная', () => {
+    const save = makeLegacySave('1.3', {
+      coreWorldState: {
+        schemaVersion: '1.2.0',
+        worldId: 'core-null-ledger',
+        clock: { segmentIndex: 0, localTimeS: 0, priorSegmentsS: 0, stepCount: 0, representableStepS: null },
+        cosmicAge: null,
+        bodies: [],
+        gravity: {},
+        radiationSources: [],
+        reservoirs: [],
+        fluxLedger: { records: [] },
+        legacy: {},
+        reactionLedger: null
+      }
+    });
+    // миграция не подменяет null пустым журналом и не падает
+    const migrated = migrateSavedWorld(save);
+    const core = (migrated.world as { coreWorldState?: { reactionLedger?: unknown; schemaVersion?: string } }).coreWorldState;
+    expect(core?.reactionLedger).toBeNull();
+    expect(core?.schemaVersion).toBe('1.3.0');
+    // Storage не возвращает такое сохранение как валидный мир
+    writeRawEntries([save, validSavedWorld('w-good')]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-good']);
+    const health = getStorageHealth();
+    expect(health.incompatibleEntries.length).toBe(1);
+    expect(health.incompatibleEntries[0]?.reason).toContain('reactionLedger');
+  });
+
+  it('повреждённая запись с null-журналом сохраняется в raw-хранилище и не «лечится» saveWorld', () => {
+    writeRawEntries([savedWorldWithRawLedger('w-ledger-null', null)]);
+    expect(getAllWorlds()).toEqual([]);
+    saveWorld(makeGeneratedWorld('w-new'), fixtureSettings);
+    const raw = readRawEntries();
+    const nullEntry = raw.find((entry) => entry.id === 'w-ledger-null') as
+      | { coreWorldState?: { reactionLedger?: unknown } }
+      | undefined;
+    expect(nullEntry).toBeDefined();
+    expect(nullEntry?.coreWorldState?.reactionLedger).toBeNull();
+    const ids = getAllWorlds().map((w) => w.id);
+    expect(ids).toContain('w-new');
+    expect(ids).not.toContain('w-ledger-null');
+  });
+
+  it('getStorageHealth различает причины: null-журнал и null-ядро', () => {
+    writeRawEntries([
+      savedWorldWithRawLedger('w-ledger-null', null),
+      savedWorldWithRawCore('w-core-null', null),
+      validSavedWorld('w-good')
+    ]);
+    const health = getStorageHealth();
+    expect(health.rawEntryCount).toBe(3);
+    expect(health.loadedWorldCount).toBe(1);
+    expect(health.parseError).toBeNull();
+    expect(health.incompatibleEntries.length).toBe(2);
+    const reasons = health.incompatibleEntries.map((entry) => entry.reason).join(' | ');
+    expect(reasons).toContain('reactionLedger');
+    expect(reasons).toContain('coreWorldState');
+  });
+
+  it('валидные соседние сохранения разных схем продолжают загружаться', () => {
+    writeRawEntries([
+      savedWorldWithRawLedger('w-ledger-null', null),
+      validSavedWorld('w-good-1'),
+      makeLegacySave('1.3'),
+      validSavedWorld('w-good-2')
+    ]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-good-1', 'world-1', 'w-good-2']);
   });
 });
 

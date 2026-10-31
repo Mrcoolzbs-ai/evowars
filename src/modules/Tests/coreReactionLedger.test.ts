@@ -1106,3 +1106,149 @@ describe('Stage 4.2.3.3.1 ReactionLedger: append-only контракт', () => {
     expect(issues[0]).toContain('невозможно проверить');
   });
 });
+
+// ============================================
+// STAGE 4.2.3.3.2 - ПОГРАНИЧНЫЕ СЛУЧАИ APPEND-ONLY И ВАЛИДАЦИИ
+// ============================================
+//
+// Отсутствие прежнего журнала не отменяет проверки формы нового;
+// явный null недопустим ни до, ни после шага; глубокое сравнение
+// различает сериализуемые виды объектов (Date не равна пустой
+// записи) и покрывает дополнительные поля записей.
+
+describe('Stage 4.2.3.3.2 ReactionLedger: форма нового журнала при отсутствии старого', () => {
+  it('валидный пустой журнал при отсутствии старого — нарушений нет', () => {
+    expect(reactionLedgerAppendOnlyIssues(undefined, { records: [] })).toEqual([]);
+  });
+
+  it('журнала не было и не появилось (undefined → undefined) — нарушений нет', () => {
+    expect(reactionLedgerAppendOnlyIssues(undefined, undefined)).toEqual([]);
+  });
+
+  it('records нового журнала не массив — нарушение: форма проверяется и без истории', () => {
+    const broken = { records: 'bad' } as unknown as ReactionLedger;
+    const issues = reactionLedgerAppendOnlyIssues(undefined, broken);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('records');
+    expect(issues[0]).toContain('должно быть массивом');
+  });
+
+  it('новый журнал — не объект — нарушение', () => {
+    const issues = reactionLedgerAppendOnlyIssues(undefined, 42 as unknown as ReactionLedger);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('должен быть объектом');
+  });
+
+  it('новый журнал с некорректной записью — нарушение формы (аудит требует Scheduler)', () => {
+    const issues = reactionLedgerAppendOnlyIssues(undefined, {
+      records: [{ id: 'rxn-bad' }] as unknown as ReactionRecord[]
+    });
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.join(' ')).toContain('запись #0');
+  });
+
+  it('валидная новая запись при отсутствии старого — нарушений нет', () => {
+    expect(reactionLedgerAppendOnlyIssues(undefined, { records: [makeRecord()] })).toEqual([]);
+  });
+
+  it('после шага явный null — нарушение, а не отсутствие журнала', () => {
+    const issues = reactionLedgerAppendOnlyIssues(undefined, null);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('null');
+  });
+
+  it('до шага явный null — нарушение: контракт непроверяем', () => {
+    const issues = reactionLedgerAppendOnlyIssues(null, { records: [] });
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('null');
+  });
+
+  it('существовавший журнал: null после шага — контролируемое нарушение, не исключение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const issues = reactionLedgerAppendOnlyIssues(before, null);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('null');
+  });
+});
+
+describe('Stage 4.2.3.3.2 ReactionLedger: глубокое сравнение различает виды объектов', () => {
+  it('пустая запись и new Date(0) — разные данные, а не одинаковые Object.keys', () => {
+    const before = { records: [{} as unknown as ReactionRecord] };
+    const after = { records: [new Date(0) as unknown as ReactionRecord] };
+    const issues = reactionLedgerAppendOnlyIssues(before, after);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('изменена или сдвинута');
+  });
+
+  it('Date с другим временем — изменение', () => {
+    const before = { records: [new Date(0) as unknown as ReactionRecord] };
+    const after = { records: [new Date(1000) as unknown as ReactionRecord] };
+    expect(reactionLedgerAppendOnlyIssues(before, after).length).toBe(1);
+  });
+
+  it('Date с тем же временем — изменением не считается (structuredClone-семантика)', () => {
+    const before = { records: [new Date(0) as unknown as ReactionRecord] };
+    const after = { records: [new Date(0) as unknown as ReactionRecord] };
+    expect(reactionLedgerAppendOnlyIssues(before, after)).toEqual([]);
+  });
+
+  it('дополнительное поле старой записи нельзя незаметно изменить', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: string }).extra = 'исходное';
+    const changed = registerReaction(createReactionLedger(), makeRecord());
+    (changed.records[0] as unknown as { extra?: string }).extra = 'подменённое';
+    expect(reactionLedgerAppendOnlyIssues(before, changed).length).toBe(1);
+  });
+
+  it('дополнительное поле Date нельзя незаметно изменить (ранее ускользало от Object.keys)', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: unknown }).extra = new Date(0);
+    const changed = registerReaction(createReactionLedger(), makeRecord());
+    (changed.records[0] as unknown as { extra?: unknown }).extra = new Date(1);
+    const issues = reactionLedgerAppendOnlyIssues(before, changed);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('изменена или сдвинута');
+  });
+
+  it('дополнительное поле Date с тем же временем — изменением не считается', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: unknown }).extra = new Date(123);
+    const same = registerReaction(createReactionLedger(), makeRecord());
+    (same.records[0] as unknown as { extra?: unknown }).extra = new Date(123);
+    expect(reactionLedgerAppendOnlyIssues(before, same)).toEqual([]);
+  });
+
+  it('изменения известных полей по-прежнему обнаруживаются (extent)', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const issues = reactionLedgerAppendOnlyIssues(before, { records: [makeRecord({ extent: 999 })] });
+    expect(issues.length).toBe(1);
+  });
+
+  it('порядок ключей объектов не влияет на сравнение (включая дополнительные поля)', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    (before.records[0] as unknown as { extra?: string }).extra = 'x';
+    const reordered = Object.fromEntries(
+      Object.entries(before.records[0] as unknown as Record<string, unknown>).reverse()
+    ) as unknown as ReactionRecord;
+    expect(reactionLedgerAppendOnlyIssues(before, { records: [reordered] })).toEqual([]);
+  });
+
+  it('порядок массивов остаётся значимым: перестановка участников — изменение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const swapped = makeRecord({
+      reactants: [
+        { reservoirId: 'atm', speciesId: 'o2', coefficient: 1 },
+        { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 }
+      ]
+    });
+    expect(reactionLedgerAppendOnlyIssues(before, { records: [swapped] }).length).toBe(1);
+  });
+
+  it('ключ со значением undefined равносилен отсутствию ключа; появление значения — изменение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const withUndef = makeRecord();
+    (withUndef as unknown as { note?: unknown }).note = undefined;
+    expect(reactionLedgerAppendOnlyIssues(before, { records: [withUndef] })).toEqual([]);
+    expect(reactionLedgerAppendOnlyIssues(before, { records: [makeRecord({ note: 'появилась' })] }).length).toBe(1);
+  });
+});

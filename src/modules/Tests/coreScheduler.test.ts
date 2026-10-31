@@ -1252,3 +1252,154 @@ describe('Stage 4.2.3.1 Scheduler: snapshot-изоляция состояния 
     expect(result.diagnostics.join(' ')).toContain('рабочий снимок');
   });
 });
+
+// ============================================
+// STAGE 4.2.3.3.2 - ВАЛИДАЦИЯ НОВОГО ЖУРНАЛА БЕЗ СТАРОГО
+// ============================================
+//
+// Мир без журнала до шага: форма появившегося журнала проверяется
+// до фиксации. Некорректная форма (records не массив, null, битая
+// запись) — контролируемый reject, а не commit и не исключение;
+// валидные новые записи по-прежнему требуют аудита.
+
+describe('Stage 4.2.3.3.2 Scheduler: валидация нового журнала при отсутствии старого', () => {
+  /** Мир без журнала реакций (поле отсутствует). */
+  function worldWithoutLedger(): CoreWorldState {
+    const world = testWorld();
+    delete world.reactionLedger;
+    return world;
+  }
+
+  it('исходный мир без журнала: оператор добавляет валидный пустой журнал — commit', () => {
+    const world = worldWithoutLedger();
+    const addingEmpty: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({ ...w, reactionLedger: { records: [] } })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [addingEmpty], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger).toEqual({ records: [] });
+    // исходный мир по-прежнему без журнала
+    expect(world.reactionLedger).toBeUndefined();
+  });
+
+  it('исходный мир без журнала: records не массив, без аудита — reject', () => {
+    const world = worldWithoutLedger();
+    const addingBroken: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({ ...w, reactionLedger: { records: 'bad' } as unknown as ReactionLedger })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [addingBroken], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('append-only'))).toBe(true);
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger).toBeUndefined();
+    expect(world.clock.stepCount).toBe(0);
+  });
+
+  it('исходный мир без журнала: явный null — контролируемый reject, не исключение', () => {
+    const world = worldWithoutLedger();
+    const settingNull: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({ ...w, reactionLedger: null as unknown as ReactionLedger })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [settingNull], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.diagnostics.some((d) => d.includes('null'))).toBe(true);
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger).toBeUndefined();
+  });
+
+  it('исходный мир без журнала: массив с некорректной записью — reject до аудита', () => {
+    const world = worldWithoutLedger();
+    const addingInvalid: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: { records: [{ id: 'rxn-bad' }] as unknown as ReactionRecord[] }
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [addingInvalid], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    // форма отклоняется ДО стехиометрического аудита
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('некорректен'))).toBe(true);
+    expect(result.world).toBe(world);
+  });
+
+  it('с валидным аудитом новая сбалансированная запись — commit', () => {
+    const world = worldWithoutLedger();
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-new']);
+    expect(result.audit?.status).toBe('balanced');
+  });
+
+  it('с валидным аудитом новая несбалансированная запись — reject с imbalanced', () => {
+    const world = worldWithoutLedger();
+    const unbalanced: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: { records: [schedulerReaction('rxn-bad', 3)] }
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [unbalanced], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.world).toBe(world);
+  });
+
+  it('ошибочные сценарии не изменяют исходный мир, часы, журнал и вложенные ссылки', () => {
+    const scenarios: ProcessOperator[] = [
+      { processId: 'a', apply: (w) => ({ ...w, reactionLedger: { records: 'bad' } as unknown as ReactionLedger }) },
+      { processId: 'a', apply: (w) => ({ ...w, reactionLedger: null as unknown as ReactionLedger }) },
+      {
+        processId: 'a',
+        apply: (w) => ({ ...w, reactionLedger: { records: [{ id: 'rxn-bad' }] as unknown as ReactionRecord[] } })
+      }
+    ];
+    for (const operator of scenarios) {
+      const world = worldWithHistory();
+      const pristine = structuredClone(world);
+      const originalLedger = world.reactionLedger;
+      const originalRecord = originalLedger?.records[0];
+      const originalReservoir = world.reservoirs[0];
+      const result = runMacroStep(world, makeRegistry([descriptor('a')]), [operator], {
+        durationS: 10,
+        splitting: 'lie',
+        audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+      });
+      expect(result.status).toBe('rejected');
+      expect(result.audit).toBeUndefined();
+      expect(result.world).toBe(world);
+      expect(world.reactionLedger).toBe(originalLedger);
+      expect(world.reactionLedger?.records[0]).toBe(originalRecord);
+      expect(world.reservoirs[0]).toBe(originalReservoir);
+      expect(world.clock.stepCount).toBe(0);
+      expect(world).toEqual(pristine);
+    }
+  });
+});
