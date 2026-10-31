@@ -81,16 +81,40 @@ function migrateWorld(world: SavedWorld): SavedWorld {
  * живому состоянию ядра и не должны менять контракт загрузки старых
  * сохранений. Некорректный журнал не «чинится» и не подменяется
  * пустым: проблемы возвращаются диагностикой.
+ *
+ * Stage 4.2.3.3.2: отсутствие (undefined) и явный null
+ * различаются. Отсутствие поля coreWorldState или
+ * coreWorldState.reactionLedger — честное «не инициализировано»,
+ * не ошибка. ЯВНО заданный null (равно как не-объектное
+ * coreWorldState) — некорректная форма, которая раньше
+ * маскировалась под отсутствие: такое сохранение не возвращается
+ * как валидно загруженный мир, а получает точную причину в
+ * диагностике. Граница остаётся минимальной: полный
+ * validateWorldState не выполняется.
  */
 function reactionLedgerProblemsOfWorld(world: SavedWorld): string[] {
   const core: unknown = (world as { coreWorldState?: unknown }).coreWorldState;
-  if (typeof core !== 'object' || core === null) {
+  // Stage 4.2.3.3.2: отсутствие поля (undefined) — «ядро не
+  // инициализировано», не ошибка; явный null и прочие не-объектные
+  // значения — некорректная форма, не маскируемая под отсутствие.
+  if (core === undefined) {
     return [];
+  }
+  if (typeof core !== 'object' || core === null || Array.isArray(core)) {
+    const description = core === null ? 'null' : Array.isArray(core) ? 'массив' : 'значение типа ' + typeof core;
+    return ['coreWorldState должен быть объектом-состоянием ядра (или отсутствовать), получено: ' + description];
   }
   const coreRecord = core as Record<string, unknown>;
   const ledger: unknown = coreRecord.reactionLedger;
-  if (ledger === undefined || ledger === null) {
+  // Stage 4.2.3.3.2: undefined — отсутствие журнала, не ошибка;
+  // null — некорректная форма: контракт CoreWorldState допускает
+  // отсутствие поля, но не ReactionLedger | null. Дальнейшие
+  // правила формы — существующий validateReactionLedger.
+  if (ledger === undefined) {
     return [];
+  }
+  if (ledger === null) {
+    return ['coreWorldState.reactionLedger: журнал реакций равен null — отсутствие журнала выражается отсутствием поля, а не null (некорректная форма)'];
   }
   const rawReservoirs: unknown = coreRecord.reservoirs;
   const reservoirIds = Array.isArray(rawReservoirs)
