@@ -12,11 +12,13 @@ import {
   CRADLE_RELATED_CATEGORIES
 } from '../Compatibility';
 import { determineCradleLocalEnvironment } from '../WorldModel';
-import type { GeneratedWorld, AtmosphereState, PhysicalCharacteristics } from '../../types';
+import type { GeneratedWorld, AtmosphereState, PhysicalCharacteristics, CradleLocalEnvironment } from '../../types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
-import { knownValue, estimatedValue, unknownValue, notApplicable } from '../Core/scientificValue';
+import { knownValue, estimatedValue, unknownValue, notApplicable, invalidValue } from '../Core/scientificValue';
+import type { DataProvenance, ScientificValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 import { createCoreWorldState } from '../Core/worldState';
+import type { ReservoirRecord } from '../Core/reservoir';
 import { atmospherePresetTemperatureToScientificValue } from '../Core/adapters';
 
 // ============================================
@@ -80,13 +82,45 @@ function errorsForRule(warnings: ReturnType<typeof checkCompatibility>, ruleId: 
 }
 
 /**
- * Stage 4.2.2.2: мир с типизированной (known/estimated) температурой
- * поверхности в научном ядре (coreWorldState → тело 'planet' →
- * thermalState.surfaceTemperature) со статусом и provenance.
+ * Stage 4.2.2.2 / 4.2.2.3: мир с типизированной (known/estimated)
+ * температурой поверхности в научном ядре (coreWorldState → тело
+ * 'planet' → thermalState.surfaceTemperature) со статусом и
+ * provenance. Stage 4.2.2.3: параметр provenance даёт полный контроль
+ * над происхождением (включая ЯВНО пустой объект {} или только note —
+ * для тестов evidence gate).
  */
 function withTypedSurfaceTemperature(
   world: Partial<GeneratedWorld>,
-  temperature: { status: 'known' | 'estimated'; valueK: number; sourceName?: string }
+  temperature: {
+    status: 'known' | 'estimated';
+    valueK: number;
+    sourceName?: string;
+    provenance?: DataProvenance;
+  }
+): Partial<GeneratedWorld> {
+  const provenance: DataProvenance | undefined =
+    temperature.provenance !== undefined
+      ? temperature.provenance
+      : temperature.sourceName !== undefined
+        ? { sourceName: temperature.sourceName }
+        : undefined;
+  const value =
+    temperature.status === 'known'
+      ? knownValue(quantity(temperature.valueK, 'K'), { provenance })
+      : estimatedValue(quantity(temperature.valueK, 'K'), 'оценка фикстуры теста', { provenance });
+  return withCoreSurfaceTemperature(world, value);
+}
+
+/**
+ * Stage 4.2.2.3: инъекция ПРОИЗВОЛЬНОГО ScientificValue как
+ * thermalState.surfaceTemperature тела 'planet' (включая значения
+ * искажённой формы: NaN, неверная единица, invalid — фикстуры
+ * обходят конструкторы ядра намеренно, чтобы проверять поведение
+ * правил на данных произвольного происхождения).
+ */
+function withCoreSurfaceTemperature(
+  world: Partial<GeneratedWorld>,
+  value: ScientificValue
 ): Partial<GeneratedWorld> {
   const core = createCoreWorldState('w-typed-surface');
   core.bodies.push({
@@ -96,20 +130,98 @@ function withTypedSurfaceTemperature(
     thermalState: {
       effectiveTemperature: notApplicable('планета — получатель излучения'),
       equilibriumTemperature: unknownValue('T_eq не задана в фикстуре'),
-      surfaceTemperature:
-        temperature.status === 'known'
-          ? knownValue(quantity(temperature.valueK, 'K'), {
-              provenance:
-                temperature.sourceName !== undefined ? { sourceName: temperature.sourceName } : undefined
-            })
-          : estimatedValue(quantity(temperature.valueK, 'K'), 'оценка фикстуры теста', {
-              provenance:
-                temperature.sourceName !== undefined ? { sourceName: temperature.sourceName } : undefined
-            }),
+      surfaceTemperature: value,
       atmosphericTemperatureProfile: { status: 'unknown', layers: [] }
     }
   });
   return { ...world, coreWorldState: core };
+}
+
+/**
+ * Stage 4.2.2.3: фиксура локальной среды с переопределённым типом
+ * расположения. Поверхность и океан — РАЗНЫЕ области с раздельными
+ * источниками температуры; тесты правил обязаны выбирать область
+ * явно, а не полагаться на совпадение колыбели и расположения.
+ */
+function withLocationType(
+  world: Partial<GeneratedWorld>,
+  locationType: CradleLocalEnvironment['locationType']
+): Partial<GeneratedWorld> {
+  const env = world.cradleLocalEnvironment as CradleLocalEnvironment;
+  return {
+    ...world,
+    cradleLocalEnvironment: {
+      ...env,
+      locationType,
+      locationDescription: `фикстура Stage 4.2.2.3: локальная среда ${locationType}`
+    }
+  };
+}
+
+/**
+ * Stage 4.2.2.3: мир с океаническим резервуаром в научном ядре,
+ * явно привязанным к локальной среде колыбели через
+ * env.localReservoirId. Резервуар принадлежит телу 'planet'
+ * (или указанному телу — для негативных тестов «чужого» резервуара).
+ */
+function withOceanReservoir(
+  world: Partial<GeneratedWorld>,
+  options: {
+    reservoirTemperature?: ScientificValue;
+    reservoirId?: string;
+    reservoirBodyId?: string;
+    withMoonBody?: boolean;
+    linkReservoirId?: string | null;
+  } = {}
+): Partial<GeneratedWorld> {
+  const core = createCoreWorldState('w-typed-ocean');
+  core.bodies.push({
+    id: 'planet',
+    kind: 'planet',
+    properties: {},
+    thermalState: {
+      effectiveTemperature: notApplicable('планета — получатель излучения'),
+      equilibriumTemperature: unknownValue('T_eq не задана в фикстуре'),
+      surfaceTemperature: unknownValue('фикстура: поверхность не заявлена'),
+      atmosphericTemperatureProfile: { status: 'unknown', layers: [] }
+    }
+  });
+  if (options.withMoonBody) {
+    core.bodies.push({
+      id: 'moon',
+      kind: 'moon',
+      properties: {},
+      thermalState: {
+        effectiveTemperature: notApplicable('луна — получатель излучения'),
+        equilibriumTemperature: unknownValue('T_eq не задана в фикстуре'),
+        surfaceTemperature: unknownValue('фикстура: поверхность не заявлена'),
+        atmosphericTemperatureProfile: { status: 'unknown', layers: [] }
+      }
+    });
+  }
+  const reservoirId = options.reservoirId ?? 'ocean_reservoir';
+  const reservoir: ReservoirRecord = {
+    id: reservoirId,
+    kind: 'ocean',
+    bodyId: options.reservoirBodyId ?? 'planet',
+    properties: {},
+    ...(options.reservoirTemperature !== undefined
+      ? { reservoirTemperature: options.reservoirTemperature }
+      : {})
+  };
+  core.reservoirs.push(reservoir);
+
+  const env = world.cradleLocalEnvironment as CradleLocalEnvironment;
+  const linkedReservoirId =
+    options.linkReservoirId === null ? undefined : (options.linkReservoirId ?? reservoirId);
+  return {
+    ...world,
+    coreWorldState: core,
+    cradleLocalEnvironment:
+      linkedReservoirId !== undefined
+        ? { ...env, localReservoirId: linkedReservoirId }
+        : env
+  };
 }
 
 function baseWorld(): Partial<GeneratedWorld> {
@@ -388,14 +500,20 @@ describe('Cradle Local Environment Compatibility', () => {
 
   describe('cradle_temperature_compatibility — температура локальной среды', () => {
     it('известная (known) типизированная поверхностная температура вне диапазона колыбели даёт ошибку', () => {
-      // Метаново-этановый океан: 90–200 K, измерено 288 K
-      // (Stage 4.2.2.2: ошибка — только доказанное known-значение)
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+      // Метаново-этановый океан: 90–200 K, измерено 288 K.
+      // Stage 4.2.2.2: ошибка — только доказанное known-значение.
+      // Stage 4.2.2.3: доказательство — значение ИМЕННО указанной
+      // области; фикстура переопределяет расположение на поверхность,
+      // потому что typed surfaceTemperature доказывает только её.
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
 
       const warnings = checkCompatibility(world, 'realistic');
@@ -405,12 +523,15 @@ describe('Cradle Local Environment Compatibility', () => {
     });
 
     it('известная (known) типизированная поверхностная температура в диапазоне проходит проверку', () => {
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
 
       const warnings = checkCompatibility(world, 'realistic');
@@ -499,12 +620,17 @@ describe('Cradle Local Environment Compatibility', () => {
     it('известная (known) температура вне диапазона по-прежнему даёт ошибку', () => {
       // 288 K вне диапазона метанового океана 90–200 K
       // (Stage 4.2.2.2: доказанное known-значение из научного ядра)
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+      // Stage 4.2.2.3: доказательство — значение ИМЕННО указанной
+      // области; typed surfaceTemperature доказывает только поверхность.
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
 
       const warnings = checkCompatibility(world, 'realistic');
@@ -517,12 +643,15 @@ describe('Cradle Local Environment Compatibility', () => {
     });
 
     it('известная (known) температура в диапазоне проходит проверку без предупреждений', () => {
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
 
       const warnings = checkCompatibility(world, 'realistic');
@@ -611,13 +740,18 @@ describe('Cradle Local Environment Compatibility', () => {
 
       // Мир с известной (known) температурой в диапазоне: та же итоговая
       // совместимость, но предупреждения о недоказанности нет —
-      // два состояния различимы только через диагностику
-      const provenWorld = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+      // два состояния различимы только через диагностику.
+      // Stage 4.2.2.3: typed surfaceTemperature доказывает только
+      // поверхность — фикстура переопределяет область.
+      const provenWorld = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
       expect(isWorldCompatible(provenWorld, 'realistic')).toBe(true);
       expect(
@@ -631,12 +765,17 @@ describe('Cradle Local Environment Compatibility', () => {
   // без происхождения не становится измерением.
   describe('Stage 4.2.2.2: оценка не является доказанным противоречием', () => {
     it('known вне диапазона → ошибка (доказанное нарушение)', () => {
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+      // Stage 4.2.2.3: typed surfaceTemperature доказывает только
+      // поверхность — фикстура переопределяет область колыбели.
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
       const warnings = checkCompatibility(world, 'realistic');
       const errors = errorsForRule(warnings, 'cradle_temperature_compatibility');
@@ -736,11 +875,16 @@ describe('Cradle Local Environment Compatibility', () => {
       // Старое сохранение: 288 K в легаси-поле без статуса/метода/
       // источника. Вне диапазона метанового океана — предупреждение
       // об оценочном расхождении, а не error.
-      const world = makeWorld('liquid_methane_ethane', {
-        ...baseWorld(),
-        atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5),
-        physicalCharacteristics: makePhysicalCharacteristics({ surfaceTemperature: 288 })
-      });
+      // Stage 4.2.2.3: легаси-число поверхности читается только как
+      // оценочный сценарий ПОВЕРХНОСТИ — фикстура задаёт область явно.
+      const world = withLocationType(
+        makeWorld('liquid_methane_ethane', {
+          ...baseWorld(),
+          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5),
+          physicalCharacteristics: makePhysicalCharacteristics({ surfaceTemperature: 288 })
+        }),
+        'surface'
+      );
       const warnings = checkCompatibility(world, 'realistic');
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
       const estimate = errorsForRule(warnings, 'cradle_temperature_estimate_outside_range');
@@ -752,11 +896,14 @@ describe('Cradle Local Environment Compatibility', () => {
     });
 
     it('легаси-число в диапазоне не даёт молчаливого подтверждения', () => {
-      const world = makeWorld('liquid_methane_ethane', {
-        ...baseWorld(),
-        atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5),
-        physicalCharacteristics: makePhysicalCharacteristics({ surfaceTemperature: 150 })
-      });
+      const world = withLocationType(
+        makeWorld('liquid_methane_ethane', {
+          ...baseWorld(),
+          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5),
+          physicalCharacteristics: makePhysicalCharacteristics({ surfaceTemperature: 150 })
+        }),
+        'surface'
+      );
       const warnings = checkCompatibility(world, 'realistic');
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
       expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(0);
@@ -765,12 +912,17 @@ describe('Cradle Local Environment Compatibility', () => {
     });
 
     it('типизированная known-температура подтверждает диапазон', () => {
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+      // Stage 4.2.2.3: typed surfaceTemperature доказывает только
+      // поверхность — фикстура переопределяет область колыбели.
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
       );
       const warnings = checkCompatibility(world, 'realistic');
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
@@ -779,17 +931,481 @@ describe('Cradle Local Environment Compatibility', () => {
     });
 
     it('типизированная estimated-температура не создаёт жёсткой физической ошибки', () => {
-      // Оценка 288 K вне диапазона 90–200 K: предупреждения, не ошибка
-      const world = withTypedSurfaceTemperature(
-        makeWorld('liquid_methane_ethane', {
-          ...baseWorld(),
-          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
-        }),
-        { status: 'estimated', valueK: 288, sourceName: 'оценка фикстуры' }
+      // Оценка 288 K вне диапазона 90–200 K: предупреждения, не ошибка.
+      // Stage 4.2.2.3: оценка поверхности относится к поверхности —
+      // фикстура переопределяет область колыбели.
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'estimated', valueK: 288, sourceName: 'оценка фикстуры' }
+        ),
+        'surface'
       );
       const warnings = checkCompatibility(world, 'realistic');
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
       expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(1);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+      expect(isWorldCompatible(world, 'realistic')).toBe(true);
+    });
+  });
+
+  // Stage 4.2.2.3 (§4.1 ТЗ): известное (known) значение становится
+  // доказательством температурной совместимости ТОЛЬКО при
+  // содержательном provenance. Статус known сам по себе, пустой
+  // объект provenance или один только note идентификацией
+  // происхождения не являются: такое значение — недоказанность
+  // (правило 6a), а не физическая ошибка (правило 6). Непригодное
+  // число (invalid, не в K, NaN, отрицательное) физическим
+  // доказательством не становится ни при каком provenance.
+  describe('Stage 4.2.2.3: evidence gate — known требует содержательного provenance', () => {
+    it('known с содержательным provenance вне диапазона → доказанная ошибка', () => {
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(1);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_estimate_outside_range')).toBe(false);
+    });
+
+    it('known с содержательным provenance в диапазоне → доказанная проверка без предупреждений', () => {
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 150, sourceName: 'измерение фикстуры' }
+        ),
+        'surface'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_estimate_outside_range')).toBe(false);
+    });
+
+    it('known БЕЗ provenance — не доказательство: вне диапазона нет ошибки, есть недоказанность', () => {
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288 } // ни sourceName, ни provenance
+        ),
+        'surface'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      const unproven = warnings.filter(w => w.ruleId === 'cradle_temperature_unproven');
+      expect(unproven).toHaveLength(1);
+      expect(unproven[0].severity).toBe('warning');
+      expect(unproven[0].message).toContain('НЕ ДОКАЗАНА');
+      // Число без происхождения не считается доказанным значением и
+      // не порождает дублирующего оценочного предупреждения
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_estimate_outside_range')).toBe(false);
+    });
+
+    it('known БЕЗ provenance в диапазоне всё равно остаётся недоказанным', () => {
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 150 } // ни sourceName, ни provenance
+        ),
+        'surface'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('known с ПУСТЫМ provenance {} — те же ожидания, что и без provenance', () => {
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288, provenance: {} }
+        ),
+        'surface'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      const unproven = warnings.filter(w => w.ruleId === 'cradle_temperature_unproven');
+      expect(unproven).toHaveLength(1);
+      expect(unproven[0].message).toContain('НЕ ДОКАЗАНА');
+    });
+
+    it('known с provenance только {note} — note не идентифицирует происхождение', () => {
+      const world = withLocationType(
+        withTypedSurfaceTemperature(
+          makeWorld('liquid_methane_ethane', {
+            ...baseWorld(),
+            atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+          }),
+          { status: 'known', valueK: 288, provenance: { note: 'заметка без источника' } }
+        ),
+        'surface'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('непригодные формы числа не становятся физическим доказательством', () => {
+      const makeSurfaceWorld = (value: ScientificValue) =>
+        withLocationType(
+          withCoreSurfaceTemperature(
+            makeWorld('liquid_methane_ethane', {
+              ...baseWorld(),
+              atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+            }),
+            value
+          ),
+          'surface'
+        );
+
+      const fixtures: Array<{ label: string; value: ScientificValue }> = [
+        {
+          label: 'invalid-статус',
+          value: invalidValue('повреждённая запись', quantity(288, 'K'), { sourceName: 'источник фикстуры' })
+        },
+        {
+          label: 'неправильная единица (Па вместо K)',
+          value: knownValue(quantity(288, 'Pa'), { provenance: { sourceName: 'источник фикстуры' } })
+        },
+        {
+          label: 'NaN в значении',
+          value: {
+            status: 'known',
+            quantity: { value: Number.NaN, unit: 'K' },
+            provenance: { sourceName: 'источник фикстуры' }
+          } as unknown as ScientificValue
+        },
+        {
+          label: 'отрицательная температура',
+          value: knownValue(quantity(-5, 'K'), { provenance: { sourceName: 'источник фикстуры' } })
+        }
+      ];
+
+      for (const fixture of fixtures) {
+        const warnings = checkCompatibility(makeSurfaceWorld(fixture.value), 'realistic');
+        // Пригодное provenance НЕ спасает непригодное число: ошибки
+        // только на основании статуса known не возникает
+        expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+        expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+      }
+    });
+
+    it('проверяемый расчёт не требует библиографии: method и rawInput — содержательный provenance', () => {
+      const makeWorldWith = (provenance: DataProvenance) =>
+        withLocationType(
+          withTypedSurfaceTemperature(
+            makeWorld('liquid_methane_ethane', {
+              ...baseWorld(),
+              atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+            }),
+            { status: 'known', valueK: 288, provenance }
+          ),
+          'surface'
+        );
+
+      // Только метод расчёта: происхождение проверяемо без библиографии
+      const methodWarnings = checkCompatibility(
+        makeWorldWith({ method: 'energy balance fixed-point iteration' }),
+        'realistic'
+      );
+      expect(errorsForRule(methodWarnings, 'cradle_temperature_compatibility')).toHaveLength(1);
+      expect(methodWarnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+
+      // Только исходные параметры расчёта
+      const rawInputWarnings = checkCompatibility(
+        makeWorldWith({ rawInput: { 'A (альбедо Бонда)': 0.3, f: 1, 'ε': 1 } }),
+        'realistic'
+      );
+      expect(errorsForRule(rawInputWarnings, 'cradle_temperature_compatibility')).toHaveLength(1);
+      expect(rawInputWarnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+  });
+
+  // Stage 4.2.2.3 (§4.5–9 ТЗ): поверхность и океан — РАЗНЫЕ области
+  // с раздельными источниками температуры. Температура поверхности
+  // не подтверждает и не опровергает океанскую колыбель; океан
+  // доказывается ТОЛЬКО температурой конкретного резервуара по
+  // явной ссылке localReservoirId; произвольный резервуар по
+  // совпадению kind и резервуары других тел не выбираются.
+  describe('Stage 4.2.2.3: поверхность ≠ океан', () => {
+    const oceanWorld = () =>
+      makeWorld('liquid_methane_ethane', {
+        ...baseWorld(),
+        atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+      });
+
+    it('доказанная температура поверхности НЕ подтверждает температуру океана', () => {
+      // typed surface known 150 (в диапазоне 90–200), но океанская
+      // среда не связана ни с каким резервуаром
+      const world = withTypedSurfaceTemperature(oceanWorld(), {
+        status: 'known',
+        valueK: 150,
+        sourceName: 'измерение фикстуры'
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('доказанная температура поверхности вне диапазона НЕ опровергает океанскую колыбель', () => {
+      const world = withTypedSurfaceTemperature(oceanWorld(), {
+        status: 'known',
+        valueK: 288,
+        sourceName: 'измерение фикстуры'
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      // 288 K вне 90–200 K, но это температура ПОВЕРХНОСТИ, а не океана:
+      // доказанного опровержения нет — только недоказанность
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('океан с явным reservoir (known + provenance) вне диапазона → доказанная ошибка', () => {
+      const world = withOceanReservoir(
+        oceanWorld(),
+        {
+          reservoirTemperature: knownValue(quantity(288, 'K'), {
+            provenance: { sourceName: 'зонд фикстуры: температура океана' }
+          })
+        }
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      const errors = errorsForRule(warnings, 'cradle_temperature_compatibility');
+      expect(errors).toHaveLength(1);
+      expect(errors[0].severity).toBe('error');
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_estimate_outside_range')).toBe(false);
+    });
+
+    it('океан с явным reservoir (known + provenance) в диапазоне → доказанная проверка', () => {
+      const world = withOceanReservoir(
+        oceanWorld(),
+        {
+          reservoirTemperature: knownValue(quantity(150, 'K'), {
+            provenance: { sourceName: 'зонд фикстуры: температура океана' }
+          })
+        }
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_estimate_outside_range')).toBe(false);
+    });
+
+    it('океан без reservoir ID → недоказанность, отсутствие ошибки именно из-за неизвестности', () => {
+      const world = withOceanReservoir(oceanWorld(), { linkReservoirId: null });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(0);
+      const unproven = warnings.filter(w => w.ruleId === 'cradle_temperature_unproven');
+      expect(unproven).toHaveLength(1);
+      expect(unproven[0].message).toContain('НЕ ДОКАЗАНА');
+    });
+
+    it('резервуар без температуры → недоказанность, не ошибка', () => {
+      const world = withOceanReservoir(oceanWorld(), { reservoirTemperature: undefined });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('резервуар с unknown-температурой → недоказанность, не ошибка', () => {
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirTemperature: unknownValue('температура океана не измерялась')
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('резервуар known БЕЗ provenance вне диапазона → нет ошибки, недоказанность', () => {
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirTemperature: knownValue(quantity(288, 'K')) // без provenance
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('резервуар estimated вне диапазона → оценочное предупреждение и недоказанность, НЕ ошибка', () => {
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirTemperature: estimatedValue(quantity(288, 'K'), 'модельная оценка фикстуры', {
+          provenance: { sourceName: 'оценка фикстуры' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      const estimate = errorsForRule(warnings, 'cradle_temperature_estimate_outside_range');
+      expect(estimate).toHaveLength(1);
+      expect(estimate[0].severity).toBe('warning');
+      expect(estimate[0].message).toContain('НЕ является доказанным физическим противоречием');
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('резервуар ДРУГОГО тела не выбирается как температура океана', () => {
+      // Резервуар физически существует, но принадлежит луне —
+      // читается только пара (bodyId 'planet', localReservoirId)
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirBodyId: 'moon',
+        withMoonBody: true,
+        reservoirTemperature: knownValue(quantity(288, 'K'), {
+          provenance: { sourceName: 'зонд фикстуры: чужой резервуар' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('ссылка на несуществующий reservoir ID → недоказанность, не ошибка', () => {
+      const world = withOceanReservoir(oceanWorld(), {
+        linkReservoirId: 'несуществующий_резервуар',
+        reservoirTemperature: knownValue(quantity(288, 'K'), {
+          provenance: { sourceName: 'зонд фикстуры' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('подземная среда доказывается температурой явно связанного резервуара', () => {
+      // Сверхкритическая вода (647–1000 K, глубинный резервуар):
+      // локальная среда subsurface_reservoir, связанная с резервуаром
+      // ядра, доказывается его температурой — доказательство через
+      // резервуар работает и для неокеанских областей
+      const world = withOceanReservoir(
+        makeWorld('supercritical_water', {
+          ...baseWorld(),
+          atmosphere: makeAtmosphere([['n2', 100]], null, null)
+        }),
+        {
+          reservoirTemperature: knownValue(quantity(700, 'K'), {
+            provenance: { sourceName: 'скважина фикстуры: сверхкритический резервуар' }
+          })
+        }
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+  });
+
+  // Stage 4.2.2.3 (§4.10–12 ТЗ): приоритет типизированного значения
+  // над легаси-скаляром. При наличии пригодного typed known
+  // легаси-число не читается вовсе; легаси-скаляр без типизированного
+  // значения — оценочный сценарий ТОЛЬКО поверхности: он не создаёт
+  // ни ошибки, ни молчаливого подтверждения.
+  describe('Stage 4.2.2.3: приоритет typed над легаси-скаляром', () => {
+    const surfaceWorld = (legacySurfaceTemperature?: number) =>
+      withLocationType(
+        makeWorld('liquid_methane_ethane', {
+          ...baseWorld(),
+          atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5),
+          ...(legacySurfaceTemperature !== undefined
+            ? {
+                physicalCharacteristics: makePhysicalCharacteristics({
+                  surfaceTemperature: legacySurfaceTemperature
+                })
+              }
+            : {})
+        }),
+        'surface'
+      );
+
+    it('typed known в диапазоне + легаси-число вне диапазона → нет ни ошибки, ни предупреждений', () => {
+      const world = withTypedSurfaceTemperature(surfaceWorld(288), {
+        status: 'known',
+        valueK: 150,
+        sourceName: 'измерение фикстуры'
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+
+    it('typed known вне диапазона + легаси-число в диапазоне → одна доказанная ошибка без дублирующего предупреждения', () => {
+      const world = withTypedSurfaceTemperature(surfaceWorld(150), {
+        status: 'known',
+        valueK: 288,
+        sourceName: 'измерение фикстуры'
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      const errors = errorsForRule(warnings, 'cradle_temperature_compatibility');
+      expect(errors).toHaveLength(1);
+      expect(errors[0].severity).toBe('error');
+      // Легаси-скаляр после пригодного typed known не читается:
+      // оценочного предупреждения нет
+      expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+
+    it('только легаси-число вне диапазона → оценочное предупреждение, никогда ошибка', () => {
+      const world = surfaceWorld(288);
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      const estimate = errorsForRule(warnings, 'cradle_temperature_estimate_outside_range');
+      expect(estimate).toHaveLength(1);
+      expect(estimate[0].severity).toBe('warning');
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+      expect(isWorldCompatible(world, 'realistic')).toBe(true);
+    });
+
+    it('только легаси-число в диапазоне → нет оценочного предупреждения, но остаётся недоказанным', () => {
+      const world = surfaceWorld(150);
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('даже абсурдное легаси-число (5000 K) даёт только предупреждение', () => {
+      const world = surfaceWorld(5000);
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(1);
+      expect(isWorldCompatible(world, 'realistic')).toBe(true);
+    });
+  });
+
+  // Stage 4.2.2.3: запрет fallback — легаси-число поверхности не
+  // используется даже как ОЦЕНКА океанской среды. Оценочный сценарий
+  // правила 6b строится только по значению указанной области.
+  describe('Stage 4.2.2.3: легаси-число поверхности не используется как оценка океана', () => {
+    it('океанская среда + легаси surfaceTemperature вне диапазона → нет оценочного предупреждения, только недоказанность', () => {
+      const world = makeWorld('liquid_methane_ethane', {
+        ...baseWorld(),
+        atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5),
+        physicalCharacteristics: makePhysicalCharacteristics({ surfaceTemperature: 288 })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      // Поверхностные 288 K — не температура океана: правило 6b
+      // молчит, оценка не выдумывается
+      expect(errorsForRule(warnings, 'cradle_temperature_estimate_outside_range')).toHaveLength(0);
       expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
       expect(isWorldCompatible(world, 'realistic')).toBe(true);
     });

@@ -10,8 +10,13 @@ import {
   generateRandomSeed,
   isCradleSupportedOnWorld
 } from '../Generator/generator';
-import type { GenerationSettings, AtmosphereState } from '../../types';
+import type { GenerationSettings, AtmosphereState, PhysicalCharacteristics, CradleLocalEnvironment } from '../../types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
+import { determineCradleLocalEnvironment } from '../WorldModel';
+import { knownValue, estimatedValue, unknownValue, notApplicable } from '../Core/scientificValue';
+import type { ScientificValue } from '../Core/scientificValue';
+import { quantity } from '../Core/physicalQuantity';
+import { createCoreWorldState } from '../Core/worldState';
 
 function baseSettings(overrides: Partial<GenerationSettings> = {}): GenerationSettings {
   return {
@@ -662,6 +667,174 @@ describe('Data Validation', () => {
       );
       expect(withoutProvenErrors.length).toBeGreaterThan(0);
       expect(hypothetical.length).toBe(withoutProvenErrors.length);
+    });
+  });
+
+  // Stage 4.2.2.3 (§4.13–14 ТЗ): доказанные нарушения в РЕАЛЬНОМ
+  // пути выбора колыбели (isCradleSupportedOnWorld → checkCompatibility →
+  // фильтр severity 'error'), а не только в изолированном
+  // вызове checkCompatibility. Контекст фильтрации расширен
+  // опциональными coreWorldState/cradleLocalEnvironment: в реальном
+  // генерационном контуре ядро строится ПОСЛЕ выбора колыбели, поэтому
+  // на этапе выбора доказательств нет и поведение генерации не меняется.
+  describe('Stage 4.2.2.3: доказанные нарушения в реальном пути выбора колыбели', () => {
+    const cradle = cradles.find(c => c.id === 'liquid_methane_ethane')!;
+    const centralObject = centralObjects.find(o => o.id === 'yellow_dwarf')!;
+    const celestialBody = celestialBodies.find(b => b.id === 'earth_like')!;
+    const atmosphere: AtmosphereState = {
+      components: [
+        { gasId: 'ch4', percentage: 60, isTrace: false, uncertainty: '', warnings: [] },
+        { gasId: 'c2h6', percentage: 15, isTrace: false, uncertainty: '', warnings: [] },
+        { gasId: 'n2', percentage: 25, isTrace: false, uncertainty: '', warnings: [] }
+      ],
+      totalPressure: 1.5,
+      temperature: 95,
+      notes: 'фикстура: метаново-этановая атмосфера'
+    };
+    const bodyCharacteristics = {
+      surfaceTemperature: 150,
+      atmosphericPressure: 1.5,
+      geologicalActivity: 'Высокая геологическая активность'
+    } as PhysicalCharacteristics;
+
+    /** Ядро с планетой и океаническим резервуаром с заданной температурой. */
+    const coreWithReservoirTemperature = (temperature: ScientificValue) => {
+      const core = createCoreWorldState('w-select-cradle');
+      core.bodies.push({
+        id: 'planet',
+        kind: 'planet',
+        properties: {},
+        thermalState: {
+          effectiveTemperature: notApplicable('планета — получатель излучения'),
+          equilibriumTemperature: unknownValue('T_eq не задана в фикстуре'),
+          surfaceTemperature: unknownValue('фикстура: поверхность не заявлена'),
+          atmosphericTemperatureProfile: { status: 'unknown', layers: [] }
+        }
+      });
+      core.reservoirs.push({
+        id: 'ocean_reservoir',
+        kind: 'ocean',
+        bodyId: 'planet',
+        properties: {},
+        reservoirTemperature: temperature
+      });
+      return core;
+    };
+
+    /** Локальная среда колыбели, явно связанная с резервуаром ядра. */
+    const environment = (): CradleLocalEnvironment => ({
+      ...determineCradleLocalEnvironment({ cradle }),
+      localReservoirId: 'ocean_reservoir'
+    });
+
+    it('доказанное known-нарушение исключает колыбель из автоматического выбора', () => {
+      // Резервуар океана: известные (known) 288 K с содержательным
+      // provenance вне диапазона 90–200 K → ошибка правила 6 →
+      // isCradleSupportedOnWorld = false
+      const rejected = isCradleSupportedOnWorld(cradle, {
+        mode: 'realistic',
+        centralObject,
+        celestialBody,
+        atmosphere,
+        bodyCharacteristics,
+        coreWorldState: coreWithReservoirTemperature(
+          knownValue(quantity(288, 'K'), {
+            provenance: { sourceName: 'зонд фикстуры: температура океана' }
+          })
+        ),
+        cradleLocalEnvironment: environment()
+      });
+      expect(rejected).toBe(false);
+
+      // Контроль: те же параметры, но доказанные 150 K в диапазоне —
+      // колыбель поддержана. False в первом случае именно из-за
+      // доказанного температурного нарушения.
+      const supported = isCradleSupportedOnWorld(cradle, {
+        mode: 'realistic',
+        centralObject,
+        celestialBody,
+        atmosphere,
+        bodyCharacteristics,
+        coreWorldState: coreWithReservoirTemperature(
+          knownValue(quantity(150, 'K'), {
+            provenance: { sourceName: 'зонд фикстуры: температура океана' }
+          })
+        ),
+        cradleLocalEnvironment: environment()
+      });
+      expect(supported).toBe(true);
+    });
+
+    it('known БЕЗ provenance не исключает колыбель: недоказанность не становится ошибкой', () => {
+      const supported = isCradleSupportedOnWorld(cradle, {
+        mode: 'realistic',
+        centralObject,
+        celestialBody,
+        atmosphere,
+        bodyCharacteristics,
+        coreWorldState: coreWithReservoirTemperature(
+          knownValue(quantity(288, 'K')) // без provenance — не доказательство
+        ),
+        cradleLocalEnvironment: environment()
+      });
+      expect(supported).toBe(true);
+    });
+
+    it('estimated-расхождение и unknown не превращаются в hard error', () => {
+      // Оценка резервуара 288 K вне диапазона — предупреждение,
+      // колыбель остаётся кандидатом
+      const estimatedSupported = isCradleSupportedOnWorld(cradle, {
+        mode: 'realistic',
+        centralObject,
+        celestialBody,
+        atmosphere,
+        bodyCharacteristics,
+        coreWorldState: coreWithReservoirTemperature(
+          estimatedValue(quantity(288, 'K'), 'модельная оценка фикстуры', {
+            provenance: { sourceName: 'оценка фикстуры' }
+          })
+        ),
+        cradleLocalEnvironment: environment()
+      });
+      expect(estimatedSupported).toBe(true);
+
+      // Без coreWorldState (реальный генерационный контур: ядро ещё
+      // не построено) локальная температура неизвестна — недоказанность,
+      // не ошибка
+      const unknownSupported = isCradleSupportedOnWorld(cradle, {
+        mode: 'realistic',
+        centralObject,
+        celestialBody,
+        atmosphere,
+        bodyCharacteristics
+      });
+      expect(unknownSupported).toBe(true);
+    });
+
+    it('реальная генерация: без ядра нет доказанных температурных ошибок, есть недоказанность', () => {
+      // Генератор не создаёт coreWorldState на этапе выбора колыбели:
+      // ни оценки, ни легаси-числа не могут превратиться в ошибку.
+      const world = generateWorld(baseSettings({
+        seed: 'cradle_real_path_unproven',
+        fixedCategories: {
+          cosmology: 'big_bang',
+          centralObject: 'yellow_dwarf',
+          celestialBody: 'earth_like',
+          cradle: 'liquid_methane_ethane'
+        },
+        customAtmosphere: atmosphere
+      }));
+
+      expect(world.cradle.id).toBe('liquid_methane_ethane');
+      // Доказанной ошибки нет
+      expect(
+        world.warnings.some(w => w.ruleId === 'cradle_temperature_compatibility')
+      ).toBe(false);
+      // Молчаливого подтверждения тоже нет: локальная температура
+      // колыбели недоказана (ядро строится после выбора)
+      expect(
+        world.warnings.some(w => w.ruleId === 'cradle_temperature_unproven')
+      ).toBe(true);
     });
   });
 });
