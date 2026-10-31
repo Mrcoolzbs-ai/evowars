@@ -47,20 +47,23 @@
 import type { CoreWorldState } from './worldState';
 import { validateWorldState } from './worldState';
 import type { SpeciesCatalog } from './species';
-import type { BalanceDiscrepancy, ConservationStatus, FluxAuditScope, FluxLedger } from './fluxLedger';
+import type { AuditOptions, BalanceDiscrepancy, ConservationStatus, FluxAuditScope, FluxLedger, FluxSubject } from './fluxLedger';
 import {
   auditChargeConservation,
   auditElementConservation,
   auditEnergyConservation,
   auditReservoirFluxes,
   auditSubstanceConservation,
+  excludedUntimed,
+  recordInScope,
   validateFluxLedger,
   validateLedgerReferences,
   validateReservoirInventories
 } from './fluxLedger';
-import type { ReactionLedger } from './reactionLedger';
-import { auditReactionLedger } from './reactionLedger';
+import type { ReactionInventoryDeltas, ReactionLedger } from './reactionLedger';
+import { auditReactionLedger, reactionInventoryDeltas } from './reactionLedger';
 import type { ReservoirRecord } from './reservoir';
+import { isPlainRecord } from './reservoir';
 import { comparePoints, now, validateClock } from './simulationClock';
 
 // ============================================
@@ -81,6 +84,7 @@ export interface WorldTransitionAuditSection {
     | 'nonnegativity'
     | 'ledger'
     | 'reactions'
+    | 'reaction_inventory'
     | 'state'
     | 'time';
   status: ConservationStatus | 'invalid';
@@ -120,11 +124,16 @@ export interface WorldTransitionAudit {
  * 7. согласованность FluxLedger (форма, ссылки, инвентари);
  * 8. реакционные транзакции (Stage 4.2.3.3): форма журнала и
  *    стехиометрический элементный/зарядовый баланс каждой записи —
- *    отдельно от потоков, без преобразования реакций в FluxRecord
- *    и без использования записей как объяснения изменений
- *    инвентарей;
- * 9. допустимость ссылок и состояний (validateWorldState);
- * 10. состояние времени (часы корректны, время не идёт назад).
+ *    отдельно от потоков и без преобразования реакций в FluxRecord;
+ * 9. согласование реакционных транзакций с материальными
+ *    инвентарями (Stage 4.2.3.4, секция reaction_inventory):
+ *    ожидаемые изменения ±coefficient × extent по паре
+ *    (reservoirId, speciesId) сопоставляются с фактической разницей
+ *    инвентарей «до»/«после» с учётом потоковых вкладов той же
+ *    пары; реакции и потоки — раздельные источники объяснения,
+ *    каждый вклад учитывается ровно один раз;
+ * 10. допустимость ссылок и состояний (validateWorldState);
+ * 11. состояние времени (часы корректны, время не идёт назад).
  *
  * Агрегация: any invalid/imbalanced → imbalanced; иначе any
  * not_verifiable или неполная граница → not_verifiable; иначе any
@@ -154,7 +163,15 @@ export function auditWorldTransition(
   const push = (key: WorldTransitionAuditSection['key'], status: WorldTransitionAuditSection['status'], issues: string[]): void => {
     sections.push({ key, status, issues });
   };
-  const auditOpts = { tolerance: opts.tolerance, scope: opts.scope };
+  // Stage 4.2.3.4: реакционные вклади ±coefficient × extent по паре
+  // (reservoirId, speciesId) рассчитываются из записей ПЕРЕХОДА и
+  // передаются аудитам инвентарей типизированным списком — реакции
+  // НЕ превращаются в FluxRecord и в FluxLedger не попадают. Вклады
+  // агрегированы по парам; структурные проблемы журнала дают invalid
+  // секции reaction_inventory, непредставимые вклады — честный
+  // not_verifiable без выдуманного нуля.
+  const reactionDeltas = reactionInventoryDeltas(opts.reactionLedger ?? { records: [] });
+  const auditOpts = { tolerance: opts.tolerance, scope: opts.scope, reactionDeltas: reactionDeltas.contributions };
   const beforeReservoirs = reservoirsRecordOf(before);
   const afterReservoirs = reservoirsRecordOf(after);
 
@@ -227,9 +244,11 @@ export function auditWorldTransition(
   // стехиометрический элементный/зарядовый баланс каждой записи —
   // баланс реакций учитывается в общем итоге аудита. Записи НЕ
   // считаются объяснением изменений инвентарей: ReactionLedger
-  // фиксирует транзакции, но не применяет их к запасам, поэтому
-  // инвентарные секции выше объясняются только потоками. Пустой
-  // журнал/его отсутствие — не ошибка (balanced).
+  // фиксирует транзакции; их согласование с фактическими
+  // изменениями инвентарей выполняет отдельная секция
+  // reaction_inventory (Stage 4.2.3.4), а вклады реакций в
+  // инвентарные аудиты передаются типизированным списком через
+  // auditOpts. Пустой журнал/его отсутствие — не ошибка (balanced).
   const reactionAudit = auditReactionLedger(opts.reactionLedger ?? { records: [] }, opts.speciesCatalog, {
     tolerance: opts.tolerance,
     reservoirIds: Object.keys(afterReservoirs)
@@ -243,6 +262,20 @@ export function auditWorldTransition(
     }
   }
   push('reactions', reactionAudit.status, reactionIssues);
+
+  // Согласование реакционных транзакций с материальными
+  // инвентарями (Stage 4.2.3.4). Записи перехода описывают
+  // ЗАВЕРШЁННЫЕ превращения: их ожидаемые изменения (вклады
+  // ±coefficient × extent, агрегированные по паре (reservoirId,
+  // speciesId)) обязаны совпадать с фактической разницей инвентарей
+  // «до»/«после» с учётом потоковых вкладов той же пары — каждый
+  // источник учитывается ровно один раз. Известное несовпадение —
+  // imbalanced (Scheduler отклоняет шаг по общему правилу);
+  // отсутствие инвентаря, несовпадение или смешение оснований,
+  // непредставимые вклады — честное not_verifiable без пересчёта
+  // между основаниями; структурные проблемы — invalid.
+  const reactionInventoryAudit = auditReactionInventory(beforeReservoirs, afterReservoirs, ledger, reactionDeltas, auditOpts);
+  push('reaction_inventory', reactionInventoryAudit.status, reactionInventoryAudit.issues);
 
   // Допустимость ссылок и состояний (до и после).
   const stateProblems: string[] = [];
@@ -299,6 +332,186 @@ export function auditWorldTransition(
   }
 
   return { status, balanced: status === 'balanced', sections, diagnostics, boundary: opts.boundary };
+}
+
+// ============================================
+// 2а. СОГЛАСОВАНИЕ РЕАКЦИЙ С ИНВЕНТАРЯМИ (STAGE 4.2.3.4)
+// ============================================
+
+/** Результат секции reaction_inventory. */
+export interface ReactionInventoryAuditResult {
+  status: ConservationStatus | 'invalid';
+  issues: string[];
+}
+
+/**
+ * Согласование реакционных транзакций перехода с фактическим
+ * изменением материальных инвентарей (Stage 4.2.3.4).
+ *
+ * Для каждого вклада (пара reservoirId + speciesId, уже
+ * агрегированного по всем участникам и записям) ожидаемое изменение
+ * резервуара = потоковый вклад той же пары (в той же временной
+ * области и основании) + реакционный вклад; оно сопоставляется с
+ * фактической разницей инвентарей «до»/«после». Реакции и потоки
+ * остаются раздельными механизмами: вклад каждого источника учтён
+ * ровно один раз, фиктивные FluxRecord не создаются.
+ *
+ * Статусы:
+ * - invalid — структурные проблемы записей (форма) или ссылка
+ *   на резервуар, отсутствующий в состоянии;
+ * - imbalanced — известное фактическое изменение не совпало с
+ *   ожидаемым (в том числе неверный размер или знак изменения);
+ * - not_verifiable — инвентарь не задан (запас неизвестен, а не
+ *   ноль), основание записи не совпадает с основанием инвентаря
+ *   (пересчёт между основаниями не выполняется), основание
+ *   инвентаря изменилось, вклад непредставим или применённый
+ *   untimed-поток касается той же пары;
+ * - balanced — все вклады подтверждены инвентарями.
+ */
+export function auditReactionInventory(
+  before: Record<string, ReservoirRecord>,
+  after: Record<string, ReservoirRecord>,
+  ledger: FluxLedger,
+  deltas: ReactionInventoryDeltas,
+  opts?: AuditOptions
+): ReactionInventoryAuditResult {
+  if (deltas.formIssues.length > 0) {
+    return { status: 'invalid', issues: [...deltas.formIssues] };
+  }
+  if (deltas.contributions.length === 0) {
+    if (deltas.unverifiableIssues.length > 0) {
+      return { status: 'not_verifiable', issues: [...deltas.unverifiableIssues] };
+    }
+    return { status: 'balanced', issues: [] };
+  }
+  const tolerance = opts?.tolerance ?? 1e-9;
+  const invalidIssues: string[] = [];
+  const unverifiableIssues: string[] = [...deltas.unverifiableIssues];
+  const discrepancies: string[] = [];
+  for (const contribution of deltas.contributions) {
+    if (!Number.isFinite(contribution.delta)) {
+      unverifiableIssues.push('запись «' + contribution.recordId + '»: вклад вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставим — сопоставление с инвентарём невозможно');
+      continue;
+    }
+    const beforeRes = before[contribution.reservoirId];
+    const afterRes = after[contribution.reservoirId];
+    if (beforeRes === undefined || afterRes === undefined) {
+      invalidIssues.push(
+        'запись «' + contribution.recordId + '» ссылается на резервуар «' + contribution.reservoirId + '», отсутствующий в состоянии «' + (beforeRes === undefined ? 'до' : 'после') + '»: сопоставление вклада с инвентарём невозможно'
+      );
+      continue;
+    }
+    const beforeInv = beforeRes.material;
+    const afterInv = afterRes.material;
+    if (beforeInv === undefined || afterInv === undefined) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: материальный инвентарь резервуара «' + contribution.reservoirId + '» не задан в состоянии «' + (beforeInv === undefined ? 'до' : 'после') + '» — реакционное изменение вида «' + contribution.speciesId + '» нечем подтвердить (запас неизвестен, а не ноль)'
+      );
+      continue;
+    }
+    if (!isPlainRecord(beforeInv.entries) || !isPlainRecord(afterInv.entries)) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: material.entries резервуара «' + contribution.reservoirId + '» не является объектом-записью (speciesId → количество) — реакционное изменение вида «' + contribution.speciesId + '» непроверяемо'
+      );
+      continue;
+    }
+    if (beforeInv.basis !== afterInv.basis) {
+      unverifiableIssues.push(
+        'резервуар «' + contribution.reservoirId + '»: основание инвентаря изменилось («' + beforeInv.basis + '» → «' + afterInv.basis + '») — реакционное изменение вида «' + contribution.speciesId + '» непроверяемо'
+      );
+      continue;
+    }
+    if (contribution.basis !== beforeInv.basis) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: основание реакции «' + contribution.basis + '» не совпадает с основанием инвентаря «' + beforeInv.basis + '» резервуара «' + contribution.reservoirId + '» — сопоставимость не доказуема, пересчёт между основаниями не выполняется'
+      );
+      continue;
+    }
+    const flux = reactionPairFluxDelta(ledger, opts?.scope, contribution.reservoirId, contribution.speciesId, beforeInv.basis);
+    if (!flux.ok) {
+      unverifiableIssues.push('запись «' + contribution.recordId + '»: ' + flux.reason);
+      continue;
+    }
+    const beforeAmount = beforeInv.entries[contribution.speciesId] ?? 0;
+    const afterAmount = afterInv.entries[contribution.speciesId] ?? 0;
+    const actualDelta = afterAmount - beforeAmount;
+    const expectedDelta = flux.delta + contribution.delta;
+    if (!Number.isFinite(expectedDelta) || !Number.isFinite(actualDelta)) {
+      unverifiableIssues.push(
+        'запись «' + contribution.recordId + '»: суммарный ожидаемый вклад вида «' + contribution.speciesId + '» в резервуаре «' + contribution.reservoirId + '» непредставим (переполнение суммы)'
+      );
+      continue;
+    }
+    if (Math.abs(actualDelta - expectedDelta) > tolerance) {
+      discrepancies.push(
+        'резервуар «' + contribution.reservoirId + '», вид «' + contribution.speciesId + '» (запись «' + contribution.recordId + '»): ожидалось изменение ' + String(expectedDelta) + ', фактически ' + String(actualDelta)
+      );
+    }
+  }
+  if (invalidIssues.length > 0) {
+    return { status: 'invalid', issues: invalidIssues };
+  }
+  if (discrepancies.length > 0) {
+    return { status: 'imbalanced', issues: discrepancies };
+  }
+  if (unverifiableIssues.length > 0) {
+    return { status: 'not_verifiable', issues: unverifiableIssues };
+  }
+  return { status: 'balanced', issues: [] };
+}
+
+/**
+ * Потоковый вклад в изменение пары (резервуар, вид) в той же
+ * временной области и основании, что и реакционный вклад
+ * (Stage 4.2.3.4). Записи вне области относятся к другим
+ * интервалам и пропускаются; применённый untimed-поток, исключённый
+ * из ограниченной области и касающийся той же пары, делает
+ * суммарный вклад непроверяемым, а не выдуманным.
+ */
+function reactionPairFluxDelta(
+  ledger: FluxLedger,
+  scope: FluxAuditScope | undefined,
+  reservoirId: string,
+  speciesId: string,
+  inventoryBasis: string
+): { ok: true; delta: number } | { ok: false; reason: string } {
+  let delta = 0;
+  for (const rec of ledger.records) {
+    if (rec.status !== 'applied' || rec.subject.subjectType !== 'substance' || rec.subject.quantityKind !== 'integrated') continue;
+    const subject = rec.subject as Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }>;
+    if (subject.speciesId !== speciesId) continue;
+    const side =
+      rec.kind === 'internal_transfer'
+        ? rec.from === reservoirId ? -1 : rec.to === reservoirId ? 1 : 0
+        : rec.kind === 'external_input'
+          ? rec.to === reservoirId ? 1 : 0
+          : rec.from === reservoirId ? -1 : 0;
+    if (side === 0) continue;
+    if (!recordInScope(rec, scope)) {
+      if (rec.time === null && excludedUntimed(scope)) {
+        return {
+          ok: false,
+          reason: 'применённый поток «' + rec.id + '» без привязки ко времени касается той же пары (резервуар «' + reservoirId + '», вид «' + speciesId + '»): его вклад нельзя отнести к интервалу перехода'
+        };
+      }
+      continue;
+    }
+    if (subject.basis !== inventoryBasis) {
+      return {
+        ok: false,
+        reason: 'поток «' + rec.id + '» задаёт вклад вида «' + speciesId + '» в основании «' + subject.basis + '», не совпадающем с основанием инвентаря «' + inventoryBasis + '» — суммирование без пересчёта невозможно'
+      };
+    }
+    const next = delta + side * subject.amount;
+    if (!Number.isFinite(next)) {
+      return {
+        ok: false,
+        reason: 'суммарный потоковый вклад вида «' + speciesId + '» в резервуаре «' + reservoirId + '» непредставим (переполнение суммы)'
+      };
+    }
+    delta = next;
+  }
+  return { ok: true, delta };
 }
 
 // ============================================

@@ -86,6 +86,41 @@
 //   значений массивов сохранён), стехиометрия, численные tolerance и
 //   статусы аудита не меняются.
 //
+// Корректирующая ревизия Stage 4.2.3.4 (реакционные вклады
+// в инвентари):
+// - reactionInventoryDeltas рассчитывает ожидаемые изменения
+//   материальных запасов по записям перехода: для участника
+//   reactants вклад = −coefficient × extent, для products —
+//   +coefficient × extent; ключ учёта — пара (reservoirId,
+//   speciesId); вклады всех участников и всех записей
+//   агрегируются (вид по обеим сторонам уравнения — катализатор —
+//   даёт нетто-вклад, в том числе нулевой);
+// - вклад — типизированная ReactionInventoryContribution, а НЕ
+//   FluxRecord: реакции не превращаются в потоки, FluxLedger не
+//   меняется; аудиты инвентарей (substance, reservoir_fluxes и
+//   новая секция reaction_inventory в invariantAuditor) складывают
+//   реакционные и потоковые вклады ровно один раз каждый;
+// - непредставимое произведение (переполнение) и непредставимая
+//   накопленная сумма не подменяются нулём: пара остаётся в
+//   результатах с непредставимым (NaN) вкладом и честной
+//   диагностикой (not_verifiable секций, а не ложный balanced);
+//   смешение оснований extentBasis по одной паре не агрегируется
+//   и не пересчитывается через выдуманную площадь;
+// - основание вклада сопоставляется с основанием инвентаря на
+//   стороне аудита: при несовпадении, отсутствии инвентаря или
+//   недоказуемой сопоставимости — not_verifiable;
+//   arbitrary_units в вклады не конвертируются,
+//   ReactionExtentBasis не расширяется, пересчёт между amount и
+//   column_amount без явного основания площади не выполняется;
+// - стехиометрия здесь НЕ проверяется (ею занимается секция
+//   reactions): запись с неверным балансом всё равно даёт вклады,
+//   несоответствие инвентарей ловит отдельная секция;
+// - форма записи проверяется validateReactionRecord: вклады
+//   структурно некорректных записей не рассчитываются;
+// - время реакции НЕ выводится из длительности шага, time: null
+//   не подменяется текущими часами; append-only контракт журнала
+//   и позиционная проверка истории не меняются.
+//
 // Стехиометрический аудит (auditReactionStoichiometry) проверяет
 // алгебраическое сохранение явно заданного состава и заряда по
 // числу частиц: коэффициент — число частиц в уравнении, extent
@@ -122,7 +157,7 @@
 //   конкатенация с пробелом допускала коллизии ('r x'+'y' против
 //   'r'+'x y').
 
-import type { ConservationStatus, FluxTime } from './fluxLedger';
+import type { ConservationStatus, FluxTime, ReactionInventoryContribution } from './fluxLedger';
 import { isPlainRecord } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
 
@@ -1052,4 +1087,114 @@ export function reactionLedgerAppendOnlyIssues(
     }
   }
   return issues;
+}
+
+// ============================================
+// 8. РЕАКЦИОННЫЕ ВКЛАДЫ В ИНВЕНТАРИ (STAGE 4.2.3.4)
+// ============================================
+
+/**
+ * Результат расчёта реакционных вкладов в изменение материальных
+ * инвентарей перехода (Stage 4.2.3.4):
+ * - contributions — вклады, агрегированные по паре (reservoirId,
+ *   speciesId): суммируются вклады всех участников и всех записей;
+ *   непредставимые пары остаются в списке с NaN-вкладом;
+ * - formIssues — структурные проблемы записей: вклады структурно
+ *   некорректных записей не рассчитываются (invalid секции);
+ * - unverifiableIssues — непредставимые вклады (переполнение
+ *   произведения или накопленной суммы) и смешение оснований по
+ *   одной паре: вклад не подменяется нулём, пара исключается из
+ *   проверки и диагностируется честным not_verifiable.
+ *
+ * Стехиометрия здесь НЕ проверяется — ею занимается секция reactions
+ * (auditReactionStoichiometry): запись с неверным балансом всё
+ * равно даёт вклады, несоответствие инвентарей ловит отдельная
+ * секция аудита перехода. Функция чистая: входные данные не
+ * изменяются.
+ */
+export interface ReactionInventoryDeltas {
+  contributions: readonly ReactionInventoryContribution[];
+  formIssues: string[];
+  unverifiableIssues: string[];
+}
+
+/**
+ * Рассчитать реакционные вклады журнала в изменение материальных
+ * инвентарей (Stage 4.2.3.4). Для каждого участника каждой записи:
+ * reactants — вклад −coefficient × extent, products —
+ * +coefficient × extent; вклады агрегируются по паре (reservoirId,
+ * speciesId). Основание вклада — extentBasis записи; пересчёта
+ * между основаниями нет: смешение оснований по одной паре —
+ * диагностированное исключение пары, а не выдуманный итог.
+ */
+export function reactionInventoryDeltas(ledger: unknown): ReactionInventoryDeltas {
+  const formIssues: string[] = [];
+  const unverifiableIssues: string[] = [];
+  if (!isPlainRecord(ledger) || !Array.isArray(ledger.records)) {
+    return {
+      contributions: [],
+      formIssues: ['журнал реакций некорректен (records не является массивом): реакционные вклады не рассчитываются'],
+      unverifiableIssues: []
+    };
+  }
+  const records: unknown[] = ledger.records;
+  const pairs = new Map<string, ReactionInventoryContribution>();
+  for (let i = 0; i < records.length; i++) {
+    const recordIssues = validateReactionRecord(records[i]);
+    if (recordIssues.length > 0) {
+      formIssues.push('запись #' + String(i) + ': ' + recordIssues.join('; '));
+      continue;
+    }
+    const record = records[i] as ReactionRecord;
+    const sides: Array<{ participants: ReactionParticipant[]; sign: 1 | -1 }> = [
+      { participants: record.reactants, sign: -1 },
+      { participants: record.products, sign: 1 }
+    ];
+    for (const side of sides) {
+      for (const participant of side.participants) {
+        const key = JSON.stringify([participant.reservoirId, participant.speciesId]);
+        const prev = pairs.get(key);
+        if (prev !== undefined && !Number.isFinite(prev.delta)) {
+          // пара уже исключена как непредставимая: повторной
+          // диагностики не требуется
+          continue;
+        }
+        const product = side.sign * participant.coefficient * record.extent;
+        if (!Number.isFinite(product)) {
+          pairs.set(key, prev !== undefined ? { ...prev, delta: NaN } : {
+            reservoirId: participant.reservoirId,
+            speciesId: participant.speciesId,
+            delta: NaN,
+            basis: record.extentBasis,
+            recordId: record.id
+          });
+          unverifiableIssues.push('запись «' + record.id + '»: вклад вида «' + participant.speciesId + '» в резервуаре «' + participant.reservoirId + '» непредставим (coefficient ' + String(participant.coefficient) + ' × extent ' + String(record.extent) + ')');
+          continue;
+        }
+        if (prev !== undefined && prev.basis !== record.extentBasis) {
+          pairs.set(key, { ...prev, delta: NaN });
+          unverifiableIssues.push('записи реакций задают вклады пары (резервуар «' + participant.reservoirId + '», вид «' + participant.speciesId + '») в разных основаниях («' + prev.basis + '» и «' + record.extentBasis + '») — агрегирование без пересчёта невозможно');
+          continue;
+        }
+        if (prev !== undefined) {
+          const sum = prev.delta + product;
+          if (!Number.isFinite(sum)) {
+            pairs.set(key, { ...prev, delta: NaN });
+            unverifiableIssues.push('запись «' + record.id + '»: накопленный вклад вида «' + participant.speciesId + '» в резервуаре «' + participant.reservoirId + '» непредставим (переполнение суммы)');
+            continue;
+          }
+          pairs.set(key, { ...prev, delta: sum });
+        } else {
+          pairs.set(key, {
+            reservoirId: participant.reservoirId,
+            speciesId: participant.speciesId,
+            delta: product,
+            basis: record.extentBasis,
+            recordId: record.id
+          });
+        }
+      }
+    }
+  }
+  return { contributions: [...pairs.values()], formIssues, unverifiableIssues };
 }

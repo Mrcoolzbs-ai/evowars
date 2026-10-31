@@ -64,6 +64,29 @@
 // Материя не создаётся и не уничтожается «внутри системы»:
 // изменение суммарного инвентаря допустимо ТОЛЬКО за счёт
 // внешних потоков; внутренние переносы сохраняют итог.
+//
+// Stage 4.2.3.4 (реакционные вклады в аудиты инвентарей):
+// - AuditOptions.reactionDeltas — типизированные вклады реакционных
+//   транзакций (±coefficient × extent по extentBasis) в изменение
+//   запасов; ReactionRecord НЕ превращается в FluxRecord и в
+//   FluxLedger не попадает: реакции и потоки — раздельные механизмы,
+//   аудиты инвентарей складывают их вклады ровно один раз каждый
+//   (expected Δ = flux Δ + reaction Δ);
+// - auditSubstanceConservation учитывает реакционные вклады в
+//   молярном счёте по видам (моли/моли-на-м² по extentBasis);
+//   смешение реакционных оснований или несовпадение с основанием
+//   системы — честное not_verifiable без пересчёта через выдуманную
+//   площадь;
+// - auditReservoirFluxes складывает реакционные вклады с потоковыми
+//   Δ по паре (reservoirId, speciesId); основание вклада обязано
+//   совпадать с основанием инвентаря — иначе исключение, а не
+//   выдуманный ноль;
+// - элементный и зарядовый аудиты реакционных вкладов НЕ получают:
+//   элементы и заряд реакция сохраняет по построению (стехиометрия
+//   проверяется отдельно секцией reactions аудита перехода), а
+//   глобальное сохранение элементов и заряда продолжает
+//   проверяться независимо — сбалансированная реакция не маскирует
+//   его нарушение.
 
 import type { InventoryBasis, MaterialInventory, ReservoirRecord } from './reservoir';
 import { addMaterial, describeRecordCandidate, isKnownBasis, isPlainRecord, removeMaterial, validateMaterialInventory } from './reservoir';
@@ -628,12 +651,37 @@ function untimedRecordsOf(ledger: FluxLedger, scope?: FluxAuditScope): string[] 
   return ids;
 }
 
+/**
+ * Реакционный вклад в изменение материального инвентаря
+ * (Stage 4.2.3.4). Это ТИПИЗИРОВАННЫЙ вклад, а НЕ FluxRecord:
+ * реакции не превращаются в потоки и в FluxLedger не попадают.
+ */
+export interface ReactionInventoryContribution {
+  reservoirId: string;
+  speciesId: string;
+  /** Ожидаемое Δ со знаком: reactants −coefficient × extent, products +coefficient × extent. */
+  delta: number;
+  /** Основание Δ — extentBasis записи-источника. */
+  basis: 'amount' | 'column_amount';
+  /** id записи-источника (диагностика). */
+  recordId: string;
+}
+
 /** Общие параметры аудитов. */
 export interface AuditOptions {
   /** Абсолютный допуск сравнения (по умолчанию 1e-9). */
   tolerance?: number;
   /** Временная область аудита. */
   scope?: FluxAuditScope;
+  /**
+   * Реакционные вклады перехода (Stage 4.2.3.4): ожидаемые
+   * изменения инвентарей по парам (reservoirId, speciesId), уже
+   * агрегированные. Учитываются аудитами инвентарей РОВНО один
+   * раз рядом с потоковыми Δ; элементный и зарядовый аудиты их не
+   * используют (элементы и заряд реакция сохраняет по построению,
+   * стехиометрия проверяется отдельно секцией reactions).
+   */
+  reactionDeltas?: readonly ReactionInventoryContribution[];
 }
 
 /** Рамка результата аудита при непроверяемости/исключениях. */
@@ -978,6 +1026,46 @@ export function netExternalMolarCounts(catalog: SpeciesCatalog, ledger: FluxLedg
   return { status: approximate ? 'approximate' : 'exact', counts, exclusions, scope: countScope };
 }
 
+/**
+ * Реакционные вклады в молярном счёте по видам (Stage 4.2.3.4).
+ * Вклады уже рассчитаны по extentBasis записей: пересчёта между
+ * основаниями нет; моли и моли/м² не смешиваются — смешение даёт
+ * честное not_verifiable. Непредставимый вклад (не конечное число
+ * или переполнение суммы) — тоже not_verifiable, а не ноль.
+ */
+function reactionMolarCounts(
+  deltas: readonly ReactionInventoryContribution[]
+): { ok: true; counts: Record<string, number>; scope: 'amount' | 'column' | null } | { ok: false; exclusion: AuditExclusion } {
+  const counts: Record<string, number> = {};
+  let scope: 'amount' | 'column' | null = null;
+  for (const contribution of deltas) {
+    if (!Number.isFinite(contribution.delta)) {
+      return {
+        ok: false,
+        exclusion: { key: contribution.speciesId, reason: 'реакционный вклад вида «' + contribution.speciesId + '» непредставим (не конечное число)' }
+      };
+    }
+    const contributionScope: 'amount' | 'column' = contribution.basis === 'amount' ? 'amount' : 'column';
+    if (scope === null) {
+      scope = contributionScope;
+    } else if (scope !== contributionScope) {
+      return {
+        ok: false,
+        exclusion: { key: 'reaction_bases', reason: 'смешение реакционных оснований: вклады в «моли» и «моли/м²» не сопоставимы без площади' }
+      };
+    }
+    const next = (counts[contribution.speciesId] ?? 0) + contribution.delta;
+    if (!Number.isFinite(next)) {
+      return {
+        ok: false,
+        exclusion: { key: contribution.speciesId, reason: 'реакционный вклад вида «' + contribution.speciesId + '» непредставим (переполнение суммы)' }
+      };
+    }
+    counts[contribution.speciesId] = next;
+  }
+  return { ok: true, counts, scope };
+}
+
 // ============================================
 // 4б. АУДИТЫ СОХРАНЕНИЯ
 // ============================================
@@ -1013,10 +1101,39 @@ export function auditSubstanceConservation(
   if (!basis.ok) {
     return auditFrame('not_verifiable', basis.exclusions, untimed, tolerance);
   }
+  // Stage 4.2.3.4: реакционные вклады в молярном счёте по видам.
+  // Вклады уже рассчитаны по extentBasis записей (моли либо моли/м²):
+  // пересчёта между основаниями нет; при смешении реакционных
+  // оснований или несовпадении с основанием системы итог честно
+  // непроверяем (площадь для пересчёта не выдумывается).
+  const reaction = reactionMolarCounts(opts?.reactionDeltas ?? []);
+  if (!reaction.ok) {
+    return auditFrame('not_verifiable', [reaction.exclusion], untimed, tolerance);
+  }
+  const systemScope = basis.before.scope ?? basis.after.scope ?? basis.net.scope ?? null;
+  if (reaction.scope !== null && systemScope !== null && reaction.scope !== systemScope) {
+    return auditFrame(
+      'not_verifiable',
+      [{
+        key: 'reaction_bases',
+        reason:
+          'реакционные вклады (' + (reaction.scope === 'amount' ? 'моли' : 'моли/м²') +
+          ') не сопоставимы с основанием системы (' + (systemScope === 'amount' ? 'моли' : 'моли/м²') +
+          ') без явного основания площади'
+      }],
+      untimed,
+      tolerance
+    );
+  }
   const discrepancies: BalanceDiscrepancy[] = [];
-  const ids = new Set([...Object.keys(basis.before.counts), ...Object.keys(basis.after.counts), ...Object.keys(basis.net.counts)]);
+  const ids = new Set([
+    ...Object.keys(basis.before.counts),
+    ...Object.keys(basis.after.counts),
+    ...Object.keys(basis.net.counts),
+    ...Object.keys(reaction.counts)
+  ]);
   for (const id of ids) {
-    const expected = (basis.before.counts[id] ?? 0) + (basis.net.counts[id] ?? 0);
+    const expected = (basis.before.counts[id] ?? 0) + (basis.net.counts[id] ?? 0) + (reaction.counts[id] ?? 0);
     const actual = basis.after.counts[id] ?? 0;
     if (Math.abs(expected - actual) > tolerance) {
       discrepancies.push({ key: id, expected, actual });
@@ -1357,6 +1474,23 @@ export function auditReservoirFluxes(
     }
   }
 
+  // Stage 4.2.3.4: реакционные вклады складываются с потоковыми Δ по
+  // той же паре (reservoirId, speciesId) и по тем же накопительным
+  // правилам: основание вклада обязано совпадать с уже накопленным
+  // (конфликт — NaN-Δ и исключение ниже), двойной счёт невозможен —
+  // каждый источник добавлен ровно один раз. Реакционные пары
+  // автоматически делают материальное измерение резервуара
+  // обязательным (materialMandatory) тем же правилом, что и потоки.
+  for (const contribution of opts?.reactionDeltas ?? []) {
+    const d = deltaOf(contribution.reservoirId);
+    const prev = d.species[contribution.speciesId];
+    if (prev && prev.basis !== contribution.basis) {
+      d.species[contribution.speciesId] = { delta: NaN, basis: prev.basis };
+    } else {
+      d.species[contribution.speciesId] = { delta: (prev?.delta ?? 0) + contribution.delta, basis: contribution.basis };
+    }
+  }
+
   const discrepancies: BalanceDiscrepancy[] = [];
   const exclusions: AuditExclusion[] = [];
 
@@ -1415,11 +1549,11 @@ export function auditReservoirFluxes(
         for (const speciesId of speciesIds) {
           const spec = fluxSpecies[speciesId];
           if (spec && Number.isNaN(spec.delta)) {
-            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: потоки вида «${speciesId}» имеют несовместимые основания` });
+            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: вклады вида «${speciesId}» (потоки и/или реакции) имеют несовместимые основания` });
             continue;
           }
           if (spec && spec.basis !== beforeInv.basis) {
-            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: основание потока «${spec.basis}» не совпадает с основанием инвентаря «${beforeInv.basis}»` });
+            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: основание вклада (потока или реакции) «${spec.basis}» не совпадает с основанием инвентаря «${beforeInv.basis}»` });
             continue;
           }
           const beforeAmount = beforeInv.entries[speciesId] ?? 0;
