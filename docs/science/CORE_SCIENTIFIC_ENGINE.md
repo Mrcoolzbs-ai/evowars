@@ -367,6 +367,21 @@
 > Scheduler не изменены; Storage и PRNG не тронуты; golden baseline
 > не тронут; итоговые количества тестов — по фактическому CI этапа.
 
+> Ревизия Stage 4.3.1 (2026-10-31): начат этап 4.3 — фундамент
+> термодинамического каталога (новый слой `thermodynamics.ts`:
+> ThermodynamicProperties вида+фазы — ΔfH°/ΔfG° в J/mol, S° в
+> J/(mol·K), исходные табличные Cp-точки, NASA-7 как производная
+> аппроксимация, ThermoReferenceState, per-value ThermoDataProvenance
+> с типизированным origin; validateThermodynamicProperties;
+> опциональное поле `thermodynamics` у ScientificSpecies — отсутствие
+> = «свойства не предоставлены», НЕ нули и НЕ fallback на gases.ts;
+> единицы J_mol/kJ_mol/J_mol_K). Модель данных и валидация — БЕЗ
+> вычислителя NASA-7, подбора коэффициентов и импорта реальных
+> значений (импорт ≥20 видов — подэтап 4.3.2). +37 тестов
+> (coreThermodynamics.test), всего по CI 29 файлов / 1141 тест;
+> CoreWorldState, Storage, legacy-модули и golden baseline не
+> изменены. Подробности — §2.17 и §4.
+
 ## 1. Слои ядра (`src/modules/Core/`)
 
 | Файл | Слой | Ответственность |
@@ -374,6 +389,7 @@
 | `physicalQuantity.ts` | Величины | значение + единица + размерность; преобразование единиц; runtime-контроль размерностей; запрет NaN/±Inf |
 | `scientificValue.ts` | Семантика данных | статусы known/estimated/unknown/not_applicable/not_implemented/invalid; неопределённость; provenance |
 | `species.ts` | Химия (контракт) | формальный элементный состав, заряд, фаза; каталог видов; проверка элементного/зарядового баланса |
+| `thermodynamics.ts` | Термодинамика (4.3.1) | ThermodynamicProperties вида+фазы: ΔfH°/ΔfG° (J/mol), S° (J/(mol·K)), исходные табличные Cp-точки, NASA-7 как производная аппроксимация; ThermoReferenceState; per-value ThermoDataProvenance с типизированным origin; validateThermodynamicProperties; без вычислителя NASA-7 и без импорта значений (4.3.2) |
 | `reservoir.ts` | Вещество и энергия | материальный инвентарь с явным основанием; энергетический инвентарь (запас/мощность/поток раздельно); иммутабельные записи |
 | `fluxLedger.ts` | Потоки | внутренние/внешние переносы; rate против integrated; атомарное применение; revert; аудиты сохранения |
 | `reactionLedger.ts` | Реакции (контракт 4.2.3.2) | журнал завершённых реакционных транзакций (участники с явными резервуарами; extent с явным extentBasis); стехиометрический аудит элементов/заряда со статусами balanced/imbalanced/not_verifiable/approximate; самостоятельный модуль — НЕ входит в CoreWorldState (интеграция — 4.2.3.3) |
@@ -1257,6 +1273,78 @@ RCM, вертикальный профиль, гидростатика, парн
   coreReactionLedger / coreInvariantAuditor / coreScheduler;
   итоговые количества тестов — по фактическому CI этапа.
 
+### 2.17 Thermodynamics — термодинамические свойства вида (4.3.1)
+
+Новый самостоятельный слой `src/modules/Core/thermodynamics.ts`;
+связан с `ScientificSpecies` опциональным полем `thermodynamics?`
+(отсутствие поля = «термохимические свойства не предоставлены» —
+неизвестность, НЕ нулевые значения; fallback на качественные описания
+`gases.ts` запрещён и не выполняется; `buildSpeciesCatalogFromLegacy`
+без изменений — легаси-записи остаются совместимыми).
+
+Контракты:
+
+- `ThermoValueOrigin` — типизированное происхождение ЗНАЧЕНИЯ (не всего
+  вещества): observed / experimental / reference_range /
+  derived_computed / numerical_approximation / theoretical_estimate /
+  game_assumption / unknown; runtime-реестр `THERMO_VALUE_ORIGINS`.
+- `ThermoDataProvenance` — per-value provenance поверх существующего
+  `DataProvenance` (без дублирования его полей): обязательный `origin`;
+  идентификация источника — `sourceId` / `datasetId` / `recordId` /
+  `reference`; версия набора — `datasetVersion`; дата получения —
+  `retrievedAt`; неопределённость — существующий `Uncertainty`
+  (отсутствие uncertainty НЕ трактуется как нулевая погрешность).
+- `ThermoReferenceState` — температура, давление (если применимо и
+  указано источником), фаза (совпадает с фазой записи: запись каталога =
+  вид + фаза), стандартное состояние, описание условий и конвенции.
+  1 bar / 1 atm / 298.15 K автоматически НЕ назначаются; газовые /
+  жидкие / твёрдые / aqueous состояния одного вещества не смешиваются.
+- `ThermodynamicProperties` — `standardFormationEnthalpy` (ΔfH°,
+  J/mol), `standardFormationGibbsEnergy` (ΔfG°, J/mol),
+  `standardEntropy` (S°, J/(mol·K)), `heatCapacity`
+  (`HeatCapacityData`: status + `tabulated?` + `nasa7?`),
+  `referenceState?`, `provenance?`, `note?`.
+- `CpTabulatedData` / `CpTablePoint` — исходные табличные точки Cp(T)
+  с собственным provenance; хранятся ОТДЕЛЬНО от параметризации.
+- `Nasa7Segment` / `Nasa7Polynomial` — производная аппроксимация
+  поверх первоисточника (не замена): quantity 'Cp_over_R', ровно
+  7 конечных коэффициентов a0…a6, температурный диапазон каждой
+  полиномиальной области, несколько областей упорядочены без
+  пересечений (стык диапазонов допустим), derivation 'published' |
+  'fitted' (для fitted обязательны method, контрольные точки
+  `Nasa7CheckPoint`, ошибка аппроксимации
+  `Nasa7ApproximationError`); fitted-полином без исходных Cp-таблиц —
+  структурно некорректен.
+
+Валидация `validateThermodynamicProperties(thermo, {speciesId?,
+expectedPhase?})`: допустимые статусы и формы; конечность числовых
+значений; соответствие единиц ожидаемым размерностям (ΔfH°/ΔfG° —
+J_mol/kJ_mol, S° — J_mol_K; безразмерные единицы не принимаются);
+корректность температурных диапазонов; порядок и отсутствие
+пересечений NASA-7 областей; контрольные точки внутри диапазона;
+per-value provenance обязателен для known/estimated (origin ≠
+unknown, идентификация источника; для derived_computed /
+numerical_approximation / theoretical_estimate / game_assumption —
+ещё и метод); unknown — БЕЗ числовой подстановки (quantity у
+нечислового статуса — ошибка); reference state обязателен при
+числовых значениях. Структурно некорректные данные отличимы от
+неизвестных и оценочных. Универсальные физические ограничения (типа
+«S° ≥ 0 везде») не вводятся — не доказано для всех классов веществ.
+
+Единицы ядра (physicalQuantity.ts) расширены: `J_mol`, `kJ_mol`
+(dimension M·L²·T⁻²·N⁻¹), `J_mol_K` (M·L²·T⁻²·Θ⁻¹·N⁻¹);
+преобразование J/mol ↔ kJ/mol, несовместимые размерности
+отклоняются.
+
+ГРАНИЦЫ 4.3.1: вычислитель NASA-7 и процедура подбора коэффициентов
+НЕ реализованы; ни одно реальное термодинамическое значение в код не
+добавлено (тестовые фикстуры — синтетика с явной пометкой «фикция
+для тестов»); NIST WebBook SRD 69 — основной источник будущего
+импорта, ATcT TN 1.228 — для сверки ΔfH° (лицензия unverified — в
+дистрибутив не включать); импорт и перекрёстная проверка ≥20 видов —
+подэтап 4.3.2. CoreWorldState, Storage, Scheduler, legacy-химия и
+golden baseline не изменены.
+
 ## 3. Интеграция (точки контакта с легаси)
 
 1. `GeneratedWorld.coreWorldState?: CoreWorldState` — опциональное поле.
@@ -1312,11 +1400,12 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов))
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test)
 
 | Файл | it() | Покрытие |
 |---|---|---|
 | corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
+| coreThermodynamics.test | 37 | 4.3.1: валидная запись с известными значениями; оценочные значения с методом; unknown без числовой подстановки; отсутствие provenance у known/estimated; некорректные единицы и размерности; конверсия J/mol ↔ kJ/mol; сегменты NASA-7 (корректные/пересекающиеся/неупорядоченные); fitted без исходных Cp-таблиц; контрольные точки и диапазоны; reference state (обязательность, фаза записи, автоматические 1 bar/298.15 K не назначаются); интеграция в validateSpecies (отсутствие thermodynamics = не предоставлены); совместимость SpeciesCatalog и legacy-адаптеров; детерминированность и отсутствие побочных эффектов |
 | coreScientificValue.test | 14 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации |
 | coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
 | coreReservoir.test | 56 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён); 4.1.1.3.1: строгие записи — Map/Set/Date/RegExp/экземпляры классов в properties/material.entries/energy — invalid, Object.create(null) валиден |
@@ -1332,9 +1421,12 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 27 тест-файлов, 863 теста (после ревизии
-4.2.2.5.1 — фактические итоги Vitest «Test Files 27 passed (27) /
-Tests 863 passed (863)» из CI; после 4.2.2.5 — 862,
+Всего в проекте 29 тест-файлов, 1141 тест (после Stage 4.3.1 —
+фактические итоги Vitest «Test Files 29 passed (29) / Tests 1141
+passed (1141)» из CI этапа; после серии ревизий 4.2.3.x, завершённой
+4.2.3.4.1, — 1104 (28 файлов, итоги CI того этапа); после ревизии
+4.2.2.5.1 — 863 (27 файлов; фактические итоги Vitest «Test Files 27
+passed (27) / Tests 863 passed (863)» из CI; после 4.2.2.5 — 862,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 862
 passed (862)» из CI; после 4.2.2.4 — 848,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 848
@@ -1373,7 +1465,10 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   процесс не активируется автоматически;
 - перевод ChemicalEvolution на Scheduler — Stage 4.2.3 (легаси-химия
   продолжает работать как есть, golden-траектория воспроизводится);
-- кинетика, термодинамика видов, EOS, равновесие смесей;
+- кинетика, EOS, равновесие смесей; термодинамика видов — МОДЕЛЬ
+  ДАННЫХ реализована в 4.3.1 (thermodynamics.ts: контракты и
+  валидация), но вычислитель NASA-7, подбор коэффициентов и значения
+  реальных видов НЕ реализованы (импорт ≥20 видов — 4.3.2);
 - сэмплирование звезды из класса (аудит §2.1) — контракты
   ScientificValue/Reservoir готовы, физика придёт на этапах
   4.6–4.8;

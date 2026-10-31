@@ -346,6 +346,27 @@
 > реализованы; PRNG, UI и Storage не тронуты; golden baseline
 > совпадает; итоговые количества тестов — по фактическому CI.
 
+> Stage 4.3.1 (2026-10-31): начат этап 4.3 «Каталог веществ и
+> термодинамических данных» — подэтап «термодинамический фундамент
+> каталога» выполнен: новый модуль `src/modules/Core/thermodynamics.ts`
+> (ThermodynamicProperties вида+фазы на ScientificSpecies: ΔfH°/ΔfG°
+> в J/mol, S° в J/(mol·K), исходные табличные Cp-точки отдельно от
+> параметризации NASA-7 (fitted-полином без исходных таблиц —
+> структурно некорректен), ThermoReferenceState (1 bar/298.15 K
+> автоматически не назначаются), per-value ThermoDataProvenance с
+> типизированным origin (8 значений), validateThermodynamicProperties;
+> единицы J_mol/kJ_mol/J_mol_K). Отсутствие thermodynamics у записи —
+> «свойства не предоставлены», НЕ нули, НЕ fallback на gases.ts;
+> buildSpeciesCatalogFromLegacy и legacy-химия без изменений.
+> Массовый импорт значений НЕ производился (≥20 видов — 4.3.2);
+> вычислитель NASA-7 и подбор коэффициентов НЕ реализованы и не
+> заявляются; ATcT (лицензия unverified) в дистрибутив не включается.
+> +37 тестов (coreThermodynamics.test), по CI 29 файлов / 1141 тест;
+> CoreWorldState, Storage, PRNG и golden baseline не изменены
+> (877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20
+> совпал). Коммиты: 4d70eb52 (код) → a299ceb0 (тесты) → 38def323 →
+> 18e05616 (фиксы типизации/теста). Реестр — §1.16.
+
 ## 1. Реестр модулей
 
 Формат записи: назначение / входы / выходы / формулы / допущения / источники /
@@ -698,14 +719,18 @@
   passed (863)»; tsc, oxlint, build зелёные (run 41207933807);
   golden baseline (877e17d3…bc0a) совпал.
 
-### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
+### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 12 файлов)
 
 - **Назначение**: канонические контракты научных данных и инвариантов,
   не зависящие от легаси-модулей: PhysicalQuantity (значение+единица+
   размерность, запрет NaN/±Inf, реестр ASCII-единиц, русские единицы
   только через адаптер), ScientificValue (6 статусов данных, uncertainty,
   provenance; «неизвестно» ≠ 0), ScientificSpecies (вид+фаза, элементный/
-  зарядовый баланс), Reservoir (инвентарь с явным basis; энергия: запас/
+  зарядовый баланс), Thermodynamics (4.3.1: модель термодинамических
+  свойств вида+фазы — ΔfH°/ΔfG° в J/mol, S° в J/(mol·K), исходные
+  Cp-таблицы, NASA-7 как производная аппроксимация, reference state,
+  per-value origin-provenance; структурная валидация; без вычислителя
+  NASA-7 и без импорта реальных значений — 4.3.2), Reservoir (инвентарь с явным basis; энергия: запас/
   мощность/поток раздельно), FluxLedger (внутренние/внешние переносы,
   rate≠integrated, атомарность, revert, аудиты сохранения вещества/
   элементов/заряда/энергии), ReactionLedger (4.2.3.2: журнал
@@ -724,7 +749,9 @@
   в Storage, тесты core*.
 - **Ограничения**: реализованы КОНТРАКТЫ и инварианты, не модели.
   Solver-бэкенды пустые (все solve → not_implemented); кинетика,
-  термодинамика, EOS, равновесия не реализованы; UI не переключён.
+  EOS, равновесия не реализованы; термодинамика — только модель
+  данных и валидация (4.3.1), без вычислителя NASA-7, подбора
+  коэффициентов и импорта реальных значений; UI не переключён.
 - **Документация**: `docs/science/CORE_SCIENTIFIC_ENGINE.md`.
 - **Связи**: легаси-модули (Generator, ChemicalEvolution, Units,
   WorldModel) не изменены; связь только через адаптеры.
@@ -1171,6 +1198,46 @@
      cradle_temperature_compatibility, есть
      cradle_temperature_unproven, автоподбор не выполняется;
      measured: 863 теста, CI 41207933807 зелёный, golden совпал.
+
+- **Stage 4.3.1 — термодинамическая модель каталога** (+37 тестов:
+  coreThermodynamics.test; коммиты 4d70eb52 → a299ceb0 → 38def323 →
+  18e05616; CI 41240292570 зелёный): новый модуль
+  `src/modules/Core/thermodynamics.ts` — ThermodynamicProperties на
+  ScientificSpecies (опциональное поле `thermodynamics`; запись
+  каталога = вид + фаза): standardFormationEnthalpy / ΔfH° и
+  standardFormationGibbsEnergy / ΔfG° в J/mol, standardEntropy /
+  S° в J/(mol·K), heatCapacity (исходные табличные Cp-точки
+  CpTabulatedData + параметризация Nasa7Segment как ПРОИЗВОДНАЯ
+  аппроксимация: quantity 'Cp_over_R', ровно 7 конечных
+  коэффициентов, диапазоны областей упорядочены без пересечений,
+  стык допустим; derivation published/fitted — для fitted
+  обязательны метод, контрольные точки и ошибка аппроксимации;
+  fitted без исходных таблиц — структурная ошибка);
+  ThermoDataProvenance = DataProvenance + типизированный origin
+  (ThermoValueOrigin: observed/experimental/reference_range/
+  derived_computed/numerical_approximation/theoretical_estimate/
+  game_assumption/unknown) — per-value provenance обязателен для
+  known/estimated, у unknown числовое значение не создаётся;
+  ThermoReferenceState (T/P/фаза/стандартное состояние/конвенция;
+  1 bar и 298.15 K автоматически не назначаются);
+  validateThermodynamicProperties (статусы, конечность,
+  размерности единиц J_mol/kJ_mol/J_mol_K, температурные
+  диапазоны, порядок NASA-7-областей, reference state при числовых
+  значениях; структурная некорректность отличима от unknown);
+  интеграция в validateSpecies (отсутствие thermodynamics —
+  «свойства не предоставлены», НЕ нули и НЕ fallback на gases.ts);
+  buildSpeciesCatalogFromLegacy без изменений. Границы: ни одно
+  реальное термодинамическое значение не импортировано (фикстуры —
+  синтетика «фикция для тестов»); вычислитель NASA-7 и подбор
+  коэффициентов не реализованы; CoreWorldState/Storage/PRNG/legacy
+  не изменены. Фактические итоги Vitest «Test Files 29 passed (29) /
+  Tests 1141 passed (1141)»; tsc, oxlint, build зелёные;
+  golden baseline
+  (877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20)
+  совпал. Импорт и перекрёстная проверка ≥20 видов (NIST WebBook
+  SRD 69 — основной источник; ATcT TN 1.228 — сверка ΔfH°, лицензия
+  unverified) — следующий подэтап 4.3.2; этап 4.3 в целом НЕ
+  завершён.
 
 ### 1.15 App.tsx (966 строк)
 
