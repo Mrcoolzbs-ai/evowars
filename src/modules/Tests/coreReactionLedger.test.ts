@@ -1539,3 +1539,54 @@ describe('Stage 4.2.3.4 ReactionLedger: реакционные вклады в �
     });
   });
 });
+
+describe('Stage 4.2.3.4.1 ReactionLedger: полная валидация журнала в reactionInventoryDeltas', () => {
+  it('дырка с унаследованным из prototype chain элементом — formIssues, вкладов нет', () => {
+    // унаследованный числовой индекс НЕ является собственной записью:
+    // раньше валидная запись читалась из прототипа и давала вклады
+    const records: unknown[] = [];
+    Object.setPrototypeOf(records, { 0: makeRecord({ extent: 1 }) });
+    records.length = 1;
+    const deltas = reactionInventoryDeltas({ records });
+    expect(deltas.formIssues.some((i) => i.includes('запись #0 отсутствует'))).toBe(true);
+    expect(deltas.formIssues.some((i) => i.includes('разреженный массив records'))).toBe(true);
+    expect(deltas.contributions).toEqual([]);
+    expect(deltas.unverifiableIssues).toEqual([]);
+  });
+
+  it('дубликаты id транзакций — formIssues и пустые вклады', () => {
+    const deltas = reactionInventoryDeltas({
+      records: [makeRecord({ id: 'rxn-dup', extent: 1 }), makeRecord({ id: 'rxn-dup', extent: 1 })]
+    });
+    expect(deltas.formIssues.some((i) => i.includes('дублирующийся id транзакции «rxn-dup»'))).toBe(true);
+    expect(deltas.contributions).toEqual([]);
+    expect(deltas.unverifiableIssues).toEqual([]);
+  });
+
+  it('структурно корректный журнал проходит полную валидацию и даёт прежние вклады', () => {
+    const deltas = reactionInventoryDeltas({ records: [makeRecord({ extent: 1 })] });
+    expect(deltas.formIssues).toEqual([]);
+    expect(deltas.unverifiableIssues).toEqual([]);
+    expect(deltas.contributions.length).toBe(3);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    const o2 = deltas.contributions.find((c) => c.speciesId === 'o2');
+    const h2o = deltas.contributions.find((c) => c.speciesId === 'h2o');
+    expect(h2?.delta).toBe(-2);
+    expect(o2?.delta).toBe(-1);
+    expect(h2o?.delta).toBe(2);
+    expect(h2?.basis).toBe('amount');
+    expect(h2?.recordId).toBe('rxn-1');
+  });
+
+  it('валидная запись рядом с некорректной — formIssues без частичных вкладов', () => {
+    // раньше некорректная запись пропускалась, а соседняя валидная
+    // давала частичный правдоподобный результат из сломанного журнала
+    const bad = makeRecord({ id: 'rxn-bad', extent: 1 });
+    delete (bad as unknown as Record<string, unknown>).time;
+    const deltas = reactionInventoryDeltas({ records: [makeRecord({ id: 'rxn-ok', extent: 1 }), bad] });
+    expect(deltas.formIssues.length).toBe(1);
+    expect(deltas.formIssues[0]).toContain('запись #1');
+    expect(deltas.contributions).toEqual([]);
+    expect(deltas.unverifiableIssues).toEqual([]);
+  });
+});

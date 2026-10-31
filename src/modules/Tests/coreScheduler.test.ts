@@ -1708,3 +1708,114 @@ describe('Stage 4.2.3.4 Scheduler: согласование реакций с и
     expect(result.world.reservoirs[0]?.material?.entries['o2']).toBe(0.5);
   });
 });
+
+
+// ============================================
+// STAGE 4.2.3.4.1 - PROTOTYPE-SAFE ВИДЫ И НЕКОРРЕКТНЫЙ TOLERANCE В ПЛАНИРОВЩИКЕ
+// ============================================
+
+describe('Stage 4.2.3.4.1 Scheduler: prototype-safe виды и некорректный tolerance', () => {
+  /** Каталог с видом «__proto__» (элемент x) и его димером (x: 2). */
+  function protoCatalog() {
+    const catalog = createSpeciesCatalog();
+    const register = (id: string, elements: Record<string, number>): void => {
+      catalog.register({
+        id,
+        formula: id.toUpperCase(),
+        name: id,
+        elements,
+        charge: 0,
+        phase: 'gas',
+        molarMassKgMol: 0.02,
+        molarMassStatus: 'known',
+        dataStatus: 'known'
+      });
+    };
+    register('__proto__', { x: 1 });
+    register('dimer', { x: 2 });
+    return catalog;
+  }
+
+  /** entries с СОБСТВЕННЫМ ключом «__proto__» (литерал own-ключа не создаёт). */
+  function protoEntries(speciesAmount: number, dimerAmount: number): Record<string, number> {
+    const entries = Object.create(null) as Record<string, number>;
+    Object.defineProperty(entries, '__proto__', {
+      value: speciesAmount,
+      writable: true,
+      enumerable: true,
+      configurable: true
+    });
+    entries['dimer'] = dimerAmount;
+    return entries;
+  }
+
+  /** Реакция 2 «__proto__» → димер (extent 1, основание amount) в «atm». */
+  function protoReaction(): ReactionRecord {
+    return {
+      id: 'rxn-proto',
+      reactionId: 'dimer-formation',
+      reactants: [{ reservoirId: 'atm', speciesId: '__proto__', coefficient: 2 }],
+      products: [{ reservoirId: 'atm', speciesId: 'dimer', coefficient: 1 }],
+      extent: 1,
+      extentBasis: 'amount',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      processId: 'a',
+      note: 'тестовая транзакция шага'
+    };
+  }
+
+  it('оператор с видом «__proto__»: вклад не теряется, шаг фиксируется, аудит balanced', () => {
+    const reservoir = setEnergyInventory(
+      setMaterialInventory(createReservoir('atm', 'atmosphere'), 'amount', protoEntries(2, 0)),
+      { storedJ: 0, netPowerW: null, fluxW_m2: null }
+    );
+    const world: CoreWorldState = { ...createCoreWorldState('w'), reservoirs: [reservoir] };
+    const reacting: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reservoirs: w.reservoirs.map((r) =>
+          r.id === 'atm' && r.material !== undefined
+            ? { ...r, material: { ...r.material, entries: protoEntries(0, 1) } }
+            : r
+        ),
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, protoReaction())
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [reacting], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: protoCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.audit?.status).toBe('balanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('balanced');
+    const afterEntries = result.world.reservoirs[0]?.material?.entries as Record<string, number>;
+    expect(Object.prototype.hasOwnProperty.call(afterEntries, '__proto__')).toBe(true);
+    expect(afterEntries['__proto__']).toBe(0);
+    expect(afterEntries['dimer']).toBe(1);
+  });
+
+  it('некорректный tolerance (NaN): шаг отклонён по секции reaction_inventory, состояние не фиксируется', () => {
+    const world = reactiveWorld();
+    const reacting: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => applyWaterFormation({
+        ...w,
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-1'))
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [reacting], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete', tolerance: Number.NaN }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.audit?.sections.find((s) => s.key === 'reaction_inventory')?.status).toBe('invalid');
+    // атомарность: исходный мир не изменён, время не продвинуто
+    expect(result.world).toBe(world);
+    expect(result.world.clock.localTimeS).toBe(0);
+    expect(world.reactionLedger?.records).toEqual([]);
+  });
+});

@@ -689,3 +689,229 @@ describe('Stage 4.2.3.4 InvariantAuditor: секция reaction_inventory', () =
     expect(audit.status).toBe('balanced');
   });
 });
+
+
+// ============================================
+// STAGE 4.2.3.4.1 - PROTOTYPE-SAFE ВИДЫ, ЧИСЛЕННАЯ УСТОЙЧИВОСТЬ, TOLERANCE
+// ============================================
+
+/**
+ * Каталог с видом speciesId (элемент x: 1) и его димером (x: 2).
+ * speciesId — произвольная непустая строка, включая зарезервированные
+ * имена прототипа ('__proto__', 'constructor', 'toString').
+ */
+function exoticCatalog(speciesId: string): SpeciesCatalog {
+  const catalog = createSpeciesCatalog();
+  const register = (id: string, elements: Record<string, number>): void => {
+    catalog.register({
+      id,
+      formula: id.toUpperCase(),
+      name: id,
+      elements,
+      charge: 0,
+      phase: 'gas',
+      molarMassKgMol: 0.02,
+      molarMassStatus: 'known',
+      dataStatus: 'known'
+    });
+  };
+  register(speciesId, { x: 1 });
+  register('dimer', { x: 2 });
+  return catalog;
+}
+
+/**
+ * entries с СОБСТВЕННЫМ ключом speciesId: литерал { '__proto__': v }
+ * собственного ключа не создаёт, поэтому ключ определяется явно.
+ * nullProto проверяет инвентарь с прототипом null.
+ */
+function exoticEntries(speciesId: string, speciesAmount: number, dimerAmount: number, nullProto: boolean): Record<string, number> {
+  const entries: Record<string, number> = nullProto ? Object.create(null) : {};
+  Object.defineProperty(entries, speciesId, {
+    value: speciesAmount,
+    writable: true,
+    enumerable: true,
+    configurable: true
+  });
+  entries['dimer'] = dimerAmount;
+  return entries;
+}
+
+/** Реакция 2 X → димер (extent 1, основание amount) в резервуаре «atm». */
+function exoticReaction(speciesId: string): ReactionRecord {
+  return {
+    id: 'rxn-dimer',
+    reactionId: 'dimer-formation',
+    reactants: [{ reservoirId: 'atm', speciesId, coefficient: 2 }],
+    products: [{ reservoirId: 'atm', speciesId: 'dimer', coefficient: 1 }],
+    extent: 1,
+    extentBasis: 'amount',
+    time: { segmentIndex: 0, localTimeS: 1 },
+    processId: 'proc-a',
+    note: 'тестовая транзакция'
+  };
+}
+
+describe('Stage 4.2.3.4.1 InvariantAuditor: prototype-safe speciesId', () => {
+  for (const speciesId of ['__proto__', 'constructor', 'toString'] as const) {
+    it(`speciesId «${speciesId}»: собственный ключ — известное количество; превращение подтверждается инвентарём (Object.prototype и null-прототип)`, () => {
+      for (const nullProto of [false, true]) {
+        const before = worldOf([res('atm', 'atmosphere', exoticEntries(speciesId, 2, 0, nullProto))]);
+        const after = worldOf([res('atm', 'atmosphere', exoticEntries(speciesId, 0, 1, nullProto))]);
+        const audit = auditWorldTransition(before, after, createFluxLedger(), {
+          speciesCatalog: exoticCatalog(speciesId),
+          boundary: 'complete',
+          reactionLedger: { records: [exoticReaction(speciesId)] }
+        });
+        expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('balanced');
+        expect(sectionOf(audit, 'reservoir_fluxes')?.status).toBe('balanced');
+        expect(sectionOf(audit, 'substance')?.status).toBe('balanced');
+        expect(audit.status).toBe('balanced');
+        expect(audit.balanced).toBe(true);
+
+        // несоответствие не маскируется прототипом: imbalanced с фактическим значением
+        const unchanged = worldOf([res('atm', 'atmosphere', exoticEntries(speciesId, 2, 0, nullProto))]);
+        const bad = auditWorldTransition(before, unchanged, createFluxLedger(), {
+          speciesCatalog: exoticCatalog(speciesId),
+          boundary: 'complete',
+          reactionLedger: { records: [exoticReaction(speciesId)] }
+        });
+        expect(sectionOf(bad, 'reaction_inventory')?.status).toBe('imbalanced');
+        expect(
+          sectionOf(bad, 'reaction_inventory')?.issues.some((i) => i.includes('ожидалось изменение -2, фактически 0'))
+        ).toBe(true);
+        expect(bad.status).toBe('imbalanced');
+      }
+    });
+  }
+});
+
+describe('Stage 4.2.3.4.1 InvariantAuditor: непредставимые суммы — not_verifiable, а не ложный imbalanced', () => {
+  /**
+   * Каталог безэлементных видов (как электрон: elements = {}): суммы
+   * видов переполняются, а элементные/зарядовые итоги остаются
+   * конечными — дисбаланс может вызвать только проверяемая величина.
+   */
+  function elementFreeCatalog(): SpeciesCatalog {
+    const catalog = createSpeciesCatalog();
+    for (const id of ['big', 'big2']) {
+      catalog.register({
+        id,
+        formula: id.toUpperCase(),
+        name: id,
+        elements: {},
+        charge: 0,
+        phase: 'gas',
+        molarMassKgMol: 0.02,
+        molarMassStatus: 'known',
+        dataStatus: 'known'
+      });
+    }
+    return catalog;
+  }
+
+  /** Реакция big2 → big с вкладом ±1e308 (по отдельности конечным). */
+  const bigReaction: ReactionRecord = {
+    id: 'rxn-big',
+    reactionId: 'big-formation',
+    reactants: [{ reservoirId: 'atm', speciesId: 'big2', coefficient: 1e308 }],
+    products: [{ reservoirId: 'atm', speciesId: 'big', coefficient: 1e308 }],
+    extent: 1,
+    extentBasis: 'amount',
+    time: { segmentIndex: 0, localTimeS: 1 },
+    processId: 'proc-a',
+    note: 'тестовая транзакция'
+  };
+
+  it('потоковый и реакционный вклады по отдельности конечны, но их сумма переполняется', () => {
+    const before = worldOf([res('atm', 'atmosphere', { big: 0, big2: 1e308 })]);
+    let ledger = createFluxLedger();
+    ledger = registerFlux(ledger, {
+      id: 'in-big',
+      kind: 'external_input',
+      from: EXTERNAL,
+      to: 'atm',
+      subject: { subjectType: 'substance', speciesId: 'big', quantityKind: 'integrated', amount: 1e308, basis: 'amount' }
+    });
+    const applied = applyFlux(ledger, reservoirsMap(before), 'in-big');
+    const after: CoreWorldState = {
+      ...before,
+      reservoirs: [
+        { ...applied.reservoirs['atm'], material: { basis: 'amount', entries: { big: 1e308, big2: 0 } } }
+      ],
+      fluxLedger: applied.ledger
+    };
+    const audit = auditWorldTransition(before, after, applied.ledger, {
+      speciesCatalog: elementFreeCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [bigReaction] }
+    });
+    // реакционная секция: сумма поток + реакция непредставима — честное not_verifiable
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('not_verifiable');
+    expect(
+      sectionOf(audit, 'reaction_inventory')?.issues.some((i) => i.includes('переполнение суммы'))
+    ).toBe(true);
+    // ни одна секция не выдаёт Infinity за доказанный дисбаланс
+    expect(sectionOf(audit, 'substance')?.status).toBe('not_verifiable');
+    expect(sectionOf(audit, 'reservoir_fluxes')?.status).toBe('not_verifiable');
+    for (const s of audit.sections) {
+      expect(s.status).not.toBe('imbalanced');
+    }
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+  });
+
+  it('начальный запас и ожидаемый вклад по отдельности конечны, но их сумма переполняется', () => {
+    const before = worldOf([res('atm', 'atmosphere', { big: 1e308, big2: 1e308 })]);
+    const after = worldOf([res('atm', 'atmosphere', { big: 1e308, big2: 0 })]);
+    const audit = auditWorldTransition(before, after, createFluxLedger(), {
+      speciesCatalog: elementFreeCatalog(),
+      boundary: 'complete',
+      reactionLedger: { records: [bigReaction] }
+    });
+    // ожидаемый итоговый запас (до + ожидаемое Δ) непредставим — not_verifiable
+    expect(sectionOf(audit, 'reaction_inventory')?.status).toBe('not_verifiable');
+    expect(
+      sectionOf(audit, 'reaction_inventory')?.issues.some((i) => i.includes('ожидаемый итоговый запас'))
+    ).toBe(true);
+    expect(sectionOf(audit, 'substance')?.status).toBe('not_verifiable');
+    expect(sectionOf(audit, 'reservoir_fluxes')?.status).toBe('not_verifiable');
+    for (const s of audit.sections) {
+      expect(s.status).not.toBe('imbalanced');
+    }
+    expect(audit.status).toBe('not_verifiable');
+    expect(audit.balanced).toBe(false);
+  });
+});
+
+describe('Stage 4.2.3.4.1 InvariantAuditor: некорректный tolerance в секции reaction_inventory', () => {
+  const badTolerances: Array<{ label: string; value: number }> = [
+    { label: 'NaN', value: Number.NaN },
+    { label: '+Infinity', value: Number.POSITIVE_INFINITY },
+    { label: 'отрицательный', value: -1 }
+  ];
+  for (const { label, value } of badTolerances) {
+    it(`tolerance ${label}: секция reaction_inventory invalid и при пустом, и при непустом журнале`, () => {
+      const before = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+      const after = worldOf([res('atm', 'atmosphere', { co2: 100 })]);
+      const empty = auditWorldTransition(before, after, createFluxLedger(), {
+        speciesCatalog: reactionCatalog(),
+        boundary: 'complete',
+        tolerance: value,
+        reactionLedger: { records: [] }
+      });
+      // пустой журнал не даёт balanced при некорректном tolerance
+      expect(sectionOf(empty, 'reaction_inventory')?.status).toBe('invalid');
+      expect(sectionOf(empty, 'reaction_inventory')?.issues.some((i) => i.includes('tolerance'))).toBe(true);
+      expect(empty.status).toBe('imbalanced');
+      const nonEmpty = auditWorldTransition(before, after, createFluxLedger(), {
+        speciesCatalog: reactionCatalog(),
+        boundary: 'complete',
+        tolerance: value,
+        reactionLedger: { records: [reactionRecord()] }
+      });
+      expect(sectionOf(nonEmpty, 'reaction_inventory')?.status).toBe('invalid');
+      expect(nonEmpty.status).toBe('imbalanced');
+    });
+  }
+});
