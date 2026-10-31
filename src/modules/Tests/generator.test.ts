@@ -8,8 +8,10 @@ import {
   generateMultipleWorlds,
   generateWorldWithFixedCategories,
   generateRandomSeed,
-  isCradleSupportedOnWorld
+  isCradleSupportedOnWorld,
+  selectCradle
 } from '../Generator/generator';
+import { createRandom } from '../Generator/random';
 import type { GenerationSettings, AtmosphereState, PhysicalCharacteristics, CradleLocalEnvironment } from '../../types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
 import { determineCradleLocalEnvironment } from '../WorldModel';
@@ -835,6 +837,228 @@ describe('Data Validation', () => {
       expect(
         world.warnings.some(w => w.ruleId === 'cradle_temperature_unproven')
       ).toBe(true);
+    });
+  });
+
+  // Stage 4.2.2.4 (§3 ТЗ): интеграционные тесты САМОГО selectCradle —
+  // полного автоматического selector'а (фильтр isCradleSupportedOnWorld
+  // → chooseWeighted), а не только boolean predicate. Детерминизм:
+  // фиксированный seed + явные веса (нулевые веса полностью исключают
+  // кандидатов из chooseWeighted). Typed evidence передаётся selector'у
+  // только явно; в реальном контуре generateWorld его не передаёт
+  // (научное ядро строится ПОСЛЕ выбора колыбели).
+  describe('Stage 4.2.2.4: интеграция selectCradle с typed evidence', () => {
+    const cradle = cradles.find(c => c.id === 'liquid_methane_ethane')!;
+    const centralObject = centralObjects.find(o => o.id === 'yellow_dwarf')!;
+    const celestialBody = celestialBodies.find(b => b.id === 'earth_like')!;
+    const atmosphere: AtmosphereState = {
+      components: [
+        { gasId: 'ch4', percentage: 60, isTrace: false, uncertainty: '', warnings: [] },
+        { gasId: 'c2h6', percentage: 15, isTrace: false, uncertainty: '', warnings: [] },
+        { gasId: 'n2', percentage: 25, isTrace: false, uncertainty: '', warnings: [] }
+      ],
+      totalPressure: 1.5,
+      temperature: 95,
+      notes: 'фикстура: метаново-этановая атмосфера'
+    };
+    const bodyCharacteristics = {
+      surfaceTemperature: 150,
+      atmosphericPressure: 1.5,
+      geologicalActivity: 'Высокая геологическая активность'
+    } as PhysicalCharacteristics;
+
+    /** Ядро с планетой и океанским резервуаром с заданной температурой. */
+    const coreWithReservoirTemperature = (temperature: ScientificValue) => {
+      const core = createCoreWorldState('w-select-cradle-4224');
+      core.bodies.push({
+        id: 'planet',
+        kind: 'planet',
+        properties: {},
+        thermalState: {
+          effectiveTemperature: notApplicable('планета — получатель излучения'),
+          equilibriumTemperature: unknownValue('T_eq не задана в фикстуре'),
+          surfaceTemperature: unknownValue('фикстура: поверхность не заявлена'),
+          atmosphericTemperatureProfile: { status: 'unknown', layers: [] }
+        }
+      });
+      core.reservoirs.push({
+        id: 'ocean_reservoir',
+        kind: 'ocean',
+        bodyId: 'planet',
+        properties: {},
+        reservoirTemperature: temperature
+      });
+      return core;
+    };
+
+    /** Локальная среда колыбели, явно связанная с резервуаром ядра. */
+    const environment = (): CradleLocalEnvironment => ({
+      ...determineCradleLocalEnvironment({ cradle }),
+      localReservoirId: 'ocean_reservoir'
+    });
+
+    const baseContext = {
+      mode: 'realistic' as const,
+      centralObject,
+      celestialBody,
+      atmosphere,
+      bodyCharacteristics
+    };
+
+    // Веса: только liquid_methane_ethane имеет положительный вес —
+    // детерминированный выбор кандидата среди поддержанных.
+    const forcedCradleSettings = baseSettings({
+      seed: 's4224_select_cradle',
+      weights: {
+        cosmology: {},
+        epoch: {},
+        centralObject: {},
+        celestialBody: {},
+        cradle: {
+          supercritical_water: 0,
+          liquid_ammonia: 0,
+          liquid_methane_ethane: 1,
+          supercritical_co2: 0,
+          h2o_co2_supercritical_mix: 0,
+          hydrogen_helium_aerosols: 0,
+          molten_salts: 0
+        }
+      }
+    });
+
+    it('кандидат с known в допустимом диапазоне остаётся доступным для выбора', () => {
+      const { cradle: chosen, cradleWarnings } = selectCradle(
+        createRandom('s4224_select_cradle'),
+        forcedCradleSettings,
+        {
+          ...baseContext,
+          coreWorldState: coreWithReservoirTemperature(
+            knownValue(quantity(150, 'K'), {
+              provenance: { sourceName: 'зонд фикстуры: температура океана' }
+            })
+          ),
+          cradleLocalEnvironment: environment()
+        }
+      );
+      expect(chosen.id).toBe('liquid_methane_ethane');
+      expect(cradleWarnings.some(w => w.id === 'warn_cradle_support_fallback')).toBe(false);
+    });
+
+    it('доказанное known-нарушение исключает кандидата: выбирается допустимая альтернатива', () => {
+      // Веса не заданы (все поддержанные кандидаты равновесны):
+      // нарушивший кандидат не выбирается, fallback на общий список
+      // не происходит — выбор идёт среди поддержанных альтернатив
+      const settings = baseSettings({ seed: 's4224_select_cradle_alt' });
+      const { cradle: chosen, cradleWarnings } = selectCradle(
+        createRandom('s4224_select_cradle_alt'),
+        settings,
+        {
+          ...baseContext,
+          coreWorldState: coreWithReservoirTemperature(
+            knownValue(quantity(288, 'K'), {
+              provenance: { sourceName: 'зонд фикстуры: температура океана' }
+            })
+          ),
+          cradleLocalEnvironment: environment()
+        }
+      );
+      expect(chosen.id).not.toBe('liquid_methane_ethane');
+      expect(cradleWarnings.some(w => w.id === 'warn_cradle_support_fallback')).toBe(false);
+    });
+
+    it('estimated вне диапазона остаётся допустимым условным кандидатом', () => {
+      const { cradle: chosen } = selectCradle(
+        createRandom('s4224_select_cradle'),
+        forcedCradleSettings,
+        {
+          ...baseContext,
+          coreWorldState: coreWithReservoirTemperature(
+            estimatedValue(quantity(288, 'K'), 'модельная оценка фикстуры', {
+              provenance: { sourceName: 'оценка фикстуры' }
+            })
+          ),
+          cradleLocalEnvironment: environment()
+        }
+      );
+      expect(chosen.id).toBe('liquid_methane_ethane');
+    });
+
+    it('unknown-температура не превращается в hard error: кандидат остаётся', () => {
+      const { cradle: chosen } = selectCradle(
+        createRandom('s4224_select_cradle'),
+        forcedCradleSettings,
+        {
+          ...baseContext,
+          coreWorldState: coreWithReservoirTemperature(
+            unknownValue('температура океана не измерялась')
+          ),
+          cradleLocalEnvironment: environment()
+        }
+      );
+      expect(chosen.id).toBe('liquid_methane_ethane');
+    });
+
+    it('без typed evidence selector не выдумывает доказательств и не исключает кандидата', () => {
+      // Реальный генерационный контур: ни ядра, ни среды не передано —
+      // температура не доказана, но и не опровергнута
+      const { cradle: chosen, cradleWarnings } = selectCradle(
+        createRandom('s4224_select_cradle'),
+        forcedCradleSettings,
+        baseContext
+      );
+      expect(chosen.id).toBe('liquid_methane_ethane');
+      expect(cradleWarnings.some(w => w.id === 'warn_cradle_support_fallback')).toBe(false);
+    });
+
+    it('ручная фиксация колыбели: выбор не фильтруется даже при доказанном нарушении', () => {
+      const settings = baseSettings({
+        seed: 's4224_select_cradle_fixed',
+        fixedCategories: { cradle: 'liquid_methane_ethane' }
+      });
+      const { cradle: chosen, cradleWarnings } = selectCradle(
+        createRandom('s4224_select_cradle_fixed'),
+        settings,
+        {
+          ...baseContext,
+          coreWorldState: coreWithReservoirTemperature(
+            knownValue(quantity(288, 'K'), {
+              provenance: { sourceName: 'зонд фикстуры: температура океана' }
+            })
+          ),
+          cradleLocalEnvironment: environment()
+        }
+      );
+      // Прежняя семантика: ручной выбор остаётся, несовместимость
+      // отражается предупреждениями итоговой проверки мира
+      expect(chosen.id).toBe('liquid_methane_ethane');
+      expect(cradleWarnings).toHaveLength(0);
+    });
+
+    it('ручная фиксация в реальной генерации: колыбель остаётся, несовместимость — предупреждением', () => {
+      const world = generateWorld(baseSettings({
+        seed: 's4224_fixed_cradle_pipeline',
+        fixedCategories: {
+          cosmology: 'big_bang',
+          centralObject: 'yellow_dwarf',
+          celestialBody: 'earth_like',
+          cradle: 'liquid_methane_ethane'
+        },
+        customAtmosphere: {
+          components: [
+            { gasId: 'n2', percentage: 100, isTrace: false, uncertainty: '', warnings: [] }
+          ],
+          totalPressure: 1.5,
+          temperature: 95,
+          notes: 'фикстура: азотная атмосфера без метана — колыбели не хватает носителя'
+        }
+      }));
+      // Ручная колыбель остаётся выбранной...
+      expect(world.cradle.id).toBe('liquid_methane_ethane');
+      // ...а несовместимость (состав без ch4/c2h6) отражается
+      // предупреждением совместимости, а не сменой колыбели
+      expect(world.warnings.some(w =>
+        w.ruleId === 'cradle_atmosphere_composition' && w.severity === 'error'
+      )).toBe(true);
     });
   });
 });

@@ -9,7 +9,8 @@ import {
   getAllRules,
   getActiveRules,
   isEnergySourceAvailable,
-  CRADLE_RELATED_CATEGORIES
+  CRADLE_RELATED_CATEGORIES,
+  LOCATION_TYPE_RESERVOIR_KINDS
 } from '../Compatibility';
 import { determineCradleLocalEnvironment } from '../WorldModel';
 import type { GeneratedWorld, AtmosphereState, PhysicalCharacteristics, CradleLocalEnvironment } from '../../types';
@@ -170,6 +171,8 @@ function withOceanReservoir(
     reservoirTemperature?: ScientificValue;
     reservoirId?: string;
     reservoirBodyId?: string;
+    /** Stage 4.2.2.4: переопределение вида резервуара для тестов соответствия kind локальной среде (по умолчанию 'ocean'). */
+    reservoirKind?: string;
     withMoonBody?: boolean;
     linkReservoirId?: string | null;
   } = {}
@@ -202,7 +205,7 @@ function withOceanReservoir(
   const reservoirId = options.reservoirId ?? 'ocean_reservoir';
   const reservoir: ReservoirRecord = {
     id: reservoirId,
-    kind: 'ocean',
+    kind: options.reservoirKind ?? 'ocean',
     bodyId: options.reservoirBodyId ?? 'planet',
     properties: {},
     ...(options.reservoirTemperature !== undefined
@@ -1310,6 +1313,193 @@ describe('Cradle Local Environment Compatibility', () => {
       const warnings = checkCompatibility(world, 'realistic');
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
       expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+  });
+
+  // Stage 4.2.2.4 (§2 ТЗ): вид резервуара (ReservoirRecord.kind) должен
+  // соответствовать локальной среде (CradleLocationType): температура
+  // резервуара атмосферы не доказывает температуру океана, лёд — не
+  // океанический резервуар, вид 'ocean' не соответствует глубоким
+  // планетным слоям (допустимы mantle/core). Несовпадение вида —
+  // НЕДОКАЗАННОСТЬ (fail-closed), не физическая ошибка; правильный
+  // вид сохраняет доказательную семантику Stage 4.2.2.3; другой
+  // резервуар автоматически не выбирается.
+  describe('Stage 4.2.2.4: вид резервуара должен соответствовать локальной среде', () => {
+    const oceanWorld = () =>
+      makeWorld('liquid_methane_ethane', {
+        ...baseWorld(),
+        atmosphere: makeAtmosphere([['ch4', 60], ['c2h6', 15], ['n2', 25]], 95, 1.5)
+      });
+
+    const subsurfaceWorld = () =>
+      makeWorld('supercritical_water', {
+        ...baseWorld(),
+        atmosphere: makeAtmosphere([['n2', 100]], null, null)
+      });
+
+    const deepWorld = () =>
+      makeWorld('molten_salts', {
+        ...baseWorld(),
+        physicalCharacteristics: makePhysicalCharacteristics({
+          surfaceTemperature: 1500,
+          atmosphericPressure: 1,
+          geologicalActivity: 'Высокая геологическая активность'
+        })
+      });
+
+    it('экспортированное соответствие фиксирует допустимые виды без изобретения таксономии', () => {
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.ocean).toEqual(['ocean']);
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.subsurface_reservoir).toEqual(['ocean', 'crust']);
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.deep_planetary_layers).toEqual(['mantle', 'core']);
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.surface).toBeNull();
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.atmosphere).toBeNull();
+      expect(LOCATION_TYPE_RESERVOIR_KINDS.other).toBeNull();
+    });
+
+    it('океан + резервуар атмосферы: even known + provenance НЕ доказывает и НЕ опровергает', () => {
+      // 288 K вне диапазона 90–200, но резервуар атмосферы температурой
+      // океана не является: физической ошибки нет — недоказанность
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirKind: 'atmosphere',
+        reservoirTemperature: knownValue(quantity(288, 'K'), {
+          provenance: { sourceName: 'зонд фикстуры: атмосферный резервуар, не океан' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('океан + резервуар льда (kind ice): недоказанность, не физическая ошибка', () => {
+      // 150 K формально в диапазоне 90–200, но ледяной резервуар без
+      // явно обоснованной связи с океанской средой: молчаливого
+      // подтверждения нет
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirKind: 'ice',
+        reservoirTemperature: knownValue(quantity(150, 'K'), {
+          provenance: { sourceName: 'зонд фикстуры: ледяной покров' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('подземная среда + резервуар атмосферы не принимается как доказательство', () => {
+      // 700 K в диапазоне 647–1000, но вид 'atmosphere' недопустим для
+      // subsurface_reservoir: доказательство недоступно
+      const world = withOceanReservoir(subsurfaceWorld(), {
+        reservoirKind: 'atmosphere',
+        reservoirTemperature: knownValue(quantity(700, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('глубинные слои + вид ocean не принимается как доказательство', () => {
+      // Вид 'ocean' допустим для океана, но НЕ для deep_planetary_layers
+      // (допустимы mantle/core): even известные 1500 K в диапазоне
+      // не доказывают среду
+      const world = withOceanReservoir(deepWorld(), {
+        reservoirKind: 'ocean',
+        reservoirTemperature: knownValue(quantity(1500, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('неизвестный тип расположения (other) не выводит природу резервуара из ID', () => {
+      // Даже вид 'ocean' с known + provenance в диапазоне не доказывает
+      // среду с недокументируемым расположением (fail-closed)
+      const world = withLocationType(
+        withOceanReservoir(oceanWorld(), {
+          reservoirTemperature: knownValue(quantity(150, 'K'), {
+            provenance: { sourceName: 'зонд фикстуры' }
+          })
+        }),
+        'other'
+      );
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('правильный вид (mantle) + known вне диапазона → доказанная ошибка', () => {
+      // Прежние контракты в силе: при правильном виде доказанное
+      // значение вне диапазона — физическая ошибка
+      const world = withOceanReservoir(deepWorld(), {
+        reservoirKind: 'mantle',
+        reservoirTemperature: knownValue(quantity(288, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры: мантийный резервуар' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      const errors = errorsForRule(warnings, 'cradle_temperature_compatibility');
+      expect(errors).toHaveLength(1);
+      expect(errors[0].severity).toBe('error');
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+
+    it('правильный вид (mantle) + known в диапазоне → доказанная проверка', () => {
+      const world = withOceanReservoir(deepWorld(), {
+        reservoirKind: 'mantle',
+        reservoirTemperature: knownValue(quantity(1500, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры: мантийный резервуар' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+
+    it('правильный вид (crust) доказывает подземную среду: прежняя семантика сохранена', () => {
+      const world = withOceanReservoir(subsurfaceWorld(), {
+        reservoirKind: 'crust',
+        reservoirTemperature: knownValue(quantity(700, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры: коровый резервуар' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(false);
+    });
+
+    it('правильный вид + estimated вне диапазона → предупреждение, не ошибка', () => {
+      const world = withOceanReservoir(subsurfaceWorld(), {
+        reservoirKind: 'crust',
+        reservoirTemperature: estimatedValue(quantity(288, 'K'), 'модельная оценка фикстуры', {
+          provenance: { sourceName: 'оценка фикстуры' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      const estimate = errorsForRule(warnings, 'cradle_temperature_estimate_outside_range');
+      expect(estimate).toHaveLength(1);
+      expect(estimate[0].severity).toBe('warning');
+      expect(estimate[0].message).toContain('НЕ является доказанным физическим противоречием');
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it('резервуар другого тела с правильным видом не читается (прежняя защита сохранена)', () => {
+      // Kind-гейт не ослабил проверку принадлежности телу: пара
+      // (bodyId 'planet', localReservoirId) остаётся обязательной
+      const world = withOceanReservoir(oceanWorld(), {
+        reservoirKind: 'ocean',
+        reservoirBodyId: 'moon',
+        withMoonBody: true,
+        reservoirTemperature: knownValue(quantity(288, 'K'), {
+          provenance: { sourceName: 'зонд фикстуры: чужой резервуар' }
+        })
+      });
+      const warnings = checkCompatibility(world, 'realistic');
+      expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
     });
   });
 
