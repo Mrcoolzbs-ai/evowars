@@ -735,7 +735,11 @@ export function auditReactionLedger(
  * объектов не важен (запись, пересобранная с иным порядком ключей, но
  * тем же содержимым, изменением не считается), порядок массивов —
  * важен (порядок участников — часть данных записи). Собственные
- * свойства читаются без обращения к прототипу.
+ * свойства читаются без обращения к прототипу. Собственный ключ со
+ * значением undefined равносилен отсутствию ключа (JSON-семантика:
+ * сериализованный журнал не содержит undefined-значений); удаление
+ * определённого значения или появление нового определённого
+ * значения — изменение.
  */
 function deepJsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) {
@@ -750,8 +754,8 @@ function deepJsonEqual(a: unknown, b: unknown): boolean {
     }
     return a.every((value, index) => deepJsonEqual(value, b[index]));
   }
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
+  const keysA = Object.keys(a).filter((key) => (a as Record<string, unknown>)[key] !== undefined);
+  const keysB = Object.keys(b).filter((key) => (b as Record<string, unknown>)[key] !== undefined);
   if (keysA.length !== keysB.length) {
     return false;
   }
