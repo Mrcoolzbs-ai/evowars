@@ -1518,12 +1518,38 @@ describe('Cradle Local Environment Compatibility', () => {
   // доказывается только видом 'crust' (схема ReservoirRecord не
   // различает поверхностный и подземный океан); неизвестное
   // runtime-расположение — fail-closed без исключений.
+  // Stage 4.2.2.5.1: fail-closed охватывает и имена унаследованных
+  // свойств прототипа ('constructor'/'toString'/'hasOwnProperty'/
+  // '__proto__') — унаследованные значения Object.prototype
+  // списками допустимых видов резервуаров не являются.
   describe('Stage 4.2.2.5: семантика видов и runtime-безопасность kind-гейта', () => {
     const subsurfaceWorld = () =>
       makeWorld('supercritical_water', {
         ...baseWorld(),
         atmosphere: makeAtmosphere([['n2', 100]], null, null)
       });
+
+    /**
+     * Stage 4.2.2.5.1: декой-резервуар тела 'planet' с ДОКАЗАННОЙ
+     * (known + содержательный provenance) неприемлемой температурой
+     * 288 K — вне диапазона supercritical_water (647–1000 K). Если
+     * бы kind-гейт при некорректном locationType автоматически
+     * «перепрыгнул» на другой резервуар, возникла бы ошибка
+     * cradle_temperature_compatibility. Отсутствие такой ошибки —
+     * наблюдаемое доказательство запрета автоподбора резервуара.
+     */
+    const withDecoyReservoir = (world: Partial<GeneratedWorld>): Partial<GeneratedWorld> => {
+      world.coreWorldState!.reservoirs.push({
+        id: 'decoy_reservoir',
+        kind: 'crust',
+        bodyId: 'planet',
+        properties: {},
+        reservoirTemperature: knownValue(quantity(288, 'K'), {
+          provenance: { sourceName: 'скважина фикстуры: ловушка автоподбора' }
+        })
+      });
+      return world;
+    };
 
     it("вид 'ocean' больше не доказывает подземную среду: недоказанность, не ошибка", () => {
       // 700 K внутри диапазона 647–1000 с known + provenance, но
@@ -1544,26 +1570,75 @@ describe('Cradle Local Environment Compatibility', () => {
       expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
     });
 
-    it('runtime-неизвестный locationType не выбрасывает и не доказывает температуру', () => {
+    it('runtime-неизвестный locationType не выбрасывает, не доказывает и не подбирает другой резервуар', () => {
       // Некорректное runtime-значение поступает через явно
       // приведённую фикстуру (внешние данные/сохранения). Lookup
-      // таблицы видов даёт undefined: без исключения, без
-      // доказательства, без выбора другого резервуара —
-      // недоказанность (fail-closed).
-      const world = withLocationType(
-        withOceanReservoir(subsurfaceWorld(), {
-          reservoirKind: 'crust',
-          reservoirTemperature: knownValue(quantity(700, 'K'), {
-            provenance: { sourceName: 'скважина фикстуры: коровый резервуар' }
-          })
-        }),
-        'hydrothermal_sinter' as unknown as CradleLocalEnvironment['locationType']
+      // по несобственному ключу таблицы даёт undefined: без
+      // исключения, без доказательства, без выбора другого
+      // резервуара — недоказанность (fail-closed). Декой-резервуар
+      // с доказанной неприемлемой температурой фиксирует отсутствие
+      // автоподбора.
+      const world = withDecoyReservoir(
+        withLocationType(
+          withOceanReservoir(subsurfaceWorld(), {
+            reservoirKind: 'crust',
+            reservoirTemperature: knownValue(quantity(700, 'K'), {
+              provenance: { sourceName: 'скважина фикстуры: коровый резервуар' }
+            })
+          }),
+          'hydrothermal_sinter' as unknown as CradleLocalEnvironment['locationType']
+        )
       );
       // Прямой вызов = no-throw assert: гейт обязан вернуть
       // недоказанность, а не выбросить TypeError на undefined.
       const warnings = checkCompatibility(world, 'realistic');
+      // Нет ошибки по температуре этого резервуара; автоподбор
+      // другого резервуара не выполняется (декой с доказанной
+      // неприемлемой температурой не становится «доказательством»).
       expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+      // Явная недоказанность.
       expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+    });
+
+    it("имена унаследованных свойств прототипа как locationType — fail-closed без TypeError", () => {
+      // Stage 4.2.2.5.1: LOCATION_TYPE_RESERVOIR_KINDS — обычный
+      // объект, наследующий свойства Object.prototype. При обычном
+      // lookup 'constructor'/'toString'/'hasOwnProperty' вернули бы
+      // функции, '__proto__' — Object.prototype, и последующий
+      // .includes() выбросил бы TypeError. Гейт обязан проверять
+      // СОБСТВЕННОСТЬ ключа: без исключения, без доказательства,
+      // без выбора другого резервуара — недоказанность (fail-closed).
+      // Приведение типа — ТОЛЬКО на границе тестовой фикстуры; вид
+      // 'crust' допустим для subsurface_reservoir, поэтому тест
+      // гарантированно проходит через фактический kind-гейт.
+      const prototypeKeyLocationTypes = [
+        'constructor',
+        'toString',
+        'hasOwnProperty',
+        '__proto__'
+      ];
+      for (const rawLocationType of prototypeKeyLocationTypes) {
+        const world = withDecoyReservoir(
+          withLocationType(
+            withOceanReservoir(subsurfaceWorld(), {
+              reservoirKind: 'crust',
+              reservoirTemperature: knownValue(quantity(700, 'K'), {
+                provenance: { sourceName: 'скважина фикстуры: коровый резервуар' }
+              })
+            }),
+            rawLocationType as unknown as CradleLocalEnvironment['locationType']
+          )
+        );
+        // Прямой вызов = no-throw assert: гейт обязан вернуть
+        // недоказанность, а не выбросить TypeError на унаследованном
+        // свойстве прототипа.
+        const warnings = checkCompatibility(world, 'realistic');
+        // Нет ошибки по температуре; автоподбор другого резервуара
+        // не выполняется.
+        expect(errorsForRule(warnings, 'cradle_temperature_compatibility')).toHaveLength(0);
+        // Явная недоказанность.
+        expect(warnings.some(w => w.ruleId === 'cradle_temperature_unproven')).toBe(true);
+      }
     });
   });
 
