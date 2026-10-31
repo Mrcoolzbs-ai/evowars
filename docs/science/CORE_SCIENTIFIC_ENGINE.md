@@ -415,6 +415,23 @@
 > по CI 29 файлов / 1175 тестов; golden baseline не изменён. Коммиты:
 > e30a9d69 (код) → 2881d27f (тесты). Подробности — §2.17 и §4.
 
+> Ревизия Stage 4.3.2, первая партия (2026-10-31): реальная
+> термодинамика импортирована — новый СЛОЙ ДАННЫХ (не Core):
+> src/modules/Data/thermodynamicCatalog.ts строит научный каталог
+> 20 газовых веществ из NASA Glenn CEA Thermodynamic Database
+> (data/thermo.inp, nasa/cea@2f79a647e85737742fb08a127da00d1ea1d069da,
+> Apache-2.0; NASA TP-2002-211556): ΔfH°(298.15 K) known (поле записи,
+> J/mol, origin reference_range), NASA-7 published (7 коэффициентов
+> Cp°/R при степенях T от -2 до +4, интегральные константы a8/a9 в
+> provenance.rawInput; форма CEA, не CHEMKIN), S°/ΔfG° — unknown с
+> пояснением (вычислитель NASA-7 не реализуется); 12 легаси-видов
+> газов переиспользованы через buildSpeciesCatalogFromLegacy, 8 новых
+> определены явно. Контракты Core (thermodynamics.ts, species.ts и
+> др.) НЕ изменены; CoreWorldState, Storage, Scheduler, legacy-химия
+> не затронуты; golden baseline не затронут изменениями этапа.
+> +14 тестов (dataThermodynamicCatalog.test), по CI 30 файлов /
+> 1189 тестов (базлайн 29/1175). Подробности — §2.17 (дополнение).
+
 ## 1. Слои ядра (`src/modules/Core/`)
 
 | Файл | Слой | Ответственность |
@@ -1419,6 +1436,22 @@ bound и семантика остальных видов неопределён
 подэтап 4.3.2. CoreWorldState, Storage, Scheduler, legacy-химия и
 golden baseline не изменены.
 
+Дополнение Stage 4.3.2, первая партия (2026-10-31): указанный план
+(«NIST WebBook — основной источник») скорректирован фактическим
+исполнением: импорт выполнен из NASA Glenn CEA Thermodynamic Database —
+записи базы уже содержат ΔfH°(298.15 K) и опубликованные NASA-7
+коэффициенты. Новый слой данных src/modules/Data/thermodynamicCatalog.ts
+(Stage 4.3.2, коммиты C1–C3): 20 газовых веществ; ΔfH° known (origin
+reference_range, поле записи), NASA-7 published (origin
+numerical_approximation, метод — аппроксимация NASA Glenn по CAP;
+коэффициенты дословные), S°/ΔfG° — unknownValue с пояснением;
+reference state: газ, 298.15 K, давление не назначается (1 atm ≠
+1 bar). Форма CEA (7 коэффициентов при T^-2..T^4 + константы a8/a9)
+сохранена в provenance.rawInput сегментов — вычислитель NASA-7
+(будущий подэтап) обязан учитывать члены T^-2 и T^-1. Контракты Core
+(включая thermodynamics.ts) не изменены; вычислитель NASA-7 по-прежнему
+НЕ реализован и не заявляется.
+
 ## 3. Интеграция (точки контакта с легаси)
 
 1. `GeneratedWorld.coreWorldState?: CoreWorldState` — опциональное поле.
@@ -1614,4 +1647,5 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   или неподтверждённая масса → not_verifiable, оценочная (estimated) →
   approximate; концентрации, доли и arbitrary_units не пересчитываются
   в моль без дополнительных данных (объём, общий запас).
+
 

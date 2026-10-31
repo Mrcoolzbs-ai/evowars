@@ -403,6 +403,22 @@
 > и golden baseline не изменены. Коммиты: e30a9d69 (код) →
 > 2881d27f (тесты). Реестр — §1.16.
 
+> Stage 4.3.2, первая партия (2026-10-31): импорт реальных
+> термодинамических значений — 20 газовых веществ из NASA Glenn CEA
+> (data/thermo.inp, nasa/cea@2f79a647e85737742fb08a127da00d1ea1d069da,
+> Apache-2.0; NASA TP-2002-211556): новый слой данных
+> src/modules/Data/thermodynamicCatalog.ts + тесты
+> dataThermodynamicCatalog.test (+14; по CI 30 файлов / 1189 тестов —
+> базлайн 29/1175 + 14) и лицензионная атрибуция (NASA_CEA_LICENSE.txt,
+> NASA_CEA_NOTICE.txt, nasaCeaAttribution.md). ΔfH°(298.15 K) known
+> (поле записи), NASA-7 published (дословные коэффициенты, форма CEA);
+> S°/ΔfG° — unknown (записью не предоставлены; вычислитель NASA-7 не
+> реализуется). NIST SRD 69 — только внешняя качественная сверка
+> (числа не копируются); ATcT не импортируется. Core, CoreWorldState,
+> Storage, PRNG, legacy-модули и golden baseline не изменены.
+> Коммиты: f80e7274 (данные+лицензирование) → 4899f7bb (тесты) → C3
+> (документация). Реестр — §1.16 (дополнение).
+
 ## 1. Реестр модулей
 
 Формат записи: назначение / входы / выходы / формулы / допущения / источники /
@@ -1327,6 +1343,32 @@
   совпал. Импорт реальных значений и вычислитель NASA-7 по-прежнему
   НЕ реализованы (4.3.2); этап 4.3 в целом НЕ завершён.
 
+- **Stage 4.3.2, первая партия (2026-10-31)** (+14 тестов:
+  dataThermodynamicCatalog.test; коммиты f80e7274 → 4899f7bb → C3):
+  импорт реальных термодинамических значений — 20 газовых веществ из
+  NASA Glenn CEA Thermodynamic Database (data/thermo.inp,
+  nasa/cea@2f79a647e85737742fb08a127da00d1ea1d069da, Apache-2.0;
+  NASA TP-2002-211556). Новый слой src/modules/Data/
+  thermodynamicCatalog.ts: ΔfH°(298.15 K) — known (поле записи, origin
+  reference_range, неопределённость записью не приводится); NASA-7 —
+  published (origin numerical_approximation; коэффициенты дословные;
+  сегменты записи 200/300–1000–6000[–20000] K, обновление Snyder
+  09.09.2021; форма CEA: 7 коэффициентов Cp°/R при T^-2..T^4, константы
+  a8/a9 в provenance.rawInput); S°(298.15 K) и ΔfG°(298.15 K) —
+  unknownValue с пояснением (НЕ вычислены: вычислитель NASA-7 не
+  реализуется); tabulated Cp отсутствует (база публикует только
+  параметризацию); reference state: газ, 298.15 K, давление записью
+  не задаётся. 12 легаси-видов газов переиспользованы
+  (buildSpeciesCatalogFromLegacy), 8 новых определены явно из записей.
+  Лицензионная атрибуция: NASA_CEA_LICENSE.txt, NASA_CEA_NOTICE.txt,
+  nasaCeaAttribution.md (Apache-2.0, NASA). NIST SRD 69 — только
+  внешняя качественная сверка; ATcT не импортируется. Контракты Core,
+  легаси-модули, CoreWorldState, Storage, PRNG не изменены; golden
+  baseline изменениями этапа не затронут. Вычислитель NASA-7 и
+  процедура подбора коэффициентов по-прежнему НЕ реализованы; этап
+  4.3 в целом НЕ завершён (тесты полиномов против таблиц, закрытие
+  S°/ΔfG°, расширение покрытия — следующие подэтапы).
+
 ### 1.15 App.tsx (966 строк)
 
 - **Назначение**: монолитный UI: GeneratorPanel, WorldDisplay, HistoryPanel, ExportPanel, форматтеры (`formatPhysValue`, `formatConfidence`, ...), вызов `runChemicalEvolutionStep`.
@@ -1597,4 +1639,5 @@
   последней проверенной; Stage 4.0.2 исправляет: фактическая последняя
   выпущенная версия на 30.10.2026 — **TN 1.228** (проверено по официальной
   странице atct.anl.gov, перечень выпусков Thermochemical Data). TN 1.222,
+
 
