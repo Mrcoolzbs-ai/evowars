@@ -10,7 +10,7 @@
 // (NIST WebBook SRD 69 со сверкой с ATcT TN 1.228) — подэтап 4.3.2.
 
 import { describe, it, expect } from 'vitest';
-import { knownValue, estimatedValue, unknownValue, convertScientificValueUnit } from '../Core/scientificValue';
+import { knownValue, estimatedValue, unknownValue, convertScientificValueUnit, ScientificValueError } from '../Core/scientificValue';
 import type { ScientificValue } from '../Core/scientificValue';
 import { quantity, convert, toSI, sameDimension, dimensionOf, QuantityError } from '../Core/physicalQuantity';
 import type { ScientificSpecies } from '../Core/species';
@@ -227,16 +227,25 @@ describe('Stage 4.3.1 Thermodynamics: происхождение значени�
     expect(errors.some((e) => e.includes('не может нести числовое значение'))).toBe(true);
   });
 
-  it('отсутствие uncertainty допустимо (это «неизвестна», не «ноль»); некорректная uncertainty — ошибка', () => {
+  it('отсутствие uncertainty допустимо (это «неизвестна», не «ноль»); некорректная не создаётся и ловится валидатором', () => {
     const thermo = validKnownThermo();
     thermo.standardFormationGibbsEnergy = knownValue(quantity(-228600, 'J_mol'), {
       provenance: testProvenance('experimental')
     });
     expect(validateThermodynamicProperties(thermo)).toEqual([]);
-    thermo.standardFormationGibbsEnergy = knownValue(quantity(-228600, 'J_mol'), {
-      provenance: testProvenance('experimental'),
+    // конструктор не создаёт значение с некорректной неопределённостью
+    expect(() =>
+      knownValue(quantity(-228600, 'J_mol'), {
+        provenance: testProvenance('experimental'),
+        uncertainty: { kind: 'interval', lower: 10, upper: -10 }
+      })
+    ).toThrow(ScientificValueError);
+    // runtime-нарушение (данные из JSON): валидатор обязан поймать
+    const valid = knownValue(quantity(-228600, 'J_mol'), { provenance: testProvenance('experimental') });
+    thermo.standardFormationGibbsEnergy = {
+      ...valid,
       uncertainty: { kind: 'interval', lower: 10, upper: -10 }
-    });
+    } as ScientificValue;
     expect(
       validateThermodynamicProperties(thermo).some((e) => e.includes('неопределённость'))
     ).toBe(true);
