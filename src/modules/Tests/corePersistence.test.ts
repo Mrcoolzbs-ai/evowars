@@ -34,6 +34,7 @@ import {
 import type { LegacyGasRecord, LegacyCompositionRecord, LegacyWorldInput } from '../Core/adapters';
 import { validateWorldState } from '../Core/worldState';
 import type { CoreWorldState } from '../Core/worldState';
+import type { ReactionRecord } from '../Core/reactionLedger';
 import { createRandom } from '../Generator/random';
 import type { PhysValue, ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import type {
@@ -1153,7 +1154,7 @@ describe('Stage 4.2.3.3 Persistence: reactionLedger в миграциях и rou
   it('round-trip: все поля ReactionRecord сохраняются при экспорте/импорте', () => {
     const core = coreWorldStateFromLegacyWorld(starWorld());
     const reservoirId = core.reservoirs[0]?.id ?? 'atm';
-    const record = {
+    const record: ReactionRecord = {
       id: 'rxn-rt',
       reactionId: 'water-formation',
       reactants: [
