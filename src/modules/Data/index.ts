@@ -12,6 +12,14 @@ import chemicalReactions from './chemicalReactions';
 import starPhysical from './starPhysical';
 import phaseProperties from './phaseProperties';
 import elementCompositions from './elementCompositions';
+import {
+  NASA_CEA_THERMO_SOURCE,
+  NASA_CEA_THERMO_DATA,
+  NEW_GAS_SPECIES,
+  THERMODYNAMIC_CATALOG_SPECIES_IDS,
+  buildThermodynamicCatalog,
+  buildNasaCeaThermodynamics
+} from './thermodynamicCatalog';
 
 export {
   cosmologies,
@@ -23,6 +31,21 @@ export {
   chemicalReactions
 };
 export { starPhysical, phaseProperties, elementCompositions };
+export {
+  NASA_CEA_THERMO_SOURCE,
+  NASA_CEA_THERMO_DATA,
+  NEW_GAS_SPECIES,
+  THERMODYNAMIC_CATALOG_SPECIES_IDS,
+  buildThermodynamicCatalog,
+  buildNasaCeaThermodynamics
+};
+export type {
+  NasaCeaDataSource,
+  NasaCeaGasRecordId,
+  NasaCeaGasRecordData,
+  NasaCeaSegmentData,
+  NewGasSpeciesDefinition
+} from './thermodynamicCatalog';
 export {
   getCentralObjectPhysics,
   getEarliestUniverseAgeGyr,
