@@ -731,6 +731,257 @@ describe('Stage 4.2.3.3 Scheduler: журнал реакционных тран�
 
 
 // ============================================
+// STAGE 4.2.3.3.1 - APPEND-ONLY КОНТРАКТ ЖУРНАЛА РЕАКЦИЙ
+// ============================================
+//
+// Записи журнала, существовавшие до macro-шага, неизменяемы:
+// совпадающий id не доказывает неизменности записи. Разрешено
+// только добавление новых записей в конец журнала; правка,
+// удаление, перестановка старых записей и удаление журнала
+// отклоняют шаг до аудита инвариантов. Новые записи обязаны
+// пройти стехиометрический аудит: шаг с новыми реакциями без
+// запрошенного аудита не фиксируется.
+
+/** Мир с одной старой записью журнала реакций. */
+function worldWithHistory(): CoreWorldState {
+  const world = testWorld();
+  world.reactionLedger = { records: [schedulerReaction('rxn-0')] };
+  return world;
+}
+
+/** Мир с двумя старыми записями (для проверки перестановки). */
+function worldWithTwoRecords(): CoreWorldState {
+  const world = testWorld();
+  world.reactionLedger = { records: [schedulerReaction('rxn-0'), schedulerReaction('rxn-1')] };
+  return world;
+}
+
+/** Оператор, добавляющий новую сбалансированную запись в конец журнала. */
+function appendingOperator(): ProcessOperator {
+  return {
+    processId: 'a',
+    apply: (w) => ({
+      ...w,
+      reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-new'))
+    })
+  };
+}
+
+/**
+ * Оператор, подменяющий старую запись (позиция 0) с сохранением id:
+ * содержимое меняется мутатором, переданным вызывающей стороной.
+ */
+function tamperOperator(tamper: (record: ReactionRecord) => ReactionRecord): ProcessOperator {
+  return {
+    processId: 'a',
+    apply: (w) => {
+      const records = (w.reactionLedger?.records ?? []).map((r) => structuredClone(r));
+      records[0] = tamper(records[0] as ReactionRecord);
+      return { ...w, reactionLedger: { records } };
+    }
+  };
+}
+
+describe('Stage 4.2.3.3.1 Scheduler: append-only контракт журнала реакций', () => {
+  it('новая сбалансированная запись при пустой истории — commit с аудитом balanced', () => {
+    const world = testWorld();
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-new']);
+    expect(result.audit?.status).toBe('balanced');
+  });
+
+  it('неизменная история плюс новая сбалансированная запись — commit', () => {
+    const world = worldWithHistory();
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-0', 'rxn-new']);
+    expect(result.audit?.status).toBe('balanced');
+  });
+
+  it('мир без журнала до шага: все записи после шага — новые, commit', () => {
+    const world = testWorld();
+    delete world.reactionLedger;
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-new']);
+  });
+
+  it('новая несбалансированная запись — reject с аудитом imbalanced', () => {
+    const world = testWorld();
+    const unbalanced: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-bad', 3))
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [unbalanced], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger?.records.map((r) => r.id)).toEqual([]);
+  });
+
+  it('изменение extent старой записи с сохранением id — reject до аудита', () => {
+    const world = worldWithHistory();
+    const result = runMacroStep(
+      world,
+      makeRegistry([descriptor('a')]),
+      [tamperOperator((r) => ({ ...r, extent: 999 }))],
+      { durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' } }
+    );
+    expect(result.status).toBe('rejected');
+    // отказ происходит ДО аудита инвариантов: нарушен append-only контракт
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('append-only'))).toBe(true);
+    expect(world.reactionLedger?.records[0]?.extent).toBe(1);
+  });
+
+  it('подмена старой записи на стехиометрически несбалансированную — reject до аудита', () => {
+    const world = worldWithHistory();
+    const result = runMacroStep(
+      world,
+      makeRegistry([descriptor('a')]),
+      [tamperOperator((r) => ({ ...r, products: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 3 }] }))],
+      { durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' } }
+    );
+    expect(result.status).toBe('rejected');
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('изменена'))).toBe(true);
+  });
+
+  it('удаление старой записи — reject', () => {
+    const world = worldWithHistory();
+    const removing: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({ ...w, reactionLedger: { records: [] } })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [removing], {
+      durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.diagnostics.some((d) => d.includes('удалены'))).toBe(true);
+  });
+
+  it('перестановка старых записей — reject', () => {
+    const world = worldWithTwoRecords();
+    const swapping: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({ ...w, reactionLedger: { records: [...(w.reactionLedger?.records ?? [])].reverse() } })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [swapping], {
+      durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.diagnostics.some((d) => d.includes('изменена или сдвинута'))).toBe(true);
+    expect(world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-0', 'rxn-1']);
+  });
+
+  it('изменение note, time, extentBasis или processId старой записи — reject', () => {
+    const tampers: Array<(record: ReactionRecord) => ReactionRecord> = [
+      (r) => ({ ...r, note: 'подменённая заметка' }),
+      (r) => ({ ...r, time: { segmentIndex: 0, localTimeS: 999 } }),
+      (r) => ({ ...r, extentBasis: 'column_amount' }),
+      (r) => ({ ...r, processId: 'not-a' })
+    ];
+    for (const tamper of tampers) {
+      const world = worldWithHistory();
+      const result = runMacroStep(
+        world,
+        makeRegistry([descriptor('a')]),
+        [tamperOperator(tamper)],
+        { durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' } }
+      );
+      expect(result.status).toBe('rejected');
+      expect(result.diagnostics.some((d) => d.includes('append-only'))).toBe(true);
+    }
+  });
+
+  it('удаление журнала из состояния мира — reject', () => {
+    const world = worldWithHistory();
+    const dropping: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const copy = { ...w };
+        delete copy.reactionLedger;
+        return copy;
+      }
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [dropping], {
+      durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.diagnostics.some((d) => d.includes('удалён'))).toBe(true);
+  });
+
+  it('шаг добавил реакции, но аудит инвариантов не запрошен — reject', () => {
+    const world = worldWithHistory();
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [appendingOperator()], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.diagnostics.some((d) => d.includes('аудит инвариантов не запрошен'))).toBe(true);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-0']);
+    expect(result.bookkeeping.stepCount).toBe(0);
+  });
+
+  it('отказные сценарии изолированы: исходный мир, журнал и записи не затронуты', () => {
+    const scenarios: ProcessOperator[] = [
+      tamperOperator((r) => ({ ...r, extent: 999 })),
+      tamperOperator((r) => ({ ...r, products: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 3 }] })),
+      { processId: 'a', apply: (w) => ({ ...w, reactionLedger: { records: [] } }) }
+    ];
+    for (const operator of scenarios) {
+      const world = worldWithHistory();
+      const originalLedger = world.reactionLedger;
+      const originalRecord = originalLedger?.records[0];
+      const result = runMacroStep(world, makeRegistry([descriptor('a')]), [operator], {
+        durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+      });
+      expect(result.status).toBe('rejected');
+      expect(result.world).toBe(world);
+      expect(world.reactionLedger).toBe(originalLedger);
+      expect(world.reactionLedger?.records[0]).toBe(originalRecord);
+      expect(world.clock.stepCount).toBe(0);
+    }
+    // перестановка: исходный порядок двух старых записей сохранён
+    const world = worldWithTwoRecords();
+    const originalLedger = world.reactionLedger;
+    const swapping: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({ ...w, reactionLedger: { records: [...(w.reactionLedger?.records ?? [])].reverse() } })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [swapping], {
+      durationS: 10, splitting: 'lie', audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger).toBe(originalLedger);
+    expect(world.reactionLedger?.records[0]?.id).toBe('rxn-0');
+  });
+});
+
+
+// ============================================
 // STAGE 4.2.3.1 - Snapshot-изоляция состояния мира
 // ============================================
 //

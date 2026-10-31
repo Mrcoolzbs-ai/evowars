@@ -23,6 +23,7 @@ import {
   validateReactionLedger,
   auditReactionStoichiometry,
   auditReactionLedger,
+  reactionLedgerAppendOnlyIssues,
   ReactionLedgerError
 } from '../Core/reactionLedger';
 import type { ReactionRecord, ReactionExtentBasis } from '../Core/reactionLedger';
@@ -999,5 +1000,109 @@ describe('Stage 4.2.3.2.1 ReactionLedger: note и однозначность п�
       ]
     });
     expect(validateReactionRecord(record).some((p) => p.includes('встречается дважды'))).toBe(true);
+  });
+});
+
+// ============================================
+// STAGE 4.2.3.3.1 - APPEND-ONLY КОНТРАКТ ЖУРНАЛА
+// ============================================
+//
+// Записи, существовавшие до macro-шага, неизменяемы по ВСЕМУ
+// содержимому (участники, коэффициенты, extent, extentBasis, time,
+// processId, note), по порядку и по количеству; совпадающий id не
+// является доказательством неизменности. Разрешено только
+// добавление новых записей в конец журнала.
+
+describe('Stage 4.2.3.3.1 ReactionLedger: append-only контракт', () => {
+  it('журнала до шага не было: все записи после — новые, нарушений нет', () => {
+    expect(reactionLedgerAppendOnlyIssues(undefined, { records: [makeRecord()] })).toEqual([]);
+  });
+
+  it('пустая история + новая запись в конец: нарушений нет', () => {
+    const after = registerReaction(createReactionLedger(), makeRecord({ id: 'rxn-new' }));
+    expect(reactionLedgerAppendOnlyIssues({ records: [] }, after)).toEqual([]);
+  });
+
+  it('история + новая запись в конец: нарушений нет', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord({ id: 'rxn-1' }));
+    const after = registerReaction(before, makeRecord({ id: 'rxn-2' }));
+    expect(reactionLedgerAppendOnlyIssues(before, after)).toEqual([]);
+  });
+
+  it('запись, пересобранная с иным порядком ключей, изменением не считается', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const record = makeRecord();
+    const reordered = {
+      note: record.note,
+      extentBasis: record.extentBasis,
+      products: record.products,
+      extent: record.extent,
+      reactants: record.reactants,
+      time: record.time,
+      reactionId: record.reactionId,
+      id: record.id
+    } as ReactionRecord;
+    expect(reactionLedgerAppendOnlyIssues(before, { records: [reordered] })).toEqual([]);
+  });
+
+  it('изменение extent при сохранённом id — нарушение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const issues = reactionLedgerAppendOnlyIssues(before, { records: [makeRecord({ extent: 999 })] });
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('rxn-1');
+    expect(issues[0]).toContain('не является доказательством');
+  });
+
+  it('изменение note, time, extentBasis или processId — нарушение для каждого поля', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const changed: ReactionRecord[] = [
+      makeRecord({ note: 'подменённая заметка' }),
+      makeRecord({ time: { segmentIndex: 0, localTimeS: 999 } }),
+      makeRecord({ extentBasis: 'column_amount' }),
+      makeRecord({ processId: 'proc-x' })
+    ];
+    for (const record of changed) {
+      const issues = reactionLedgerAppendOnlyIssues(before, { records: [record] });
+      expect(issues.length).toBe(1);
+      expect(issues[0]).toContain('изменена или сдвинута');
+    }
+  });
+
+  it('удаление старой записи — нарушение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const issues = reactionLedgerAppendOnlyIssues(before, createReactionLedger());
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('удалены');
+  });
+
+  it('перестановка старых записей — нарушение', () => {
+    const before = registerReaction(
+      registerReaction(createReactionLedger(), makeRecord({ id: 'rxn-1' })),
+      makeRecord({ id: 'rxn-2' })
+    );
+    const issues = reactionLedgerAppendOnlyIssues(before, { records: [...before.records].reverse() });
+    expect(issues.length).toBeGreaterThan(0);
+  });
+
+  it('журнал удалён из состояния мира — нарушение', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const issues = reactionLedgerAppendOnlyIssues(before, undefined);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('удалён');
+  });
+
+  it('records после шага не массив — нарушение: контракт непроверяем', () => {
+    const before = registerReaction(createReactionLedger(), makeRecord());
+    const broken = { records: 'not an array' } as unknown as ReactionLedger;
+    const issues = reactionLedgerAppendOnlyIssues(before, broken);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('не является массивом');
+  });
+
+  it('records до шага не массив — нарушение: контракт непроверяем', () => {
+    const brokenBefore = { records: 42 } as unknown as ReactionLedger;
+    const issues = reactionLedgerAppendOnlyIssues(brokenBefore, { records: [] });
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain('невозможно проверить');
   });
 });
