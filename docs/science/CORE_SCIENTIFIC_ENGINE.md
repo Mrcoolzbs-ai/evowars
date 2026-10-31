@@ -401,6 +401,20 @@
 > изменён). Коммиты: 0e3edbd0 → 4745ad4c → 8d7bba5a (фикс типизации
 > после красного CI). Подробности — §2.17 и §4.
 
+> Заключительная проверка валидатора 4.3.1 (2026-10-31): два краевых
+> случая исправлены — (1) checkQuantityShape при несовпадении
+> размерности возвращает false: величина с чужой размерностью НЕ
+> используется в дальнейших проверках (положительность, порядок
+> температур, пересечение диапазонов, контрольные точки); авто-
+> матическое преобразование единиц не выполняется (конверсия —
+> отдельная явная операция); (2) validateUncertainty для bounded
+> требует direction 'above'|'below' (отсутствие/null/постороннее
+> значение — ошибка валидации; knownValue/estimatedValue отклоняют
+> некорректную bounded-неопределённость с ScientificValueError).
+> +11 тестов (5 — coreScientificValue, 6 — coreThermodynamics), всего
+> по CI 29 файлов / 1175 тестов; golden baseline не изменён. Коммиты:
+> e30a9d69 (код) → 2881d27f (тесты). Подробности — §2.17 и §4.
+
 ## 1. Слои ядра (`src/modules/Core/`)
 
 | Файл | Слой | Ответственность |
@@ -1383,6 +1397,19 @@ value → строковая unit → размерность; `quantityDimension
 origin); при отсутствии точечного provenance точка наследует
 provenance таблицы.
 
+Заключительная проверка валидатора закрыла два краевых случая:
+(1) `checkQuantityShape` при несовпадении размерности возвращает
+false — величина с чужой размерностью непригодна для дальнейших
+проверок (её число не используется как температура/граница ни для
+положительности, ни для порядка, ни для пересечения диапазонов и
+контрольных точек); автоматическая конверсия единиц при этом НЕ
+выполняется; (2) `validateUncertainty` для bounded-неопределённости
+требует явное направление `direction: 'above' | 'below'` — отсутствие,
+null и посторонние значения дают ошибку валидации, а конструкторы
+`knownValue`/`estimatedValue` отклоняют такую неопределённость
+(ScientificValueError, invalid_uncertainty); проверка конечности
+bound и семантика остальных видов неопределённости сохранены.
+
 ГРАНИЦЫ 4.3.1: вычислитель NASA-7 и процедура подбора коэффициентов
 НЕ реализованы; ни одно реальное термодинамическое значение в код не
 добавлено (тестовые фикстуры — синтетика с явной пометкой «фикция
@@ -1447,13 +1474,13 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test)
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6)
 
 | Файл | it() | Покрытие |
 |---|---|---|
 | corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
-| coreThermodynamics.test | 60 | 4.3.1: валидная запись с известными значениями; оценочные значения с методом; unknown без числовой подстановки; отсутствие provenance у known/estimated; некорректные единицы и размерности; конверсия J/mol ↔ kJ/mol; сегменты NASA-7 (корректные/пересекающиеся/неупорядоченные); fitted без исходных Cp-таблиц; контрольные точки и диапазоны; reference state (обязательность, фаза записи, автоматические 1 bar/298.15 K не назначаются); интеграция в validateSpecies (отсутствие thermodynamics = не предоставлены); совместимость SpeciesCatalog и legacy-адаптеров; детерминированность и отсутствие побочных эффектов; 4.3.1 hardening: reference state при числовых Cp-данных (таблица/NASA-7/оба без reference state — ошибка; с корректным reference state проходят; несовпадение фазы — ошибка); безопасная runtime-валидация (null вместо ScientificValue/referenceState/heatCapacity/таблиц/точек/NASA-7/сегментов/диапазонов/derivation/provenance, битые quantity — диагностики без исключений, детерминированность); provenance отдельных Cp-точек (наследование таблицы; origin unknown/без идентификации источника/derived_computed без метода/неизвестный origin — ошибки; корректный точечный и с методом — проходят) |
-| coreScientificValue.test | 14 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации |
+| coreThermodynamics.test | 66 | 4.3.1: валидная запись с известными значениями; оценочные значения с методом; unknown без числовой подстановки; отсутствие provenance у known/estimated; некорректные единицы и размерности; конверсия J/mol ↔ kJ/mol; сегменты NASA-7 (корректные/пересекающиеся/неупорядоченные); fitted без исходных Cp-таблиц; контрольные точки и диапазоны; reference state (обязательность, фаза записи, автоматические 1 bar/298.15 K не назначаются); интеграция в validateSpecies (отсутствие thermodynamics = не предоставлены); совместимость SpeciesCatalog и legacy-адаптеров; детерминированность и отсутствие побочных эффектов; 4.3.1 hardening: reference state при числовых Cp-данных (таблица/NASA-7/оба без reference state — ошибка; с корректным reference state проходят; несовпадение фазы — ошибка); безопасная runtime-валидация (null вместо ScientificValue/referenceState/heatCapacity/таблиц/точек/NASA-7/сегментов/диапазонов/derivation/provenance, битые quantity — диагностики без исключений, детерминированность);provenance отдельных Cp-точек (наследование таблицы; origin unknown/без идентификации источника/derived_computed без метода/неизвестный origin — ошибки; корректный точечный и с методом — проходят); заключительная проверка: повреждённая bounded-неопределённость у known/estimated — диагностики; температура Cp-точки, граница rangeK и температура reference state в чужой размерности — диагностика без использования значения в порядке/диапазонах/положительности; детерминированность |
+| coreScientificValue.test | 19 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации; заключительная проверка 4.3.1: bounded-неопределённость (above/below принимаются; отсутствие direction, null и постороннее значение — ошибки валидации; конструкторы — ScientificValueError invalid_uncertainty; конечность bound сохранена) |
 | coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
 | coreReservoir.test | 56 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён); 4.1.1.3.1: строгие записи — Map/Set/Date/RegExp/экземпляры классов в properties/material.entries/energy — invalid, Object.create(null) валиден |
 | coreFluxLedger.test | 88 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries; 4.1.1.3.1: Map/Date в entries — not_verifiable, а не «известная пустота» |
@@ -1468,10 +1495,13 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 29 тест-файлов, 1164 теста (после корректирующей
-ревизии 4.3.1 validator hardening — фактические итоги Vitest
-«Test Files 29 passed (29) / Tests 1164 passed (1164)» из CI этапа;
-после Stage 4.3.1 — 1141 (те же 29 файлов,
+Всего в проекте 29 тест-файлов, 1175 тестов (после заключительной
+проверки валидатора 4.3.1 — фактические итоги Vitest
+«Test Files 29 passed (29) / Tests 1175 passed (1175)» из CI этапа;
+после корректирующей
+ревизии 4.3.1 validator hardening — 1164 (те же 29 файлов,
+фактические итоги Vitest «Test Files 29 passed (29) / Tests 1164
+passed (1164)» из CI этапа; после Stage 4.3.1 — 1141 (те же 29 файлов,
 фактические итоги Vitest «Test Files 29 passed (29) / Tests 1141
 passed (1141)» из CI этапа; после серии ревизий 4.2.3.x, завершённой
 4.2.3.4.1, — 1104 (28 файлов, итоги CI того этапа); после ревизии
