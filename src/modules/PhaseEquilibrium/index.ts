@@ -387,7 +387,16 @@ export function analyzeAtmospherePhasesWithProvenance(
       : statusNote;
   return {
     ...base,
-    temperatureBasis: { temperature: value, note }
+    temperatureBasis: {
+      temperature: value,
+      note,
+      // Stage 4.2.2.2: структурированное место контекста — слой
+      // атмосферы сохраняется как машиночитаемое поле (дублировать
+      // ScientificValue и создавать вторую систему температур нельзя).
+      ...(layer !== null
+        ? { location: { kind: 'atmosphere_layer' as const, layerId: layer.layerId } }
+        : {})
+    }
   };
 }
 

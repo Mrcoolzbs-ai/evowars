@@ -487,7 +487,11 @@ function selectCradle(
  * проверка): колыбель поддержана, если ни одно правило категорий,
  * относящихся к колыбели, не даёт ошибки.
  */
-function isCradleSupportedOnWorld(
+// Stage 4.2.2.2: экспортируется для интеграционных тестов семантики
+// «оценочное расхождение не отбрасывает колыбель» — фильтрация
+// кандидатов идёт по severity error, а оценочные расхождения
+// являются предупреждениями (cradle_temperature_estimate_outside_range).
+export function isCradleSupportedOnWorld(
   cradle: CradleOption,
   context: {
     mode: GenerationMode;

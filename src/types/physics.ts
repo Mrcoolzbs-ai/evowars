@@ -363,6 +363,15 @@ export interface AtmospherePhaseAnalysis {
 export interface PhaseTemperatureBasis {
   temperature: ScientificValue;
   note: string;
+  /**
+   * Stage 4.2.2.2: структурированное место температурного контекста.
+   * Присутствует, когда контекст — конкретный слой атмосферы
+   * (например, 'surface_boundary'); отсутствует, когда контекст —
+   * «температура некоторой области» без конкретного слоя. Это
+   * машиночитаемый аналог пояснения в note, а НЕ вторая система
+   * температур: значение и статус живут в temperature.
+   */
+  location?: { kind: 'atmosphere_layer'; layerId: string };
 }
 
 /** Резервуары вещества. Вещество не исчезает при фазовых переходах. */

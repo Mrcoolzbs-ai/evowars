@@ -326,12 +326,16 @@ export interface LegacyWorldInput {
    * Легаси-атмосфера (Stage 4.2.2): temperature — числовое допущение
    * пресета, а НЕ измерение; presetKind/presetNotes объясняют его
    * происхождение. Никакое из этих полей не является температурой
-   * поверхности.
+   * поверхности. Stage 4.2.2.2: presetNotes — пояснение пресета,
+   * а НЕ название источника; sourceName заполняется ТОЛЬКО из
+   * presetSourceName — отдельного поля с реальным источником.
    */
   atmosphere?: {
     temperature: number | null;
     presetKind?: string;
     presetNotes?: string;
+    /** Stage 4.2.2.2: реальный первичный источник пресета — только когда действительно известен. */
+    presetSourceName?: string;
   } | null;
   /** Опциональный энергетический бюджет (падающий поток, T_eq). */
   energyBudget?: {
@@ -383,20 +387,26 @@ export function atmospherePresetTemperatureToScientificValue(
   const provenance: DataProvenance = {
     rawInput: { presetTemperatureK: raw === null ? null : raw, presetKind }
   };
-  // Stage 4.2.2.1: presetNotes — ПОЯСНЕНИЕ пресета, а не название
-  // источника. sourceName заполняется только когда пресет явно
-  // заявляет наблюдательный источник (observational_reference):
-  // игровое допущение (historical_game) и гипотеза НЕ изображаются
-  // наблюдательным измерением. Выдумывать библиографию запрещено.
-  if (presetNotes !== null && presetKind === 'observational_reference') {
-    provenance.sourceName = presetNotes;
+  // Stage 4.2.2.2: presetNotes — ПОЯСНЕНИЕ пресета, а не название
+  // источника («Наблюдательный справочный сценарий: значения
+  // соответствуют современной атмосфере Земли» — не библиография).
+  // observational_reference — КЛАССИФИКАЦИЯ происхождения пресета,
+  // но не библиографическая ссылка. sourceName заполняется ТОЛЬКО из
+  // отдельного поля presetSourceName, когда реальный источник
+  // действительно известен. Выдумывать URL, DOI, dataset ID или
+  // название публикации запрещено: sourceName остаётся undefined.
+  const presetSourceName =
+    atmosphere.presetSourceName !== undefined && atmosphere.presetSourceName !== ''
+      ? atmosphere.presetSourceName
+      : null;
+  if (presetSourceName !== null) {
+    provenance.sourceName = presetSourceName;
   }
   const noteWithPreset = (baseNote: string): DataProvenance => ({
     ...provenance,
-    note:
-      presetNotes !== null && presetKind !== 'observational_reference'
-        ? `${baseNote}; пояснение пресета: ${presetNotes}`
-        : baseNote
+    // Пояснение пресета сохраняется в note ДЛЯ ВСЕХ видов пресета,
+    // включая observational_reference (Stage 4.2.2.2).
+    note: presetNotes !== null ? `${baseNote}; пояснение пресета: ${presetNotes}` : baseNote
   });
   if (raw === null) {
     return unknownValue('температура атмосферы не заявлена (null)', noteWithPreset('температура не заявлена'));
@@ -425,10 +435,9 @@ export function atmospherePresetTemperatureToScientificValue(
   }
   if (presetKind === 'observational_reference') {
     return estimatedValue(q, 'справочный ориентир пресета (observational_reference)', {
-      provenance: {
-        ...provenance,
-        note: 'справочное значение из наблюдений за реальными телами: НЕ измерение этого мира'
-      }
+      provenance: noteWithPreset(
+        'справочное значение из наблюдений за реальными телами: НЕ измерение этого мира'
+      )
     });
   }
   if (presetKind === 'hypothetical') {
