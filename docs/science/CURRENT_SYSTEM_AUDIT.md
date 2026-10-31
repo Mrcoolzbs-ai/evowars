@@ -90,6 +90,30 @@
 > 500. Коммиты: a62b7dd → d916fb7 → 59c4ca1 → fcb0876 →
 > 78c032a (последние три — корректирующие: tsc-строгости в тестах
 > и выравнивание сообщений).
+> Stage 4.2.2.2 (2026-10-31): семантика оценки и измерения —
+> ревизия по итогам независимого аудита: ошибка совместимости
+> колыбели (incompatible/error) — только для известного (known)
+> значения локальной среды вне диапазона; оценочное расхождение
+> (пресет estimated или легаси-число без происхождения) — ЯВНОЕ
+> предупреждение cradle_temperature_estimate_outside_range, а не
+> доказанное физическое противоречие; selectCradle такую колыбель
+> не отбрасывает; легаси surfaceTemperature без происхождения
+> измерением не считается (миграция число сохраняет, provenance не
+> выдумывает); presetNotes — всегда пояснение в note, sourceName —
+> только из нового явного поля AtmosphereState.presetSourceName;
+> PhaseTemperatureBasis.location — структурированное место
+> температурного контекста; строгий unknown-скрининг тест
+> (customAtmosphere temperature:null), реальный computeEnergyBudget
+> integration test (estimated остаётся estimated, surfaceTemperature
+> не заполняется); измерено: КАЖДЫЙ мир реалистичного режима несёт
+> cradle_temperature_unproven → physically_plausible недостижим,
+> обычные миры — hypothetical (статус смешивает правдоподобность
+> объектов и полноту знания о локальной среде; предупреждение не
+> ослаблено; семантика scientificStatus не менялась). Golden
+> baseline (877e17d3…bc0a) совпадает. После 4.2.2.2 — 800 тестов
+> (27 файлов), из них ядро — 505. Коммиты: d9a37be → 78526d6 →
+> 03ffd69 (последний — корректирующий: rawInput-ключи T_eq);
+> CI run 41172263279 зелёный.
 > НЕ завершено в 4.2: 4.2.3–4.2.4 не начаты; химия НЕ на Scheduler;
 > RCM не реализована (surfaceTemperature = unknown).
 
@@ -341,6 +365,31 @@
   passed (783)» сверяются с notice-аннотацией шага Tests; golden
   baseline (877e17d3…bc0a) совпадает. CI зелёный: tsc, vitest,
   oxlint, build.
+- **Stage 4.2.2.2**: 27 файлов, 800 тестов (+17: 10 compatibility.test,
+  5 coreThermalState.test, 2 generator.test), из них ядро — 505.
+  Семантика оценки vs измерения: known вне диапазона — error,
+  estimated вне диапазона — предупреждение
+  cradle_temperature_estimate_outside_range (НЕ физическая
+  ошибка), estimated в диапазоне — условная совместимость,
+  unknown — предупреждение о недоказанности; легаси
+  surfaceTemperature без происхождения — не proof
+  (миграция сохраняет число без выдуманного provenance);
+  historical_game остаётся игровым допущением,
+  observational_reference не становится known конкретного мира;
+  isCradleSupportedOnWorld не отбрасывает кандидата из-за
+  оценочного расхождения; presetNotes ≠ sourceName (источник —
+  только явное поле presetSourceName); PhaseTemperatureBasis.
+  location ({kind:'atmosphere_layer', layerId}); строгий
+  unknown-скрининг тест (customAtmosphere temperature:null — все
+  компоненты unknown, T_eq не подставлена); РЕАЛЬНЫЙ
+  computeEnergyBudget integration test (estimated сохранён,
+  метод/uncertainty/rawInput перенесены, surfaceTemperature не
+  заполняется); измерение 25 сидов: все миры реалистичного режима
+  несут cradle_temperature_unproven → hypothetical. Фактические
+  итоги Vitest «Test Files 27 passed (27) / Tests 800 passed
+  (800)» сверяются с notice-аннотацией шага Tests; golden baseline
+  (877e17d3…bc0a) совпадает. CI зелёный: tsc, vitest, oxlint,
+  build (run 41172263279).
 
 ### 1.16 Core — научное ядро (Stage 4.1, `src/modules/Core/`, 11 файлов)
 
@@ -629,7 +678,47 @@
      обозначенной локальной области surface_boundary (однослойная
      модель текущего этапа); статус и provenance сохранены; при
      отсутствии пригодной локальной температуры скрининг
-     остаётся unknown без fallback на T_eq.
+     остаётся unknown без fallback на T_eq;
+  S. Compatibility: ошибка (incompatible/error) — только для
+     известного (known) значения локальной среды вне диапазона;
+     оценочная температура (пресет estimated или легаси-число
+     без происхождения) вне диапазона — отдельное ЯВНОЕ
+     предупреждение cradle_temperature_estimate_outside_range
+     (conditionally_compatible, warning), НЕ физическая ошибка;
+     selectCradle не отбрасывает такую колыбель (фильтр — только
+     severity error); известное в диапазоне — проверка может
+     считаться доказанной; неизвестное — предупреждение
+     недоказанности без ложного подтверждения;
+  T. легаси surfaceTemperature без происхождения — не proof:
+     cradle_temperature_unproven подтверждается только
+     типизированной known-температурой (coreWorldState →
+     planet → thermalState.surfaceTemperature); миграция старых
+     сохранений сохраняет исходное число без выдуманных
+     источника/метода/статуса; T_eq, атмосфера и соседние
+     резервуары как fallback не используются;
+  U. provenance: presetNotes — ВСЕГДА пояснение в note (включая
+     observational_reference); sourceName — только из отдельного
+     явного поля AtmosphereState.presetSourceName при
+     действительно известном источнике, иначе undefined;
+     observational_reference — классификация происхождения
+     пресета, НЕ библиографическая ссылка; provenance
+     переносится в AtmosphericTemperatureProfile;
+  V. PhaseTemperatureBasis.location — структурированное место
+     температурного контекста ({kind:'atmosphere_layer',
+     layerId}; ScientificValue-контекст — без location; unknown
+     остаётся unknown без fallback); строгий unknown-скрининг
+     тест (customAtmosphere temperature:null → все компоненты
+     unknown, T_eq не подставлена); РЕАЛЬНЫЙ computeEnergyBudget
+     integration test (equilibriumTemperature → адаптер:
+     estimated остаётся estimated, метод/uncertainty/rawInput
+     сохранены, surfaceTemperature не заполняется); измерение
+     25 сидов (fixed cosmology big_bang): КАЖДЫЙ мир
+     реалистичного режима несёт cradle_temperature_unproven →
+     physically_plausible недостижим, обычные миры —
+     hypothetical; scientificStatus смешивает физическую
+     правдоподобность выбранных объектов и полноту знания о
+     локальной среде (архитектурное следствие задокументировано,
+     семантика статуса НЕ менялась).
 
 ### 1.15 App.tsx (966 строк)
 
@@ -672,6 +761,15 @@
   (оценка не повышается до измерения); типизированный контекст
   фазового скрининга привязан к локальной области
   surface_boundary.
+- **Статус (Stage 4.2.2.2)**: известная (known) температура
+  поверхности подтверждает или опровергает совместимость
+  колыбели только как типизированное значение из научного ядра
+  (coreWorldState со статусом и provenance); легаси-скаляр
+  surfaceTemperature (в старых сохранениях мог быть скопирован
+  из пресета) измерением не считается — остаётся оценочным/
+  неизвестным; оценка вне диапазона — предупреждение
+  cradle_temperature_estimate_outside_range, не ошибка;
+  T_eq по-прежнему не подставляется как температура поверхности.
 
 ### 2.3 Пресетная температура — скрытый вход скрининга [средний риск]
 
@@ -697,6 +795,14 @@
   surfaceTemperature и НЕ использует T_eq как fallback; при
   отсутствии пригодной локальной температуры скрининг остаётся
   unknown.
+- **Статус (Stage 4.2.2.2)**: строгий unknown-скрининг
+  гарантирован тестом (customAtmosphere с корректным составом и
+  temperature:null → phaseAnalysis.temperatureK === null,
+  temperatureBasis.temperature.status === 'unknown', все компоненты
+  фазового анализа unknown, T_eq из энергетического бюджета не
+  подставлена); layerId доступен структурно через
+  temperatureBasis.location ({kind:'atmosphere_layer',
+  layerId:'surface_boundary'}), а не только в свободном тексте.
 
 ### 2.4 Температурные диапазоны реакций каталога — игровые [низкий риск, гигиена данных]
 
@@ -716,6 +822,14 @@
   источника; teff-диапазон класса сохраняется в rawInput и не
   схлопывается в среднее); сами provenance-метки диапазонов
   реакций остаются Stage 4.5.
+- **Статус (Stage 4.2.2.2)**: sourceName пресета заполняется
+  ТОЛЬКО из явного отдельного поля
+  AtmosphereState.presetSourceName (когда реальный источник
+  действительно известен); presetNotes остаётся пояснением в
+  provenance.note во всех случаях (observational_reference —
+  классификация происхождения пресета, не библиография);
+  provenance не теряется в AtmosphericTemperatureProfile;
+  provenance-метки диапазонов реакций остаются Stage 4.5.
 
 ### 2.5 Однонаправленная стехиометрия [архитектурное ограничение]
 

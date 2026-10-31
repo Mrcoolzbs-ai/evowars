@@ -133,6 +133,28 @@
 > Коммиты: a62b7dd → d916fb7 → 59c4ca1 → fcb0876 → 78c032a
 > (последние три — корректирующие: tsc-строгости в тестах и
 > выравнивание фактических сообщений; CI зелёный).
+>
+> Ревизия Stage 4.2.2.2 (2026-10-31): семантика оценки и
+> измерения — ошибка совместимости колыбели (incompatible/error)
+> только для известного (known) значения локальной среды вне
+> диапазона; оценочное расхождение (пресет estimated или
+> легаси-число без происхождения) — ЯВНОЕ предупреждение
+> cradle_temperature_estimate_outside_range, НЕ физическая
+> ошибка; selectCradle такую колыбель не отбрасывает; легаси
+> surfaceTemperature без происхождения измерением не считается
+> (миграция число сохраняет, provenance не выдумывает);
+> presetNotes — всегда пояснение в note, sourceName — только из
+> нового явного поля AtmosphereState.presetSourceName;
+> PhaseTemperatureBasis.location — структурированное место
+> температурного контекста; измерено: КАЖДЫЙ мир
+> реалистичного режима несёт cradle_temperature_unproven →
+> physically_plausible недостижим, обычные миры —
+> hypothetical (архитектурное следствие задокументировано;
+> семантика статуса НЕ менялась). Golden baseline совпадает.
+> После 4.2.2.2 — 800 тестов (27 файлов), из них ядро — 505.
+> Коммиты: d9a37be → 78526d6 → 03ffd69 (последний —
+> корректирующий: rawInput-ключи T_eq; CI run 41172263279
+> зелёный).
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -676,6 +698,47 @@ untimed-записи в ограниченной временной област
   адаптера (historical_game не изображается наблюдательным
   измерением); известная температура вне диапазона — error.
 
+Ревизия 4.2.2.2 (семантика оценки и измерения):
+
+- ошибка совместимости (incompatible/error) — ТОЛЬКО для
+  известного (known) значения локальной среды вне диапазона;
+  оценочная температура (пресет estimated или легаси-число без
+  происхождения) вне диапазона — отдельное ЯВНОЕ предупреждение
+  cradle_temperature_estimate_outside_range
+  (conditionally_compatible, warning); оценочная в диапазоне —
+  условная совместимость (остаётся предупреждение
+  недоказанности); selectCradle не отбрасывает колыбель из-за
+  оценочного расхождения (фильтр — только severity error);
+- легаси surfaceTemperature без происхождения — не proof:
+  cradle_temperature_unproven подтверждается только
+  типизированной known-температурой (coreWorldState → planet →
+  thermalState.surfaceTemperature); миграция старых сохранений
+  сохраняет исходное число без выдуманных источника/метода/
+  статуса; T_eq, атмосфера и соседние резервуары как fallback
+  не используются;
+- provenance: presetNotes — ВСЕГДА пояснение в note (включая
+  observational_reference — это классификация происхождения
+  пресета, НЕ библиографическая ссылка); sourceName — только из
+  отдельного явного поля AtmosphereState.presetSourceName при
+  действительно известном источнике, иначе undefined;
+  provenance переносится в AtmosphericTemperatureProfile;
+- PhaseTemperatureBasis.location — структурированное место
+  температурного контекста ({kind:'atmosphere_layer', layerId};
+  ScientificValue-контекст — без location; unknown остаётся
+  unknown без fallback); строгий unknown-скрининг тест
+  (customAtmosphere temperature:null — все компоненты unknown,
+  T_eq не подставлена); РЕАЛЬНЫЙ computeEnergyBudget
+  integration test (equilibriumTemperature → адаптер: estimated
+  остаётся estimated, метод/uncertainty/rawInput сохранены,
+  surfaceTemperature не заполняется);
+- измерение 25 сидов (fixed cosmology big_bang): КАЖДЫЙ мир
+  реалистичного режима несёт cradle_temperature_unproven →
+  physically_plausible недостижим, обычные миры —
+  hypothetical; научный статус смешивает физическую
+  правдоподобность выбранных объектов и полноту знания о
+  локальной среде (задокументировано; предупреждение не
+  ослаблено; семантика scientificStatus НЕ менялась).
+
 RCM, вертикальный профиль, гидростатика, парниковый эффект и
 вычисление surfaceTemperature НЕ реализованы и не выдаются за
 реализованные (этап 4.8); легаси-химия продолжает работать на
@@ -736,7 +799,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (500 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1)
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2)
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -754,9 +817,11 @@ golden-траектория 100 шагов воспроизводится чис
 | coreProcessRegistry.test | 21 | 4.2.1: уникальные id, τ с размерностью времени и provenance, unknown τ ≠ число, disabled/без solver не запускаются автоматически, мост легаси-химии (11 процессов, честное состояние); 4.2.1.2: числовое τ строго положительно (0/−1 s и −1 ч → invalid_descriptor после перевода в секунды), fail-closed tauSeconds (τ ≤ 0 → null, не autorunnable, эвристика шага не назначается) |
 | coreScheduler.test | 30 | 4.2.1: детерминированный порядок, sub-cycling, Lie и Strang A(dt/2) → B(dt) → A(dt/2) (ровно 2 оператора), один macro-шаг — одно продвижение WorldClock, атомарный отказ шага, очередь событий (сортировка, tie-break, повторная обработка запрещена), сериализация bookkeeping; 4.2.1.2: дубликаты processId (processIds и operators) — duplicate_process_id до первого вызова оператора, мир/часы не тронуты, физические подынтервалы Strang внутри [0, dt] (A [0,dt/2], B [0,dt], A [dt/2,dt]) в вызовах и журнале, неположительное τ не запускается даже при прямом вызове |
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
-| coreThermalState.test | 86 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback) |
+| coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 27 тест-файлов, 783 теста (после ревизии 4.2.2.1 —
+Всего в проекте 27 тест-файлов, 800 тестов (после ревизии 4.2.2.2 —
+фактические итоги Vitest «Test Files 27 passed (27) / Tests 800
+passed (800)» из CI; после 4.2.2.1 — 783,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 783
 passed (783)» из CI; после 4.2.2 — 761,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 761
@@ -801,7 +866,13 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   схлопывается) и подключила диагностику и location-aware
   фазовый скрининг к реальному контуру генерации и
   Compatibility (отсутствие локальной температуры — НЕ
-  доказанная совместимость). НЕ реализовано и не
+  доказанная совместимость). Ревизия 4.2.2.2 добавила семантику
+  оценки vs измерения в Compatibility (known вне диапазона —
+  ошибка; оценка/легаси-число без происхождения вне диапазона —
+  предупреждение cradle_temperature_estimate_outside_range),
+  явное поле presetSourceName для реальных источников и
+  структурированное PhaseTemperatureBasis.location температурного
+  контекста. НЕ реализовано и не
   выдаётся за реализованное: RCM и вертикальный профиль (этап 4.8),
   гидростатика, парниковый эффект, вычисление surfaceTemperature
   (остаётся ЯВНО unknown); ни один резервуар/слой не получил
