@@ -1080,7 +1080,7 @@ describe('Data Validation', () => {
   // перестали исключать или кандидат ошибочно получал чужую среду,
   // единственный положительный вес перестал бы детерминировать
   // выбор и тесты ниже падали бы).
-  describe('Stage 4.2.2.5: candidate-specific локальные среды selector'а', () => {
+  describe("Stage 4.2.2.5: candidate-specific локальные среды selector'а", () => {
     const centralObject = centralObjects.find(o => o.id === 'yellow_dwarf')!;
     const celestialBody = celestialBodies.find(b => b.id === 'earth_like')!;
 
