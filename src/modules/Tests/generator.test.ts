@@ -7,9 +7,10 @@ import {
   generateWorld,
   generateMultipleWorlds,
   generateWorldWithFixedCategories,
-  generateRandomSeed
+  generateRandomSeed,
+  isCradleSupportedOnWorld
 } from '../Generator/generator';
-import type { GenerationSettings } from '../../types';
+import type { GenerationSettings, AtmosphereState } from '../../types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
 
 function baseSettings(overrides: Partial<GenerationSettings> = {}): GenerationSettings {
@@ -523,22 +524,144 @@ describe('Data Validation', () => {
           presetKind: 'observational_reference'
         });
       }
+      // Stage 4.2.2.2: структурированное место контекста — тот же layerId
+      expect(world.phaseAnalysis!.temperatureBasis!.location).toEqual({
+        kind: 'atmosphere_layer',
+        layerId: 'surface_boundary'
+      });
     });
 
-    it('без пригодной пресетной температуры скрининг остаётся unknown без fallback на T_eq', () => {
-      // zero_atmosphere (если есть) или пресет без температуры:
-      // собираем мир и заменяем контекст напрямую
+    it('без пригодной пресетной температуры скрининг остаётся unknown без fallback на T_eq (4.2.2.2)', () => {
+      // ЯВНАЯ атмосфера с корректным составом, но temperature: null —
+      // сценарий гарантированно воспроизводит отсутствие температурной
+      // информации (ранее без customAtmosphere генератор брал пресет
+      // methane_ethane с температурой 95 K, и тест не доказывал
+      // неизвестность). presetKind задан в корректной форме.
       const world = generateWorld(baseSettings({
-        seed: 'unknown_screening_temperature'
+        seed: 'unknown_screening_temperature',
+        fixedCategories: {
+          cosmology: 'big_bang',
+          centralObject: 'yellow_dwarf',
+          celestialBody: 'earth_like'
+        },
+        customAtmosphere: {
+          components: [
+            { gasId: 'n2', percentage: 80, isTrace: false, uncertainty: '', warnings: [] },
+            { gasId: 'ch4', percentage: 20, isTrace: false, uncertainty: '', warnings: [] }
+          ],
+          totalPressure: 1,
+          temperature: null,
+          notes: 'фикстура: состав задан, температура не заявлена',
+          presetKind: 'hypothetical',
+          presetNotes: 'температура не заявлена намеренно'
+        } as AtmosphereState
       }));
 
-      // В любом сгенерированном мире числовой результат скрининга
-      // соответствует именно базовой температуре скрининга, а не T_eq
-      // (паритет: компоненты вычислены при базовой температуре слоя)
-      const basisK = world.phaseAnalysis!.temperatureBasis!.temperature.status;
-      expect(['known', 'estimated', 'unknown', 'not_applicable', 'invalid']).toContain(basisK);
-      // note всегда объясняет контекст локальной области
+      // Числовой результат скрининга отсутствует — именно unknown
+      expect(world.phaseAnalysis!.temperatureK).toBeNull();
+      expect(world.phaseAnalysis!.temperatureBasis!.temperature.status).toBe('unknown');
+      // ВСЕ компоненты фазового анализа остаются unknown
+      expect(world.phaseAnalysis!.components.length).toBeGreaterThan(0);
+      for (const component of world.phaseAnalysis!.components) {
+        expect(component.state).toBe('unknown');
+      }
+      // T_eq энергетического бюджета вычислена, но НЕ подставлена
+      // вместо локальной температуры
+      expect(world.energyBudget!.equilibriumTemperature.value).not.toBeNull();
+      expect(world.phaseAnalysis!.temperatureK).toBeNull();
+      // note объясняет контекст локальной области
       expect(world.phaseAnalysis!.temperatureBasis!.note).toContain('Stage 4.2.2.1');
+      // Структурированное место слоя задано и остаётся unknown-слоем
+      expect(world.phaseAnalysis!.temperatureBasis!.location).toEqual({
+        kind: 'atmosphere_layer',
+        layerId: 'surface_boundary'
+      });
+    });
+  });
+
+  // Stage 4.2.2.2: семантика «оценка не является доказанным
+  // противоречием» в реальном генерационном контуре + измерение
+  // системного следствия для scientificStatus.
+  describe('Stage 4.2.2.2: оценочные расхождения и научный статус миров', () => {
+    it('оценочное расхождение не отбрасывает колыбель из автоматического выбора', () => {
+      // Венусоподобная водородно-гелиевая атмосфера 737 K при
+      // диапазоне колыбели 50–500 K: оценка (не known) — предупреждение
+      // cradle_temperature_estimate_outside_range, колыбель остаётся
+      // кандидатом (isCradleSupportedOnWorld фильтрует только error).
+      const world = generateWorld(baseSettings({
+        seed: 'cradle_estimate_keeps_candidate',
+        fixedCategories: {
+          cosmology: 'big_bang',
+          centralObject: 'yellow_dwarf',
+          celestialBody: 'earth_like',
+          cradle: 'hydrogen_helium_aerosols'
+        },
+        customAtmosphere: {
+          components: [
+            { gasId: 'h2', percentage: 80, isTrace: false, uncertainty: '', warnings: [] },
+            { gasId: 'he', percentage: 15, isTrace: false, uncertainty: '', warnings: [] },
+            { gasId: 'ch4', percentage: 5, isTrace: false, uncertainty: '', warnings: [] }
+          ],
+          totalPressure: 92,
+          temperature: 737,
+          notes: 'фикстура: венусоподобный оценочный сценарий',
+          presetKind: 'hypothetical',
+          presetNotes: 'оценочный сценарий вне диапазона колыбели'
+        } as AtmosphereState
+      }));
+
+      expect(world.cradle.id).toBe('hydrogen_helium_aerosols');
+      // Предупреждение оценочного расхождения присутствует в мире
+      const estimate = world.warnings.filter(w => w.ruleId === 'cradle_temperature_estimate_outside_range');
+      expect(estimate.length).toBeGreaterThan(0);
+      expect(estimate[0].severity).toBe('warning');
+      // ...но не превратилось в доказанную ошибку
+      expect(world.warnings.some(w => w.ruleId === 'cradle_temperature_compatibility')).toBe(false);
+
+      // Прямая проверка фильтрации: колыбель не отбрасывается
+      const supported = isCradleSupportedOnWorld(world.cradle, {
+        mode: 'realistic',
+        centralObject: world.centralObject,
+        celestialBody: world.celestialBody,
+        atmosphere: world.atmosphere,
+        bodyCharacteristics: world.physicalCharacteristics
+      });
+      expect(supported).toBe(true);
+    });
+
+    it('доля миров с hypothetical из-за cradle_temperature_unproven измерена детерминированно', () => {
+      // Репрезентативная серия: 25 сидов, фиксирована только
+      // неаномальная космология (остальное сэмплируется).
+      const worlds = Array.from({ length: 25 }, (_, i) =>
+        generateWorld(baseSettings({
+          seed: `hypothetical_share_${i}`,
+          fixedCategories: { cosmology: 'big_bang' }
+        }))
+      );
+
+      for (const world of worlds) {
+        // КАЖДЫЙ мир реалистичного режима несёт предупреждение
+        // недоказанности локальной температуры колыбели:
+        // генератор не создаёт known-значений локальной среды.
+        expect(
+          world.warnings.some(w => w.ruleId === 'cradle_temperature_unproven')
+        ).toBe(true);
+        // Следствие: physically_plausible недостижим — любое
+        // предупреждение даёт hypothetical (или impossible_in_model
+        // при доказанных ошибках).
+        expect(world.scientificStatus).not.toBe('physically_plausible');
+      }
+
+      // Измеренная доля: все миры БЕЗ доказанных ошибок — hypothetical
+      // именно с этим предупреждением в причине.
+      const withoutProvenErrors = worlds.filter(
+        w => !w.warnings.some(warn => warn.severity === 'error')
+      );
+      const hypothetical = withoutProvenErrors.filter(
+        w => w.scientificStatus === 'hypothetical'
+      );
+      expect(withoutProvenErrors.length).toBeGreaterThan(0);
+      expect(hypothetical.length).toBe(withoutProvenErrors.length);
     });
   });
 });

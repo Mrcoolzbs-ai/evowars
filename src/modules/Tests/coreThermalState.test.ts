@@ -64,8 +64,9 @@ import {
 } from '../Core/adapters';
 import type { LegacyWorldInput } from '../Core/adapters';
 import { analyzeAtmospherePhases, analyzeAtmospherePhasesWithProvenance } from '../PhaseEquilibrium';
-import type { AtmospherePhysicalModel, PhysValue, AtmosphereState } from '../../types';
+import type { AtmospherePhysicalModel, PhysValue, AtmosphereState, OrbitalConfigurationData } from '../../types';
 import { getAllPresets } from '../Atmosphere';
+import { computeEnergyBudget } from '../EnergyBalance';
 
 // ============================================
 // ФИКСТУРЫ
@@ -492,6 +493,33 @@ describe('Stage 4.2.2: CoreWorldState 1.2.0 и валидация', () => {
     expect(world.coreWorldState.bodies[0].thermalState).toBeUndefined();
   });
 
+  it('миграция сохраняет легаси surfaceTemperature без выдуманного provenance (4.2.2.2)', () => {
+    // Старое сохранение этапа 3: скаляр surfaceTemperature мог быть
+    // скопирован из температуры пресета атмосферы — происхождение
+    // неизвестно. Миграция обязана сохранить исходное число и НЕ
+    // выдумать источник, метод или статус.
+    const core = createCoreWorldState('w-mig-legacy');
+    core.bodies.push({ id: 'planet', kind: 'planet', properties: {} });
+    const saved = {
+      id: 'w-mig-legacy',
+      savedAt: '2026-10-30T00:00:00.000Z',
+      version: '1.2',
+      coreWorldState: core,
+      physicalCharacteristics: {
+        surfaceTemperature: 288,
+        atmosphericPressure: 1,
+        geologicalActivity: 'Высокая геологическая активность'
+      }
+    };
+    const result = migrateSavedWorld(saved as never, '1.3');
+    const world = result.world as unknown as typeof saved;
+    // Исходное число сохранено без потерь
+    expect(world.physicalCharacteristics.surfaceTemperature).toBe(288);
+    // Миграция НЕ создаёт thermalState и НЕ выдумывает provenance:
+    // легаси-число не становится известным измерением при загрузке
+    expect(world.coreWorldState.bodies[0].thermalState).toBeUndefined();
+  });
+
   it('validateBodyThermalState агрегирует ошибки по полям', () => {
     const issues = validateBodyThermalState(
       {
@@ -527,17 +555,66 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
     }
   });
 
-  it('observational_reference 94 K → estimated со справочной пометкой', () => {
+  it('observational_reference 94 K → estimated со справочной пометкой (пояснение НЕ источник)', () => {
     const value = atmospherePresetTemperatureToScientificValue({
       temperature: 94,
       presetKind: 'observational_reference',
-      presetNotes: 'Титан'
+      presetNotes: 'Наблюдательный справочный сценарий: значения соответствуют современной атмосфере Титана.'
     });
     expect(value.status).toBe('estimated');
     if (value.status === 'estimated') {
       expect(value.method).toContain('observational_reference');
       expect(value.provenance?.note).toContain('НЕ измерение');
-      expect(value.provenance?.sourceName).toBe('Титан');
+      // Stage 4.2.2.2: пояснительный текст пресета живёт в note,
+      // sourceName НЕ выдумывается из пояснения
+      expect(value.provenance?.sourceName).toBeUndefined();
+      expect(value.provenance?.note).toContain('пояснение пресета');
+      expect(value.provenance?.note).toContain('Титана');
+    }
+  });
+
+  it('presetSourceName переносится в sourceName, только когда реальный источник известен (4.2.2.2)', () => {
+    const value = atmospherePresetTemperatureToScientificValue({
+      temperature: 94,
+      presetKind: 'observational_reference',
+      presetNotes: 'справочный сценарий Титана',
+      presetSourceName: 'фикстура: справочный профиль атмосферы Титана'
+    });
+    expect(value.status).toBe('estimated');
+    if (value.status === 'estimated') {
+      // Настоящее отдельное поле источника переносится в sourceName
+      expect(value.provenance?.sourceName).toBe('фикстура: справочный профиль атмосферы Титана');
+      // Пояснение пресета при этом остаётся пояснением в note
+      expect(value.provenance?.note).toContain('пояснение пресета');
+      expect(value.provenance?.note).toContain('справочный сценарий Титана');
+    }
+    // Без presetSourceName источник не выдумывается ни для какого вида пресета
+    const noSource = atmospherePresetTemperatureToScientificValue({
+      temperature: 94,
+      presetKind: 'observational_reference',
+      presetNotes: 'пояснение без источника'
+    });
+    if (noSource.status === 'estimated') {
+      expect(noSource.provenance?.sourceName).toBeUndefined();
+    }
+  });
+
+  it('provenance не теряется в AtmosphericTemperatureProfile (4.2.2.2)', () => {
+    const profile = atmosphericProfileFromPreset({
+      temperature: 94,
+      presetKind: 'observational_reference',
+      presetNotes: 'справочный сценарий',
+      presetSourceName: 'фикстура справочника'
+    });
+    expect(profile).not.toBeNull();
+    expect(profile?.layers[0]?.layerId).toBe('surface_boundary');
+    // sourceName и note переносятся в профиль слоя без потерь
+    expect(profile?.provenance?.sourceName).toBe('фикстура справочника');
+    expect(profile?.provenance?.note).toContain('пояснение пресета');
+    expect(profile?.provenance?.note).toContain('справочный сценарий');
+    if (profile && profile.layers[0] && profile.layers[0].temperature.status === 'estimated') {
+      expect(profile.layers[0].temperature.provenance?.sourceName).toBe('фикстура справочника');
+      expect(profile.layers[0].temperature.provenance?.note).toContain('справочный сценарий');
     }
   });
 
@@ -627,6 +704,52 @@ describe('Stage 4.2.2: адаптеры пресетных температур'
       expect(thermal.equilibriumTemperature.method).toContain('T_eq');
       expect(thermal.equilibriumTemperature.provenance?.method).toContain('T_eq');
     }
+  });
+
+  it('T_eq из РЕАЛЬНОГО computeEnergyBudget: статус, метод и provenance сохранены, surfaceTemperature не заполняется (4.2.2.2)', () => {
+    // Настоящий integration-контур: валидный вход → реальная функция
+    // EnergyBalance → её equilibriumTemperature → адаптер планеты.
+    // Формула T_eq не меняется; estimated НЕ повышается до known.
+    const orbit: OrbitalConfigurationData = {
+      frame: 'around_star',
+      orbitalBasis: 'фикстура: звезда класса жёлтый карлик',
+      semiMajorAxis: phys(1.496e11, 'м'),
+      eccentricity: phys(0.0167, ''),
+      orbitalPeriod: phys(3.156e7, 'с'),
+      inclination: phys(null, 'рад'),
+      tidalLocking: { value: 'unknown', unit: '', confidence: 'unknown', note: 'фикстура' },
+      stabilityCheck: 'not_performed',
+      stabilityNote: 'фикстура: устойчивость не проверялась',
+      radiativeConditions: 'фикстура',
+      notes: ['фикстура орбиты для интеграционного теста EnergyBalance']
+    };
+    const budget = computeEnergyBudget({ centralObjectId: 'yellow_dwarf', orbit });
+
+    // Реальная функция дала числовую равновесную температуру
+    expect(budget.equilibriumTemperature.value).not.toBeNull();
+    expect(budget.equilibriumTemperature.confidence).toBe('estimated');
+
+    const thermal = planetThermalStateFromLegacy(legacyInput({ energyBudget: budget }));
+    // Фактический статус сохранён: оценка остаётся оценкой
+    expect(thermal.equilibriumTemperature.status).toBe('estimated');
+    expect(temperatureValueOrNull(thermal.equilibriumTemperature)).toBe(
+      budget.equilibriumTemperature.value
+    );
+    if (thermal.equilibriumTemperature.status === 'estimated') {
+      // Метод (формула T_eq) сохранён
+      expect(thermal.equilibriumTemperature.method).toContain('T_eq = [F(1-A)·f / (4εσ)]^(1/4)');
+      expect(thermal.equilibriumTemperature.provenance?.method).toContain('T_eq = [F(1-A)·f / (4εσ)]^(1/4)');
+      // Характер неопределённости и параметры расчёта не потерялись
+      expect(thermal.equilibriumTemperature.provenance?.note).toContain('характер неопределённости');
+      expect(thermal.equilibriumTemperature.provenance?.rawInput).toMatchObject({
+        'A (альбедо Бонда)': 0.3,
+        f: 1,
+        'ε (эмиссивность)': 1
+      });
+    }
+    // surfaceTemperature НЕ заполняется T_eq: RCM не реализована
+    expect(thermal.surfaceTemperature.status).toBe('unknown');
+    expect(temperatureValueOrNull(thermal.surfaceTemperature)).toBeNull();
   });
 
   it('centralThermalStateFromLegacy: null без centralObjectSystem', () => {
@@ -1093,6 +1216,46 @@ describe('Stage 4.2.2: фазовый скрининг с происхожден
     expect(typed.temperatureBasis?.note).toContain('surface_boundary');
     expect(typed.temperatureBasis?.note).toContain('НЕ глобальная surfaceTemperature');
     expect(typed.temperatureBasis?.note).toContain('НЕ T_eq');
+    // Stage 4.2.2.2: layerId доступен как структурированное значение
+    expect(typed.temperatureBasis?.location).toEqual({
+      kind: 'atmosphere_layer',
+      layerId: 'surface_boundary'
+    });
+  });
+
+  it('структурированное location контекста (4.2.2.2): слой — да, ScientificValue — нет', () => {
+    const model = makeAtmosphereModel();
+    // Слой передаётся как входной контекст → тот же layerId в результате
+    const layerAnalysis = analyzeAtmospherePhasesWithProvenance(model, {
+      layerId: 'surface_boundary',
+      temperature: estimatedValue(pv(95), 'пресет метановой атмосферы', {
+        provenance: { sourceName: 'фикстура' }
+      })
+    });
+    expect(layerAnalysis.temperatureBasis?.location).toEqual({
+      kind: 'atmosphere_layer',
+      layerId: 'surface_boundary'
+    });
+    // Статус и provenance температуры сохранены
+    expect(layerAnalysis.temperatureBasis?.temperature.status).toBe('estimated');
+    // ScientificValue-контекст без конкретного слоя: location отсутствует
+    // (обратная совместимость API сохранена)
+    const valueAnalysis = analyzeAtmospherePhasesWithProvenance(
+      model,
+      estimatedValue(pv(95), 'пресет метановой атмосферы')
+    );
+    expect(valueAnalysis.temperatureBasis?.location).toBeUndefined();
+    // unknown остаётся unknown: T_eq не используется как fallback
+    const unknownAnalysis = analyzeAtmospherePhasesWithProvenance(model, {
+      layerId: 'surface_boundary',
+      temperature: unknownValue('температура не заявлена')
+    });
+    expect(unknownAnalysis.temperatureK).toBeNull();
+    expect(unknownAnalysis.temperatureBasis?.temperature.status).toBe('unknown');
+    expect(unknownAnalysis.temperatureBasis?.location).toEqual({
+      kind: 'atmosphere_layer',
+      layerId: 'surface_boundary'
+    });
   });
 
   it('слой с unknown температурой (4.2.2.1): скрининг остаётся unknown без fallback', () => {
