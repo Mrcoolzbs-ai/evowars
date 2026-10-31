@@ -113,10 +113,16 @@ export const CRADLE_RELATED_CATEGORIES: RuleCategory[] = [
  *
  * - 'ocean': океанская локальная среда доказывается только
  *   резервуарами вида 'ocean';
- * - 'subsurface_reservoir': глубинная среда — резервуарами вида
- *   'ocean' (глубинные гидротермальные/жидкостные резервуары
- *   представлены этим видом) и 'crust' (коровые резервуары —
- *   задокументированный вид);
+ * - 'subsurface_reservoir': глубинная среда — ТОЛЬКО резервуарами
+ *   вида 'crust' (задокументированный вид коровых резервуаров:
+ *   глубинные гидротермальные системы живут в коре). Вид 'ocean'
+ *   глубинную среду НЕ доказывает (Stage 4.2.2.5): схема
+ *   ReservoirRecord не различает поверхностный и подземный
+ *   океан, и допущение 'ocean' позволяло бы поверхностному
+ *   океану «доказывать» глубинную среду; достаточных данных для
+ *   такого соответствия нет — недоказанность (fail-closed).
+ *   Тестовая фикстура физическим обоснованием таксономии НЕ
+ *   является; новые виды резервуаров не вводятся;
  * - 'deep_planetary_layers': глубинные планетные слои —
  *   резервуарами видов 'mantle' и 'core' (задокументированные
  *   виды глубинных слоёв);
@@ -137,7 +143,7 @@ export const LOCATION_TYPE_RESERVOIR_KINDS: Readonly<
   Record<CradleLocationType, readonly string[] | null>
 > = {
   ocean: ['ocean'],
-  subsurface_reservoir: ['ocean', 'crust'],
+  subsurface_reservoir: ['crust'],
   deep_planetary_layers: ['mantle', 'core'],
   surface: null,
   atmosphere: null,
@@ -264,6 +270,11 @@ function isProvenTemperatureEvidence(v: ScientificValue | null | undefined): boo
  *   океана не является. Несовпадение вида — недоказанность
  *   (fail-closed), не физическая ошибка; другой резервуар
  *   автоматически не выбирается;
+ * - Stage 4.2.2.5 (runtime safety): неизвестное runtime-значение
+ *   locationType (вне CradleLocationType, из внешних данных)
+ *   обрабатывается тем же fail-closed правилом: без исключений,
+ *   без доказательства, без выбора другого резервуара —
+ *   недоказанность;
  * - locationType 'atmosphere': обрабатывается отдельной веткой
  *   пресета (адаптер никогда не возвращает known) — здесь null.
  *
@@ -298,8 +309,15 @@ function typedLocalTemperatureOfWorld(
     // резервуары не читаются — это недоказанность, не ошибка.
     return null;
   }
-  const admissibleKinds = LOCATION_TYPE_RESERVOIR_KINDS[env.locationType];
-  if (admissibleKinds === null || !admissibleKinds.includes(reservoir.kind)) {
+  // Stage 4.2.2.5 (runtime safety): locationType приходит из внешних
+  // данных (среда колыбели сохранений/фикстур) и во время исполнения
+  // может выйти за CradleLocationType. Lookup в Record не выбрасывает,
+  // но даёт undefined: неизвестное расположение, как и недопустимый
+  // вид, доказательством не является — fail-closed (недоказанность,
+  // НЕ ошибка), другой резервуар автоматически не выбирается.
+  const admissibleKinds = LOCATION_TYPE_RESERVOIR_KINDS[env.locationType] as
+    readonly string[] | null | undefined;
+  if (admissibleKinds == null || !admissibleKinds.includes(reservoir.kind)) {
     // Вид резервуара не соответствует локальной области (например,
     // резервуар атмосферы как «доказательство» океана): температура
     // не используется ни как доказательство, ни как опровержение.

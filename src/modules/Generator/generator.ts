@@ -439,6 +439,17 @@ function selectCelestialBody(
  * выбора не существует, и selector не выдумывает доказательств —
  * температурный результат остаётся условным
  * (cradle_temperature_unproven).
+ *
+ * Stage 4.2.2.5 (candidate-specific cradle context): локальная
+ * среда принадлежит КАЖДОМУ кандидату отдельно — один
+ * CradleLocalEnvironment на всех кандидатов НЕ применяется
+ * (locationType, состав и localReservoirId у каждого свои).
+ * Контекст принимает карту cradleLocalEnvironmentsById
+ * (ID кандидата → его среда); для кандидата без явной среды
+ * selector вычисляет её сам через determineCradleLocalEnvironment
+ * (тот же путь, что и в реальном контуре). coreWorldState
+ * остаётся общим для всех кандидатов; фиктивное ядро не
+ * создаётся; перенос evidence между кандидатами исключён.
  */
 export function selectCradle(
   rng: ReturnType<typeof createRandom>,
@@ -457,13 +468,18 @@ export function selectCradle(
      */
     coreWorldState?: CoreWorldState;
     /**
-     * Stage 4.2.2.4: локальная среда колыбели, если она уже известна
-     * вызывающей стороне. Переданная среда применяется ко ВСЕМ
-     * кандидатам без пересчёта по каждому кандидату: связанность
-     * среды с каждым кандидатом — ответственность вызывающей
-     * стороны. В реальном контуре не передаётся.
+     * Stage 4.2.2.5 (candidate-specific): локальные среды
+     * кандидатов ПО ОТДЕЛЬНОСТИ, по ID кандидата. Среда описывает
+     * конкретную колыбель: применять один CradleLocalEnvironment
+     * ко всем кандидатам нельзя (locationType, состав и
+     * localReservoirId у каждого кандидата свои). Для кандидата
+     * без явной среды selector вычисляет её сам через
+     * determineCradleLocalEnvironment — тот же путь, что и в
+     * реальном контуре. Перенос localReservoirId/locationType с
+     * одного кандидата на другого исключён. В реальном контуре
+     * не передаётся.
      */
-    cradleLocalEnvironment?: CradleLocalEnvironment;
+    cradleLocalEnvironmentsById?: Partial<Record<string, CradleLocalEnvironment>>;
   }
 ): { cradle: CradleOption; cradleWarnings: GenerationWarning[] } {
   const cradleWarnings: GenerationWarning[] = [];
@@ -479,9 +495,19 @@ export function selectCradle(
 
   const weights = settings.weights?.cradle || {};
 
-  // Оцениваем каждую колыбель реальными правилами совместимости
+  // Оцениваем каждую колыбель реальными правилами совместимости.
+  // Stage 4.2.2.5: каждый кандидат проверяется по СВОЕЙ локальной
+  // среде — явная среда берётся из карты по ID кандидата, без
+  // явной среды вычисляется per-candidate внутри
+  // isCradleSupportedOnWorld (determineCradleLocalEnvironment,
+  // тот же путь, что и в реальном контуре). Чужой locationType,
+  // состав и localReservoirId к кандидату НЕ применяются; перенос
+  // среды/evidence между кандидатами исключён.
   const supportedCradles = cradles.filter((cradle) =>
-    isCradleSupportedOnWorld(cradle, context)
+    isCradleSupportedOnWorld(cradle, {
+      ...context,
+      cradleLocalEnvironment: context.cradleLocalEnvironmentsById?.[cradle.id]
+    })
   );
 
   if (supportedCradles.length === 0) {
