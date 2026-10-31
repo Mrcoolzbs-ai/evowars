@@ -4,6 +4,14 @@
 // интеграция с каталогом видов
 // ============================================
 //
+// Корректирующая ревизия Stage 4.3.1 (validator hardening):
+// - reference state обязателен при любых числовых данных, включая
+//   табличные Cp(T) и NASA-7 (не только скалярные ΔfH°/ΔfG°/S°);
+// - безопасная runtime-валидация повреждённых JSON-подобных данных:
+//   диагностики вместо исключений (null-поля, недостроенные
+//   величины, битые сегменты и provenance);
+// - per-value provenance отдельных Cp-точек (ThermoDataProvenance).
+//
 // Все значения в фикстурах — СИНТЕТИЧЕСКИЕ тестовые числа с
 // фиктивными источниками («тестовый источник (фикция для тестов)»):
 // это не реальные термохимические данные. Реальный импорт значений
@@ -13,6 +21,7 @@ import { describe, it, expect } from 'vitest';
 import { knownValue, estimatedValue, unknownValue, convertScientificValueUnit, ScientificValueError } from '../Core/scientificValue';
 import type { ScientificValue } from '../Core/scientificValue';
 import { quantity, convert, toSI, sameDimension, dimensionOf, QuantityError } from '../Core/physicalQuantity';
+import type { PhysicalQuantity } from '../Core/physicalQuantity';
 import type { ScientificSpecies } from '../Core/species';
 import { createSpeciesCatalog, validateSpecies, SpeciesError } from '../Core/species';
 import { buildSpeciesCatalogFromLegacy } from '../Core/adapters';
@@ -22,7 +31,9 @@ import type {
   ThermoDataProvenance,
   ThermoValueOrigin,
   Nasa7Segment,
-  CpTabulatedData
+  Nasa7Polynomial,
+  CpTabulatedData,
+  CpTablePoint
 } from '../Core/thermodynamics';
 
 // ============================================
@@ -640,5 +651,369 @@ describe('Stage 4.3.1 Thermodynamics: детерминированность и 
     validateThermodynamicProperties(thermo);
     validateThermodynamicProperties(thermo, { speciesId: 'тест', expectedPhase: 'gas' });
     expect(JSON.stringify(thermo)).toBe(before);
+  });
+});
+
+// ============================================
+// КОРЕКТИРУЮЩАЯ РЕВИЗИЯ 4.3.1 (VALIDATOR HARDENING):
+// REFERENCE STATE ДЛЯ ЧИСЛОВЫХ CP-ДАННЫХ
+// ============================================
+
+describe('Stage 4.3.1 (hardening): reference state при числовых Cp-данных', () => {
+  it('все скаляры unknown + числовая Cp-таблица без reference state — ошибка', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = { status: 'known', tabulated: testCpTable() };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('reference state обязателен'))
+    ).toBe(true);
+  });
+
+  it('все скаляры unknown + NASA-7 без reference state — ошибка', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = { status: 'known', nasa7: { segments: [nasa7Segment(200, 1000)] } };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('reference state обязателен'))
+    ).toBe(true);
+  });
+
+  it('скаляры unknown + таблица и NASA-7 одновременно без reference state — ошибка', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = {
+      status: 'estimated',
+      tabulated: testCpTable(),
+      nasa7: { segments: [nasa7Segment(200, 1000)] }
+    };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('reference state обязателен'))
+    ).toBe(true);
+  });
+
+  it('те же записи с корректным reference state проходят', () => {
+    const withTable = unknownThermo();
+    withTable.heatCapacity = { status: 'known', tabulated: testCpTable() };
+    withTable.referenceState = { phase: 'gas', standardState: 'идеальный газ, 1 бар (объявлено тестовым источником)' };
+    expect(validateThermodynamicProperties(withTable)).toEqual([]);
+    const withNasa = unknownThermo();
+    withNasa.heatCapacity = { status: 'known', nasa7: { segments: [nasa7Segment(200, 1000)] } };
+    withNasa.referenceState = { phase: 'gas', standardState: 'идеальный газ, 1 бар (объявлено тестовым источником)' };
+    expect(validateThermodynamicProperties(withNasa)).toEqual([]);
+    const withBoth = unknownThermo();
+    withBoth.heatCapacity = {
+      status: 'known',
+      tabulated: testCpTable(),
+      nasa7: { segments: [nasa7Segment(200, 1000)] }
+    };
+    withBoth.referenceState = { phase: 'gas', standardState: 'идеальный газ, 1 бар (объявлено тестовым источником)' };
+    expect(validateThermodynamicProperties(withBoth)).toEqual([]);
+  });
+
+  it('несовпадение фазы reference state при единственных числовых данных Cp — ошибка', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = { status: 'known', tabulated: testCpTable() };
+    thermo.referenceState = { phase: 'liquid', standardState: 'идеальный газ, 1 бар (объявлено тестовым источником)' };
+    const direct = validateThermodynamicProperties(thermo, { speciesId: 'тест', expectedPhase: 'gas' });
+    expect(direct.some((e) => e.includes('не совпадает с фазой записи'))).toBe(true);
+    const species = makeThermoSpecies(thermo);
+    expect(
+      validateSpecies(species).some((e) => e.includes('не совпадает с фазой записи'))
+    ).toBe(true);
+  });
+
+  it('reference state без температуры и давления допустим, если источник их не задаёт', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = { status: 'known', tabulated: testCpTable() };
+    thermo.referenceState = {
+      phase: 'gas',
+      standardState: 'стандартное состояние описано тестовым источником явно',
+      conditions: 'температура и давление источником не заданы — автоматически не назначаются'
+    };
+    expect(validateThermodynamicProperties(thermo)).toEqual([]);
+  });
+});
+
+// ============================================
+// КОРЕКТИРУЮЩАЯ РЕВИЗИЯ 4.3.1 (VALIDATOR HARDENING):
+// БЕЗОПАСНАЯ RUNTIME-ВАЛИДАЦИЯ ПОВРЕЖДЁННЫХ ДАННЫХ
+// ============================================
+
+describe('Stage 4.3.1 (hardening): безопасная runtime-валидация повреждённых данных', () => {
+  it('null вместо ScientificValue — диагностики, не исключение', () => {
+    const thermo = unknownThermo();
+    thermo.standardFormationEnthalpy = null as unknown as ScientificValue;
+    thermo.standardFormationGibbsEnergy = null as unknown as ScientificValue;
+    thermo.standardEntropy = null as unknown as ScientificValue;
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.length).toBeGreaterThanOrEqual(3);
+    expect(errors.some((e) => e.includes('энтальпия') && e.includes('должно быть объектом ScientificValue'))).toBe(true);
+    expect(errors.some((e) => e.includes('энергия Гиббса') && e.includes('должно быть объектом ScientificValue'))).toBe(true);
+    expect(errors.some((e) => e.includes('энтропия') && e.includes('должно быть объектом ScientificValue'))).toBe(true);
+  });
+
+  it('known без корректного объекта quantity — диагностики, не исключение', () => {
+    const thermo = validKnownThermo();
+    thermo.standardFormationEnthalpy = { status: 'known' } as unknown as ScientificValue;
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.includes('quantity должен быть объектом'))).toBe(true);
+    expect(errors.some((e) => e.includes('величина должна быть объектом {value, unit}'))).toBe(true);
+  });
+
+  it('quantity без value/unit, с нечисловым и неконечным value — диагностики', () => {
+    const thermo = validKnownThermo();
+    thermo.standardFormationEnthalpy = {
+      status: 'known',
+      quantity: { value: 1 }
+    } as unknown as ScientificValue;
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('quantity.unit должен быть зарегистрированной единицей'))).toBe(true);
+    expect(errors.some((e) => e.includes('единица должна быть строкой, получено undefined'))).toBe(true);
+    thermo.standardFormationEnthalpy = {
+      status: 'known',
+      quantity: { value: 'много', unit: 'J_mol' }
+    } as unknown as ScientificValue;
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('значение должно быть конечным числом, получено много'))).toBe(true);
+    thermo.standardFormationEnthalpy = {
+      status: 'known',
+      quantity: { value: Number.NaN, unit: 'J_mol' },
+      provenance: testProvenance('experimental')
+    } as unknown as ScientificValue;
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('значение должно быть конечным числом, получено NaN'))).toBe(true);
+  });
+
+  it('null вместо reference state — диагностики при числовых данных', () => {
+    const thermo = validKnownThermo();
+    thermo.referenceState = null as unknown as ThermodynamicProperties['referenceState'];
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('reference state обязателен'))).toBe(true);
+    expect(errors.some((e) => e.includes('reference state: должен быть объектом'))).toBe(true);
+  });
+
+  it('null вместо heatCapacity — диагностика, не исключение', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = null as unknown as ThermodynamicProperties['heatCapacity'];
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('теплоёмкость: блок должен быть объектом'))).toBe(true);
+  });
+
+  it('null вместо Cp-таблицы и null-точка в таблице — диагностики', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = { status: 'known', tabulated: null as unknown as CpTabulatedData };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('Cp-таблица: таблица должна быть объектом'))).toBe(true);
+    const withNullPoint = unknownThermo();
+    withNullPoint.heatCapacity = {
+      status: 'known',
+      tabulated: {
+        points: [
+          null as unknown as CpTablePoint,
+          { temperature: quantity(300, 'K'), cp: quantity(33.6, 'J_mol_K') }
+        ],
+        provenance: testProvenance('experimental')
+      }
+    };
+    expect(() => {
+      errors = validateThermodynamicProperties(withNullPoint);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('точка 0: точка должна быть объектом'))).toBe(true);
+  });
+
+  it('null температура/null Cp точки, NaN в Cp и неположительная температура — диагностики', () => {
+    const thermo = validKnownThermo();
+    thermo.heatCapacity = {
+      status: 'known',
+      tabulated: {
+        points: [
+          { temperature: null as unknown as PhysicalQuantity, cp: quantity(33.6, 'J_mol_K') },
+          { temperature: quantity(0, 'K'), cp: null as unknown as PhysicalQuantity },
+          { temperature: quantity(400, 'K'), cp: { value: Number.NaN, unit: 'J_mol_K' } as unknown as PhysicalQuantity }
+        ],
+        provenance: testProvenance('experimental')
+      }
+    };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('точка 0: температура') && e.includes('объектом {value, unit}'))).toBe(true);
+    expect(errors.some((e) => e.includes('точка 1: температура') && e.includes('положительной'))).toBe(true);
+    expect(errors.some((e) => e.includes('точка 1: Cp') && e.includes('объектом {value, unit}'))).toBe(true);
+    expect(errors.some((e) => e.includes('точка 2: Cp') && e.includes('конечным числом, получено NaN'))).toBe(true);
+  });
+
+  it('null NASA-7 параметризация, null-сегмент и null rangeK — диагностики', () => {
+    const thermo = unknownThermo();
+    thermo.heatCapacity = { status: 'known', nasa7: null as unknown as Nasa7Polynomial };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('NASA-7: параметризация должна быть объектом'))).toBe(true);
+    thermo.heatCapacity = { status: 'known', nasa7: { segments: [null as unknown as Nasa7Segment] } };
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('сегмент 0: сегмент должен быть объектом'))).toBe(true);
+    const brokenRange = nasa7Segment(200, 1000);
+    brokenRange.rangeK = null as unknown as Nasa7Segment['rangeK'];
+    thermo.heatCapacity = { status: 'known', nasa7: { segments: [brokenRange] } };
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('требуется диапазон применимости rangeK {min, max}'))).toBe(true);
+    const brokenBounds = nasa7Segment(200, 1000);
+    brokenBounds.rangeK = { min: null, max: null } as unknown as Nasa7Segment['rangeK'];
+    thermo.heatCapacity = { status: 'known', nasa7: { segments: [brokenBounds] } };
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('требуется диапазон применимости rangeK {min, max}'))).toBe(true);
+  });
+
+  it('null derivation и derivation без kind/provenance — диагностики', () => {
+    const thermo = unknownThermo();
+    const nullDerivation = nasa7Segment(200, 1000);
+    nullDerivation.derivation = null as unknown as Nasa7Segment['derivation'];
+    thermo.heatCapacity = { status: 'known', nasa7: { segments: [nullDerivation] } };
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('derivation должен быть объектом'))).toBe(true);
+    const emptyDerivation = nasa7Segment(200, 1000);
+    emptyDerivation.derivation = {} as unknown as Nasa7Segment['derivation'];
+    thermo.heatCapacity = { status: 'known', nasa7: { segments: [emptyDerivation] } };
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes("derivation.kind должен быть 'published' или 'fitted', получено «undefined»"))).toBe(true);
+    expect(errors.some((e) => e.includes('provenance исходных данных') && e.includes('собственный provenance'))).toBe(true);
+  });
+
+  it('null per-value provenance и null точечный provenance — диагностики', () => {
+    const thermo = validKnownThermo();
+    const value = knownValue(quantity(-228600, 'J_mol'), { provenance: testProvenance('experimental') });
+    thermo.standardFormationGibbsEnergy = {
+      ...value,
+      provenance: null
+    } as unknown as ScientificValue;
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateThermodynamicProperties(thermo);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('provenance должен быть объектом'))).toBe(true);
+    const table = testCpTable();
+    table.points[0].provenance = null as unknown as ThermoDataProvenance;
+    const thermoTable = validKnownThermo();
+    thermoTable.heatCapacity = { status: 'known', tabulated: table };
+    expect(() => {
+      errors = validateThermodynamicProperties(thermoTable);
+    }).not.toThrow();
+    expect(errors.some((e) => e.includes('точка 0: provenance: provenance должен быть объектом'))).toBe(true);
+  });
+
+  it('повреждённый блок через validateSpecies — префикс «термодинамика:», без исключения, детерминированно', () => {
+    const thermo = validKnownThermo();
+    thermo.heatCapacity = null as unknown as ThermodynamicProperties['heatCapacity'];
+    thermo.referenceState = null as unknown as ThermodynamicProperties['referenceState'];
+    const species = makeThermoSpecies(thermo);
+    let errors: string[] = [];
+    expect(() => {
+      errors = validateSpecies(species);
+    }).not.toThrow();
+    expect(errors.some((e) => e.startsWith('термодинамика:'))).toBe(true);
+    expect(errors.some((e) => e.includes('теплоёмкость: блок должен быть объектом'))).toBe(true);
+    expect(errors.some((e) => e.includes('reference state: должен быть объектом'))).toBe(true);
+    // детерминированность на повреждённых данных
+    expect(validateSpecies(species)).toEqual(errors);
+  });
+});
+
+// ============================================
+// КОРЕКТИРУЮЩАЯ РЕВИЗИЯ 4.3.1 (VALIDATOR HARDENING):
+// PROVENANCE ОТДЕЛЬНЫХ CP-ТОЧЕК
+// ============================================
+
+describe('Stage 4.3.1 (hardening): provenance отдельных Cp-точек', () => {
+  it('точка без собственного provenance наследует provenance таблицы — проходит', () => {
+    const thermo = validKnownThermo();
+    expect(validateThermodynamicProperties(thermo)).toEqual([]);
+  });
+
+  it('точка с корректным собственным provenance проходит', () => {
+    const thermo = validKnownThermo();
+    const table = testCpTable();
+    table.points[0].provenance = testProvenance('experimental', { recordId: 'тест-точка-1' });
+    thermo.heatCapacity = { status: 'known', tabulated: table };
+    expect(validateThermodynamicProperties(thermo)).toEqual([]);
+  });
+
+  it('точечный provenance с origin unknown — ошибка (числовая точка)', () => {
+    const thermo = validKnownThermo();
+    const table = testCpTable();
+    table.points[0].provenance = testProvenance('unknown');
+    thermo.heatCapacity = { status: 'known', tabulated: table };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('не может иметь происхождение unknown'))
+    ).toBe(true);
+  });
+
+  it('точечный provenance без идентификации источника — ошибка', () => {
+    const thermo = validKnownThermo();
+    const table = testCpTable();
+    table.points[0].provenance = { origin: 'experimental' };
+    thermo.heatCapacity = { status: 'known', tabulated: table };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('не идентифицирует источник'))
+    ).toBe(true);
+  });
+
+  it('точечный provenance derived_computed без метода — ошибка; с методом — проходит', () => {
+    const thermo = validKnownThermo();
+    const table = testCpTable();
+    table.points[0].provenance = { origin: 'derived_computed', sourceName: 'тест' };
+    thermo.heatCapacity = { status: 'known', tabulated: table };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('требует непустой метод'))
+    ).toBe(true);
+    table.points[0].provenance = {
+      origin: 'derived_computed',
+      sourceName: 'тест',
+      method: 'интерполяция тестовой таблицы'
+    };
+    expect(validateThermodynamicProperties(thermo)).toEqual([]);
+  });
+
+  it('точечный provenance с неизвестным origin — ошибка', () => {
+    const thermo = validKnownThermo();
+    const table = testCpTable();
+    table.points[0].provenance = { origin: 'guesstimate' } as unknown as ThermoDataProvenance;
+    thermo.heatCapacity = { status: 'known', tabulated: table };
+    expect(
+      validateThermodynamicProperties(thermo).some((e) => e.includes('неизвестный origin'))
+    ).toBe(true);
   });
 });
