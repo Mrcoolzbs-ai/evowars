@@ -104,12 +104,16 @@ export const CRADLE_RELATED_CATEGORIES: RuleCategory[] = [
  * (ReservoirRecord.kind), температура которых может ДОКАЗЫВАТЬ
  * температуру именно этой локальной области.
  *
- * Таксономия видов НЕ изобретается: используются только виды,
- * документированные контрактом ReservoirRecord («atmosphere |
- * ocean | ice | crust | mantle | core | ...» — расширяемая
- * строка) и реально применяемые в проекте значения (вид 'ocean' —
- * единственный вид резервуара, реально используемый проектом,
- * включая фикстуры глубинных гидротермальных резервуаров).
+ * Таксономия видов НЕ изобретается: ReservoirRecord.kind содержит
+ * ДОКУМЕНТИРОВАННЫЕ семантические категории контракта
+ * («atmosphere | ocean | ice | crust | mantle | core | ...» —
+ * расширяемая строка); таблица соответствий намеренно
+ * КОНСЕРВАТИВНА и зависит от типа локальной среды. Stage 4.2.2.5:
+ * subsurface_reservoir принимает только вид 'crust'; вид 'ocean'
+ * подземное расположение НЕ доказывает. Тесты и фикстуры (включая
+ * используемые ими виды 'ocean', 'crust', 'mantle') сами по себе
+ * научную таксономию НЕ устанавливают; новые виды резервуаров не
+ * вводятся, соответствия не расширяются.
  *
  * - 'ocean': океанская локальная среда доказывается только
  *   резервуарами вида 'ocean';
@@ -270,11 +274,12 @@ function isProvenTemperatureEvidence(v: ScientificValue | null | undefined): boo
  *   океана не является. Несовпадение вида — недоказанность
  *   (fail-closed), не физическая ошибка; другой резервуар
  *   автоматически не выбирается;
- * - Stage 4.2.2.5 (runtime safety): неизвестное runtime-значение
- *   locationType (вне CradleLocationType, из внешних данных)
- *   обрабатывается тем же fail-closed правилом: без исключений,
- *   без доказательства, без выбора другого резервуара —
- *   недоказанность;
+ * - Stage 4.2.2.5 / 4.2.2.5.1 (runtime safety): неизвестное
+ *   runtime-значение locationType (вне CradleLocationType, из
+ *   внешних данных, включая имена унаследованных свойств
+ *   прототипа объекта) обрабатывается тем же fail-closed
+ *   правилом: без исключений, без доказательства, без выбора
+ *   другого резервуара — недоказанность;
  * - locationType 'atmosphere': обрабатывается отдельной веткой
  *   пресета (адаптер никогда не возвращает known) — здесь null.
  *
@@ -309,15 +314,28 @@ function typedLocalTemperatureOfWorld(
     // резервуары не читаются — это недоказанность, не ошибка.
     return null;
   }
-  // Stage 4.2.2.5 (runtime safety): locationType приходит из внешних
-  // данных (среда колыбели сохранений/фикстур) и во время исполнения
-  // может выйти за CradleLocationType. Lookup в Record не выбрасывает,
-  // но даёт undefined: неизвестное расположение, как и недопустимый
+  // Stage 4.2.2.5 / 4.2.2.5.1 (runtime + prototype safety):
+  // locationType приходит из внешних данных (среда колыбели
+  // сохранений/фикстур) и во время исполнения может выйти за
+  // CradleLocationType. LOCATION_TYPE_RESERVOIR_KINDS — обычный
+  // объект, наследующий свойства Object.prototype: при обычном
+  // lookup некорректные runtime-значения ('constructor',
+  // 'toString', 'hasOwnProperty', '__proto__') вернули бы
+  // УНАСЛЕДОВАННЫЕ свойства вместо undefined, а последующий
+  // .includes() выбросил бы TypeError. Поэтому до чтения значения
+  // проверяется, что locationType — СОБСТВЕННЫЙ ключ таблицы
+  // (Object.prototype.hasOwnProperty.call): унаследованные
+  // свойства прототипа списками допустимых видов НЕ являются.
+  // Неизвестное или некорректное расположение, как и недопустимый
   // вид, доказательством не является — fail-closed (недоказанность,
   // НЕ ошибка), другой резервуар автоматически не выбирается.
-  const admissibleKinds = LOCATION_TYPE_RESERVOIR_KINDS[env.locationType] as
-    readonly string[] | null | undefined;
-  if (admissibleKinds == null || !admissibleKinds.includes(reservoir.kind)) {
+  if (!Object.prototype.hasOwnProperty.call(LOCATION_TYPE_RESERVOIR_KINDS, env.locationType)) {
+    // Не собственный ключ таблицы (в т.ч. имя унаследованного
+    // свойства прототипа): доказательства нет (fail-closed).
+    return null;
+  }
+  const admissibleKinds = LOCATION_TYPE_RESERVOIR_KINDS[env.locationType];
+  if (admissibleKinds === null || !admissibleKinds.includes(reservoir.kind)) {
     // Вид резервуара не соответствует локальной области (например,
     // резервуар атмосферы как «доказательство» океана): температура
     // не используется ни как доказательство, ни как опровержение.
