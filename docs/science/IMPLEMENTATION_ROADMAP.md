@@ -131,6 +131,19 @@
 > Следующий подэтап 4.2.3.3 — интеграция (CoreWorldState, версия
 > схемы и сохранения, auditWorldTransition, Scheduler). Итоговые
 > количества тестов — по фактическому CI. Статус — см. §4.2.
+> Ревизия Stage 4.2.3.2.1 (2026-10-31): корректирующая ревизия
+> ReactionLedger — 6 дефектов: обязательность time (undefined →
+> invalid); прототип-безопасный учёт компонентов (Map +
+> Object.fromEntries: 'constructor'/'toString'/'hasOwnProperty'/
+> '__proto__' — данные, не прототип); строгая форма состава (только
+> объектная запись; Map/Set/Date/RegExp/массив/класс →
+> not_verifiable; численная пригодность — только known/estimated;
+> пустой {} легитимен); NaN/Infinity в промежуточных итогах →
+> not_verifiable (не balanced); tolerance — конечное неотрицательное
+> (некорректное → invalid); note — непустая строка, пары участников
+> кодируются однозначно (JSON.stringify). Границы прежние: интеграции
+> нет (4.2.3.3 — следующий подэтап), защищённые контракты не
+> изменены, golden не тронут. Статус — см. §4.2.
 
 ## Карта этапов
 
@@ -517,6 +530,30 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   схемы с обратной совместимостью сохранений, связь с
   auditWorldTransition и передача реакционных записей из
   Scheduler. Golden-траектория стабильна
+  (877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20);
+  итоговые количества тестов — по фактическому CI.
+
+- **Статус (31.10.2026, Stage 4.2.3.2.1 выполнен)**: корректирующая
+  ревизия ReactionLedger — 6 дефектов исправлены (коммит кода +
+  коммит регрессионных тестов в coreReactionLedger.test.ts,
+  существующие тесты не изменены): time обязательно (undefined →
+  invalid), накопление состава прототип-безопасно (внутренний Map +
+  Object.fromEntries; '__proto__', 'constructor', 'toString',
+  'hasOwnProperty' — обычные данные, прототип отчёта не меняется,
+  компонент не исчезает), строгая форма элементов (только объектная
+  запись; Map/Set/Date/RegExp/массив/класс/null → not_verifiable;
+  численная пригодность — только dataStatus known/estimated;
+  пустой {} легитимен — электрон), NaN/Infinity в промежуточных
+  итогах → not_verifiable с диагностикой (не balanced), tolerance —
+  конечное неотрицательное (NaN/±Infinity/отрицательное → invalid;
+  единая политика записи и журнала), note — непустая строка,
+  пары резервуар+вид кодируются однозначно (JSON.stringify).
+  Интеграционные границы прежние (4.2.3.3 — следующий подэтап):
+  ReactionLedger НЕ входит в CoreWorldState, Scheduler и
+  InvariantAuditor его не используют; ReactionRecord/extent/
+  extentBasis, FluxLedger, SpeciesCatalog, CoreWorldState, Storage,
+  InvariantAuditor, Scheduler, ChemicalEvolution, PRNG и UI не
+  изменены; golden-траектория стабильна
   (877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20);
   итоговые количества тестов — по фактическому CI.
 

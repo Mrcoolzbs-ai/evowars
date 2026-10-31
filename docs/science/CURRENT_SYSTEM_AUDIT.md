@@ -188,6 +188,22 @@
 > Storage, схема мира и ChemicalEvolution не изменены; golden
 > baseline совпадает. Тесты — coreReactionLedger.test.ts; итоговые
 > количества — по фактическому CI.
+> Ревизия Stage 4.2.3.2.1 (2026-10-31): корректирующая ревизия
+> ReactionLedger — 6 дефектов: обязательность time (undefined →
+> invalid, а не эквивалент null), прототип-безопасный учёт
+> компонентов (Map + Object.fromEntries; 'constructor'/'toString'/
+> 'hasOwnProperty'/'__proto__' — данные, не прототип), строгая
+> форма состава (только объектная запись; Map/Set/Date/RegExp/
+> массив/класс/null → not_verifiable без исключений; численная
+> пригодность — только known/estimated; пустой {} легитимен —
+> электрон), NaN/Infinity в промежуточных итогах → not_verifiable
+> с диагностикой (Infinity − Infinity ≠ balanced), tolerance —
+> конечное неотрицательное (некорректное → invalid), note —
+> непустая строка, однозначные пары участников (JSON.stringify).
+> Границы прежние: ReactionLedger НЕ интегрирован (CoreWorldState,
+> Scheduler, InvariantAuditor), FluxLedger, Storage, ChemicalEvolution,
+> PRNG и UI не изменены; golden baseline совпадает; итоговые
+> количества — по фактическому CI.
 > НЕ завершено в 4.2: перевод химии на Scheduler (4.2.3) не
 > начат — выполнены только подготовительные подэтапы 4.2.3.1
 > (snapshot-изоляция планировщика) и 4.2.3.2 (ReactionLedger —
