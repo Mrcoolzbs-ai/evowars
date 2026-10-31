@@ -17,6 +17,7 @@ import {
   saveWorld,
   deleteWorld,
   importWorldFromJSON,
+  exportWorldToJSON,
   getStorageHealth,
   StorageError
 } from '../Storage';
@@ -32,11 +33,13 @@ import {
 } from '../Core/adapters';
 import type { LegacyGasRecord, LegacyCompositionRecord, LegacyWorldInput } from '../Core/adapters';
 import { validateWorldState } from '../Core/worldState';
+import type { CoreWorldState } from '../Core/worldState';
 import { createRandom } from '../Generator/random';
 import type { PhysValue, ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import type {
   GeneratedWorld,
   GenerationSettings,
+  SavedWorld,
   CosmologyOption,
   EpochOption,
   CentralObjectOption,
@@ -1047,3 +1050,148 @@ describe('Stage 4.1.1.2 Storage: повреждённое хранилище н�
     expect(health.loadedWorldCount).toBe(2);
   });
 });
+
+
+// ============================================
+// STAGE 4.2.3.3 - РЕАКЦИОННЫЙ ЖУРНАЛ: МИГРАЦИЯ 1.3 → 1.4 И ROUND-TRIP
+// ============================================
+
+describe('Stage 4.2.3.3 Persistence: reactionLedger в миграциях и round-trip', () => {
+  it('миграция 1.3 → 1.4 без coreWorldState не создаёт ядро; след честен', () => {
+    const result = migrateSavedWorld(makeLegacySave('1.3'));
+    expect(result.from).toBe('1.3');
+    expect(result.to).toBe('1.4');
+    expect(result.world.version).toBe('1.4');
+    expect(result.world.coreWorldState).toBeUndefined();
+    expect(result.notes.some((n) => n.includes('reactionLedger'))).toBe(true);
+  });
+
+  it('миграция 1.3 → 1.4 создаёт пустой журнал у существующего ядра и поднимает его схему до 1.3.0', () => {
+    const save = makeLegacySave('1.3', {
+      coreWorldState: {
+        schemaVersion: '1.2.0',
+        worldId: 'core-r',
+        clock: { segmentIndex: 0, localTimeS: 7, priorSegmentsS: 0, stepCount: 1, representableStepS: null },
+        cosmicAge: null,
+        bodies: [],
+        gravity: {},
+        radiationSources: [],
+        reservoirs: [],
+        fluxLedger: { records: [] },
+        legacy: {}
+      }
+    });
+    const result = migrateSavedWorld(save);
+    expect(result.to).toBe('1.4');
+    const core = (result.world as { coreWorldState?: { schemaVersion: string; reactionLedger?: { records: unknown[] }; clock: { localTimeS: number } } }).coreWorldState;
+    expect(core?.schemaVersion).toBe('1.3.0');
+    expect(core?.reactionLedger?.records).toEqual([]);
+    expect(core?.clock.localTimeS).toBe(7);
+    expect(result.notes.some((n) => n.includes('1.3.0'))).toBe(true);
+    expect(result.notes.some((n) => n.includes('reactionLedger'))).toBe(true);
+  });
+
+  it('миграция 1.3 → 1.4 не перезаписывает уже существующий журнал', () => {
+    const save = makeLegacySave('1.3', {
+      coreWorldState: {
+        schemaVersion: '1.2.0',
+        worldId: 'core-e',
+        clock: { segmentIndex: 0, localTimeS: 0, priorSegmentsS: 0, stepCount: 0, representableStepS: null },
+        cosmicAge: null,
+        bodies: [],
+        gravity: {},
+        radiationSources: [],
+        reservoirs: [],
+        fluxLedger: { records: [] },
+        legacy: {},
+        reactionLedger: { records: [{ id: 'rxn-old' }] }
+      }
+    });
+    const result = migrateSavedWorld(save);
+    const core = (result.world as { coreWorldState?: { reactionLedger?: { records: Array<{ id: string }> } } }).coreWorldState;
+    expect(core?.reactionLedger?.records).toEqual([{ id: 'rxn-old' }]);
+    expect(result.notes.some((n) => n.includes('не перезаписаны'))).toBe(true);
+  });
+
+  it('миграция 1.3 → 1.4 с нераспознанной схемой ядра не переписывает версию и оставляет след', () => {
+    const save = makeLegacySave('1.3', {
+      coreWorldState: {
+        schemaVersion: '9.9.9',
+        worldId: 'core-x',
+        clock: { segmentIndex: 0, localTimeS: 0, priorSegmentsS: 0, stepCount: 0, representableStepS: null },
+        cosmicAge: null,
+        bodies: [],
+        gravity: {},
+        radiationSources: [],
+        reservoirs: [],
+        fluxLedger: { records: [] },
+        legacy: {}
+      }
+    });
+    const result = migrateSavedWorld(save);
+    const core = (result.world as { coreWorldState?: { schemaVersion: string; reactionLedger?: { records: unknown[] } } }).coreWorldState;
+    expect(core?.schemaVersion).toBe('9.9.9');
+    expect(core?.reactionLedger?.records).toEqual([]);
+    expect(result.notes.some((n) => n.includes('не распознана'))).toBe(true);
+  });
+
+  it('новое ядро из легаси мира получает пустой журнал реакций', () => {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    expect(core.reactionLedger).toEqual({ records: [] });
+    expect(validateWorldState(core)).toEqual([]);
+  });
+
+  it('некорректный журнал в сохранении отклоняется валидацией, а не превращается в пустой', () => {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    core.reactionLedger = { records: [{ id: 'rxn-bad' }] } as unknown as NonNullable<typeof core.reactionLedger>;
+    const issues = validateWorldState(core);
+    expect(issues.some((i) => i.code === 'invalid_reaction_ledger')).toBe(true);
+    // данные не подменены пустым журналом
+    expect(core.reactionLedger?.records.length).toBe(1);
+  });
+
+  it('round-trip: все поля ReactionRecord сохраняются при экспорте/импорте', () => {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    const reservoirId = core.reservoirs[0]?.id ?? 'atm';
+    const record = {
+      id: 'rxn-rt',
+      reactionId: 'water-formation',
+      reactants: [
+        { reservoirId, speciesId: 'h2', coefficient: 2 },
+        { reservoirId, speciesId: 'o2', coefficient: 1 }
+      ],
+      products: [{ reservoirId, speciesId: 'h2o', coefficient: 2 }],
+      extent: 1.5,
+      extentBasis: 'amount',
+      time: { segmentIndex: 1, localTimeS: 2.5 },
+      processId: 'proc-rt',
+      note: 'заметка round-trip'
+    };
+    core.reactionLedger = { records: [record] };
+    // состояние ядра с журналом валидно ДО сериализации
+    expect(validateWorldState(core)).toEqual([]);
+    const saved: SavedWorld = {
+      ...makeGeneratedWorld('w-rt'),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+    const json = exportWorldToJSON(saved);
+    const imported = importWorldFromJSON(json);
+    expect(imported).not.toBeNull();
+    const coreBack = (imported as unknown as { coreWorldState?: CoreWorldState }).coreWorldState;
+    expect(coreBack?.reactionLedger?.records).toEqual([record]);
+    // повторный round-trip не теряет и не меняет смысл записей
+    const imported2 = importWorldFromJSON(exportWorldToJSON(imported as SavedWorld));
+    expect(imported2).not.toBeNull();
+    const coreBack2 = (imported2 as unknown as { coreWorldState?: CoreWorldState }).coreWorldState;
+    expect(coreBack2?.reactionLedger?.records).toEqual([record]);
+    // загруженное ядро проходит валидацию: журнал принят, а не «починен»
+    expect(coreBack).toBeDefined();
+    if (coreBack !== undefined) {
+      expect(validateWorldState(coreBack)).toEqual([]);
+    }
+  });
+});
+

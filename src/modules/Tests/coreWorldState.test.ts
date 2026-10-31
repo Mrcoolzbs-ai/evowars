@@ -17,6 +17,8 @@ import type { ReservoirRecord } from '../Core/reservoir';
 import { createFluxLedger, EXTERNAL } from '../Core/fluxLedger';
 import type { FluxRecord } from '../Core/fluxLedger';
 import { createSchedulerBookkeeping, enqueueEvent } from '../Core/scheduler';
+import { registerReaction } from '../Core/reactionLedger';
+import type { ReactionLedger, ReactionRecord } from '../Core/reactionLedger';
 
 function validState(): CoreWorldState {
   const state = createCoreWorldState('w1');
@@ -501,3 +503,90 @@ describe('Stage 4.2.1 WorldState: опциональное поле scheduling',
     expect(issues.some((i) => i.code === 'invalid_scheduling')).toBe(true);
   });
 });
+
+// ============================================
+// STAGE 4.2.3.3 - ЖУРНАЛ РЕАКЦИОННЫХ ТРАНЗАКЦИЙ В СОСТОЯНИИ МИРА
+// ============================================
+
+/** Корректная запись реакции: участники в существующем резервуаре «atm». */
+function waterRecord(id: string): ReactionRecord {
+  return {
+    id,
+    reactionId: 'water-formation',
+    reactants: [
+      { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 },
+      { reservoirId: 'atm', speciesId: 'o2', coefficient: 1 }
+    ],
+    products: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 }],
+    extent: 1,
+    extentBasis: 'amount',
+    time: { segmentIndex: 0, localTimeS: 5 },
+    processId: 'proc-a',
+    note: 'тестовая транзакция'
+  };
+}
+
+describe('Stage 4.2.3.3 WorldState: опциональное поле reactionLedger', () => {
+  it('createCoreWorldState создаёт мир с пустым валидным журналом реакций', () => {
+    const state = createCoreWorldState('w-fresh');
+    expect(state.reactionLedger).toEqual({ records: [] });
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('валидный журнал реакций проходит валидацию состояния', () => {
+    const state = validState();
+    state.reactionLedger = { records: [waterRecord('rxn-1')] };
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('отсутствие журнала — не ошибка: состояния схем 1.0.0–1.2.0 его не имеют', () => {
+    const state = validState();
+    delete state.reactionLedger;
+    expect(validateWorldState(state)).toEqual([]);
+  });
+
+  it('мусорная форма журнала → invalid_reaction_ledger, данные не «чинятся» молча', () => {
+    const state = validState();
+    state.reactionLedger = { records: 'не массив' } as unknown as ReactionLedger;
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reaction_ledger')).toBe(true);
+    expect((state.reactionLedger as unknown as { records: unknown }).records).toBe('не массив');
+  });
+
+  it('запись без обязательного time → invalid_reaction_ledger', () => {
+    const state = validState();
+    const bad = waterRecord('rxn-no-time') as unknown as Record<string, unknown>;
+    delete bad.time;
+    state.reactionLedger = { records: [bad as unknown as ReactionRecord] };
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reaction_ledger')).toBe(true);
+  });
+
+  it('запись со ссылкой на несуществующий резервуар → invalid_reaction_ledger', () => {
+    const state = validState();
+    const bad = waterRecord('rxn-ghost');
+    bad.reactants = [
+      { reservoirId: 'no-such-reservoir', speciesId: 'h2', coefficient: 2 },
+      { reservoirId: 'atm', speciesId: 'o2', coefficient: 1 }
+    ];
+    state.reactionLedger = { records: [bad] };
+    const issues = validateWorldState(state);
+    expect(issues.some((i) => i.code === 'invalid_reaction_ledger')).toBe(true);
+  });
+
+  it('registerReaction возвращает новый журнал: исходные записи не мутируются, копии не разделяют ссылки', () => {
+    const state = validState();
+    const ledger: ReactionLedger = { records: [waterRecord('rxn-1')] };
+    state.reactionLedger = ledger;
+    const rec = waterRecord('rxn-2');
+    const updated = registerReaction(ledger, rec);
+    expect(updated.records.length).toBe(2);
+    expect(ledger.records.length).toBe(1);
+    expect(ledger.records.map((r) => r.id)).toEqual(['rxn-1']);
+    // новая запись хранится копией: участники и метка времени — не ссылки вызывающего кода
+    expect(updated.records[1].reactants).not.toBe(rec.reactants);
+    expect(updated.records[1].reactants[0]).not.toBe(rec.reactants[0]);
+    expect(updated.records[1].time).not.toBe(rec.time);
+  });
+});
+

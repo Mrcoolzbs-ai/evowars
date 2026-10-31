@@ -33,6 +33,8 @@ import { createCoreWorldState } from '../Core/worldState';
 import type { CoreWorldState } from '../Core/worldState';
 import { createReservoir, setEnergyInventory, setMaterialInventory } from '../Core/reservoir';
 import { createSpeciesCatalog } from '../Core/species';
+import { registerReaction } from '../Core/reactionLedger';
+import type { ReactionLedger, ReactionRecord } from '../Core/reactionLedger';
 
 function descriptor(id: string, overrides?: Partial<ProcessDescriptor>): ProcessDescriptor {
   return {
@@ -579,6 +581,154 @@ describe('Stage 4.2.1 Scheduler: расписания процессов', () =>
     expect(readyProcessIds(bk, registry, [opA, opB], 60)).toEqual(['a', 'b']);
   });
 });
+
+// ============================================
+// STAGE 4.2.3.3 - ЖУРНАЛ РЕАКЦИОННЫХ ТРАНЗАКЦИЙ В ПЛАНИРОВЩИКЕ
+// ============================================
+
+/** Каталог с известными составами для записи 2 H2 + O2 → 2 H2O. */
+function waterCatalog() {
+  const catalog = createSpeciesCatalog();
+  const register = (id: string, elements: Record<string, number>): void => {
+    catalog.register({
+      id,
+      formula: id.toUpperCase(),
+      name: id,
+      elements,
+      charge: 0,
+      phase: 'gas',
+      molarMassKgMol: 0.02,
+      molarMassStatus: 'known',
+      dataStatus: 'known'
+    });
+  };
+  register('h2', { h: 2 });
+  register('o2', { o: 2 });
+  register('h2o', { h: 2, o: 1 });
+  register('co2', { c: 1, o: 2 });
+  return catalog;
+}
+
+/** Запись реакции в резервуаре «atm» (по умолчанию сбалансированная). */
+function schedulerReaction(id: string, productCoefficient = 2): ReactionRecord {
+  return {
+    id,
+    reactionId: 'water-formation',
+    reactants: [
+      { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 },
+      { reservoirId: 'atm', speciesId: 'o2', coefficient: 1 }
+    ],
+    products: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: productCoefficient }],
+    extent: 1,
+    extentBasis: 'amount',
+    time: { segmentIndex: 0, localTimeS: 0 },
+    processId: 'a',
+    note: 'тестовая транзакция шага'
+  };
+}
+
+describe('Stage 4.2.3.3 Scheduler: журнал реакционных транзакций', () => {
+  it('оператор регистрирует реакцию: commit фиксирует журнал, аудит balanced', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a')]);
+    const reacting: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-1'))
+      })
+    };
+    const result = runMacroStep(world, registry, [reacting], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records.map((r) => r.id)).toEqual(['rxn-1']);
+    expect(result.audit?.status).toBe('balanced');
+    // исходный мир не мутирован: его журнал пуст
+    expect(world.reactionLedger?.records).toEqual([]);
+  });
+
+  it('snapshot-изоляция: записи журнала в результате — копии, ссылки с исходным миром не разделяются', () => {
+    const world = testWorld();
+    const existing: ReactionLedger = { records: [schedulerReaction('rxn-0')] };
+    world.reactionLedger = existing;
+    const registry = makeRegistry([descriptor('a')]);
+    const reacting: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-1'))
+      })
+    };
+    const result = runMacroStep(world, registry, [reacting], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records.length).toBe(2);
+    expect(existing.records.length).toBe(1);
+    // structuredClone-изоляция: запись исходного мира не «протекает» ссылкой в результат
+    const carried = result.world.reactionLedger?.records.find((r) => r.id === 'rxn-0');
+    expect(carried).not.toBe(existing.records[0]);
+  });
+
+  it('реакционный дисбаланс: шаг отклонён, мир и журнал на исходном snapshot', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a')]);
+    const badStoichiometry: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: registerReaction(w.reactionLedger ?? { records: [] }, schedulerReaction('rxn-bad', 3))
+      })
+    };
+    const result = runMacroStep(world, registry, [badStoichiometry], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger?.records).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
+  });
+
+  it('ошибка оператора: атомарность — состояние и журнал нетронуты', () => {
+    const world = testWorld();
+    const existing: ReactionLedger = { records: [schedulerReaction('rxn-0')] };
+    world.reactionLedger = existing;
+    const registry = makeRegistry([descriptor('a')]);
+    const failing: ProcessOperator = {
+      processId: 'a',
+      apply: () => {
+        throw new Error('оператор сломан');
+      }
+    };
+    const result = runMacroStep(world, registry, [failing], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(existing.records.length).toBe(1);
+    expect(existing.records[0].id).toBe('rxn-0');
+  });
+
+  it('операторы без реакций не создают записей журнала автоматически', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a')]);
+    const result = runMacroStep(world, registry, [recorder('a', [])], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('committed');
+    expect(result.world.reactionLedger?.records).toEqual([]);
+    expect(result.audit?.status).toBe('balanced');
+  });
+});
+
 
 // ============================================
 // STAGE 4.2.3.1 - Snapshot-изоляция состояния мира
