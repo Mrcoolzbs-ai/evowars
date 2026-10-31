@@ -96,11 +96,19 @@ export function createDatasetRegistry(): DatasetRegistry {
  * - 1.3 — этап 4.2.1: опциональное поле coreWorldState.scheduling
  *         (динамика процессов планировщика, очередь событий мира,
  *         журнал шагов); отсутствие = «планировщик не
- *         инициализирован», значения не пересоздаются.
+ *         инициализирован», значения не пересоздаются;
+ * - 1.4 — этап 4.2.3.3: опциональное поле
+ *         coreWorldState.reactionLedger (журнал реакционных
+ *         транзакций): у существующего coreWorldState миграция
+ *         создаёт ПУСТОЙ журнал (старый код реакций не записывал —
+ *         пустой журнал отражает факт, транзакции не выдумываются)
+ *         и поднимает схему состояния ядра до 1.3.0; отсутствие
+ *         coreWorldState остаётся отсутствием (ядро не
+ *         инициализировано), научные значения не пересчитываются.
  */
-export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3'] as const;
+export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4'] as const;
 export type SaveSchemaVersion = (typeof SAVE_SCHEMA_VERSIONS)[number];
-export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.3';
+export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.4';
 
 export function isKnownSchemaVersion(version: string): boolean {
   return (SAVE_SCHEMA_VERSIONS as readonly string[]).includes(version);
@@ -231,7 +239,65 @@ const migrate12to13: SaveMigration<any> = {
   }
 };
 
-const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13];
+/**
+ * Миграция 1.3 → 1.4 (этап 4.2.3.3).
+ * Поле coreWorldState.reactionLedger СОЗДАЁТСЯ пустым для
+ * существующего coreWorldState: старый код реакций не записывал,
+ * поэтому пустой журнал — честное отражение факта («транзакций не
+ * было»), а не выдуманное значение; схема состояния ядра
+ * поднимается до 1.3.0 (опциональное поле реакций). Уже
+ * существующий журнал не перезаписывается. Сохранение без
+ * coreWorldState остаётся без него. Часы, инвентари и потоки НЕ
+ * пересчитываются; записи реакций к инвентарям не применяются.
+ */
+const migrate13to14: SaveMigration<any> = {
+  from: '1.3',
+  to: '1.4',
+  migrate(world: any): SaveMigrationResult<any> {
+    const core = world.coreWorldState;
+    if (core === undefined) {
+      return {
+        world: { ...world, version: '1.4' },
+        notes: [
+          'добавлено опциональное поле coreWorldState.reactionLedger (журнал реакционных транзакций): ядро мира не инициализировано, поле не создаётся, значения не пересоздаются'
+        ]
+      };
+    }
+    const knownCoreVersions = ['1.0.0', '1.1.0', '1.2.0'];
+    const known = typeof core.schemaVersion === 'string' && knownCoreVersions.includes(core.schemaVersion);
+    if (core.reactionLedger !== undefined) {
+      // Журнал уже есть (например, частично обновлённое сохранение) —
+      // чужие данные не перезаписываются; поднимается только версия
+      // схемы известного старого состояния.
+      if (known) {
+        return {
+          world: { ...world, version: '1.4', coreWorldState: { ...core, schemaVersion: '1.3.0' } },
+          notes: ['coreWorldState.reactionLedger уже задан: данные не перезаписаны; версия схемы состояния ядра поднята до 1.3.0']
+        };
+      }
+      return { world: { ...world, version: '1.4' }, notes: [] };
+    }
+    return {
+      world: {
+        ...world,
+        version: '1.4',
+        coreWorldState: {
+          ...core,
+          ...(known ? { schemaVersion: '1.3.0' } : {}),
+          reactionLedger: { records: [] }
+        }
+      },
+      notes: [
+        ...(known
+          ? ['версия схемы состояния ядра поднята до 1.3.0 (опциональное поле reactionLedger)']
+          : ['версия схемы состояния ядра «' + String(core.schemaVersion) + '» не распознана: не переписана, будет диагностирована валидацией']),
+        'добавлено поле coreWorldState.reactionLedger (журнал реакционных транзакций): старый код реакций не записывал, журнал создан пустым; записи реакций к инвентарям не применяются'
+      ]
+    };
+  }
+};
+
+const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14];
 
 /**
  * Полная цепочка миграций. Детерминирована: одна и та же входная

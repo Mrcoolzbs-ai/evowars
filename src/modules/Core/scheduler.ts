@@ -615,8 +615,9 @@ function clocksEqual(a: SimulationClockState, b: SimulationClockState): boolean 
  * даёт полную изолированную копию всех вложенных объектов —
  * bodies и bodies[].properties, reservoirs и
  * reservoirs[].material.entries, reservoirs[].energy,
- * fluxLedger.records и их subject, scheduling (eventQueue,
- * processDynamics, stepLog) и другие поля — без изменения или
+ * fluxLedger.records и их subject, reactionLedger.records
+ * (Stage 4.2.3.3), scheduling (eventQueue, processDynamics,
+ * stepLog) и другие поля — без изменения или
  * потери значений. JSON-раунд-трип (JSON.parse(JSON.stringify(
  * ...))) для клонирования НЕ используется: он молча теряет и
  * искажает значения (undefined-поля, -0, нестроковые ключи) и
@@ -884,11 +885,20 @@ export function runMacroStep(
   if (opts.audit !== undefined) {
     const beforeIds = new Set(world.fluxLedger.records.map((r) => r.id));
     const stepRecords = current.fluxLedger.records.filter((r) => !beforeIds.has(r.id));
+    // Stage 4.2.3.3: реакционные транзакции шага — записи, добавленные
+    // операторами в журнал реакций (идентификаторы исходного мира
+    // исключаются так же, как у потоков). Операторы, не работающие с
+    // реакциями, не добавляют записей: аудит получает пустой журнал
+    // (не ошибка). Журнал проверяется аудитом ОТДЕЛЬНО от потоков;
+    // автоматически записи не создаются.
+    const beforeReactionIds = new Set(world.reactionLedger?.records.map((r) => r.id) ?? []);
+    const stepReactions = current.reactionLedger?.records.filter((r) => !beforeReactionIds.has(r.id)) ?? [];
     audit = auditWorldTransition(world, current, { records: stepRecords }, {
       speciesCatalog: opts.audit.speciesCatalog,
       boundary: opts.audit.boundary,
       tolerance: opts.audit.tolerance,
-      scope: opts.audit.scope
+      scope: opts.audit.scope,
+      reactionLedger: { records: stepReactions }
     });
     if (audit.status === 'imbalanced') {
       return {

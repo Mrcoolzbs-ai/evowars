@@ -136,14 +136,15 @@ function starWorld(): LegacyWorldInput {
 // ============================================
 
 describe('Stage 4.1 Persistence: миграции сохранений', () => {
-  it('миграция 1.0 → 1.3 проходит всю цепочку с честным следом', () => {
+  it('миграция 1.0 → 1.4 проходит всю цепочку с честным следом', () => {
     const save = makeLegacySave('1.0');
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.0');
-    expect(result.to).toBe('1.3');
-    expect(result.world.version).toBe('1.3');
-    // две записи от 1.0→1.1, одна от 1.1→1.2 и одна от 1.2→1.3
-    expect(result.notes.length).toBe(4);
+    expect(result.to).toBe('1.4');
+    expect(result.world.version).toBe('1.4');
+    // две записи от 1.0→1.1, по одной от 1.1→1.2, 1.2→1.3 и 1.3→1.4
+    expect(result.notes.length).toBe(5);
+    expect(result.notes[4]).toContain('reactionLedger');
     expect(result.world.migration?.from).toBe('1.0');
     expect(result.world.migration?.notes).toEqual(result.notes);
     // coreWorldState НЕ создаётся задним числом: отсутствие = «не инициализировано»
@@ -154,22 +155,23 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.world.atmosphere.totalPressure).toBeNull();
   });
 
-  it('миграция 1.1 → 1.3 добавляет записи о coreWorldState и scheduling', () => {
+  it('миграция 1.1 → 1.4 добавляет записи о coreWorldState, scheduling и reactionLedger', () => {
     const save = makeLegacySave('1.1');
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.1');
-    expect(result.notes.length).toBe(2);
+    expect(result.notes.length).toBe(3);
     expect(result.notes[0]).toContain('coreWorldState');
     expect(result.notes[1]).toContain('scheduling');
-    expect(result.world.version).toBe('1.3');
+    expect(result.notes[2]).toContain('reactionLedger');
+    expect(result.world.version).toBe('1.4');
     expect(result.world.coreWorldState).toBeUndefined();
   });
 
-  it('миграция идемпотентна: мир схемы 1.3 не переписывается повторно', () => {
-    const save = makeLegacySave('1.3');
+  it('миграция идемпотентна: мир схемы 1.4 не переписывается повторно', () => {
+    const save = makeLegacySave('1.4');
     const result = migrateSavedWorld(save);
-    expect(result.from).toBe('1.3');
-    expect(result.to).toBe('1.3');
+    expect(result.from).toBe('1.4');
+    expect(result.to).toBe('1.4');
     expect(result.notes).toEqual([]);
     // объект не копируется и не обрабатывается повторно
     expect(result.world).toBe(save);
@@ -181,7 +183,8 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     // Stage 4.1.1 (ISSUE 6): раньше '0.9'/'1.4'/'2.0' молча трактовались
     // как 1.0 и «мигрировались» — номер схемы выдумывался. Теперь
     // сохранение из будущего/прошлого формата — честная ошибка.
-    for (const version of ['0.9', '1.4', '2.0']) {
+    // Stage 4.2.3.3: '1.4' стала поддерживаемой; будущей остаётся '1.5'.
+    for (const version of ['0.9', '1.5', '2.0']) {
       const save = makeLegacySave(version);
       try {
         migrateSavedWorld(save);
@@ -221,7 +224,7 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.0');
     expect(result.world.migration?.notes[0]).toContain('не указана');
-    expect(result.world.version).toBe('1.3');
+    expect(result.world.version).toBe('1.4');
   });
 
   it('легаси-записи истории миграции сохраняются, новые дописываются', () => {
@@ -231,9 +234,10 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     const result = migrateSavedWorld(save);
     const notes = result.world.migration?.notes ?? [];
     expect(notes[0]).toBe('старая запись миграции');
-    expect(notes.length).toBe(3);
+    expect(notes.length).toBe(4);
     expect(notes[1]).toContain('coreWorldState');
     expect(notes[2]).toContain('scheduling');
+    expect(notes[3]).toContain('reactionLedger');
   });
 
   it('миграции детерминированы: два прогона дают одинаковый результат', () => {
@@ -249,13 +253,13 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
   });
 
   it('версии схемы и Storage согласованы', () => {
-    expect(CURRENT_SAVE_SCHEMA_VERSION).toBe('1.3');
-    expect([...SAVE_SCHEMA_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3']);
-    expect(STORAGE_FORMAT_VERSION).toBe('1.3');
-    expect([...SUPPORTED_SAVE_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3']);
+    expect(CURRENT_SAVE_SCHEMA_VERSION).toBe('1.4');
+    expect([...SAVE_SCHEMA_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3', '1.4']);
+    expect(STORAGE_FORMAT_VERSION).toBe('1.4');
+    expect([...SUPPORTED_SAVE_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3', '1.4']);
   });
 
-  it('Stage 4.2.1: миграция 1.2 → 1.3 не создаёт scheduling у существующего coreWorldState', () => {
+  it('Stage 4.2.1/4.2.3.3: миграция 1.2 → 1.4 не создаёт scheduling, reactionLedger создаётся пустым', () => {
     const save = makeLegacySave('1.2', {
       coreWorldState: {
         schemaVersion: '1.0.0',
@@ -272,13 +276,19 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     });
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.2');
-    expect(result.to).toBe('1.3');
-    expect(result.notes.length).toBe(1);
+    expect(result.to).toBe('1.4');
+    // scheduling (1.2→1.3) не создаётся; reactionLedger (1.3→1.4)
+    // создаётся пустым, схема ядра поднимается до 1.3.0
+    expect(result.notes.length).toBe(3);
     expect(result.notes[0]).toContain('scheduling');
-    const core = (result.world as { coreWorldState?: { scheduling?: unknown; clock: { localTimeS: number; stepCount: number } } }).coreWorldState;
+    expect(result.notes[1]).toContain('1.3.0');
+    expect(result.notes[2]).toContain('reactionLedger');
+    const core = (result.world as { coreWorldState?: { scheduling?: unknown; reactionLedger?: { records: unknown[] }; clock: { localTimeS: number; stepCount: number } } }).coreWorldState;
     expect(core).toBeDefined();
     // поле scheduling НЕ создаётся: отсутствие = «планировщик не инициализирован»
     expect(core?.scheduling).toBeUndefined();
+    // журнал реакций создан ПУСТЫМ: старый код реакций не записывал
+    expect(core?.reactionLedger?.records).toEqual([]);
     // часы ядра не пересчитываются и не затираются
     expect(core?.clock.localTimeS).toBe(42);
     expect(core?.clock.stepCount).toBe(2);
@@ -308,9 +318,14 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
       }
     });
     const result = migrateSavedWorld(save);
-    expect(result.notes).toEqual([]);
-    const core = (result.world as { coreWorldState?: { scheduling?: unknown } }).coreWorldState;
+    // scheduling не перезаписан; миграция 1.3→1.4 добавила пустой
+    // журнал реакций существующему coreWorldState (Stage 4.2.3.3)
+    expect(result.notes.length).toBe(2);
+    expect(result.notes[0]).toContain('1.3.0');
+    expect(result.notes[1]).toContain('reactionLedger');
+    const core = (result.world as { coreWorldState?: { scheduling?: unknown; reactionLedger?: { records: unknown[] } } }).coreWorldState;
     expect(core?.scheduling).toEqual(scheduling);
+    expect(core?.reactionLedger?.records).toEqual([]);
   });
 
   it('Stage 4.2.1: сохранение без coreWorldState остаётся без него (фиктивное ядро не создаётся)', () => {
@@ -859,11 +874,11 @@ describe('Stage 4.1.1 Storage: изоляция ошибок и защита н�
     localStorage.clear();
   });
 
-  it('четыре нормальных мира (1.0/1.1/1.2/1.3) загружаются и мигрируются к 1.3', () => {
+  it('четыре нормальных мира (1.0/1.1/1.2/1.3) загружаются и мигрируются к 1.4', () => {
     writeRawEntries([rawEntry('w1', '1.0'), rawEntry('w2', '1.1'), rawEntry('w3', '1.2'), rawEntry('w4', '1.3')]);
     const worlds = getAllWorlds();
     expect(worlds.map((w) => w.id)).toEqual(['w1', 'w2', 'w3', 'w4']);
-    expect(worlds.every((w) => w.version === '1.3')).toBe(true);
+    expect(worlds.every((w) => w.version === '1.4')).toBe(true);
   });
 
   it('несовместимый мир (версия 2.0) не прячет остальные', () => {
@@ -890,7 +905,7 @@ describe('Stage 4.1.1 Storage: изоляция ошибок и защита н�
   it('saveWorld не уничтожает несовместимую запись', () => {
     writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0')]);
     const saved = saveWorld(makeGeneratedWorld('w-new'), fixtureSettings);
-    expect(saved.version).toBe('1.3');
+    expect(saved.version).toBe('1.4');
     // запись из будущего формата сохранена как есть
     const raw = readRawEntries();
     expect(raw.some((e) => e['id'] === 'future' && e['version'] === '2.0')).toBe(true);

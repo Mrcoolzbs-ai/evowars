@@ -41,6 +41,8 @@ import {
   validateLedgerReferences,
   validateReservoirInventories
 } from './fluxLedger';
+import type { ReactionLedger } from './reactionLedger';
+import { auditReactionLedger } from './reactionLedger';
 import type { ReservoirRecord } from './reservoir';
 import { comparePoints, now, validateClock } from './simulationClock';
 
@@ -61,6 +63,7 @@ export interface WorldTransitionAuditSection {
     | 'reservoir_fluxes'
     | 'nonnegativity'
     | 'ledger'
+    | 'reactions'
     | 'state'
     | 'time';
   status: ConservationStatus | 'invalid';
@@ -98,8 +101,13 @@ export interface WorldTransitionAudit {
  * 5. пофазовое изменение резервуаров;
  * 6. неотрицательность запасов (в состоянии «после»);
  * 7. согласованность FluxLedger (форма, ссылки, инвентари);
- * 8. допустимость ссылок и состояний (validateWorldState);
- * 9. состояние времени (часы корректны, время не идёт назад).
+ * 8. реакционные транзакции (Stage 4.2.3.3): форма журнала и
+ *    стехиометрический элементный/зарядовый баланс каждой записи —
+ *    отдельно от потоков, без преобразования реакций в FluxRecord
+ *    и без использования записей как объяснения изменений
+ *    инвентарей;
+ * 9. допустимость ссылок и состояний (validateWorldState);
+ * 10. состояние времени (часы корректны, время не идёт назад).
  *
  * Агрегация: any invalid/imbalanced → imbalanced; иначе any
  * not_verifiable или неполная граница → not_verifiable; иначе any
@@ -116,6 +124,13 @@ export function auditWorldTransition(
     boundary: BoundaryCompleteness;
     tolerance?: number;
     scope?: FluxAuditScope;
+    /**
+     * Журнал реакционных транзакций перехода (Stage 4.2.3.3):
+     * записи реакций, относящиеся к проверяемому переходу (аналог
+     * позиционного ledger для потоков). Необязателен: отсутствие
+     * означает «транзакций не было» (пустой журнал, не ошибка).
+     */
+    reactionLedger?: ReactionLedger;
   }
 ): WorldTransitionAudit {
   const sections: WorldTransitionAuditSection[] = [];
@@ -186,6 +201,31 @@ export function auditWorldTransition(
     ...validateReservoirInventories(afterReservoirs)
   ];
   push('ledger', ledgerProblems.length > 0 ? 'invalid' : 'balanced', ledgerProblems);
+
+  // Реакционные транзакции (Stage 4.2.3.3). Реакция —
+  // многокомпонентное ПРЕВРАЩЕНИЕ, а не перенос: записи проверяются
+  // ОТДЕЛЬНО от FluxLedger и никогда не преобразуются в потоки
+  // (двойной счёт невозможен по построению). Секция объединяет форму
+  // журнала (включая ссылки участников на резервуары) и
+  // стехиометрический элементный/зарядовый баланс каждой записи —
+  // баланс реакций учитывается в общем итоге аудита. Записи НЕ
+  // считаются объяснением изменений инвентарей: ReactionLedger
+  // фиксирует транзакции, но не применяет их к запасам, поэтому
+  // инвентарные секции выше объясняются только потоками. Пустой
+  // журнал/его отсутствие — не ошибка (balanced).
+  const reactionAudit = auditReactionLedger(opts.reactionLedger ?? { records: [] }, opts.speciesCatalog, {
+    tolerance: opts.tolerance,
+    reservoirIds: Object.keys(afterReservoirs)
+  });
+  const reactionIssues: string[] = [...reactionAudit.formIssues];
+  for (const recordAudit of reactionAudit.recordAudits) {
+    if (recordAudit.status !== 'balanced' && recordAudit.issues.length > 0) {
+      reactionIssues.push((recordAudit.recordId ?? 'запись без id') + ': ' + recordAudit.issues.join('; '));
+    } else if (recordAudit.status !== 'balanced') {
+      reactionIssues.push((recordAudit.recordId ?? 'запись без id') + ': статус ' + recordAudit.status);
+    }
+  }
+  push('reactions', reactionAudit.status, reactionIssues);
 
   // Допустимость ссылок и состояний (до и после).
   const stateProblems: string[] = [];

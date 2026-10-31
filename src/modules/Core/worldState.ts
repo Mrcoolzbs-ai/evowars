@@ -32,6 +32,8 @@
 
 import type { FluxLedger } from './fluxLedger';
 import { validateFluxLedger } from './fluxLedger';
+import type { ReactionLedger } from './reactionLedger';
+import { validateReactionLedger } from './reactionLedger';
 import type { ReservoirRecord } from './reservoir';
 import { validateReservoirRecord } from './reservoir';
 import type { ScientificValue } from './scientificValue';
@@ -53,8 +55,15 @@ import { validateBodyThermalState } from './thermalState';
  * (температурная иерархия с provenance) и опциональное поле
  * ReservoirRecord.reservoirTemperature; миграция не создаёт их —
  * поля появляются только там, где температурные данные заявлены.
+ * 1.3.0 (Stage 4.2.3.3): опциональное поле reactionLedger (журнал
+ * реакционных транзакций ReactionLedger). Новые состояния создаются
+ * с пустым журналом; миграция сохранений 1.3 → 1.4 создаёт пустой
+ * журнал для существующих coreWorldState (старый код реакций не
+ * записывал — пустой журнал честно отражает этот факт, ни одна
+ * транзакция не выдумывается). Записи журнала НЕ применяются к
+ * инвентарям: ledger фиксирует транзакции, но не исполняет их.
  */
-export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.2.0';
+export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.3.0';
 
 /**
  * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
@@ -62,7 +71,7 @@ export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.2.0';
  * списку, а не только на непустоту: неизвестная версия — это
  * version_mismatch, а не молчаливое «сойдёт любая».
  */
-export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0'];
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0'];
 
 export const BODY_KINDS: readonly BodyKind[] = [
   'star',
@@ -134,6 +143,19 @@ export interface CoreWorldState {
   reservoirs: ReservoirRecord[];
   fluxLedger: FluxLedger;
   /**
+   * Журнал реакционных транзакций (Stage 4.2.3.3): многокомпонентные
+   * ПРЕВРАЩЕНИЯ — отдельно от fluxLedger (переносов). Опционально:
+   * состояния схем 1.0.0–1.2.0 его не имеют; отсутствие означает
+   * «реакции не записывались» и трактуется аудитами как пустой
+   * журнал, а не ошибка. Наличие записи НЕ является утверждением об
+   * изменении инвентарей: журнал фиксирует транзакции, но не
+   * применяет их к запасам (это задача оператора процесса).
+   * Миграция сохранений 1.3 → 1.4 создаёт пустой журнал у
+   * существующих coreWorldState; некорректный журнал отклоняется
+   * валидацией (invalid_reaction_ledger), а не «чинится» молча.
+   */
+  reactionLedger?: ReactionLedger;
+  /**
    * Динамическое состояние планировщика и очередь событий мира
    * (Stage 4.2.1). Опционально: состояния схемы 1.0.0 его не имеют,
    * и миграция его НЕ создаёт — отсутствие означает «планировщик
@@ -165,6 +187,7 @@ export interface WorldStateIssue {
     | 'invalid_reservoir'
     | 'invalid_flux'
     | 'invalid_flux_reference'
+    | 'invalid_reaction_ledger'
     | 'invalid_scheduling'
     | 'invalid_event'
     | 'invalid_body'
@@ -302,6 +325,18 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
     issues.push({ code: 'invalid_flux', component: 'FluxLedger', message: fluxProblems.join('; '), refs: [] });
   }
 
+  // --- журнал реакционных транзакций (Stage 4.2.3.3) ---
+  // Проверяется ЯВНО заданный журнал: отсутствие поля — не ошибка
+  // (реакции не записывались). Некорректные данные не превращаются
+  // молча в пустой журнал: каждая проблема — диагностика
+  // invalid_reaction_ledger, «лечения» автозаполнением нет.
+  if (state.reactionLedger !== undefined) {
+    const reactionProblems = validateReactionLedger(state.reactionLedger, { reservoirIds: [...reservoirIds] });
+    if (reactionProblems.length > 0) {
+      issues.push({ code: 'invalid_reaction_ledger', component: 'ReactionLedger', message: reactionProblems.join('; '), refs: [] });
+    }
+  }
+
   // --- планировщик (Stage 4.2.1): опциональное состояние расписаний ---
   if (state.scheduling !== undefined) {
     const schedulingIssues = validateSchedulerBookkeeping(state.scheduling);
@@ -354,6 +389,7 @@ export function createCoreWorldState(worldId: string): CoreWorldState {
     radiationSources: [],
     reservoirs: [],
     fluxLedger: { records: [] },
+    reactionLedger: { records: [] },
     legacy: {}
   };
 }

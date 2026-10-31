@@ -37,7 +37,13 @@ const SETTINGS_KEY = 'evowars_settings';
  * - 1.3 (этап 4.2.1) — опциональное поле coreWorldState.scheduling
  *   (динамика процессов планировщика, очередь событий мира, журнал
  *   шагов); отсутствие означает «планировщик не инициализирован»,
- *   значения не пересоздаются.
+ *   значения не пересоздаются;
+ * - 1.4 (этап 4.2.3.3) — опциональное поле
+ *   coreWorldState.reactionLedger (журнал реакционных транзакций):
+ *   у существующего coreWorldState миграция создаёт ПУСТОЙ журнал
+ *   (старый код реакций не записывал), схема состояния ядра
+ *   поднимается до 1.3.0; существующий журнал не перезаписывается;
+ *   значения не пересчитываются.
  */
 export const STORAGE_FORMAT_VERSION: string = CURRENT_SAVE_SCHEMA_VERSION;
 
@@ -597,6 +603,11 @@ export function exportWorldToMarkdown(world: SavedWorld): string {
     lines.push(`- **Сегмент времени:** ${core.clock.segmentIndex}, шагов: ${core.clock.stepCount}`);
     lines.push(`- **Локальное время симуляции, с:** ${core.clock.localTimeS}`);
     lines.push(`- **Тела:** ${core.bodies.length}; резервуары: ${core.reservoirs.length}; записи потоков: ${core.fluxLedger.records.length}`);
+    // Stage 4.2.3.3: записи реакций — только если журнал реально задан;
+    // отсутствие журнала не изображается пустым списком.
+    if (core.reactionLedger !== undefined && core.reactionLedger !== null && Array.isArray(core.reactionLedger.records)) {
+      lines.push(`- **Записи реакционных транзакций (Stage 4.2.3.3):** ${core.reactionLedger.records.length}`);
+    }
     if (core.note) lines.push(`- Примечание: ${core.note}`);
     lines.push('');
   }

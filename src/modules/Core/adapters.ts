@@ -649,6 +649,10 @@ export function coreWorldStateFromLegacyWorld(input: LegacyWorldInput): CoreWorl
     radiationSources: [],
     reservoirs: [],
     fluxLedger: { records: [] },
+    // Stage 4.2.3.3: пустой журнал реакционных транзакций — у нового
+    // мира реакций не было; записи появятся только от операторов
+    // процессов, выдуманные транзакции не создаются.
+    reactionLedger: { records: [] },
     legacy: {
       generatorVersion: input.generatorVersion,
       seed: input.seed
