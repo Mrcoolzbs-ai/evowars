@@ -579,3 +579,275 @@ describe('Stage 4.2.1 Scheduler: расписания процессов', () =>
     expect(readyProcessIds(bk, registry, [opA, opB], 60)).toEqual(['a', 'b']);
   });
 });
+
+// ============================================
+// STAGE 4.2.3.1 - Snapshot-изоляция состояния мира
+// ============================================
+//
+// Macro-шаг выполняется на полной изолированной копии мира:
+// операторы физически не могут изменить объект вызывающей
+// стороны (включая вложенные bodies, reservoirs, fluxLedger и
+// scheduling). Отклонение шага — ошибкой оператора, движением
+// часов или аудитом инвариантов — оставляет исходный world
+// глубоко неизменным; успешный шаг фиксирует итоговое рабочее
+// состояние, а не частично изменённый объект вызывающей стороны.
+
+describe('Stage 4.2.3.1 Scheduler: snapshot-изоляция состояния мира', () => {
+  /** Мир со вложенными структурами, которые попробуют мутировать операторы. */
+  function snapshotTestWorld(): CoreWorldState {
+    const base = testWorld();
+    const world: CoreWorldState = {
+      ...base,
+      bodies: [
+        {
+          id: 'planet',
+          kind: 'planet',
+          properties: { massKg: knownValue(quantity(5.972e24, 'kg')) }
+        }
+      ],
+      gravity: { planet: null },
+      fluxLedger: {
+        records: [
+          {
+            id: 'flux-1',
+            kind: 'internal_transfer',
+            from: 'atm',
+            to: 'atm',
+            subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 1, basis: 'amount' },
+            time: { segmentIndex: 0, localTimeS: 0 },
+            status: 'applied'
+          }
+        ]
+      }
+    };
+    return world;
+  }
+
+  /** Мутация НЕСКОЛЬКИХ вложенных полей рабочего состояния на месте. */
+  function mutateNestedInPlace(w: CoreWorldState): void {
+    const res = w.reservoirs[0];
+    if (res !== undefined && res.material !== undefined) {
+      res.material.entries['co2'] = 5;
+    }
+    if (res !== undefined && res.energy !== undefined) {
+      res.energy.storedJ = 4321;
+    }
+    const body = w.bodies[0];
+    if (body !== undefined) {
+      body.properties['massKg'] = knownValue(quantity(1, 'kg'));
+    }
+    const rec = w.fluxLedger.records[0];
+    if (rec !== undefined && rec.subject.subjectType === 'substance' && rec.subject.quantityKind === 'integrated') {
+      rec.subject.amount = 999;
+    }
+  }
+
+  it('Тест A: оператор мутировал вложенное состояние и выбросил исключение — исходный мир глубоко неизменен', () => {
+    const world = snapshotTestWorld();
+    const pristine = structuredClone(world);
+    const registry = makeRegistry([descriptor('a')]);
+    const mutator: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        mutateNestedInPlace(w);
+        throw new Error('оператор сломался после мутаций');
+      }
+    };
+    const result = runMacroStep(world, registry, [mutator], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('rejected');
+    // возвращён ИСХОДНЫЙ объект вызывающей стороны
+    expect(result.world).toBe(world);
+    // исходный мир глубоко идентичен снимку до вызова
+    expect(world).toEqual(pristine);
+    // ни одна вложенная структура не изменилась
+    expect(world.reservoirs[0]?.material?.entries['co2']).toBe(100);
+    expect(world.reservoirs[0]?.energy?.storedJ).toBe(0);
+    expect(world.bodies[0]?.properties['massKg']).toEqual(knownValue(quantity(5.972e24, 'kg')));
+    const rec = world.fluxLedger.records[0];
+    expect(rec?.subject.subjectType === 'substance' && rec.subject.quantityKind === 'integrated' ? rec.subject.amount : null).toBe(1);
+    // часы и bookkeeping не продвинулись
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world.scheduling).toBeUndefined();
+    expect(result.bookkeeping.stepCount).toBe(0);
+    // диагностика содержит причину отказа
+    expect(result.diagnostics.join(' ')).toContain('оператор сломался после мутаций');
+    expect(result.log.every((e) => e.status === 'rejected')).toBe(true);
+  });
+
+  it('Тест B: успех первого оператора + ошибка второго — весь шаг отклонён, частичный результат не фиксируется', () => {
+    const world = snapshotTestWorld();
+    const pristine = structuredClone(world);
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const good: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        mutateNestedInPlace(w);
+        return w;
+      }
+    };
+    const bad: ProcessOperator = {
+      processId: 'b',
+      apply: () => {
+        throw new Error('второй оператор сломан');
+      }
+    };
+    const result = runMacroStep(world, registry, [good, bad], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    // изменения первого оператора не попали в исходный мир
+    expect(world).toEqual(pristine);
+    expect(world.reservoirs[0]?.material?.entries['co2']).toBe(100);
+    // шаг отклонён целиком: время и счётчики шагов не изменились
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world.scheduling).toBeUndefined();
+    expect(result.bookkeeping.stepCount).toBe(0);
+    // все записи лога имеют статус rejected
+    expect(result.log.length).toBe(2);
+    expect(result.log.every((e) => e.status === 'rejected')).toBe(true);
+  });
+
+  it('Тест C: успешный шаг фиксирует рабочее состояние; входной мир нетронут; часы продвинулись ровно один раз', () => {
+    const world = snapshotTestWorld();
+    const pristine = structuredClone(world);
+    const registry = makeRegistry([descriptor('a')]);
+    const worker: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const res = w.reservoirs[0];
+        if (res !== undefined && res.material !== undefined) {
+          res.material.entries['co2'] = 90;
+        }
+        return w;
+      }
+    };
+    const result = runMacroStep(world, registry, [worker], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('committed');
+    // зафиксировано итоговое рабочее состояние с ожидаемыми изменениями
+    expect(result.world.reservoirs[0]?.material?.entries['co2']).toBe(90);
+    // входной объект вызывающей стороны остался неизменным
+    expect(world).toEqual(pristine);
+    expect(world.reservoirs[0]?.material?.entries['co2']).toBe(100);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.clock.stepCount).toBe(0);
+    // часы продвинулись ровно на durationS
+    expect(result.world.clock.localTimeS).toBe(10);
+    expect(result.world.clock.stepCount).toBe(1);
+    // bookkeeping и журнал вызовов обновились ровно один раз
+    expect(result.bookkeeping.stepCount).toBe(1);
+    expect(result.world.scheduling?.stepCount).toBe(1);
+    expect(result.log.length).toBe(1);
+    expect(result.log[0]?.status).toBe('committed');
+    expect(result.bookkeeping.processDynamics['a']?.operatorCallsCompleted).toBe(1);
+    expect(result.bookkeeping.processDynamics['a']?.macroStepsCompleted).toBe(1);
+  });
+
+  it('Тест D: оператор изменил материал и незаконно двинул часы — шаг отклонён, мир без мутаций', () => {
+    const world = snapshotTestWorld();
+    const pristine = structuredClone(world);
+    const registry = makeRegistry([descriptor('a')]);
+    const mover: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const res = w.reservoirs[0];
+        if (res !== undefined && res.material !== undefined) {
+          res.material.entries['co2'] = 7;
+        }
+        return { ...w, clock: { ...w.clock, localTimeS: w.clock.localTimeS + 1 } };
+      }
+    };
+    const result = runMacroStep(world, registry, [mover], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    // первоначальный мир сохранён без мутаций
+    expect(world).toEqual(pristine);
+    expect(world.reservoirs[0]?.material?.entries['co2']).toBe(100);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.clock.stepCount).toBe(0);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(result.diagnostics.join(' ')).toContain('продвинул мировое время');
+  });
+
+  it('Тест E: аудит отклонил переход как imbalanced — исходный мир и все вложенные объекты неизменны', () => {
+    const world = snapshotTestWorld();
+    const pristine = structuredClone(world);
+    const registry = makeRegistry([descriptor('a')]);
+    const leaking: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const res = w.reservoirs[0];
+        if (res !== undefined && res.material !== undefined) {
+          res.material.entries['co2'] = 55;
+        }
+        return w;
+      }
+    };
+    const result = runMacroStep(world, registry, [leaking], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: co2Catalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.world).toBe(world);
+    expect(world).toEqual(pristine);
+    expect(world.reservoirs[0]?.material?.entries['co2']).toBe(100);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(result.bookkeeping.stepCount).toBe(0);
+  });
+
+  it('Тест F: повторяемость — одинаковое состояние и операторы дают детерминированный результат', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const opA: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        const res = w.reservoirs[0];
+        if (res !== undefined && res.material !== undefined) {
+          res.material.entries['co2'] = 80;
+        }
+        return w;
+      }
+    };
+    const opB: ProcessOperator = { processId: 'b', apply: (w) => w };
+    const first = runMacroStep(snapshotTestWorld(), registry, [opA, opB], { durationS: 10, splitting: 'lie' });
+    const second = runMacroStep(snapshotTestWorld(), registry, [opA, opB], { durationS: 10, splitting: 'lie' });
+    expect(first.status).toBe('committed');
+    expect(second.status).toBe('committed');
+    // механизм копирования и порядок обхода полей не вносят различий
+    expect(
+      JSON.stringify({ world: second.world, bookkeeping: second.bookkeeping, log: second.log, diagnostics: second.diagnostics })
+    ).toBe(JSON.stringify({ world: first.world, bookkeeping: first.bookkeeping, log: first.log, diagnostics: first.diagnostics }));
+    // повторные прогоны на одном и том же входном объекте: мир нетронут, результат идентичен
+    const world = snapshotTestWorld();
+    const pristine = structuredClone(world);
+    const r1 = runMacroStep(world, registry, [opA, opB], { durationS: 10, splitting: 'lie' });
+    const r2 = runMacroStep(world, registry, [opA, opB], { durationS: 10, splitting: 'lie' });
+    expect(JSON.stringify(r2)).toBe(JSON.stringify(r1));
+    expect(world).toEqual(pristine);
+  });
+
+  it('неклонируемое состояние мира — контролируемый отказ ДО вызова первого оператора', () => {
+    const world = snapshotTestWorld();
+    (world.legacy as unknown as { seed?: unknown }).seed = (() => 'несериализуемо') as unknown as string;
+    const registry = makeRegistry([descriptor('a')]);
+    let operatorCalls = 0;
+    const probe: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => {
+        operatorCalls += 1;
+        return w;
+      }
+    };
+    const result = runMacroStep(world, registry, [probe], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('rejected');
+    // ни один оператор не был вызван
+    expect(operatorCalls).toBe(0);
+    // исходное состояние нетронуто
+    expect(result.world).toBe(world);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(result.log).toEqual([]);
+    expect(result.diagnostics.join(' ')).toContain('рабочий снимок');
+  });
+});
