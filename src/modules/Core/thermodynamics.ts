@@ -473,7 +473,10 @@ function scalarIssues(
     case 'unknown':
     case 'not_applicable':
     case 'not_implemented': {
-      if (value.quantity !== undefined) {
+      // У этих статусов в типе ScientificValue поля quantity нет; для
+      // runtime-проверки повреждённых данных читаем его безопасно.
+      const quantityUnknown: unknown = (value as unknown as Record<string, unknown>).quantity;
+      if (quantityUnknown !== undefined) {
         errors.push(`${path}: статус «${status}» не может нести числовое значение (для unknown числовое значение не создаётся)`);
       }
       break;
@@ -632,8 +635,11 @@ function nasa7Issues(
       const minOk = checkQuantityShape(`${segPath}: нижняя граница`, rangeRec.min, TEMPERATURE_DIMENSION, errors);
       const maxOk = checkQuantityShape(`${segPath}: верхняя граница`, rangeRec.max, TEMPERATURE_DIMENSION, errors);
       if (minOk && maxOk) {
-        const tMin = (rangeRec.min as PhysicalQuantity).value;
-        const tMax = (rangeRec.max as PhysicalQuantity).value;
+        // checkQuantityShape уже подтвердил форму и размерность;
+        // сужение isNonNullObject оставляет Record<string, unknown>,
+        // поэтому двойное приведение — единственный честный путь.
+        const tMin = (rangeRec.min as unknown as PhysicalQuantity).value;
+        const tMax = (rangeRec.max as unknown as PhysicalQuantity).value;
         rangeBounds = { min: tMin, max: tMax };
         if (!(tMin > 0)) {
           errors.push(`${segPath}: нижняя граница диапазона должна быть положительной, получено ${tMin}`);
