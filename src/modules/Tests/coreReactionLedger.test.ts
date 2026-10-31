@@ -1394,3 +1394,58 @@ describe('Stage 4.2.3.3.3 ReactionLedger: разреженные массивы,
     expect(audit.diagnostics.some((d) => d.includes('разреженный массив records'))).toBe(true);
   });
 });
+
+describe('Stage 4.2.3.3.4 ReactionLedger: собственные индексы массивов', () => {
+  /** Разреженный массив длины 1: индекс 0 унаследован из prototype chain, собственного элемента нет. */
+  function protoHoleArray(inheritedValue: unknown): unknown[] {
+    const sparse = new Array(1);
+    Object.setPrototypeOf(sparse, { 0: inheritedValue });
+    return sparse;
+  }
+
+  it('records: унаследованный из prototype chain индекс не заменяет собственный элемент — структурная ошибка', () => {
+    const problems = validateReactionLedger({
+      records: protoHoleArray(makeRecord()) as unknown as ReactionRecord[]
+    });
+    expect(problems.some((p) => p.includes('запись #0 отсутствует'))).toBe(true);
+    expect(problems.some((p) => p.includes('разреженный массив records'))).toBe(true);
+  });
+
+  it('reactants: унаследованный из prototype chain индекс не заменяет собственный элемент — структурная ошибка', () => {
+    const problems = validateReactionRecord({
+      ...makeRecord(),
+      reactants: protoHoleArray({ reservoirId: 'atm', speciesId: 'h2', coefficient: 2 }) as unknown as ReactionRecord['reactants']
+    });
+    expect(problems.some((p) => p.includes('reactants[0] отсутствует'))).toBe(true);
+    expect(problems.some((p) => p.includes('разреженный массив'))).toBe(true);
+  });
+
+  it('products: унаследованный из prototype chain индекс не заменяет собственный элемент — структурная ошибка', () => {
+    const problems = validateReactionRecord({
+      ...makeRecord(),
+      products: protoHoleArray({ reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 }) as unknown as ReactionRecord['products']
+    });
+    expect(problems.some((p) => p.includes('products[0] отсутствует'))).toBe(true);
+    expect(problems.some((p) => p.includes('разреженный массив'))).toBe(true);
+  });
+
+  it('явный undefined как собственное значение остаётся некорректной записью и участником', () => {
+    const problemsRecords = validateReactionLedger({ records: [undefined] as unknown as ReactionRecord[] });
+    expect(problemsRecords.some((p) => p.includes('запись #0'))).toBe(true);
+    const problemsReactants = validateReactionRecord({
+      ...makeRecord(),
+      reactants: [undefined] as unknown as ReactionRecord['reactants']
+    });
+    expect(problemsReactants.some((p) => p.includes('reactants[0]'))).toBe(true);
+    const problemsProducts = validateReactionRecord({
+      ...makeRecord(),
+      products: [undefined] as unknown as ReactionRecord['products']
+    });
+    expect(problemsProducts.some((p) => p.includes('products[0]'))).toBe(true);
+  });
+
+  it('обычные плотные массивы продолжают проходить валидацию', () => {
+    expect(validateReactionRecord(makeRecord())).toEqual([]);
+    expect(validateReactionLedger({ records: [makeRecord()] })).toEqual([]);
+  });
+});

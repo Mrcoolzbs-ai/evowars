@@ -1416,7 +1416,11 @@ describe('Stage 4.2.3.3.3 Scheduler: циклические данные и ра
     const world = worldWithHistory();
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    (world.reactionLedger?.records[0] as unknown as { extra?: unknown }).extra = cyclic;
+    const ledger = world.reactionLedger;
+    if (ledger === undefined) {
+      throw new Error('фикстура worldWithHistory обязана содержать журнал реакций');
+    }
+    (ledger.records[0] as unknown as { extra?: unknown }).extra = cyclic;
     const pristine = structuredClone(world);
     const originalLedger = world.reactionLedger;
     const originalRecord = originalLedger?.records[0];
@@ -1456,6 +1460,44 @@ describe('Stage 4.2.3.3.3 Scheduler: циклические данные и ра
     });
     expect(result.status).toBe('rejected');
     // форма нового журнала отклоняется ДО стехиометрического аудита
+    expect(result.audit).toBeUndefined();
+    expect(result.diagnostics.some((d) => d.includes('некорректен'))).toBe(true);
+    expect(result.diagnostics.some((d) => d.includes('разреженный массив'))).toBe(true);
+    expect(result.world).toBe(world);
+    expect(world.reactionLedger).toBeUndefined();
+    expect(world.clock.stepCount).toBe(0);
+    expect(world).toEqual(pristine);
+  });
+});
+
+describe('Stage 4.2.3.3.4 Scheduler: унаследованные индексы массивов не заменяют элементы', () => {
+  /** Мир без журнала реакций (поле отсутствует). */
+  function worldWithoutLedger(): CoreWorldState {
+    const world = testWorld();
+    delete world.reactionLedger;
+    return world;
+  }
+
+  it('новая запись с дыркой в reactants, унаследованной из prototype chain: reject до аудита, исходный мир нетронут', () => {
+    const world = worldWithoutLedger();
+    const pristine = structuredClone(world);
+    const sparseReactants = new Array(1);
+    Object.setPrototypeOf(sparseReactants, { 0: { reservoirId: 'atm', speciesId: 'h2', coefficient: 2 } });
+    const addingInherited: ProcessOperator = {
+      processId: 'a',
+      apply: (w) => ({
+        ...w,
+        reactionLedger: { records: [{ ...schedulerReaction('rxn-proto-hole'), reactants: sparseReactants }] }
+      })
+    };
+    const result = runMacroStep(world, makeRegistry([descriptor('a')]), [addingInherited], {
+      durationS: 10,
+      splitting: 'lie',
+      audit: { speciesCatalog: waterCatalog(), boundary: 'complete' }
+    });
+    expect(result.status).toBe('rejected');
+    // унаследованный индекс — не собственный элемент: структурная
+    // ошибка формы отклоняется ДО стехиометрического аудита
     expect(result.audit).toBeUndefined();
     expect(result.diagnostics.some((d) => d.includes('некорректен'))).toBe(true);
     expect(result.diagnostics.some((d) => d.includes('разреженный массив'))).toBe(true);
