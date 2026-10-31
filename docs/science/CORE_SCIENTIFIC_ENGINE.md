@@ -193,6 +193,17 @@
 > 4.2.2.5 — 862 теста (27 файлов), из них ядро — 505 (новых
 > core-тестов нет). Коммиты: 44e93b71 → 356da6e5 → b527aa1f →
 > ff810acd; CI run 41192420708 зелёный.
+>
+> Ревизия Stage 4.2.2.5.1 (2026-10-31): узкая корректирующая
+> ревизия — защита kind-гейта от prototype pollution: список
+> допустимых видов резервуаров читается только по СОБСТВЕННОМУ
+> ключу таблицы (Object.prototype.hasOwnProperty.call); имена
+> унаследованных свойств прототипа и произвольные строки —
+> недоказанность без исключений и без автоподбора резервуара;
+> комментарий таксономии приведён к действующему контракту.
+> Golden baseline совпадает. После 4.2.2.5.1 — 863 теста
+> (27 файлов), из них ядро — 505 (новых core-тестов нет).
+> Коммиты: 9b31419b → 1fad4992; CI run 41207933807 зелёный.
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -880,6 +891,35 @@ untimed-записи в ограниченной временной област
   locationType), всего 862 (27 файлов), ядро — 505 (новых
   core-тестов нет).
 
+Ревизия 4.2.2.5.1 (prototype safety kind-гейта и комментарий
+таксономии):
+
+- runtime lookup LOCATION_TYPE_RESERVOIR_KINDS[env.locationType]
+  — только по СОБСТВЕННОМУ ключу таблицы
+  (Object.prototype.hasOwnProperty.call): таблица — обычный
+  объект, наследующий свойства Object.prototype, поэтому имена
+  ’constructor’/’toString’/’hasOwnProperty’/’__proto__’ вернули
+  бы унаследованные значения (функции, Object.prototype), а
+  последующий .includes() — TypeError; несобственный ключ
+  (включая произвольные строки вроде ’hydrothermal_sinter’) —
+  недоказанность cradle_temperature_unproven без исключения,
+  без TypeError и без выбора другого резервуара (fail-closed);
+  корректные CradleLocationType — прежнее поведение; валидация
+  kind, provenance и isProvenTemperatureEvidence не ослаблены;
+- комментарий таксономии перед таблицей приведён к действующему
+  контракту: kind — документированные семантические категории,
+  таблица намеренно консервативна и зависит от типа локальной
+  среды, subsurface_reservoir — только ’crust’, вид ’ocean’
+  подземное расположение не доказывает, тесты/фикстуры таксономию
+  не устанавливают, новые виды не вводятся;
+- +1 тест к 4.2.2.5 (compatibility.test: 5 некорректных
+  runtime-значений через реальный путь checkCompatibility с
+  резервуаром допустимого вида ’crust’ — known 700 K +
+  provenance — и декой-резервуаром с доказанной неприемлемой
+  288 K как наблюдаемым доказательством отсутствия
+  автоподбора), всего 863 (27 файлов), ядро — 505 (новых
+  core-тестов нет).
+
 RCM, вертикальный профиль, гидростатика, парниковый эффект и
 вычисление surfaceTemperature НЕ реализованы и не выдаются за
 реализованные (этап 4.8); легаси-химия продолжает работать на
@@ -940,7 +980,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 (все эти ревизии — без новых core-тестов))
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов))
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -960,7 +1000,9 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 27 тест-файлов, 862 теста (после ревизии 4.2.2.5 —
+Всего в проекте 27 тест-файлов, 863 теста (после ревизии
+4.2.2.5.1 — фактические итоги Vitest «Test Files 27 passed (27) /
+Tests 863 passed (863)» из CI; после 4.2.2.5 — 862,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 862
 passed (862)» из CI; после 4.2.2.4 — 848,
 фактические итоги Vitest «Test Files 27 passed (27) / Tests 848
@@ -1039,7 +1081,13 @@ next/nextIntRange/shuffle/generateId; разные seed различаются) 
   subsurface_reservoir (доказывается только ’crust’) и сделала
   kind-гейт runtime-безопасным (неизвестный locationType —
   недоказанность без исключений, другой резервуар не
-  выбирается). НЕ реализовано и не
+  выбирается). Ревизия 4.2.2.5.1 защитила этот гейт от
+  prototype pollution (чтение списка допустимых видов только
+  по СОБСТВЕННОМУ ключу таблицы — имена унаследованных свойств
+  прототипа и произвольные строки дают недоказанность без
+  исключения, без TypeError и без автоподбора; контракты
+  4.2.2.5 сохранены) и привела комментарий таксономии к
+  действующему контракту. НЕ реализовано и не
   выдаётся за реализованное: RCM и вертикальный профиль (этап 4.8),
   гидростатика, парниковый эффект, вычисление surfaceTemperature
   (остаётся ЯВНО unknown); ни один резервуар/слой не получил
