@@ -53,6 +53,7 @@ import { GENERATOR_VERSION } from '../../types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
 import { getEarliestUniverseAgeGyr } from '../Data/starPhysical';
 import { checkCompatibility, CRADLE_RELATED_CATEGORIES } from '../Compatibility';
+import type { CoreWorldState } from '../Core/worldState';
 import { createAtmosphere, normalizeAtmosphere, computeAtmospherePhysicalModel } from '../Atmosphere';
 import {
   calculatePhysicalCharacteristics,
@@ -491,6 +492,19 @@ function selectCradle(
 // «оценочное расхождение не отбрасывает колыбель» — фильтрация
 // кандидатов идёт по severity error, а оценочные расхождения
 // являются предупреждениями (cradle_temperature_estimate_outside_range).
+//
+// Stage 4.2.2.3: контекст дополнен ОПЦИОНАЛЬНЫМИ полями coreWorldState
+// и cradleLocalEnvironment. В реальном генерационном контуре на
+// момент выбора колыбели типизированное состояние ядра ещё не
+// построено (ядро инициализируется ПОСЛЕ генерации), поэтому
+// selectCradle их не передаёт — доказанных температурных ошибок на
+// этапе выбора быть не может, а оценочные расхождения колыбель не
+// исключают. Поля позволяют интеграционным тестам провести через
+// РЕАЛЬНЫЙ путь фильтрации (isCradleSupportedOnWorld →
+// checkCompatibility → severity error) миры с доказанными
+// типизированными нарушениями (Stage 4.2.2.3: известная температура
+// СО содержательным provenance, принадлежащая указанной локальной
+// области, например резервуару по явной ссылке localReservoirId).
 export function isCradleSupportedOnWorld(
   cradle: CradleOption,
   context: {
@@ -499,13 +513,21 @@ export function isCradleSupportedOnWorld(
     celestialBody: CelestialBodyOption;
     atmosphere: AtmosphereState;
     bodyCharacteristics: PhysicalCharacteristics;
+    /** Stage 4.2.2.3: типизированное состояние ядра (для тестов реального пути фильтрации). */
+    coreWorldState?: CoreWorldState;
+    /**
+     * Stage 4.2.2.3: готовая локальная среда колыбели; без поля
+     * вычисляется как обычно (determineCradleLocalEnvironment).
+     */
+    cradleLocalEnvironment?: CradleLocalEnvironment;
   }
 ): boolean {
-  const cradleLocalEnvironment = determineCradleLocalEnvironment({
-    cradle,
-    celestialBody: context.celestialBody,
-    atmosphere: context.atmosphere
-  });
+  const cradleLocalEnvironment = context.cradleLocalEnvironment ??
+    determineCradleLocalEnvironment({
+      cradle,
+      celestialBody: context.celestialBody,
+      atmosphere: context.atmosphere
+    });
 
   const warnings = checkCompatibility({
     mode: context.mode,
@@ -514,7 +536,8 @@ export function isCradleSupportedOnWorld(
     atmosphere: context.atmosphere,
     cradle,
     cradleLocalEnvironment,
-    physicalCharacteristics: context.bodyCharacteristics
+    physicalCharacteristics: context.bodyCharacteristics,
+    coreWorldState: context.coreWorldState
   }, context.mode);
 
   // Ошибка в правилах, относящихся к колыбели, означает,
