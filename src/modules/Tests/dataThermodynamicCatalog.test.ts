@@ -35,6 +35,7 @@ import {
   THERMODYNAMIC_CATALOG_SPECIES_IDS
 } from '../Data/thermodynamicCatalog';
 import type { NasaCeaGasRecordId } from '../Data/thermodynamicCatalog';
+import gases from '../Data/gases';
 import { validateSpecies } from '../Core/species';
 import { validateThermodynamicProperties } from '../Core/thermodynamics';
 
@@ -74,6 +75,32 @@ const EXPECTED_MOLAR_MASS_NEW: Record<string, number> = {
   c2h4: 28.05316e-3,
   c3h8: 44.09562e-3,
   ch3oh: 32.04186e-3
+};
+
+// Молярные массы ВСЕХ 20 видов, кг/моль — поля записей NASA CEA (г/моль × 1e-3).
+// Корректирующая ревизия Stage 4.3.2: легаси-виды тоже используют массу записи
+// источника, а не округлённые значения легаси-каталога газов (gases.ts).
+const EXPECTED_MOLAR_MASS_ALL: Record<NasaCeaGasRecordId, number> = {
+  ar: 39.9480000e-3,
+  he: 4.0026020e-3,
+  ne: 20.1797000e-3,
+  h2: 2.0158800e-3,
+  n2: 28.0134000e-3,
+  o2: 31.9988000e-3,
+  h2o: 18.0152800e-3,
+  co: 28.0101000e-3,
+  co2: 44.0095000e-3,
+  ch4: 16.0424600e-3,
+  nh3: 17.0305200e-3,
+  c2h6: 30.0690400e-3,
+  so2: 64.0638000e-3,
+  h2s: 34.0808800e-3,
+  no: 30.0061000e-3,
+  n2o: 44.0128000e-3,
+  c2h2: 26.0372800e-3,
+  c2h4: 28.0531600e-3,
+  c3h8: 44.0956200e-3,
+  ch3oh: 32.0418600e-3
 };
 
 // Элементные составы 8 новых видов — из строк записей thermo.inp.
@@ -288,5 +315,65 @@ describe('Stage 4.3.2: термодинамический каталог пер�
     expect(catalog.has('so3')).toBe(false);
     expect(catalog.get('')).toBeNull();
     expect(catalog.size()).toBe(20);
+  });
+
+  it('молярные массы всех 20 видов — точные значения записей NASA CEA с собственным provenance', () => {
+    const catalog = buildThermodynamicCatalog();
+    for (const id of IDS) {
+      const species = catalog.get(id)!;
+      const record = NASA_CEA_THERMO_DATA[id];
+      expect(species.molarMassKgMol, 'молярная масса вида ' + id).toBe(record.molarMassKgMol);
+      expect(species.molarMassKgMol, 'масса вида ' + id + ' равна точному значению записи').toBe(EXPECTED_MOLAR_MASS_ALL[id]);
+      expect(species.molarMassStatus).toBe('known');
+      const massProvenance = species.molarMassProvenance;
+      expect(massProvenance, 'molarMassProvenance вида ' + id).toBeDefined();
+      expect(massProvenance!.recordId).toBe(record.recordId);
+      expect(massProvenance!.sourceId).toBe('nasa/cea');
+      expect(massProvenance!.datasetId).toBe('data/thermo.inp');
+      expect(massProvenance!.datasetVersion).toBe('2f79a647e85737742fb08a127da00d1ea1d069da');
+      expect(massProvenance!.license).toBe('Apache-2.0');
+    }
+  });
+
+  it('легаси-каталог газов не изменён; научный каталог не наследует округлённые массы', () => {
+    const legacyNe = gases.find((g) => g.id === 'ne');
+    const legacyO2 = gases.find((g) => g.id === 'o2');
+    expect(legacyNe?.molarMass).toBe(20.18);
+    expect(legacyO2?.molarMass).toBe(32.00);
+    const catalog = buildThermodynamicCatalog();
+    expect(catalog.get('ne')!.molarMassKgMol).toBe(20.1797e-3);
+    expect(catalog.get('o2')!.molarMassKgMol).toBe(31.9988e-3);
+    expect(catalog.get('ne')!.molarMassKgMol).not.toBe(20.18e-3);
+    expect(catalog.get('o2')!.molarMassKgMol).not.toBe(32.00e-3);
+  });
+
+  it('все сегменты всех видов — форма nasa_cea с интегральными константами записи a8/a9', () => {
+    const catalog = buildThermodynamicCatalog();
+    let totalSegments = 0;
+    for (const id of IDS) {
+      const record = NASA_CEA_THERMO_DATA[id];
+      const segments = catalog.get(id)!.thermodynamics!.heatCapacity.nasa7!.segments;
+      totalSegments += segments.length;
+      expect(segments.length, 'число сегментов вида ' + id).toBe(record.segments.length);
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        if (segment.form !== 'nasa_cea') {
+          throw new Error('сегмент ' + i + ' вида ' + id + ' имеет форму ' + segment.form + ', ожидалась nasa_cea');
+        }
+        expect(segment.coefficients).toEqual([...record.segments[i].coefficients]);
+        expect(segment.integralConstants.enthalpyConstantOverR).toBe(record.segments[i].enthalpyConstantOverR);
+        expect(segment.integralConstants.entropyConstantOverR).toBe(record.segments[i].entropyConstantOverR);
+      }
+    }
+    expect(totalSegments).toBe(49);
+  });
+
+  it('распределение сегментов: 9 видов с тремя, 11 с двумя (49 всего)', () => {
+    const withThree = IDS.filter((id) => NASA_CEA_THERMO_DATA[id].segments.length === 3);
+    const withTwo = IDS.filter((id) => NASA_CEA_THERMO_DATA[id].segments.length === 2);
+    expect(withThree).toHaveLength(9);
+    expect(withTwo).toHaveLength(11);
+    expect(withThree.length + withTwo.length).toBe(20);
+    expect([...withThree].sort()).toEqual(['ar', 'co', 'co2', 'h2', 'he', 'n2', 'ne', 'no', 'o2']);
   });
 });

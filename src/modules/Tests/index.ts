@@ -26,5 +26,8 @@ export * from './coreWorldState.test';
 export * from './coreSolverBackend.test';
 export * from './corePersistence.test';
 
+// --- Формы NASA-полиномов: типизированное разделение (корректирующая ревизия Stage 4.3.2) ---
+export * from './coreNasaPolynomialForm.test';
+
 // --- Термодинамика видов: каталог первой партии NASA CEA (Stage 4.3.2) ---
 export * from './dataThermodynamicCatalog.test';
