@@ -317,7 +317,7 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     const cand = makeCandidate();
     (cand as unknown as Record<string, unknown>).halfLife = unknownValue('тест: значение недоступно');
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
-    expect(bad.some((e) => e.includes('период полураспада не может быть unknown'))).toBe(true);
+    expect(bad.some((e) => e.includes('обязан быть known/estimated'))).toBe(true);
   });
 
   it('кандидат: estimated-период полураспада без метода — ошибка', () => {
@@ -383,6 +383,112 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
   it('кандидат: дубликат записи (массовое число + состояние) — ошибка', () => {
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([makeCandidate(), makeCandidate()]); }));
     expect(bad.some((e) => e.includes('дубликат записи-кандидата'))).toBe(true);
+  });
+
+  it('кандидат: единица периода полураспада без размерности времени (eV, kg, K) — ошибки', () => {
+    for (const unit of ['eV', 'kg', 'K']) {
+      const cand = makeCandidate();
+      (cand as unknown as Record<string, unknown>).halfLife = knownValue(quantity(4.2, unit), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } });
+      const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+      expect(bad.some((e) => e.includes('должна иметь размерность времени')), 'unit ' + unit).toBe(true);
+    }
+  });
+
+  it('кандидат: нулевой и отрицательный период полураспада — ошибки', () => {
+    for (const value of [0, -4.2]) {
+      const cand = makeCandidate();
+      (cand as unknown as Record<string, unknown>).halfLife = knownValue(quantity(value, 'Ma'), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } });
+      const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+      expect(bad.some((e) => e.includes('строго положительным числом')), 'value ' + value).toBe(true);
+    }
+  });
+
+  it('кандидат: недопустимые статусы периода полураспада (unknown, not_applicable, not_implemented, invalid) — ошибки', () => {
+    const badValues = [
+      { status: 'unknown', note: 'тест' },
+      { status: 'not_applicable', reason: 'тест' },
+      { status: 'not_implemented', note: 'тест' },
+      { status: 'invalid', reason: 'тест' }
+    ];
+    for (const halfLife of badValues) {
+      const cand = makeCandidate();
+      (cand as unknown as Record<string, unknown>).halfLife = halfLife;
+      const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+      expect(bad.some((e) => e.includes('обязан быть known/estimated')), 'status ' + halfLife.status).toBe(true);
+    }
+  });
+
+  it('кандидат: невалидная неопределённость периода полураспада — ошибка', () => {
+    const cand = makeCandidate();
+    (cand as unknown as Record<string, unknown>).halfLife = {
+      status: 'known',
+      quantity: quantity(4.2, 'Ma'),
+      uncertainty: { kind: 'stddev', sigma: -1 },
+      provenance: PROVENANCE
+    };
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+    expect(bad.some((e) => e.includes('неопределённость периода полураспада'))).toBe(true);
+    expect(bad.some((e) => e.includes('неотрицательным'))).toBe(true);
+  });
+
+  it('кандидат: все единицы времени реестра (yr, ka, Ma, day, h, min, s, ms) проходят валидацию', () => {
+    for (const unit of ['yr', 'ka', 'Ma', 'day', 'h', 'min', 's', 'ms']) {
+      const cand = makeCandidate();
+      (cand as unknown as Record<string, unknown>).halfLife = knownValue(quantity(4.2, unit), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } });
+      const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+      expect(bad, 'unit ' + unit).toEqual([]);
+    }
+  });
+
+  it('интервальный атомный вес с неположительными границами — ошибка', () => {
+    const bad = validateChemicalElement(damaged((el) => {
+      const w = el.standardAtomicWeight as Record<string, unknown>;
+      w.lower = -1.00784;
+    }));
+    expect(bad.some((e) => e.includes('строго положительными'))).toBe(true);
+  });
+
+  it('скобочный атомный вес: неположительное значение — ошибка', () => {
+    const bad = validateChemicalElement(damaged((el) => {
+      el.standardAtomicWeight = {
+        kind: 'value_with_uncertainty',
+        value: -4.002602,
+        uncertainty: 0.000002,
+        rawNotation: '-4.002602(2)',
+        provenance: PROVENANCE
+      };
+    }));
+    expect(bad.some((e) => e.includes('стандартный атомный вес должен быть строго положительным'))).toBe(true);
+  });
+
+  it('not_assigned с числовыми полями — ошибка (отсутствие веса не превращается в число)', () => {
+    const bad = validateChemicalElement(damaged((el) => {
+      el.standardAtomicWeight = { kind: 'not_assigned', reason: 'тест: прочерк', provenance: PROVENANCE, value: 98 };
+    }));
+    expect(bad.some((e) => e.includes('не должен содержать числовых полей'))).toBe(true);
+  });
+
+  it('изотопная запись: A < Z владельца и повторяющиеся массовые числа — ошибки', () => {
+    const abundance = (value: number, raw: string) => ({ kind: 'value', value, uncertainty: null, rawNotation: raw, provenance: { sourceName: 'тест', recordId: 'тест' } });
+    const badA = validateChemicalElement(damaged((el) => {
+      el.atomicNumber = 2;
+      el.symbol = 'He';
+      el.isotopicComposition = {
+        status: 'known',
+        records: [{ massNumber: 1, abundance: abundance(0.9999, '0.9999') }]
+      };
+    }));
+    expect(badA.some((e) => e.includes('не может быть меньше атомного номера'))).toBe(true);
+    const dup = validateChemicalElement(damaged((el) => {
+      el.isotopicComposition = {
+        status: 'known',
+        records: [
+          { massNumber: 1, abundance: abundance(0.75, '0.75') },
+          { massNumber: 1, abundance: abundance(0.25, '0.25') }
+        ]
+      };
+    }));
+    expect(dup.some((e) => e.includes('повторяющееся массовое число'))).toBe(true);
   });
 
   it('строковые свойства: known без значения и unknown без причины — ошибки', () => {

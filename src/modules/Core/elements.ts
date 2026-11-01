@@ -49,8 +49,8 @@
 // случайности и времени.
 
 import type { DataProvenance, ScientificValue } from './scientificValue';
-import { validateScientificValueShape } from './scientificValue';
-import { isKnownUnit } from './physicalQuantity';
+import { validateScientificValueShape, validateUncertainty } from './scientificValue';
+import { getUnitDefinition, sameDimension, dimension } from './physicalQuantity';
 
 // ============================================
 // 1. ТИПЫ КЛАССИФИКАЦИИ
@@ -402,6 +402,9 @@ function isNonEmptyString(v: unknown): v is string {
 // 7. ВАЛИДАТОР ЗАПИСИ
 // ============================================
 
+/** Размерность времени (секунда): период полураспада обязан иметь её. */
+const TIME_DIMENSION = dimension(0, 0, 1);
+
 /**
  * Проверка ФОРМЫ записи элемента произвольного происхождения
  * (данные могут приходить из JSON). Возвращает список проблем;
@@ -510,6 +513,8 @@ export function validateChemicalElement(element: unknown): string[] {
         errors.push(where('границы интервального атомного веса должны быть конечными числами'));
       } else if (w.lower >= w.upper) {
         errors.push(where(`нижняя граница интервала должна быть меньше верхней, получено [${String(w.lower)}, ${String(w.upper)}]`));
+      } else if (w.lower <= 0 || w.upper <= 0) {
+        errors.push(where(`границы интервального атомного веса должны быть строго положительными, получено [${String(w.lower)}, ${String(w.upper)}]`));
       }
       if (!isNonEmptyString(w.rawNotation)) {
         errors.push(where('интервальный атомный вес обязан сохранять исходную нотацию CIAAW (rawNotation)'));
@@ -517,6 +522,8 @@ export function validateChemicalElement(element: unknown): string[] {
     } else if (w.kind === 'value_with_uncertainty') {
       if (typeof w.value !== 'number' || !Number.isFinite(w.value)) {
         errors.push(where('центральное значение атомного веса должно быть конечным числом'));
+      } else if (w.value <= 0) {
+        errors.push(where(`стандартный атомный вес должен быть строго положительным, получено ${String(w.value)}`));
       }
       if (typeof w.uncertainty !== 'number' || !Number.isFinite(w.uncertainty) || w.uncertainty < 0) {
         errors.push(where(`стандартная неопределённость должна быть конечным неотрицательным числом, получено ${String(w.uncertainty)}`));
@@ -527,6 +534,10 @@ export function validateChemicalElement(element: unknown): string[] {
     } else if (w.kind === 'not_assigned') {
       if (!isNonEmptyString(w.reason)) {
         errors.push(where('отсутствие стандартного атомного веса требует объяснения reason (не ноль, не подстановка массового числа)'));
+      }
+      const wNotAssigned = w as Record<string, unknown>;
+      if ('value' in wNotAssigned || 'lower' in wNotAssigned || 'upper' in wNotAssigned) {
+        errors.push(where('not_assigned (прочерк CIAAW) не должен содержать числовых полей value/lower/upper: отсутствие веса НЕ превращается в число или подстановку'));
       }
     } else {
       errors.push(where(`неизвестная форма стандартного атомного веса: ${String(w.kind)}`));
@@ -545,6 +556,7 @@ export function validateChemicalElement(element: unknown): string[] {
       if (!Array.isArray(ic.records) || ic.records.length === 0) {
         errors.push(where('изотопный состав known требует непустого списка записей'));
       } else {
+        const seenIsotopeMassNumbers = new Set<number>();
         for (const rec of ic.records) {
           if (!isNonNullObject(rec)) {
             errors.push(where('изотопная запись должна быть объектом'));
@@ -552,6 +564,15 @@ export function validateChemicalElement(element: unknown): string[] {
           }
           if (typeof rec.massNumber !== 'number' || !Number.isInteger(rec.massNumber) || rec.massNumber < 1) {
             errors.push(where(`массовое число должно быть целым положительным (число нуклонов), получено ${String(rec.massNumber)}`));
+          } else if (typeof el.atomicNumber === 'number' && Number.isInteger(el.atomicNumber) && rec.massNumber < el.atomicNumber) {
+            errors.push(where(`массовое число изотопной записи A=${String(rec.massNumber)} не может быть меньше атомного номера Z=${String(el.atomicNumber)}`));
+          }
+          if (typeof rec.massNumber === 'number' && Number.isInteger(rec.massNumber)) {
+            if (seenIsotopeMassNumbers.has(rec.massNumber)) {
+              errors.push(where(`повторяющееся массовое число в изотопном составе: ${String(rec.massNumber)}`));
+            } else {
+              seenIsotopeMassNumbers.add(rec.massNumber);
+            }
           }
           const ab = rec.abundance;
           if (!isNonNullObject(ab)) {
@@ -696,8 +717,32 @@ export function validateChemicalElement(element: unknown): string[] {
           }
           if (isNonNullObject(c.halfLife) && (c.halfLife.status === 'known' || c.halfLife.status === 'estimated')) {
             const q = (c.halfLife as Record<string, unknown>).quantity as Record<string, unknown> | undefined;
-            if (!isNonNullObject(q) || typeof q.unit !== 'string' || !isKnownUnit(q.unit)) {
+            if (!isNonNullObject(q) || typeof q.unit !== 'string' || getUnitDefinition(q.unit) === null) {
               errors.push(where(`кандидат ${label}: период полураспада требует зарегистрированную единицу времени`));
+            } else {
+              // Размерность единицы — именно время (сравнение с размерностью
+              // секунды через реестр physicalQuantity), а не просто наличие
+              // единицы в реестре: eV, kg и K тоже зарегистрированы (аудит R1).
+              const unitDef = getUnitDefinition(q.unit);
+              if (unitDef === null || !sameDimension(unitDef.dimension, TIME_DIMENSION)) {
+                errors.push(where(`кандидат ${label}: единица периода полураспада («${String(q.unit)}») должна иметь размерность времени`));
+              }
+            }
+            // Значение конечно и строго положительно: нулевой и
+            // отрицательный период полураспада физически невозможны (аудит R1).
+            if (isNonNullObject(q) && (typeof q.value !== 'number' || !Number.isFinite(q.value) || q.value <= 0)) {
+              errors.push(where(`кандидат ${label}: период полураспада должен быть конечным строго положительным числом, получено ${String(q.value)}`));
+            }
+            // Неопределённость, если присутствует, проходит собственную проверку.
+            const hlUncertainty = (c.halfLife as Record<string, unknown>).uncertainty;
+            if (hlUncertainty !== undefined && hlUncertainty !== null) {
+              if (!isNonNullObject(hlUncertainty)) {
+                errors.push(where(`кандидат ${label}: неопределённость периода полураспада должна быть объектом`));
+              } else {
+                for (const issue of validateUncertainty(hlUncertainty as Parameters<typeof validateUncertainty>[0])) {
+                  errors.push(where(`кандидат ${label}: неопределённость периода полураспада: ${issue}`));
+                }
+              }
             }
             if (c.halfLife.status === 'estimated' && !isNonEmptyString((c.halfLife as Record<string, unknown>).method)) {
               errors.push(where(`кандидат ${label}: estimated-период полураспада требует непустой метод оценки`));
@@ -705,8 +750,8 @@ export function validateChemicalElement(element: unknown): string[] {
             if (!provenanceIdentifiesSource((c.halfLife as Record<string, unknown>).provenance)) {
               errors.push(where(`кандидат ${label}: числовой период полураспада требует provenance с идентификацией источника`));
             }
-          } else if (isNonNullObject(c.halfLife) && c.halfLife.status === 'unknown') {
-            errors.push(where(`кандидат ${label}: период полураспада не может быть unknown (источник его публикует) — данные либо известны, либо кандидат не включается`));
+          } else if (isNonNullObject(c.halfLife) && (c.halfLife.status === 'unknown' || c.halfLife.status === 'not_applicable' || c.halfLife.status === 'not_implemented' || c.halfLife.status === 'invalid')) {
+            errors.push(where(`кандидат ${label}: период полураспада уже отобранного кандидата обязан быть known/estimated, получено ${String((c.halfLife as Record<string, unknown>).status)} — данные либо известны, либо кандидат не включается`));
           }
           if (c.decayMode !== undefined && !isNonEmptyString(c.decayMode)) {
             errors.push(where(`кандидат ${label}: режим распада — непустая строка или отсутствие (не выдумывается)`));
