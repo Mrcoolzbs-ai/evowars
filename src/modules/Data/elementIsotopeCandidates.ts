@@ -427,3 +427,158 @@ const ELEMENT_CANDIDATES: readonly ElementCandidatesSpec[] = [
   {
     z: 116,
     completeness: 'incomplete',
+    completenessNote: "область активных исследований: известный сегодня список экспериментально наблюдавшихся нуклидов неполон, и включённые кандидаты не доказывают абсолютный максимум среди всех возможных изотопов; список кандидатов ограничен наблюдавшимися нуклидами NUBASE2020; оценённая (не наблюдавшаяся) запись 289Lv (16# мс) не кандидат",
+    candidates: [
+      { a: 293, state: 'ground', i: 0, s: '', value: 70, sigma: 30, unit: 'ms', raw: "70(30) ms", decay: "A~100; SF ?", reason: "1σ-интервалы периодов полураспада кандидатов (Lv-293 70(30) мс и Lv-293m 80(60) мс (изомер)) перекрываются; по принятому консервативному правилу отбора все эти кандидаты сохранены равноправными (перекрытие опубликованных 1σ-интервалов само по себе не доказывает статистической эквивалентности значений), единственный кандидат не назначается" },
+      { a: 293, state: 'isomeric', i: 1, s: 'm', value: 80, sigma: 60, unit: 'ms', raw: "80(60) ms", decay: "A=100", reason: "1σ-интервалы периодов полураспада кандидатов (Lv-293 70(30) мс и Lv-293m 80(60) мс (изомер)) перекрываются; по принятому консервативному правилу отбора все эти кандидаты сохранены равноправными (перекрытие опубликованных 1σ-интервалов само по себе не доказывает статистической эквивалентности значений), единственный кандидат не назначается" },
+    ]
+  },
+  {
+    z: 117,
+    completeness: 'incomplete',
+    completenessNote: "область активных исследований: известный сегодня список экспериментально наблюдавшихся нуклидов неполон, и включённые кандидаты не доказывают абсолютный максимум среди всех возможных изотопов; список кандидатов ограничен наблюдавшимися нуклидами NUBASE2020; оценённые (не наблюдавшиеся) записи 291Ts (2# мс) и 292Ts (10# мс) не кандидаты",
+    candidates: [
+      { a: 294, state: 'ground', i: 0, s: '', value: 70, sigma: 30, unit: 'ms', raw: "70(30) ms", decay: "A=100", reason: "самый долгоживущий экспериментально наблюдавшийся нуклид элемента по NUBASE2020: 1σ-интервалы остальных наблюдавшихся нуклидов не пересекаются с его интервалом" },
+    ]
+  },
+  {
+    z: 118,
+    completeness: 'incomplete',
+    completenessNote: "область активных исследований: известный сегодня список экспериментально наблюдавшихся нуклидов неполон, и включённые кандидаты не доказывают абсолютный максимум среди всех возможных изотопов; список кандидатов ограничен наблюдавшимися нуклидами NUBASE2020; оценённая (не наблюдавшаяся) запись 293Og (1# мс) не кандидат",
+    candidates: [
+      { a: 295, state: 'ground', i: 0, s: '', value: 680, sigma: 540, unit: 'ms', raw: "680(540) ms", decay: "A~100", reason: "самый долгоживущий экспериментально наблюдавшийся нуклид элемента по NUBASE2020 (295Og, 680(540) мс, наблюдение 2006); 294Og (0.7(3) мс) не пересекается с его 1σ-интервалом" },
+    ]
+  },
+];
+
+// ============================================
+// 4. ПОСТРОЕНИЕ КАНДИДАТОВ
+// ============================================
+
+/**
+ * Репрезентативные изотопы-кандидаты элемента. Для элементов со
+ * назначенным стандартным атомным весом (CIAAW 2024) — not_applicable:
+ * список заполняется только для элементов без назначенного веса.
+ * Символ передаётся параметром (Data/elements.ts) — без цикла импортов.
+ */
+export function buildRepresentativeCandidates(z: number, symbol: string): RepresentativeIsotopeCandidates {
+  const spec = ELEMENT_CANDIDATES.find((e) => e.z === z);
+  if (!spec) {
+    return {
+      status: 'not_applicable',
+      notApplicableReason: 'у элемента назначен стандартный атомный вес (CIAAW 2024): список репрезентативных изотопов-кандидатов не требуется (правило Stage 4.3.3 — заполняется только для элементов без назначенного веса)'
+    };
+  }
+  return {
+    status: 'known',
+    completeness: spec.completeness,
+    completenessNote: spec.completenessNote,
+    candidates: spec.candidates.map((c) => toNuclide(z, symbol, c)),
+    provenance: { ...NUBASE2020_PROVENANCE }
+  };
+}
+
+/** Сборка одного кандидата из спецификации. */
+function toNuclide(z: number, symbol: string, c: NuclideSpec): NuclideCandidate {
+  const isomer = c.state === 'isomeric';
+  // recordId идентифицирует КОНКРЕТНУЮ строку источника NUBASE2020
+  // парой полей состояния (i, s); для основного состояния s пуста
+  // и не пишется (аудит R2).
+  const recordId = 'nubase2020:Z=' + z + ' ' + symbol + ' A=' + c.a + ' i=' + c.i + (c.s !== '' ? ' s=' + c.s : '');
+  const provenance: DataProvenance = { ...NUBASE2020_PROVENANCE, recordId };
+  const stateNote = isomer
+    ? (c.orderingUncertain === true
+      ? 'изомерное состояние; звёздочка NUBASE2020 (*): порядок основного и изомерного состояний не установлен (Isom.Unc)'
+      : 'изомерное состояние (строка изомера NUBASE2020)')
+    : (c.orderingUncertain === true
+      ? 'основное состояние; звёздочка NUBASE2020 (*): порядок основного и изомерного состояний не установлен (Isom.Unc)'
+      : undefined);
+  const uncertainty = c.sigma === null
+    ? undefined
+    : {
+      kind: 'stddev' as const,
+      sigma: c.sigma,
+      interpretation: 'стандартная неопределённость NUBASE2020 (1 сигма, скобочная запись)'
+    };
+  const halfLife = knownValue(
+    quantity(c.value, c.unit),
+    {
+      uncertainty,
+      provenance: {
+        ...provenance,
+        note: c.sigma === null ? 'значение опубликовано NUBASE2020 как приблизительное (~) без неопределённости' : provenance.note
+      }
+    }
+  );
+  return {
+    atomicNumber: z,
+    massNumber: c.a,
+    nuclideNotation: symbol + '-' + c.a + (isomer ? c.s : ''),
+    state: c.state,
+    stateIndex: c.i,
+    stateCode: c.s as NuclideCandidate['stateCode'],
+    ...(stateNote !== undefined ? { stateNote } : {}),
+    recordId,
+    halfLife,
+    halfLifeRawNotation: c.raw,
+    decayMode: c.decay,
+    dataStatus: 'experimental',
+    reason: c.reason,
+    provenance
+  };
+}
+
+/** Атомные номера элементов с кандидатами (все — без стандартного атомного веса). */
+export const ELEMENTS_WITH_CANDIDATES: readonly number[] = ELEMENT_CANDIDATES.map((e) => e.z);
+
+/** Фактические счётчики кандидатов (для тестов и документации). */
+export interface IsotopeCandidateCoverage {
+  elements: number;
+  /** Записи-кандидаты/состояния: основное и изомерное состояние одного (Z,A) считаются отдельно. */
+  candidateRecords: number;
+  /** Изомерные состояния среди записей-кандидатов. */
+  isomericStates: number;
+  /** Уникальные пары (Z,A): один нуклид может быть представлен основным и изомерным состояниями. */
+  uniqueNuclides: number;
+  experimental: number;
+  completeElements: number;
+  /** Элементы, полнота отбора которых не доказуема: среди наблюдавшихся состояний есть нижние пределы T1/2 без верхней границы (аудит R2). */
+  notVerifiableElements: number;
+  incompleteElements: number;
+}
+
+export function isotopeCandidateCoverage(): IsotopeCandidateCoverage {
+  let candidateRecords = 0;
+  let isomericStates = 0;
+  const uniquePairs = new Set<string>();
+  let completeElements = 0;
+  let notVerifiableElements = 0;
+  let incompleteElements = 0;
+  for (const spec of ELEMENT_CANDIDATES) {
+    if (spec.completeness === 'complete') {
+      completeElements += 1;
+    } else if (spec.completeness === 'not_verifiable') {
+      notVerifiableElements += 1;
+    } else {
+      incompleteElements += 1;
+    }
+    for (const c of spec.candidates) {
+      candidateRecords += 1;
+      uniquePairs.add(spec.z + '-' + c.a);
+      if (c.state === 'isomeric') {
+        isomericStates += 1;
+      }
+    }
+  }
+  return {
+    elements: ELEMENT_CANDIDATES.length,
+    candidateRecords,
+    isomericStates,
+    uniqueNuclides: uniquePairs.size,
+    experimental: candidateRecords, // все кандидаты — экспериментально наблюдавшиеся
+    completeElements,
+    notVerifiableElements,
+    incompleteElements
+  };
+}
+
