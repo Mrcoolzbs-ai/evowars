@@ -21,6 +21,7 @@ import {
   isZero,
   isNegative,
   sameDimension,
+  getUnitDefinition,
   QuantityError
 } from '../Core/physicalQuantity';
 
@@ -165,5 +166,47 @@ describe('Stage 4.1 PhysicalQuantity: особые случаи', () => {
   it('scale требует конечный коэффициент', () => {
     expect(() => scale(quantity(1, 'kg'), Number.POSITIVE_INFINITY)).toThrow(QuantityError);
     expect(scale(quantity(2, 'kg'), 3).value).toBe(6);
+  });
+});
+
+describe('Stage 4.3.3 R2 PhysicalQuantity: единицы года NUBASE2020 (тропический год)', () => {
+  it('y, ky, My зарегистрированы с официальным определением года NUBASE2020', () => {
+    const y = getUnitDefinition('y');
+    const ky = getUnitDefinition('ky');
+    const my = getUnitDefinition('My');
+    if (!y || !ky || !my) throw new Error('единицы NUBASE2020 y/ky/My обязаны быть зарегистрированы');
+    // официальное определение года NUBASE2020: 365.2422 сут = 31 556 926 с
+    expect(y.factor).toBe(31556926);
+    expect(ky.factor).toBe(31556926000);
+    expect(my.factor).toBe(31556926000000);
+    expect(sameDimension(dimensionOf(quantity(1, 'y')), dimensionOf(quantity(1, 's')))).toBe(true);
+    expect(y.note ?? '').toContain('365.2422');
+    expect(isKnownUnit('y')).toBe(true);
+    expect(isKnownUnit('ky')).toBe(true);
+    expect(isKnownUnit('My')).toBe(true);
+  });
+
+  it('тропический год NUBASE2020 отличается от юлианского yr (не равен и не подменяет его)', () => {
+    expect(convert(quantity(1, 'yr'), 's').value).toBe(3.15576e7);
+    expect(convert(quantity(1, 'y'), 's').value).toBe(31556926);
+    const yInYr = convert(quantity(1, 'y'), 'yr').value;
+    expect(yInYr).not.toBe(1);
+    // отношение NUBASE2020: 31 556 926 с / 31 557 600 с
+    expect(yInYr).toBeCloseTo(31556926 / 31557600, 12);
+  });
+
+  it('кратные тропического года: ky = 1000 y, My = 1 000 000 y, SI-секунды', () => {
+    expect(convert(quantity(1, 'ky'), 'y').value).toBe(1000);
+    expect(convert(quantity(1, 'My'), 'y').value).toBe(1e6);
+    expect(toSI(quantity(2, 'y'))).toBe(2 * 31556926);
+    expect(toSI(quantity(2, 'ky'))).toBe(2 * 31556926000);
+    expect(toSI(quantity(3, 'My'))).toBe(3 * 31556926000000);
+  });
+
+  it('юлианские yr/ka/Ma остаются прежними (легаси Units.YEAR_S не затронут)', () => {
+    expect(convert(quantity(1, 'yr'), 's').value).toBe(3.15576e7);
+    expect(convert(quantity(1, 'ka'), 'yr').value).toBe(1000);
+    expect(convert(quantity(1, 'Ma'), 'yr').value).toBe(1e6);
+    expect(getUnitDefinition('yr')?.factor).toBe(3.15576e7);
   });
 });

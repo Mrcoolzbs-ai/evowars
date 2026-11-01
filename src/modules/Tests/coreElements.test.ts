@@ -431,8 +431,8 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(bad.some((e) => e.includes('неотрицательным'))).toBe(true);
   });
 
-  it('кандидат: все единицы времени реестра (yr, ka, Ma, day, h, min, s, ms) проходят валидацию', () => {
-    for (const unit of ['yr', 'ka', 'Ma', 'day', 'h', 'min', 's', 'ms']) {
+  it('кандидат: все единицы времени реестра (y, ky, My, yr, ka, Ma, day, h, min, s, ms) проходят валидацию', () => {
+    for (const unit of ['y', 'ky', 'My', 'yr', 'ka', 'Ma', 'day', 'h', 'min', 's', 'ms']) {
       const cand = makeCandidate();
       (cand as unknown as Record<string, unknown>).halfLife = knownValue(quantity(4.2, unit), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } });
       const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));

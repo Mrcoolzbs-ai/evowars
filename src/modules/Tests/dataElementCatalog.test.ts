@@ -24,6 +24,7 @@ import { validateChemicalElement, checkElementCountsReference } from '../Core/el
 import type { ChemicalElement, RepresentativeIsotopeCandidates } from '../Core/elements';
 import { elementCompositions } from '../Data/elementCompositions';
 import { buildThermodynamicCatalog, THERMODYNAMIC_CATALOG_SPECIES_IDS } from '../Data/thermodynamicCatalog';
+import { toSI } from '../Core/physicalQuantity';
 
 function allElements(): readonly ChemicalElement[] {
   return buildElementCatalog().list();
@@ -398,7 +399,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
       throw new Error('периоды полураспада Tc должны быть known');
     }
     expect(a97.halfLife.quantity.value).toBe(4.21);
-    expect(a97.halfLife.quantity.unit).toBe('Ma');
+    expect(a97.halfLife.quantity.unit).toBe('My');
     expect(a98.halfLife.quantity.value).toBe(4.2);
     const u97 = a97.halfLife.uncertainty;
     const u98 = a98.halfLife.uncertainty;
@@ -409,7 +410,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(a97.reason).toContain('равноправными');
   });
 
-  it('Pm: единственный кандидат Pm-145, 17.7(4) yr, с recordId NUBASE2020', () => {
+  it('Pm: единственный кандидат Pm-145, 17.7(4) y (год NUBASE2020), с recordId NUBASE2020', () => {
     const c = expectKnownCandidates(buildElement(61));
     expect(c.completeness).toBe('complete');
     const cands = c.candidates ?? [];
@@ -419,12 +420,12 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(pm.nuclideNotation).toBe('Pm-145');
     if (pm.halfLife.status !== 'known') throw new Error('17.7(4) y должно быть known');
     expect(pm.halfLife.quantity.value).toBe(17.7);
-    expect(pm.halfLife.quantity.unit).toBe('yr');
+    expect(pm.halfLife.quantity.unit).toBe('y');
     expect(pm.halfLifeRawNotation).toBe('17.7(4) y');
     expect(pm.recordId).toBe('nubase2020:Z=61 Pm A=145');
   });
 
-  it('Po: единственный кандидат Po-209, 124(3) yr', () => {
+  it('Po: единственный кандидат Po-209, 124(3) y (год NUBASE2020)', () => {
     const c = expectKnownCandidates(buildElement(84));
     const cands = c.candidates ?? [];
     expect(cands).toHaveLength(1);
@@ -432,9 +433,52 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(po.massNumber).toBe(209);
     if (po.halfLife.status !== 'known') throw new Error('124(3) y должно быть known');
     expect(po.halfLife.quantity.value).toBe(124);
-    expect(po.halfLife.quantity.unit).toBe('yr');
+    expect(po.halfLife.quantity.unit).toBe('y');
     expect(po.halfLifeRawNotation).toBe('124(3) y');
     expect(po.recordId).toBe('nubase2020:Z=84 Po A=209');
+  });
+
+  it('записи с годовыми единицами NUBASE2020: значения в y/ky/My, SI-секунды тропического года, σ сохранена', () => {
+    const expectYear = (z: number, a: number, value: number, sigma: number, unit: 'y' | 'ky' | 'My', raw: string): void => {
+      const c = expectKnownCandidates(buildElement(z));
+      const cand = (c.candidates ?? []).find((x) => x.massNumber === a);
+      if (!cand) throw new Error('Z=' + z + ' A=' + a + ': ожидался кандидат');
+      if (cand.halfLife.status !== 'known') throw new Error('Z=' + z + ' A=' + a + ': период полураспада должен быть known');
+      expect(cand.halfLife.quantity.value, 'Z=' + z + ' A=' + a).toBe(value);
+      expect(cand.halfLife.quantity.unit, 'Z=' + z + ' A=' + a).toBe(unit);
+      expect(cand.halfLifeRawNotation, 'Z=' + z + ' A=' + a).toBe(raw);
+      const u = cand.halfLife.uncertainty;
+      if (!u || u.kind !== 'stddev') throw new Error('Z=' + z + ' A=' + a + ': неопределённость должна быть stddev');
+      expect(u.sigma, 'Z=' + z + ' A=' + a).toBe(sigma);
+      // SI-секунды: тропический год NUBASE2020 (1 y = 31 556 926 с), без пересчёта значений
+      const siFactor = unit === 'y' ? 31556926 : unit === 'ky' ? 31556926000 : 31556926000000;
+      expect(toSI(cand.halfLife.quantity), 'Z=' + z + ' A=' + a).toBeCloseTo(value * siFactor, 3);
+    };
+    // исходные величины в y (год NUBASE2020)
+    expectYear(61, 145, 17.7, 0.4, 'y', '17.7(4) y');
+    expectYear(84, 209, 124, 3, 'y', '124(3) y');
+    expectYear(89, 227, 21.772, 0.003, 'y', '21.772(3) y');
+    expectYear(98, 251, 898, 44, 'y', '898(44) y');
+    // исходные величины в ky
+    expectYear(88, 226, 1.6, 0.007, 'ky', '1.600(7) ky');
+    expectYear(95, 243, 7.35, 0.009, 'ky', '7.350(9) ky');
+    expectYear(97, 247, 1.38, 0.25, 'ky', '1.38(25) ky');
+    // исходные величины в My
+    expectYear(43, 97, 4.21, 0.16, 'My', '4.21(16) My');
+    expectYear(43, 98, 4.2, 0.3, 'My', '4.2(3) My');
+    expectYear(93, 237, 2.144, 0.007, 'My', '2.144(7) My');
+    expectYear(94, 244, 81.3, 0.3, 'My', '81.3(3) My');
+    expectYear(96, 247, 15.6, 0.5, 'My', '15.6(5) My');
+    // ни одна запись-кандидат не использует юлианские yr/ka/Ma
+    // (физически некорректное приписывание значений NUBASE2020 устранено)
+    for (const el of allElements()) {
+      const c = el.representativeIsotopeCandidates;
+      if (c.status !== 'known') continue;
+      for (const cand of c.candidates ?? []) {
+        if (cand.halfLife.status !== 'known') continue;
+        expect(['yr', 'ka', 'Ma'].includes(cand.halfLife.quantity.unit), cand.nuclideNotation).toBe(false);
+      }
+    }
   });
 
   it('Bi, Th, Pa, U: кандидаты not_applicable (вес назначен)', () => {
@@ -547,7 +591,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
   });
 
   it('все кандидаты: Z владельца, целое массовое число, единицы времени, provenance nubase, experimental', () => {
-    const TIME_UNITS = ['yr', 'ka', 'Ma', 'day', 'h', 'min', 's', 'ms'];
+    const TIME_UNITS = ['y', 'ky', 'My', 'yr', 'ka', 'Ma', 'day', 'h', 'min', 's', 'ms'];
     for (const el of allElements()) {
       const c = el.representativeIsotopeCandidates;
       if (c.status !== 'known') continue;
