@@ -106,9 +106,16 @@ interface ElementCandidatesSpec {
 }
 
 // ============================================
-// 3. ДАННЫЕ: 34 ЭЛЕМЕНТА, 44 НУКЛИДА-КАНДИДАТА
+// 3. ДАННЫЕ: 34 ЭЛЕМЕНТА, 44 ЗАПИСИ-КАНДИДАТА
+//    (43 уникальных нуклида (Z,A), 3 изомерных
+//    состояния; у Lv-293 основное и изомерное
+//    состояния одного массового числа)
 // ============================================
-// (проверено по официальному файлу nubase_4.mas20.txt NUBASE2020)
+// (все 44 записи сверены по официальному файлу nubase_4.mas20.txt
+// NUBASE2020 2026-11-01: Z, A, индекс состояния i, обозначение, флаг
+// Isom.Unc (*), период полураспада, единица, неопределённость, режим
+// распада, отсутствие # в поле T1/2; таблица соответствия —
+// elementDataAttribution.md §7)
 
 const ELEMENT_CANDIDATES: readonly ElementCandidatesSpec[] = [
   {
@@ -245,7 +252,7 @@ const ELEMENT_CANDIDATES: readonly ElementCandidatesSpec[] = [
     completeness: 'incomplete',
     completenessNote: "область активных исследований: известный сегодня список экспериментально наблюдавшихся нуклидов неполон, и включённые кандидаты не доказывают абсолютный максимум среди всех возможных изотопов; список кандидатов ограничен наблюдавшимися нуклидами NUBASE2020",
     candidates: [
-      { a: 258, state: 'isomeric', value: 51.59, sigma: 0.29, unit: 'day', raw: "51.59(29) d", decay: "A~100;B+<0.0015;B-<0.0015", reason: "самый долгоживущий экспериментально наблюдавшийся нуклид элемента по NUBASE2020 (изомер 258Mdm, 51.59(29) сут); страница CIAAW «Radioactive elements» приводит его как Md-258, но NUBASE2020 уточняет: долгоживущее состояние — изомер, помеченный звёздочкой (порядок основного и изомерного состояний не установлен)", orderingUncertain: true },
+      { a: 258, state: 'ground', value: 51.59, sigma: 0.29, unit: 'day', raw: "51.59(29) d", decay: "A~100;B+<0.0015;B-<0.0015", reason: "самый долгоживущий экспериментально наблюдавшийся нуклид элемента по NUBASE2020 (258Md, 51.59(29) сут, строка основного состояния, идентификатор строки i=0); звёздочка NUBASE2020 (поле Isom.Unc) означает неопределённость порядка основного и изомерного состояний, но НЕ превращает строку основного состояния в изомерную; изомер 258Mdm (57.0(9) мин) — отдельная строка NUBASE2020 (i=1) и не является долгоживущим кандидатом; страница CIAAW «Radioactive elements» приводит долгоживущее состояние как Md-258, что согласуется со строкой основного состояния NUBASE2020", orderingUncertain: true },
     ]
   },
   {
@@ -312,7 +319,7 @@ const ELEMENT_CANDIDATES: readonly ElementCandidatesSpec[] = [
     completeness: 'incomplete',
     completenessNote: "область активных исследований: известный сегодня список экспериментально наблюдавшихся нуклидов неполон, и включённые кандидаты не доказывают абсолютный максимум среди всех возможных изотопов; список кандидатов ограничен наблюдавшимися нуклидами NUBASE2020",
     candidates: [
-      { a: 276, state: 'isomeric', value: 7, sigma: 3, unit: 's', raw: "7(3) s", decay: "A=100", reason: "1σ-интервалы периодов полураспада кандидатов (Mt-276m 7(3) с, Mt-277 9(6) с, Mt-278 6(3) с) перекрываются — статистически неразличимы как наиболее долгоживущие; сохранены равноправными кандидатами, единственный не выбирается" },
+      { a: 276, state: 'isomeric', value: 7, sigma: 3, unit: 's', raw: "7(3) s", decay: "A=100", reason: "1σ-интервалы периодов полураспада кандидатов (Mt-276m 7(3) с, Mt-277 9(6) с, Mt-278 6(3) с) перекрываются — статистически неразличимы как наиболее долгоживущие; сохранены равноправными кандидатами, единственный не выбирается; звёздочка NUBASE2020 у 276Mt/276Mtm: порядок основного и изомерного состояний не установлен", orderingUncertain: true },
       { a: 277, state: 'ground', value: 9, sigma: 6, unit: 's', raw: "9(6) s", decay: "SF=100;A ?", reason: "1σ-интервалы периодов полураспада кандидатов (Mt-276m 7(3) с, Mt-277 9(6) с, Mt-278 6(3) с) перекрываются — статистически неразличимы как наиболее долгоживущие; сохранены равноправными кандидатами, единственный не выбирается" },
       { a: 278, state: 'ground', value: 6, sigma: 3, unit: 's', raw: "6(3) s", decay: "A=100", reason: "1σ-интервалы периодов полураспада кандидатов (Mt-276m 7(3) с, Mt-277 9(6) с, Mt-278 6(3) с) перекрываются — статистически неразличимы как наиболее долгоживущие; сохранены равноправными кандидатами, единственный не выбирается" },
     ]
@@ -473,16 +480,21 @@ export const ELEMENTS_WITH_CANDIDATES: readonly number[] = ELEMENT_CANDIDATES.ma
 /** Фактические счётчики кандидатов (для тестов и документации). */
 export interface IsotopeCandidateCoverage {
   elements: number;
-  nuclides: number;
+  /** Записи-кандидаты/состояния: основное и изомерное состояние одного (Z,A) считаются отдельно. */
+  candidateRecords: number;
+  /** Изомерные состояния среди записей-кандидатов. */
   isomericStates: number;
+  /** Уникальные пары (Z,A): один нуклид может быть представлен основным и изомерным состояниями. */
+  uniqueNuclides: number;
   experimental: number;
   completeElements: number;
   incompleteElements: number;
 }
 
 export function isotopeCandidateCoverage(): IsotopeCandidateCoverage {
-  let nuclides = 0;
+  let candidateRecords = 0;
   let isomericStates = 0;
+  const uniquePairs = new Set<string>();
   let completeElements = 0;
   let incompleteElements = 0;
   for (const spec of ELEMENT_CANDIDATES) {
@@ -492,7 +504,8 @@ export function isotopeCandidateCoverage(): IsotopeCandidateCoverage {
       incompleteElements += 1;
     }
     for (const c of spec.candidates) {
-      nuclides += 1;
+      candidateRecords += 1;
+      uniquePairs.add(spec.z + '-' + c.a);
       if (c.state === 'isomeric') {
         isomericStates += 1;
       }
@@ -500,9 +513,10 @@ export function isotopeCandidateCoverage(): IsotopeCandidateCoverage {
   }
   return {
     elements: ELEMENT_CANDIDATES.length,
-    nuclides,
+    candidateRecords,
     isomericStates,
-    experimental: nuclides, // все кандидаты — экспериментально наблюдавшиеся
+    uniqueNuclides: uniquePairs.size,
+    experimental: candidateRecords, // все кандидаты — экспериментально наблюдавшиеся
     completeElements,
     incompleteElements
   };

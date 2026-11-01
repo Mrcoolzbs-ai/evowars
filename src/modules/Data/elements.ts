@@ -1108,7 +1108,10 @@ export interface ElementCatalogCoverage {
   groupNotAssigned: number;
   blockNotAssigned: number;
   candidateElements: number;
-  candidateNuclides: number;
+  /** Записи-кандидаты/состояния (основное и изомерное считаются отдельно). */
+  candidateRecords: number;
+  /** Уникальные пары (Z,A) записей-кандидатов. */
+  candidateUniqueNuclides: number;
   candidateIsomericStates: number;
   candidateCompleteElements: number;
   candidateIncompleteElements: number;
@@ -1130,7 +1133,8 @@ export function elementCatalogCoverage(): ElementCatalogCoverage {
   let groupNotAssigned = 0;
   let blockNotAssigned = 0;
   let candidateElements = 0;
-  let candidateNuclides = 0;
+  let candidateRecords = 0;
+  let candidateUniqueNuclides = 0;
   let candidateIsomericStates = 0;
   let candidateCompleteElements = 0;
   let candidateIncompleteElements = 0;
@@ -1168,12 +1172,15 @@ export function elementCatalogCoverage(): ElementCatalogCoverage {
     if (candidates.status === 'known') {
       candidateElements += 1;
       const list = candidates.candidates ?? [];
-      candidateNuclides += list.length;
+      candidateRecords += list.length;
+      const pairs = new Set<string>();
       for (const candidate of list) {
+        pairs.add(element.atomicNumber + '-' + candidate.massNumber);
         if (candidate.state === 'isomeric') {
           candidateIsomericStates += 1;
         }
       }
+      candidateUniqueNuclides += pairs.size;
       if (candidates.completeness === 'complete') {
         candidateCompleteElements += 1;
       } else {
@@ -1216,7 +1223,8 @@ export function elementCatalogCoverage(): ElementCatalogCoverage {
     groupNotAssigned,
     blockNotAssigned,
     candidateElements,
-    candidateNuclides,
+    candidateRecords,
+    candidateUniqueNuclides,
     candidateIsomericStates,
     candidateCompleteElements,
     candidateIncompleteElements,

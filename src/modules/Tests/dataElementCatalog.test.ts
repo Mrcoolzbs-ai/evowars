@@ -9,7 +9,7 @@
 // источников: IUPAC PT (2022-05-04), CIAAW SAW 2024,
 // CIAAW Isotopic Compositions 2024, NUBASE2020.
 // Контрольные случаи: Tc/Pm/Po (нет веса), Bi/Th/Pa/U (вес есть,
-// хотя элементы радиоактивны), Md-258m/Lr/Mt/Lv (несколько кандидатов
+// хотя элементы радиоактивны), Md-258/Lr/Mt/Lv (несколько кандидатов
 // или изомеры), сверхтяжёлые элементы (неполнота данных).
 
 import { describe, it, expect } from 'vitest';
@@ -332,20 +332,35 @@ describe('Stage 4.3.3 (данные): изотопные распростран�
 });
 
 describe('Stage 4.3.3 (данные): репрезентативные изотопы-кандидаты NUBASE2020', () => {
-  it('покрытие: 34 элемента, 44 нуклида, 4 изомерных, все experimental; счётчики согласованы', () => {
+  it('покрытие: 34 элемента, 44 записи, 3 изомерных состояния, 43 уникальных нуклида; все experimental', () => {
     const cov = elementCatalogCoverage();
     const ic = isotopeCandidateCoverage();
     expect(ic.elements).toBe(34);
-    expect(ic.nuclides).toBe(44);
-    expect(ic.isomericStates).toBe(4);
+    expect(ic.candidateRecords).toBe(44);
+    expect(ic.isomericStates).toBe(3);
+    expect(ic.uniqueNuclides).toBe(43);
     expect(ic.experimental).toBe(44);
     expect(ic.completeElements).toBe(14);
     expect(ic.incompleteElements).toBe(20);
     expect(cov.candidateElements).toBe(ic.elements);
-    expect(cov.candidateNuclides).toBe(ic.nuclides);
+    expect(cov.candidateRecords).toBe(ic.candidateRecords);
+    expect(cov.candidateUniqueNuclides).toBe(ic.uniqueNuclides);
     expect(cov.candidateIsomericStates).toBe(ic.isomericStates);
     expect(cov.candidateCompleteElements).toBe(ic.completeElements);
     expect(cov.candidateIncompleteElements).toBe(ic.incompleteElements);
+    // изомерные состояния: Hs-277m, Mt-276m, Lv-293m (Md-258 — основное состояние, i=0)
+    const isomers = allElements()
+      .flatMap((e) => {
+        const c = e.representativeIsotopeCandidates;
+        return c.status === 'known' ? (c.candidates ?? []) : [];
+      })
+      .filter((x) => x.state === 'isomeric')
+      .map((x) => x.nuclideNotation)
+      .sort();
+    expect(isomers).toEqual(['Hs-277m', 'Lv-293m', 'Mt-276m']);
+    // Lv-293: одно массовое число — два состояния
+    const lv = expectKnownCandidates(buildElement(116));
+    expect((lv.candidates ?? []).map((x) => x.massNumber)).toEqual([293, 293]);
   });
 
   it('кандидаты — только у элементов без веса; с весом — not_applicable с причиной', () => {
@@ -429,15 +444,23 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     }
   });
 
-  it('Md-258m: изомерное состояние, звёздочка NUBASE, recordId с m', () => {
+  it('Md-258: основное состояние (строка i=0), звёздочка Isom.Unc, recordId без m', () => {
     const c = expectKnownCandidates(buildElement(101));
     const cands = c.candidates ?? [];
     expect(cands).toHaveLength(1);
     const md = cands[0];
-    expect(md.state).toBe('isomeric');
-    expect(md.nuclideNotation).toBe('Md-258m');
+    expect(md.state).toBe('ground');
+    expect(md.nuclideNotation).toBe('Md-258');
     expect(md.stateNote ?? '').toContain('звёздочка');
-    expect(md.recordId).toBe('nubase2020:Z=101 Md A=258m');
+    expect(md.stateNote ?? '').toContain('порядок');
+    expect(md.recordId).toBe('nubase2020:Z=101 Md A=258');
+    expect(md.halfLifeRawNotation).toBe('51.59(29) d');
+    if (md.halfLife.status !== 'known') throw new Error('51.59(29) d должно быть known');
+    expect(md.halfLife.quantity.value).toBe(51.59);
+    expect(md.halfLife.quantity.unit).toBe('day');
+    const u = md.halfLife.uncertainty;
+    if (!u || u.kind !== 'stddev') throw new Error('неопределённость Md-258 должна быть stddev');
+    expect(u.sigma).toBe(0.29);
   });
 
   it('Lr: 266Lr 22(14) h и приблизительный 262Lr ~4 h без неопределённости', () => {
@@ -467,6 +490,9 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     const cands = c.candidates ?? [];
     expect(cands).toHaveLength(3);
     expect(cands.map((x) => x.nuclideNotation).sort()).toEqual(['Mt-276m', 'Mt-277', 'Mt-278']);
+    const mt276m = cands.find((x) => x.nuclideNotation === 'Mt-276m');
+    if (!mt276m) throw new Error('Mt-276m должен быть кандидатом');
+    expect(mt276m.stateNote ?? '', 'у 276Mt/276Mtm звёздочка Isom.Unc').toContain('звёздочка');
     const bounds = cands.map((x) => {
       if (x.halfLife.status !== 'known') throw new Error('период полураспада Mt должен быть known');
       const u = x.halfLife.uncertainty;
