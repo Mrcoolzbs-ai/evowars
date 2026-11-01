@@ -229,8 +229,38 @@ export interface ElementIsotopicComposition {
 // 4. РЕПРЕЗЕНТАТИВНЫЕ ИЗОТОПЫ-КАНДИДАТЫ (NUBASE2020 ЧЕРЕЗ CIAAW)
 // ============================================
 
-/** Состояние нуклида: основное или изомерное. */
+/**
+ * Состояние нуклида: основное или изомерное. Кандидатами могут быть
+ * только эти два вида; ядерные уровни, резонансы и IAS (изоаналоговые
+ * состояния) по правилу отбора кандидатами не являются.
+ */
 export type NuclideStateKind = 'ground' | 'isomeric';
+
+/**
+ * Буквенный код состояния s из NUBASE2020: '' — основное состояние;
+ * m, n, p, q, r, x — изомерные состояния (у одного нуклида их может
+ * быть несколько: s=m,n — обычные изомеры, s=p,q,r,x — дополнительные
+ * при более чем двух изомерных состояниях); i, j — изоаналоговые
+ * состояния (IAS), кандидатами не являются.
+ */
+export type NuclideStateCode = '' | 'm' | 'n' | 'p' | 'q' | 'r' | 'x' | 'i' | 'j';
+
+/**
+ * Согласованность индекса состояния i и буквенного кода s NUBASE2020
+ * (шапка официального файла): 0↔'', 1↔m, 2↔n, 3↔p, 4↔q, 5↔r, 6↔x,
+ * 8↔i, 9↔j. Пара (i, s) идентифицирует КОНКРЕТНУЮ строку источника.
+ */
+export const NUBASE_STATE_CODE_BY_INDEX: Readonly<Record<number, NuclideStateCode>> = {
+  0: '',
+  1: 'm',
+  2: 'n',
+  3: 'p',
+  4: 'q',
+  5: 'r',
+  6: 'x',
+  8: 'i',
+  9: 'j'
+};
 
 /** Статус ядерных данных: экспериментальные или оценочные (экстраполяция NUBASE). */
 export type NuclideDataStatus = 'experimental' | 'estimated';
@@ -249,6 +279,16 @@ export interface NuclideCandidate {
   nuclideNotation: string;
   /** Основное или изомерное состояние. */
   state: NuclideStateKind;
+  /**
+   * Индекс состояния i из NUBASE2020: 0 — основное состояние,
+   * 1–6 — возбуждённые строки (изомеры либо уровни/резонансы),
+   * 8/9 — IAS. Вместе с stateCode идентифицирует КОНКРЕТНУЮ строку
+   * источника: у одного (Z, A) может быть несколько различных
+   * изомерных состояний (аудит R2).
+   */
+  stateIndex: number;
+  /** Буквенный код состояния s из NUBASE2020 ('' у основного состояния). */
+  stateCode: NuclideStateCode;
   stateNote?: string;
   /** Идентификатор строки источника. */
   recordId: string;
@@ -662,30 +702,56 @@ export function validateChemicalElement(element: unknown): string[] {
           if (c.state !== 'ground' && c.state !== 'isomeric') {
             errors.push(where(`кандидат ${label}: состояние должно быть ground/isomeric, получено ${String(c.state)}`));
           }
+          // Точное состояние NUBASE2020: индекс i и буквенный код s
+          // согласованы между собой и с видом состояния (аудит R2).
+          const stateIndexOk = typeof c.stateIndex === 'number' && Number.isInteger(c.stateIndex) && c.stateIndex >= 0 && c.stateIndex <= 9;
+          if (!stateIndexOk) {
+            errors.push(where(`кандидат ${label}: индекс состояния NUBASE2020 (stateIndex) должен быть целым числом 0…9, получено ${String(c.stateIndex)}`));
+          }
+          const stateCodeOk = typeof c.stateCode === 'string' && (Object.values(NUBASE_STATE_CODE_BY_INDEX) as readonly string[]).includes(c.stateCode);
+          if (!stateCodeOk) {
+            errors.push(where(`кандидат ${label}: буквенный код состояния NUBASE2020 (stateCode) должен быть одним из ''/m/n/p/q/r/x/i/j, получено ${String(c.stateCode)}`));
+          }
+          if (stateIndexOk && stateCodeOk && NUBASE_STATE_CODE_BY_INDEX[c.stateIndex as number] !== c.stateCode) {
+            errors.push(where(`кандидат ${label}: индекс состояния i=${String(c.stateIndex)} и буквенный код s=${String(c.stateCode) === '' ? '(пусто)' : String(c.stateCode)} не согласованы (NUBASE2020: 0↔'', 1↔m, 2↔n, 3↔p, 4↔q, 5↔r, 6↔x, 8↔i, 9↔j)`));
+          }
+          if (stateIndexOk && c.state === 'ground' && c.stateIndex !== 0) {
+            errors.push(where(`кандидат ${label}: основное состояние — это строка i=0 NUBASE2020, получен i=${String(c.stateIndex)}`));
+          }
+          if (stateIndexOk && c.state === 'isomeric' && (c.stateIndex === 0 || c.stateCode === 'i' || c.stateCode === 'j')) {
+            errors.push(where(`кандидат ${label}: изомерное состояние — возбуждённая строка NUBASE2020 (i>=1, s=m/n/p/q/r/x), а не основная (i=0) и не IAS (s=i/j)`));
+          }
           // Согласованность обозначения нуклида с элементом-владельцем:
-          // символ владельца, массовое число и суффикс состояния (аудит R1).
+          // символ владельца, массовое число и суффикс состояния —
+          // буквенный код s NUBASE2020 (аудиты R1, R2).
           const ownerSymbolOk = typeof el.symbol === 'string' && /^[A-Z][a-z]?$/.test(el.symbol);
           const candMassOk = typeof c.massNumber === 'number' && Number.isInteger(c.massNumber) && c.massNumber >= 1;
           const candStateOk = c.state === 'ground' || c.state === 'isomeric';
-          if (ownerSymbolOk && candMassOk && candStateOk && isNonEmptyString(c.nuclideNotation)) {
+          if (ownerSymbolOk && candMassOk && candStateOk && stateCodeOk && isNonEmptyString(c.nuclideNotation)) {
             const notation = c.nuclideNotation;
             const prefix = `${el.symbol as string}-`;
             if (!notation.startsWith(prefix)) {
               errors.push(where(`кандидат ${label}: обозначение нуклида обязано начинаться с символа элемента-владельца «${prefix}…», получено «${notation}»`));
             } else {
               const rest = notation.slice(prefix.length);
-              const expected = c.state === 'isomeric' ? `${c.massNumber}m` : String(c.massNumber);
+              // Суффикс обозначения — буквенный код состояния s NUBASE2020:
+              // основное состояние (i=0) — без суффикса, изомер — с кодом
+              // своей строки (m, n, p, q, ...): несколько изомеров одного A
+              // различаются суффиксами (аудит R2).
+              const expected = c.state === 'isomeric' ? `${c.massNumber}${String(c.stateCode)}` : String(c.massNumber);
               if (rest !== expected) {
-                errors.push(where(`кандидат ${label}: ${c.state === 'isomeric' ? 'изомерное' : 'основное'} состояние требует обозначение «${prefix}${expected}»${c.state === 'isomeric' ? ' с суффиксом изомера m' : ' без суффикса изомера'}, получено «${notation}»`));
+                errors.push(where(`кандидат ${label}: ${c.state === 'isomeric' ? 'изомерное' : 'основное'} состояние требует обозначение «${prefix}${expected}»${c.state === 'isomeric' ? ' с суффиксом кода состояния NUBASE2020' : ' без суффикса изомера'}, получено «${notation}»`));
               }
             }
           }
-          // Уникальность записи (массовое число + состояние): одна строка
-          // источника не должна дублироваться (аудит R1).
+          // Уникальность записи — по КОНКРЕТНОЙ строке источника NUBASE2020
+          // (массовое число A + индекс состояния i + буквенный код s), а не
+          // только по паре (A, состояние): несколько РАЗЛИЧНЫХ изомерных
+          // состояний одного A легитимны и не являются дубликатом (аудит R2).
           if (typeof c.massNumber === 'number' && (c.state === 'ground' || c.state === 'isomeric')) {
-            const dupKey = `${String(c.massNumber)}:${String(c.state)}`;
+            const dupKey = `${String(c.massNumber)}:i=${String(c.stateIndex)}:s=${String(c.stateCode)}`;
             if (seenCandidateKeys.has(dupKey)) {
-              errors.push(where(`кандидат ${label}: дубликат записи-кандидата (массовое число ${String(c.massNumber)} + состояние ${String(c.state)}): одна и та же строка источника не должна дублироваться`));
+              errors.push(where(`кандидат ${label}: дубликат записи-кандидата (строка источника NUBASE2020: A=${String(c.massNumber)}, i=${String(c.stateIndex)}, s=${String(c.stateCode)}): одна и та же строка источника не должна дублироваться`));
             } else {
               seenCandidateKeys.add(dupKey);
             }
@@ -913,3 +979,4 @@ export function checkElementCountsReference(
   }
   return { knownSymbols, unknownSymbols };
 }
+

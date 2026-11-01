@@ -422,7 +422,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(pm.halfLife.quantity.value).toBe(17.7);
     expect(pm.halfLife.quantity.unit).toBe('y');
     expect(pm.halfLifeRawNotation).toBe('17.7(4) y');
-    expect(pm.recordId).toBe('nubase2020:Z=61 Pm A=145');
+    expect(pm.recordId).toBe('nubase2020:Z=61 Pm A=145 i=0');
   });
 
   it('Po: единственный кандидат Po-209, 124(3) y (год NUBASE2020)', () => {
@@ -435,7 +435,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(po.halfLife.quantity.value).toBe(124);
     expect(po.halfLife.quantity.unit).toBe('y');
     expect(po.halfLifeRawNotation).toBe('124(3) y');
-    expect(po.recordId).toBe('nubase2020:Z=84 Po A=209');
+    expect(po.recordId).toBe('nubase2020:Z=84 Po A=209 i=0');
   });
 
   it('записи с годовыми единицами NUBASE2020: значения в y/ky/My, SI-секунды тропического года, σ сохранена', () => {
@@ -497,7 +497,9 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(md.nuclideNotation).toBe('Md-258');
     expect(md.stateNote ?? '').toContain('звёздочка');
     expect(md.stateNote ?? '').toContain('порядок');
-    expect(md.recordId).toBe('nubase2020:Z=101 Md A=258');
+    expect(md.recordId).toBe('nubase2020:Z=101 Md A=258 i=0');
+    expect(md.stateIndex).toBe(0);
+    expect(md.stateCode).toBe('');
     expect(md.halfLifeRawNotation).toBe('51.59(29) d');
     if (md.halfLife.status !== 'known') throw new Error('51.59(29) d должно быть known');
     expect(md.halfLife.quantity.value).toBe(51.59);
@@ -505,6 +507,40 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     const u = md.halfLife.uncertainty;
     if (!u || u.kind !== 'stddev') throw new Error('неопределённость Md-258 должна быть stddev');
     expect(u.sigma).toBe(0.29);
+  });
+
+  it('точное состояние NUBASE2020 у всех 44 записей: stateIndex/stateCode согласованы, recordId строки источника', () => {
+    let records = 0;
+    for (const el of allElements()) {
+      const c = el.representativeIsotopeCandidates;
+      if (c.status !== 'known') continue;
+      for (const cand of c.candidates ?? []) {
+        records += 1;
+        const where = 'Z=' + el.atomicNumber + ' ' + cand.nuclideNotation;
+        // индекс состояния: целое 0…9; код: из множества NUBASE2020
+        expect(Number.isInteger(cand.stateIndex) && cand.stateIndex >= 0 && cand.stateIndex <= 9, where).toBe(true);
+        expect(['', 'm', 'n', 'p', 'q', 'r', 'x', 'i', 'j'].includes(cand.stateCode), where).toBe(true);
+        // согласованность i ↔ s (NUBASE2020: 0↔'', 1↔m, 2↔n, 3↔p, 4↔q, 5↔r, 6↔x, 8↔i, 9↔j)
+        const expectedCode = ['', 'm', 'n', 'p', 'q', 'r', 'x', undefined, 'i', 'j'][cand.stateIndex];
+        expect(cand.stateCode, where).toBe(expectedCode);
+        if (cand.state === 'ground') {
+          // основное состояние — строка i=0 без суффикса и без s в recordId
+          expect(cand.stateIndex, where).toBe(0);
+          expect(cand.stateCode, where).toBe('');
+          expect(cand.nuclideNotation, where).toBe(el.symbol + '-' + cand.massNumber);
+          expect(cand.recordId.endsWith(' i=0'), where).toBe(true);
+        } else {
+          // изомер: возбуждённая строка (i>=1, s=m/n/p/q/r/x), обозначение с кодом
+          expect(cand.stateIndex >= 1, where).toBe(true);
+          expect(cand.nuclideNotation.endsWith(cand.stateCode), where).toBe(true);
+          expect(cand.recordId.includes(' i=' + cand.stateIndex + ' s=' + cand.stateCode), where).toBe(true);
+        }
+        // recordId кандидата, provenance.recordId и recordId периода полураспада — одна строка источника
+        expect(cand.provenance.recordId, where).toBe(cand.recordId);
+        expect(cand.halfLife.provenance?.recordId, where).toBe(cand.recordId);
+      }
+    }
+    expect(records).toBe(44);
   });
 
   it('Lr: 266Lr 22(14) h и приблизительный 262Lr ~4 h без неопределённости', () => {

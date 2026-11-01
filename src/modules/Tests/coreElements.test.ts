@@ -84,6 +84,8 @@ function makeCandidate(): NuclideCandidate {
     massNumber: 1,
     nuclideNotation: 'H-1',
     state: 'ground',
+    stateIndex: 0,
+    stateCode: '',
     recordId: 'test:A=1',
     halfLife: knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } }),
     halfLifeRawNotation: '4.2(3) My',
@@ -91,6 +93,25 @@ function makeCandidate(): NuclideCandidate {
     dataStatus: 'experimental',
     reason: 'тест: кандидат включён как самый долгоживущий',
     provenance: { ...PROVENANCE, recordId: 'test:A=1' }
+  };
+}
+
+/**
+ * Валидный изомерный кандидат с явной строкой состояния NUBASE2020
+ * (i, s): recordId, provenance.recordId и recordId периода полураспада
+ * идентифицируют одну и ту же строку источника (аудит R2).
+ */
+function makeStateCandidate(stateIndex: number, stateCode: string): NuclideCandidate {
+  const recordId = 'test:A=1 i=' + stateIndex + ' s=' + stateCode;
+  return {
+    ...makeCandidate(),
+    state: 'isomeric',
+    stateIndex,
+    stateCode: stateCode as NuclideCandidate['stateCode'],
+    nuclideNotation: 'H-1' + stateCode,
+    recordId,
+    halfLife: knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId } }),
+    provenance: { ...PROVENANCE, recordId }
   };
 }
 
@@ -353,8 +374,61 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(badM.some((e) => e.includes('основное состояние требует обозначение «H-1» без суффикса изомера'))).toBe(true);
     const noM = makeCandidate();
     (noM as unknown as Record<string, unknown>).state = 'isomeric';
+    (noM as unknown as Record<string, unknown>).stateIndex = 1;
+    (noM as unknown as Record<string, unknown>).stateCode = 'm';
     const badI = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([noM]); }));
     expect(badI.some((e) => e.includes('изомерное состояние требует обозначение «H-1m»'))).toBe(true);
+  });
+
+  it('кандидат (R2): согласованность индекса i и кода s NUBASE2020; i=3↔p — дополнительный изомер', () => {
+    // i=1 с кодом p — рассогласование пары (i, s)
+    const mismatch = makeStateCandidate(1, 'p');
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([mismatch]); }));
+    expect(bad.some((e) => e.includes('не согласованы'))).toBe(true);
+    // i=3 с кодом p — согласовано: строка дополнительного изомера NUBASE2020
+    const extra = makeStateCandidate(3, 'p');
+    const ok = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([extra]); }));
+    expect(ok).toEqual([]);
+  });
+
+  it('кандидат (R2): отсутствие stateIndex, некорректный stateCode, ground с i>=1 — ошибки', () => {
+    const noIndex = makeCandidate();
+    delete (noIndex as unknown as Record<string, unknown>).stateIndex;
+    const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([noIndex]); }));
+    expect(res1.some((e) => e.includes('индекс состояния NUBASE2020 (stateIndex)'))).toBe(true);
+    const badCode = makeCandidate();
+    (badCode as unknown as Record<string, unknown>).stateCode = 'z';
+    const res2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([badCode]); }));
+    expect(res2.some((e) => e.includes('буквенный код состояния NUBASE2020 (stateCode)'))).toBe(true);
+    // ground обязан быть строкой i=0
+    const groundExcited = makeCandidate();
+    (groundExcited as unknown as Record<string, unknown>).stateIndex = 1;
+    (groundExcited as unknown as Record<string, unknown>).stateCode = 'm';
+    const res3 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([groundExcited]); }));
+    expect(res3.some((e) => e.includes('основное состояние — это строка i=0 NUBASE2020'))).toBe(true);
+    // isomeric не может быть IAS (s=i)
+    const ias = makeCandidate();
+    (ias as unknown as Record<string, unknown>).state = 'isomeric';
+    (ias as unknown as Record<string, unknown>).stateIndex = 8;
+    (ias as unknown as Record<string, unknown>).stateCode = 'i';
+    const res4 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([ias]); }));
+    expect(res4.some((e) => e.includes('изомерное состояние — возбуждённая строка NUBASE2020'))).toBe(true);
+  });
+
+  it('кандидат (R2): несколько РАЗЛИЧНЫХ изомерных состояний одного A (s=m и s=p) — не дубликат', () => {
+    const m = makeStateCandidate(1, 'm');
+    const p = makeStateCandidate(3, 'p');
+    const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([m, p]); }));
+    expect(res.some((e) => e.includes('дубликат'))).toBe(false);
+    expect(res).toEqual([]);
+  });
+
+  it('кандидат (R2): дубликат одной и той же строки источника (A + i + s) — ошибка', () => {
+    const m1 = makeStateCandidate(1, 'm');
+    const m2 = makeStateCandidate(1, 'm');
+    const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([m1, m2]); }));
+    expect(res.some((e) => e.includes('дубликат записи-кандидата'))).toBe(true);
+    expect(res.some((e) => e.includes('строка источника NUBASE2020'))).toBe(true);
   });
 
   it('кандидат: массовое число меньше атомного номера (A < Z) — ошибка', () => {
