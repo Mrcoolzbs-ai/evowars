@@ -817,6 +817,24 @@ export function validateChemicalElement(element: unknown): string[] {
             if (!provenanceIdentifiesSource((c.halfLife as Record<string, unknown>).provenance)) {
               errors.push(where(`кандидат ${label}: числовой период полураспада требует provenance с идентификацией источника`));
             }
+            // (аудит R2) Значение периода полураспада и запись кандидата —
+            // ОДНА строка источника NUBASE2020: provenance.recordId значения
+            // обязан совпадать с recordId записи кандидата.
+            const hlProv = (c.halfLife as Record<string, unknown>).provenance as Record<string, unknown> | undefined;
+            const hlRecordId = isNonNullObject(hlProv) ? hlProv.recordId : undefined;
+            if (typeof hlRecordId !== 'string' || hlRecordId.trim() === '') {
+              errors.push(where(`кандидат ${label}: provenance.recordId периода полураспада обязателен — значение обязано идентифицировать ту же строку источника, что и запись кандидата`));
+            } else if (isNonEmptyString(c.recordId) && hlRecordId !== c.recordId) {
+              errors.push(where(`кандидат ${label}: provenance.recordId периода полураспада (${String(hlRecordId)}) обязан совпадать с recordId записи кандидата (${String(c.recordId)}): значение и запись происходят из одной строки источника NUBASE2020`));
+            }
+            // (аудит R2) Статусы не противоречат происхождению данных:
+            // экспериментальная запись — известное значение, оценочная — оценка.
+            if (c.dataStatus === 'experimental' && c.halfLife.status !== 'known') {
+              errors.push(where(`кандидат ${label}: противоречие статусов — экспериментальная запись (dataStatus experimental) требует известного значения (halfLife known), получено ${String(c.halfLife.status)}`));
+            }
+            if (c.dataStatus === 'estimated' && c.halfLife.status !== 'estimated') {
+              errors.push(where(`кандидат ${label}: противоречие статусов — оценочная запись (dataStatus estimated) требует оценённого значения (halfLife estimated), получено ${String(c.halfLife.status)}`));
+            }
           } else if (isNonNullObject(c.halfLife) && (c.halfLife.status === 'unknown' || c.halfLife.status === 'not_applicable' || c.halfLife.status === 'not_implemented' || c.halfLife.status === 'invalid')) {
             errors.push(where(`кандидат ${label}: период полураспада уже отобранного кандидата обязан быть known/estimated, получено ${String((c.halfLife as Record<string, unknown>).status)} — данные либо известны, либо кандидат не включается`));
           }
@@ -979,4 +997,5 @@ export function checkElementCountsReference(
   }
   return { knownSymbols, unknownSymbols };
 }
+
 

@@ -443,6 +443,54 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(res.some((e) => e.includes('строка источника NUBASE2020'))).toBe(true);
   });
 
+  it('кандидат (R2): provenance.recordId периода полураспада — та же строка источника, что и запись кандидата', () => {
+    // положительный: recordId значения совпадает с recordId записи
+    const ok = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([makeCandidate()]); }));
+    expect(ok).toEqual([]);
+    // отрицательный: значение приписано ДРУГОЙ строке источника
+    const cand = makeCandidate();
+    (cand as unknown as Record<string, unknown>).halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: 'test:other-row' } });
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+    expect(bad.some((e) => e.includes('обязан совпадать с recordId записи кандидата'))).toBe(true);
+    expect(bad.some((e) => e.includes('одной строки источника'))).toBe(true);
+    // отрицательный: recordId у provenance значения отсутствует
+    const cand2 = makeCandidate();
+    (cand2 as unknown as Record<string, unknown>).halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { sourceName: 'тестовый источник' } });
+    const bad2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand2]); }));
+    expect(bad2.some((e) => e.includes('provenance.recordId периода полураспада обязателен'))).toBe(true);
+  });
+
+  it('кандидат (R2): противоречие dataStatus и halfLife.status — ошибка; согласованное сочетание проходит', () => {
+    // отрицательный: экспериментальная запись с оценённым значением
+    const estimatedValue = makeCandidate();
+    (estimatedValue as unknown as Record<string, unknown>).halfLife = {
+      status: 'estimated',
+      quantity: quantity(4.2, 'Ma'),
+      method: 'тест: экстраполяция',
+      provenance: { ...PROVENANCE, recordId: 'test:A=1' }
+    };
+    const bad1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([estimatedValue]); }));
+    expect(bad1.some((e) => e.includes('противоречие статусов'))).toBe(true);
+    expect(bad1.some((e) => e.includes('experimental'))).toBe(true);
+    // отрицательный: оценочная запись с известным значением
+    const estimatedRecord = makeCandidate();
+    (estimatedRecord as unknown as Record<string, unknown>).dataStatus = 'estimated';
+    const bad2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([estimatedRecord]); }));
+    expect(bad2.some((e) => e.includes('противоречие статусов'))).toBe(true);
+    expect(bad2.some((e) => e.includes('estimated'))).toBe(true);
+    // положительный: оценочная запись с оценённым значением и методом
+    const consistent = makeCandidate();
+    (consistent as unknown as Record<string, unknown>).dataStatus = 'estimated';
+    (consistent as unknown as Record<string, unknown>).halfLife = {
+      status: 'estimated',
+      quantity: quantity(4.2, 'Ma'),
+      method: 'тест: экстраполяция по соседним нуклидам',
+      provenance: { ...PROVENANCE, recordId: 'test:A=1' }
+    };
+    const ok = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([consistent]); }));
+    expect(ok).toEqual([]);
+  });
+
   it('кандидат: массовое число меньше атомного номера (A < Z) — ошибка', () => {
     const cand = makeCandidate();
     const c = cand as unknown as Record<string, unknown>;
