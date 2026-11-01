@@ -1,7 +1,8 @@
 // ============================================
 // STAGE 4.3.3 (аудит R4) — Тесты воспроизводимой утилиты аудита
-// NUBASE2020: парсер фиксированных колонок, наблюдаемость строк,
-// контекстная классификация (i, s), ранжирование и полнота
+// NUBASE2020: строгий fail-closed парсер фиксированных колонок,
+// наблюдаемость строк, контекстная классификация (i, s), ранжирование,
+// полнота, SHA-256 фактического входа и метаданные запуска
 // ============================================
 //
 // Утилита Data/nubaseAudit.ts делает результат аудита ранжирования
@@ -12,7 +13,7 @@
 // дополнительные изомеры ДОКАЗАННОГО контекста; 183Au p и 255No p —
 // уровни вне контекста (не превращаются в изомеры по букве); 28Si —
 // резонанс и IAS; 98Y — полная цепочка m,n,p,q,r,x (x — изомер
-// 6-го порядка). Политика неопределённостей аудита R4: точечное
+// 6-го порядка). Политика неопределённостей аудита R4 (C1): точечное
 // правило R3 УДАЛЕНО — приближения «~v», измеренные значения без
 // опубликованной σ и оценки «v#» НЕ получают искусственной
 // неопределённости и НЕ исключаются точечным предположением:
@@ -25,23 +26,44 @@
 // опубликованными данными: непересечение 1σ-интервалов (у обеих строк
 // есть σ) — interval_disjoint; верхний предел ниже нижней границы
 // интервала якоря — upper_limit_excluded.
+//
+// Строгий парсер (C3): обрезанные, повреждённые и дублирующиеся записи
+// НЕ теряются молча — каждая попадает в диагностику с номером строки
+// и причиной; пустое поле массы НЕ трактуется как измеренная масса
+// (регрессионный тест 181Pbm); предел в позиции dT при пустом поле T
+// (аномалия файла: 85Tc «<110ns», 18B «<26 ns») разбирается как
+// собственный T1/2; неподдерживаемая единица — предупреждение
+// unsupported_unit без потери строки.
+//
+// Происхождение входа (C4): SHA-256 ФАКТИЧЕСКОГО входного текста
+// вычисляется при каждом запуске (computeNubaseAuditTextSha256) и
+// сверяется с SHA-256 локально проверенной копии официального файла
+// (NUBASE2020_VERIFIED_SOURCE_SHA256); синтетические фрагменты
+// получают sourceVerification 'unverified' и НЕ имитируют проверку
+// полного официального файла.
 
 import { describe, it, expect } from 'vitest';
 import {
-  NUBASE2020_AUDIT_SOURCE,
+  NUBASE2020_BIBLIOGRAPHY,
+  NUBASE2020_VERIFIED_SOURCE_SHA256,
+  NUBASE2020_VERIFIED_SOURCE_BYTES,
+  NUBASE2020_SOURCE_RETRIEVED_AT,
+  NUBASE_AUDIT_PARSER_VERSION,
   NUBASE_AUDIT_RANKED_ELEMENTS,
   NUBASE_AUDIT_UNIT_SECONDS,
   nubaseAuditUnitSeconds,
+  computeNubaseAuditTextSha256,
   parseNubaseAuditLine,
   parseNubaseAuditText,
   auditNubaseElement,
-  auditNubaseText
+  auditNubaseText,
+  NubaseAuditParseError
 } from '../Data/nubaseAudit';
 import type { NubaseAuditRow } from '../Data/nubaseAudit';
 
 // Фикстуры — ДОСЛОВНЫЕ строки официального ASCII-файла NUBASE2020
 // (сгенерированы из локально проверенной копии файла построчно;
-// SHA-256 копии — NUBASE2020_AUDIT_SOURCE.localCopySha256).
+// SHA-256 копии — NUBASE2020_VERIFIED_SOURCE_SHA256).
 // 92Tc: ground, m, n, p — контрольный пример шапки NUBASE2020:
 // p — дополнительное изомерное состояние (в группе есть m и n).
 const NUBASE_92TC_LINES: readonly string[] = [
@@ -144,9 +166,51 @@ const NUBASE_250BK_LINES: readonly string[] = [
   '250 0972   250Bkn  73038          3          85.6        1.6          213     us 8      7+            01          1972 IT=100',
   '250 0973   250Bkp  73163.8        2.9       211.80       0.20                           2+            01               IT=100',
 ];
+// 181Pbm: масса НЕ опубликована (поле пустое), энергия возбуждения
+// non-exist, собственного T1/2 нет — единственная строка файла, чья
+// наблюдаемость изменилась при исправлении дефекта пустого поля массы
+// (аудит R4, C3): пустое поле массы НЕ трактуется как измеренная масса.
+// Дословная строка: 119 символов, 25 хвостовых пробелов.
+const NUBASE_181PBM_LINE =
+  '181 0821   181Pbm                          non-exist             RN                     13/2+#                         ';
+// 18B: верхний предел <26 ns записан в позиции dT при пустом поле T —
+// с пробелом между значением и единицей (аудит R4, C3).
+const NUBASE_18B_LINE =
+  '018 0050   18B     51790        200                                              <26 ns (2-)          16          2010 n=100';
+// 129Prm: ОЦЕНЁННОЕ систематикой «26#» с ОПУБЛИКОВАННОЙ σ оценки «11#»
+// в dT — kind estimated, halfLifeSigma 11 (σ оценки публикуется файлом).
+const NUBASE_129PRM_LINE =
+  '129 0591   129Prm -69390         30         382.57       0.24          26#    us 11#    (11/2-)       14          1997 IT=100';
+// 134Pmm: приближение ~5 s; Isom.Unc «*» И Isom.Inv «&» в одной строке —
+// оба признака сохраняются отдельно и в ранжировании не используются.
+const NUBASE_134PMM_LINE =
+  '134 0611   134Pmm -66710#        60#         50#        50#        *&  ~5      s        (2+)          04          1988 B+=100';
+// 206Frm: второй член пары 206Fr/206Frm ~16 s — приближение без σ (аудит R4, C1, Z=87).
+const NUBASE_206FRM_LINE =
+  '206 0871   206Frm  -1048         28         200         40       IT   ~16      s        7+*           08          1964 A=84.7 15;B+ ?;IT ?';
+// 216Acn ~300 ns (приближение без σ, Z=89) и 218Acm >100# ns (оценка
+// систематики: «#» определяет вид записи — estimated, Z=89).
+const NUBASE_216ACN_LINE =
+  '216 0892   216Acn   8570#       100#        422#       100#          ~300     ns                      07          2006 IT=100';
+const NUBASE_218ACM_LINE =
+  '218 0891   218Acm  10900         90          50         70         * >100#    ns        8-#                            IT ?;A ?;B+ ?';
+// 237Cm >10# m (оценка систематики) и 244Cmn >500 ns (нижний предел) — Z=96.
+const NUBASE_237CM_LINE =
+  '237 0960   237Cm   49250         70                                   >10#     m        5/2+#         06          2002 B+ ?;A=?';
+const NUBASE_244CMN_LINE =
+  '244 0962   244Cmn  59550#       900#       1100#       900#          >500     ns                      17          1969 SF~100;IT ?';
+// 249Cmm 23 us и 249Bkm 300 us — ИЗМЕРЕННЫЕ значения БЕЗ опубликованной σ
+// (Z=96 и Z=97): отсутствие σ — отсутствие информации, а не нулевая σ.
+const NUBASE_249CMM_LINE =
+  '249 0961   249Cmm  70799.5        2.4        48.76       0.04          23     us        7/2+          11          1966 A=100';
+const NUBASE_249BKM_LINE =
+  '249 0971   249Bkm  69855.1        1.2         8.777      0.014        300     us        3/2-          11          1960 IT=100';
+// 244Amp ~6.5 us — приближение без σ (аудит R4, C1, Z=95).
+const NUBASE_244AMP_LINE =
+  '244 0953   244Amp  62080#       200#       2200#       200#            ~6.5   us                      17          1969 SF~100;IT ?';
 
-function rowsOf(lines: readonly string[]): ReturnType<typeof parseNubaseAuditText> {
-  return parseNubaseAuditText(lines.join('\n'));
+function rowsOf(lines: readonly string[]): readonly NubaseAuditRow[] {
+  return parseNubaseAuditText(lines.join('\n')).rows;
 }
 
 function parseOrThrow(line: string): NubaseAuditRow {
@@ -252,7 +316,7 @@ describe('Stage 4.3.3 (аудит R4): парсер фиксированных �
     expect(tcn.halfLifeSigma).toBeNull();
   });
 
-  it('аномалия файла: предел в позиции dT при пустом поле T — 85Tc <110 ns; 255Nop >100 ns в позиции T', () => {
+  it('аномалия файла: предел в позиции dT при пустом поле T — 85Tc <110ns; 18B <26 ns (с пробелом)', () => {
     const tc85 = parseOrThrow(NUBASE_85TC_LINE);
     expect(tc85.massNumber).toBe(85);
     expect(tc85.atomicNumber).toBe(43);
@@ -267,6 +331,21 @@ describe('Stage 4.3.3 (аудит R4): парсер фиксированных �
     expect(tc85.massEstimated).toBe(true);
     expect(tc85.excitationPresent).toBe(false);
     expect(tc85.observed).toBe(true);
+    // 18B: «<26 ns» — предел в позиции dT с пробелом между значением и единицей
+    const b18 = parseOrThrow(NUBASE_18B_LINE);
+    expect(b18.massNumber).toBe(18);
+    expect(b18.atomicNumber).toBe(5);
+    expect(b18.stateIndex).toBe(0);
+    expect(b18.stateCode).toBe('');
+    expect(b18.notation).toBe('18B');
+    expect(b18.halfLifeKind).toBe('upper_limit');
+    expect(b18.halfLifeRaw).toBe('<26');
+    expect(b18.halfLifeUnit).toBe('ns');
+    expect(b18.halfLifeValue).toBe(26);
+    expect(b18.halfLifeSeconds).toBeCloseTo(2.6e-8, 12);
+    expect(b18.halfLifeSigma).toBeNull();
+    expect(b18.halfLifeUncFieldRaw.trim()).toBe('<26 ns');
+    expect(b18.observed).toBe(true);
     const nop = parseOrThrow(NUBASE_255NO_LINES[2]);
     expect(nop.stateIndex).toBe(3);
     expect(nop.stateCode).toBe('p');
@@ -318,6 +397,250 @@ describe('Stage 4.3.3 (аудит R4): парсер фиксированных �
     expect(npp.observed).toBe(true);
     const tc83 = parseOrThrow(NUBASE_83TC_LINE);
     expect(tc83.observed).toBe(false);
+  });
+
+  it('181Pbm — регрессия пустого поля массы (C3): non-exist не даёт наблюдаемости', () => {
+    // дословная строка файла: 119 символов, 25 хвостовых пробелов
+    expect(NUBASE_181PBM_LINE).toHaveLength(119);
+    const pbm = parseOrThrow(NUBASE_181PBM_LINE);
+    expect(pbm.massNumber).toBe(181);
+    expect(pbm.atomicNumber).toBe(82);
+    expect(pbm.stateIndex).toBe(1);
+    expect(pbm.stateCode).toBe('m');
+    expect(pbm.notation).toBe('181Pb');
+    // масса НЕ опубликована: пустое поле — отсутствие данных, а не измерение
+    expect(pbm.massValid).toBe(false);
+    expect(pbm.massEstimated).toBe(false);
+    // энергия возбуждения non-exist: состояние не существует как связанное
+    expect(pbm.excitationPresent).toBe(false);
+    expect(pbm.excitationEstimated).toBe(false);
+    expect(pbm.excitationNonExist).toBe(true);
+    expect(pbm.halfLifeKind).toBe('none');
+    expect(pbm.halfLifeSeconds).toBeNull();
+    // наблюдаемость — ТОЛЬКО по валидным опубликованным данным
+    expect(pbm.observed).toBe(false);
+  });
+
+  it('Isom.Unc «*» и Isom.Inv «&» сохраняются отдельно: 134Pmm, 218Acm, 187Pom', () => {
+    const pmm = parseOrThrow(NUBASE_134PMM_LINE);
+    expect(pmm.stateIndex).toBe(1);
+    expect(pmm.stateCode).toBe('m');
+    expect(pmm.notation).toBe('134Pm');
+    expect(pmm.halfLifeKind).toBe('approx');
+    expect(pmm.halfLifeRaw).toBe('~5');
+    expect(pmm.halfLifeUnit).toBe('s');
+    expect(pmm.halfLifeValue).toBe(5);
+    expect(pmm.halfLifeSigma).toBeNull();
+    expect(pmm.orderingUncertain).toBe(true);
+    expect(pmm.orderingInverted).toBe(true);
+    expect(pmm.observed).toBe(true);
+    const acm = parseOrThrow(NUBASE_218ACM_LINE);
+    expect(acm.stateCode).toBe('m');
+    expect(acm.orderingUncertain).toBe(true);
+    expect(acm.orderingInverted).toBe(false);
+    const pom = parseOrThrow(NUBASE_187POM_LINE);
+    expect(pom.orderingUncertain).toBe(true);
+    expect(pom.orderingInverted).toBe(false);
+  });
+
+  it('оценка систематики с опубликованной σ оценки: 129Prm 26# us, σ 11#', () => {
+    const prm = parseOrThrow(NUBASE_129PRM_LINE);
+    expect(prm.stateIndex).toBe(1);
+    expect(prm.stateCode).toBe('m');
+    expect(prm.notation).toBe('129Pr');
+    expect(prm.halfLifeKind).toBe('estimated');
+    expect(prm.halfLifeRaw).toBe('26#');
+    expect(prm.halfLifeUnit).toBe('us');
+    expect(prm.halfLifeValue).toBe(26);
+    // σ ОЦЕНКИ публикуется файлом («11#» в dT) — это не выдуманная σ
+    expect(prm.halfLifeSigma).toBe(11);
+    expect(prm.massValid).toBe(true);
+    expect(prm.observed).toBe(true);
+  });
+
+  it('пределы и оценки Z=89/Z=96: 218Acm >100# ns (estimated), 216Acn ~300 ns (approx), 237Cm >10# m, 244Cmn >500 ns', () => {
+    const acm = parseOrThrow(NUBASE_218ACM_LINE);
+    expect(acm.halfLifeKind).toBe('estimated');
+    expect(acm.halfLifeRaw).toBe('>100#');
+    expect(acm.halfLifeUnit).toBe('ns');
+    expect(acm.halfLifeValue).toBe(100);
+    expect(acm.halfLifeSigma).toBeNull();
+    expect(acm.observed).toBe(true);
+    const acn = parseOrThrow(NUBASE_216ACN_LINE);
+    expect(acn.halfLifeKind).toBe('approx');
+    expect(acn.halfLifeRaw).toBe('~300');
+    expect(acn.halfLifeUnit).toBe('ns');
+    expect(acn.halfLifeSeconds).toBeCloseTo(3e-7, 12);
+    expect(acn.halfLifeSigma).toBeNull();
+    expect(acn.massEstimated).toBe(true);
+    expect(acn.observed).toBe(true);
+    const cm237 = parseOrThrow(NUBASE_237CM_LINE);
+    expect(cm237.halfLifeKind).toBe('estimated');
+    expect(cm237.halfLifeRaw).toBe('>10#');
+    expect(cm237.halfLifeUnit).toBe('m');
+    expect(cm237.halfLifeValue).toBe(10);
+    expect(cm237.massValid).toBe(true);
+    expect(cm237.observed).toBe(true);
+    const cmn244 = parseOrThrow(NUBASE_244CMN_LINE);
+    expect(cmn244.halfLifeKind).toBe('lower_limit');
+    expect(cmn244.halfLifeRaw).toBe('>500');
+    expect(cmn244.halfLifeUnit).toBe('ns');
+    expect(cmn244.massEstimated).toBe(true);
+    expect(cmn244.observed).toBe(true);
+  });
+
+  it('строки R4-C1: 206Fr/206Frm ~16 s и 244Amp ~6.5 us — приближения без σ; 249Cmm/249Bkm — измеренные без σ', () => {
+    const fr = parseOrThrow(NUBASE_206FR_LINE);
+    const frm = parseOrThrow(NUBASE_206FRM_LINE);
+    for (const r of [fr, frm]) {
+      expect(r.halfLifeKind).toBe('approx');
+      expect(r.halfLifeRaw).toBe('~16');
+      expect(r.halfLifeUnit).toBe('s');
+      expect(r.halfLifeValue).toBe(16);
+      expect(r.halfLifeSigma).toBeNull();
+      expect(r.observed).toBe(true);
+    }
+    expect(fr.stateIndex).toBe(0);
+    expect(frm.stateIndex).toBe(1);
+    expect(frm.stateCode).toBe('m');
+    const amp = parseOrThrow(NUBASE_244AMP_LINE);
+    expect(amp.stateIndex).toBe(3);
+    expect(amp.stateCode).toBe('p');
+    expect(amp.notation).toBe('244Am');
+    expect(amp.halfLifeKind).toBe('approx');
+    expect(amp.halfLifeRaw).toBe('~6.5');
+    expect(amp.halfLifeUnit).toBe('us');
+    expect(amp.halfLifeValue).toBeCloseTo(6.5, 12);
+    expect(amp.halfLifeSigma).toBeNull();
+    expect(amp.observed).toBe(true);
+    const cmm = parseOrThrow(NUBASE_249CMM_LINE);
+    expect(cmm.stateIndex).toBe(1);
+    expect(cmm.stateCode).toBe('m');
+    expect(cmm.halfLifeKind).toBe('measured');
+    expect(cmm.halfLifeRaw).toBe('23');
+    expect(cmm.halfLifeUnit).toBe('us');
+    expect(cmm.halfLifeValue).toBe(23);
+    expect(cmm.halfLifeSeconds).toBeCloseTo(23e-6, 15);
+    // измеренное значение БЕЗ опубликованной σ: σ не выдумывается
+    expect(cmm.halfLifeSigma).toBeNull();
+    expect(cmm.observed).toBe(true);
+    const bkm = parseOrThrow(NUBASE_249BKM_LINE);
+    expect(bkm.halfLifeKind).toBe('measured');
+    expect(bkm.halfLifeRaw).toBe('300');
+    expect(bkm.halfLifeUnit).toBe('us');
+    expect(bkm.halfLifeSigma).toBeNull();
+    expect(bkm.observed).toBe(true);
+  });
+});
+
+describe('Stage 4.3.3 (аудит R4): fail-closed диагностика строгого парсера (C3)', () => {
+  it('обрезанная строка (менее 75 символов) — too_short, запись не теряется молча', () => {
+    const text = NUBASE_205PO_LINES[0].slice(0, 40);
+    const r = parseNubaseAuditText(text);
+    expect(r.lineStats).toEqual({
+      totalLines: 1,
+      nonDataLines: 0,
+      dataLines: 1,
+      parsedRows: 0,
+      malformedRows: 1,
+      duplicateRows: 0
+    });
+    expect(r.rows).toHaveLength(0);
+    expect(r.diagnostics).toHaveLength(1);
+    expect(r.diagnostics[0].kind).toBe('too_short');
+    expect(r.diagnostics[0].lineNumber).toBe(1);
+    expect(r.diagnostics[0].reason).toContain('40');
+    expect(r.diagnostics[0].sourceLine).toBe(text);
+  });
+
+  it('повреждённое поле AAA — malformed_aaa; заголовок — не запись данных', () => {
+    const bad =
+      '09A 0430   92Tc   -78926          3                                     4.25   m 0.15   (8)+          12          1964 B+=100';
+    const r = parseNubaseAuditText([NUBASE_HEADER_LINE, bad].join('\n'));
+    expect(r.lineStats.totalLines).toBe(2);
+    expect(r.lineStats.nonDataLines).toBe(1);
+    expect(r.lineStats.dataLines).toBe(1);
+    expect(r.lineStats.parsedRows).toBe(0);
+    expect(r.lineStats.malformedRows).toBe(1);
+    expect(r.diagnostics).toHaveLength(1);
+    expect(r.diagnostics[0].kind).toBe('malformed_aaa');
+    expect(r.diagnostics[0].lineNumber).toBe(2);
+    expect(r.diagnostics[0].sourceLine).toBe(bad);
+  });
+
+  it('рассогласованный код состояния (i=0 с «m») — malformed_state_code', () => {
+    const bad = NUBASE_205PO_LINES[0].slice(0, 16) + 'm' + NUBASE_205PO_LINES[0].slice(17);
+    const r = parseNubaseAuditText(bad);
+    expect(r.lineStats.parsedRows).toBe(0);
+    expect(r.lineStats.malformedRows).toBe(1);
+    expect(r.diagnostics[0].kind).toBe('malformed_state_code');
+    expect(r.diagnostics[0].reason).toContain('i=0');
+  });
+
+  it('повреждённое поле массы — malformed_mass_field', () => {
+    const bad = NUBASE_205PO_LINES[0].slice(0, 18) + 'zz' + NUBASE_205PO_LINES[0].slice(20);
+    const r = parseNubaseAuditText(bad);
+    expect(r.lineStats.parsedRows).toBe(0);
+    expect(r.diagnostics[0].kind).toBe('malformed_mass_field');
+  });
+
+  it('повреждённое поле T1/2 — malformed_half_life_field', () => {
+    const bad = NUBASE_205PO_LINES[0].slice(0, 69) + 'x' + NUBASE_205PO_LINES[0].slice(70);
+    const r = parseNubaseAuditText(bad);
+    expect(r.lineStats.parsedRows).toBe(0);
+    expect(r.diagnostics[0].kind).toBe('malformed_half_life_field');
+  });
+
+  it('дубликат (Z, A, i, s) — duplicate_record: разбирается один раз, дубль диагностируется', () => {
+    const r = parseNubaseAuditText([NUBASE_205PO_LINES[0], NUBASE_205PO_LINES[0]].join('\n'));
+    expect(r.lineStats).toEqual({
+      totalLines: 2,
+      nonDataLines: 0,
+      dataLines: 2,
+      parsedRows: 1,
+      malformedRows: 0,
+      duplicateRows: 1
+    });
+    expect(r.diagnostics).toHaveLength(1);
+    expect(r.diagnostics[0].kind).toBe('duplicate_record');
+    expect(r.diagnostics[0].lineNumber).toBe(2);
+    expect(r.diagnostics[0].reason).toContain('nubase2020:Z=084,A=205,i=0,s=');
+    // дубликат не участвует в аудите дважды
+    const report = auditNubaseElement(84, r.rows);
+    expect(report.observedRows).toBe(1);
+  });
+
+  it('неподдерживаемая единица — предупреждение unsupported_unit, строка сохраняется', () => {
+    const bad = NUBASE_205PO_LINES[0].slice(0, 78) + 'qz' + NUBASE_205PO_LINES[0].slice(80);
+    const r = parseNubaseAuditText(bad);
+    expect(r.lineStats.parsedRows).toBe(1);
+    expect(r.lineStats.malformedRows).toBe(0);
+    expect(r.rows[0].halfLifeUnit).toBe('qz');
+    expect(r.rows[0].halfLifeSeconds).toBeNull();
+    expect(r.diagnostics).toHaveLength(1);
+    expect(r.diagnostics[0].kind).toBe('unsupported_unit');
+    // в аудите против валидного якоря — причина unresolved_unit, полнота не доказуема
+    const synthetic = replaceHalfLife(NUBASE_187POM_LINE, '0.5', 'qz', '');
+    const rows = rowsOf([synthetic, NUBASE_209PO_LINE]);
+    const report = auditNubaseElement(84, rows);
+    expect(report.completeness).toBe('not_verifiable');
+    expect(report.reasons.map((x) => x.kind)).toContain('unresolved_unit');
+  });
+
+  it('parseNubaseAuditLine выбрасывает NubaseAuditParseError с человекочитаемой диагностикой', () => {
+    let error: unknown = null;
+    try {
+      parseNubaseAuditLine('09A 0430');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(NubaseAuditParseError);
+    const diagnostic = (error as NubaseAuditParseError).diagnostic;
+    expect(diagnostic.kind).toBe('too_short');
+    expect(diagnostic.lineNumber).toBe(1);
+    expect(diagnostic.sourceLine).toBe('09A 0430');
+    expect((error as Error).message).toContain('too_short');
+    expect((error as Error).message).toContain('строка 1');
   });
 });
 
@@ -552,6 +875,20 @@ describe('Stage 4.3.3 (аудит R4): ранжирование и статус�
     expect(r.reasons[0].row.halfLifeSigma).toBeNull();
   });
 
+  it('пара 206Fr/206Frm ~16 s (Z=87): обе строки без σ — две причины unresolved_approx, полнота not_verifiable', () => {
+    const r = auditNubaseElement(
+      87,
+      rowsOf([NUBASE_206FR_LINE, NUBASE_206FRM_LINE, NUBASE_223FR_LINE])
+    );
+    const anchor = anchorOrThrow(r);
+    expect(anchor.notation).toBe('223Fr');
+    expect(r.completeness).toBe('not_verifiable');
+    expect(r.candidates).toHaveLength(1);
+    expect(r.reasons).toHaveLength(2);
+    expect(r.reasons.map((x) => x.kind).sort()).toEqual(['unresolved_approx', 'unresolved_approx']);
+    expect(r.reasons.map((x) => x.row.stateIndex).sort()).toEqual([0, 1]);
+  });
+
   it('приближение ~v с номиналом ВЫШЕ границы якоря: та же причина unresolved_approx — полнота не зависит от положения номинала', () => {
     // ~1320 s против нижней границы якоря (22.00-0.07)*60 = 1315.8 s:
     // под положением номинала полнота не выводится ни в одну сторону
@@ -671,7 +1008,126 @@ describe('Stage 4.3.3 (аудит R4): ранжирование и статус�
   });
 });
 
-describe('Stage 4.3.3 (аудит R4): источник, единицы и детерминированность', () => {
+describe('Stage 4.3.3 (аудит R4): SHA-256 фактического входа (C4)', () => {
+  it('контрольные векторы FIPS/NIST SHA-256: пустой текст, abc, 448-битное сообщение', () => {
+    expect(computeNubaseAuditTextSha256('')).toBe(
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    );
+    expect(computeNubaseAuditTextSha256('abc')).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+    );
+    expect(computeNubaseAuditTextSha256('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')).toBe(
+      '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1'
+    );
+  });
+
+  it('многоблочное сообщение (300 символов, 5 блоков) — контрольный вектор реализации', () => {
+    expect(computeNubaseAuditTextSha256('NUBASE2020'.repeat(30))).toBe(
+      '940f29670bf764bfa1d71361df7f53589c50b7d304593f823d504ef1a9e1b413'
+    );
+  });
+
+  it('не-ASCII вход отвергается ошибкой с позицией символа, а не хешируется молча', () => {
+    let error: unknown = null;
+    try {
+      computeNubaseAuditTextSha256('NUBASE2020 α');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('ASCII');
+    expect((error as Error).message).toContain('позиции 11');
+  });
+
+  it('константы локально проверенной копии: SHA-256, размер, дата получения, версия парсера', () => {
+    expect(NUBASE2020_VERIFIED_SOURCE_SHA256).toBe(
+      '1585a5eea86c5e17e90307c7e6e786d060049c4039e392a261ff6db977df9859'
+    );
+    expect(NUBASE2020_VERIFIED_SOURCE_SHA256).toMatch(/^[0-9a-f]{64}$/);
+    expect(NUBASE2020_VERIFIED_SOURCE_BYTES).toBe(761906);
+    expect(NUBASE2020_SOURCE_RETRIEVED_AT).toBe('2026-11-01');
+    expect(NUBASE_AUDIT_PARSER_VERSION).toBe('nubase-audit-r4/2.0.0');
+  });
+
+  it('библиография источника NUBASE2020: цитирование, DOI, страница AMDC, ограничения', () => {
+    expect(NUBASE2020_BIBLIOGRAPHY.citation).toContain('NUBASE2020');
+    expect(NUBASE2020_BIBLIOGRAPHY.citation).toContain('Chinese Physics C 45 (2021) 030001');
+    expect(NUBASE2020_BIBLIOGRAPHY.doi).toBe('10.1088/1674-1137/abddae');
+    expect(NUBASE2020_BIBLIOGRAPHY.amdcPageUrl).toBe('https://amdc.impcas.ac.cn/web/nubase_en.html');
+    expect(NUBASE2020_BIBLIOGRAPHY.sourceVersion).toContain('NUBASE2020');
+    const limitations = NUBASE2020_BIBLIOGRAPHY.limitations;
+    expect(limitations.length).toBeGreaterThanOrEqual(3);
+    for (const item of limitations) {
+      expect(item.trim() !== '').toBe(true);
+    }
+    expect(limitations[0]).toContain('не включается в репозиторий');
+  });
+
+  it('recordId — ключ дедупликации строки (Z, A, i, s)', () => {
+    const ground = parseOrThrow(NUBASE_205PO_LINES[0]);
+    expect(ground.recordId).toBe('nubase2020:Z=084,A=205,i=0,s=');
+    const pom = parseOrThrow(NUBASE_205PO_LINES[1]);
+    expect(pom.recordId).toBe('nubase2020:Z=084,A=205,i=1,s=m');
+    const amp = parseOrThrow(NUBASE_244AMP_LINE);
+    expect(amp.recordId).toBe('nubase2020:Z=095,A=244,i=3,s=p');
+  });
+});
+
+describe('Stage 4.3.3 (аудит R4): метаданные запуска и детерминированность (C4)', () => {
+  it('синтетический фрагмент (fixture): unverified, вычисленный хеш входа, счётчики строк', () => {
+    const text = [NUBASE_HEADER_LINE, ...NUBASE_92TC_LINES].join('\n');
+    const a = auditNubaseText(text, [43], { fixtureLabel: 'тестовый фрагмент 92Tc' });
+    expect(a.bibliography).toBe(NUBASE2020_BIBLIOGRAPHY);
+    expect(a.verifiedSourceSha256).toBe(NUBASE2020_VERIFIED_SOURCE_SHA256);
+    expect(a.run.parserVersion).toBe(NUBASE_AUDIT_PARSER_VERSION);
+    expect(a.run.sourceVersion).toBe(NUBASE2020_BIBLIOGRAPHY.sourceVersion);
+    // хеш ВЫЧИСЛЕН по фактическому входу и НЕ совпадает с константой копии
+    expect(a.run.inputSha256).toBe(computeNubaseAuditTextSha256(text));
+    expect(a.run.inputSha256).not.toBe(NUBASE2020_VERIFIED_SOURCE_SHA256);
+    expect(a.run.inputBytes).toBe(text.length);
+    // синтетический фрагмент НЕ имитирует проверку официального файла
+    expect(a.run.sourceVerification).toBe('unverified');
+    expect(a.run.verificationNote).toContain('синтетический');
+    expect(a.run.retrievedAt).toBeNull();
+    expect(a.run.fixtureLabel).toBe('тестовый фрагмент 92Tc');
+    expect(a.run.parsedRows).toBe(4);
+    expect(a.run.malformedRows).toBe(0);
+    expect(a.run.duplicateRows).toBe(0);
+    expect(a.run.skippedNonDataLines).toBe(1);
+    expect(a.run.rankedElements).toEqual([43]);
+    expect(a.reports.map((x) => x.atomicNumber)).toEqual([43]);
+    expect(a.diagnostics).toHaveLength(0);
+  });
+
+  it('без метки fixture вход всё равно не подтверждён: сверка по SHA-256 и размеру', () => {
+    const text = [...NUBASE_205PO_LINES].join('\n');
+    const a = auditNubaseText(text, [84]);
+    expect(a.run.sourceVerification).toBe('unverified');
+    expect(a.run.verificationNote).toContain('SHA-256');
+    expect(a.run.fixtureLabel).toBeNull();
+    expect(a.run.retrievedAt).toBeNull();
+    expect(a.run.inputSha256).toBe(computeNubaseAuditTextSha256(text));
+    expect(a.run.parsedRows).toBe(5);
+    expect(a.run.rankedElements).toEqual([84]);
+  });
+
+  it('детерминированность: повторные прогоны идентичны, заголовок не разбирается', () => {
+    const text = [
+      NUBASE_HEADER_LINE,
+      ...NUBASE_92TC_LINES,
+      ...NUBASE_205PO_LINES,
+      ...NUBASE_183AU_LINES
+    ].join('\n');
+    const a = auditNubaseText(text, [43, 84, 79], { fixtureLabel: 'детерминированность' });
+    const b = auditNubaseText(text, [43, 84, 79], { fixtureLabel: 'детерминированность' });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    // 4 + 5 + 3 строки данных; строка заголовка не разбирается
+    expect(a.run.parsedRows).toBe(12);
+    expect(a.run.skippedNonDataLines).toBe(1);
+    expect(a.reports.map((x) => x.atomicNumber)).toEqual([43, 84, 79]);
+    expect(a.bibliography).toBe(NUBASE2020_BIBLIOGRAPHY);
+  });
+
   it('единицы времени NUBASE2020: тропический год y = 31 556 926 с, точные ky и My', () => {
     expect(NUBASE_AUDIT_UNIT_SECONDS['y']).toBe(31556926);
     expect(NUBASE_AUDIT_UNIT_SECONDS['ky']).toBe(31556926000);
@@ -687,41 +1143,5 @@ describe('Stage 4.3.3 (аудит R4): источник, единицы и де�
   it('14 ранжируемых элементов зафиксированы: Z=43,61,84,85,86,87,88,89,93,94,95,96,97,98', () => {
     expect(NUBASE_AUDIT_RANKED_ELEMENTS).toEqual([43, 61, 84, 85, 86, 87, 88, 89, 93, 94, 95, 96, 97, 98]);
     expect(NUBASE_AUDIT_RANKED_ELEMENTS).toHaveLength(14);
-  });
-
-  it('метаданные источника: цитирование, DOI, SHA-256 локальной копии, версия парсера, ограничения', () => {
-    expect(NUBASE2020_AUDIT_SOURCE.citation).toContain('NUBASE2020');
-    expect(NUBASE2020_AUDIT_SOURCE.citation).toContain('Chinese Physics C 45 (2021) 030001');
-    expect(NUBASE2020_AUDIT_SOURCE.doi).toBe('10.1088/1674-1137/abddae');
-    expect(NUBASE2020_AUDIT_SOURCE.amdcPageUrl).toBe('https://amdc.impcas.ac.cn/web/nubase_en.html');
-    expect(NUBASE2020_AUDIT_SOURCE.retrievedAt).toBe('2026-11-01');
-    expect(NUBASE2020_AUDIT_SOURCE.parserVersion).toBe('nubase-audit-r4/1.0.0');
-    const sha = NUBASE2020_AUDIT_SOURCE.localCopySha256;
-    expect(sha).toBe('5646189e91c9c04016005a12e34f74b73e4ea4dec57a14ed5d6d948fe0ee83ce');
-    expect(sha).toMatch(/^[0-9a-f]{64}$/);
-    // хеш — локально проверенной копии, НЕ официальный хеш распределения
-    expect(NUBASE2020_AUDIT_SOURCE.localCopySha256Note).toContain('НЕ заявляется');
-    const limitations = NUBASE2020_AUDIT_SOURCE.limitations;
-    expect(limitations.length).toBeGreaterThanOrEqual(3);
-    for (const item of limitations) {
-      expect(item.trim() !== '').toBe(true);
-    }
-    expect(limitations[0]).toContain('не включается в репозиторий');
-  });
-
-  it('детерминированность: повторные прогоны auditNubaseText идентичны, заголовки не разбираются', () => {
-    const text = [
-      NUBASE_HEADER_LINE,
-      ...NUBASE_92TC_LINES,
-      ...NUBASE_205PO_LINES,
-      ...NUBASE_183AU_LINES
-    ].join('\n');
-    const a = auditNubaseText(text, [43, 84, 79]);
-    const b = auditNubaseText(text, [43, 84, 79]);
-    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-    // 4 + 5 + 3 строки данных; строка заголовка не разбирается
-    expect(a.parsedRows).toBe(12);
-    expect(a.reports.map((x) => x.atomicNumber)).toEqual([43, 84, 79]);
-    expect(a.source).toBe(NUBASE2020_AUDIT_SOURCE);
   });
 });

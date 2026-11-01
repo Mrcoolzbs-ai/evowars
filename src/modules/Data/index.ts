@@ -38,10 +38,15 @@ import {
   isotopeCandidateCoverage
 } from './elementIsotopeCandidates';
 import {
-  NUBASE2020_AUDIT_SOURCE,
+  NUBASE2020_BIBLIOGRAPHY,
+  NUBASE2020_VERIFIED_SOURCE_SHA256,
+  NUBASE2020_VERIFIED_SOURCE_BYTES,
+  NUBASE2020_SOURCE_RETRIEVED_AT,
+  NUBASE_AUDIT_PARSER_VERSION,
   NUBASE_AUDIT_RANKED_ELEMENTS,
   NUBASE_AUDIT_UNIT_SECONDS,
   nubaseAuditUnitSeconds,
+  computeNubaseAuditTextSha256,
   parseNubaseAuditLine,
   parseNubaseAuditText,
   auditNubaseElement,
@@ -104,27 +109,42 @@ export {
 export type { ElementCatalogCoverage } from './elements';
 export type { IsotopeCandidateCoverage } from './elementIsotopeCandidates';
 
-// Stage 4.3.3 (аудит R3): воспроизводимая утилита аудита NUBASE2020 —
-// парсер фиксированных колонок официального ASCII-файла, контекстная
-// классификация состояний (i, s) и ранжирование кандидатов. Полный
-// ASCII-файл NUBASE2020 в репозиторий не включается (отдельная
-// лицензия файла AMDC не подтверждена): полный прогон выполняется на
-// локально предоставленной копии официального файла.
+// Stage 4.3.3 (аудит R4, C3/C4): воспроизводимая утилита аудита NUBASE2020 —
+// строгий fail-closed парсер фиксированных колонок официального ASCII-файла
+// (диагностика обрезанных, повреждённых и дублирующихся строк), контекстная
+// классификация состояний (i, s), ранжирование кандидатов, SHA-256
+// ФАКТИЧЕСКОГО входного текста (computeNubaseAuditTextSha256) и метаданные
+// конкретного запуска (NubaseAuditRunMetadata). Полный ASCII-файл NUBASE2020
+// в репозиторий не включается (отдельная лицензия файла AMDC не
+// подтверждена): полный прогон выполняется на локально предоставленной
+// копии официального файла, побайтово сверяемой по SHA-256.
 export {
-  NUBASE2020_AUDIT_SOURCE,
+  NUBASE2020_BIBLIOGRAPHY,
+  NUBASE2020_VERIFIED_SOURCE_SHA256,
+  NUBASE2020_VERIFIED_SOURCE_BYTES,
+  NUBASE2020_SOURCE_RETRIEVED_AT,
+  NUBASE_AUDIT_PARSER_VERSION,
   NUBASE_AUDIT_RANKED_ELEMENTS,
   NUBASE_AUDIT_UNIT_SECONDS,
   nubaseAuditUnitSeconds,
+  computeNubaseAuditTextSha256,
   parseNubaseAuditLine,
   parseNubaseAuditText,
   auditNubaseElement,
   auditNubaseText
 };
 export type {
-  NubaseAuditSource,
+  NubaseBibliography,
   NubaseAuditRow,
   NubaseAuditHalfLifeKind,
+  NubaseParseDiagnosticKind,
+  NubaseParseDiagnostic,
+  NubaseParseLineStats,
+  NubaseParseResult,
+  NubaseAuditExclusionKind,
   NubaseAuditExclusion,
   NubaseAuditElementReport,
+  NubaseAuditOptions,
+  NubaseAuditRunMetadata,
   NubaseAuditReport
 } from './nubaseAudit';
