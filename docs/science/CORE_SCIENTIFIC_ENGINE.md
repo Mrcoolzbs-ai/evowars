@@ -522,13 +522,44 @@
 > NuclideCandidate.classification/classificationBasis; универсальная
 > трактовка «s=m..x — изомеры независимо от i» удалена. (2) правило
 > фактора 2 для «~v» удалено — точечное правило: исключение только
-> ниже нижней границы 1σ-интервала якоря; полнота 8/6/20, состав
+> ниже нижней границы 1σ-интервала якоря (правило удалено аудитом
+> R4 — см. следующий блок); полнота 8/6/20 (статусы аудита R3,
+> пересчитаны аудитом R4), состав
 > 44/3/43 — без изменений. (3) уточнённые счётчики строк 14 элементов
 > (21 наблюдавшийся дополнительный изомер у 8 элементов — §2.18),
 > воспроизводимая утилита Data/nubaseAudit.ts + 22 теста
 > dataNubaseAudit.test (фикс-коммит CI — ненулевые типы хелперов).
 > Тесты 1328 → 1334 → 1356 (34 файла), Golden baseline не изменён.
 > См. §2.18 и §4.
+>
+> **Аудит R4 Stage 4.3.3 (2026-11-01)**: (1) точечное правило
+> исключения значений без опубликованной σ УДАЛЕНО (Kondev et al.,
+> NUBASE2020, §3.2, DOI 10.1088/1674-1137/abddae не даёт права
+> считать значение без σ точной точкой): отсутствие σ — отсутствие
+> информации о неопределённости; приближения «~v», измеренные
+> значения без σ и оценки «v#» не исключаются, а делают полноту
+> НЕ ДОКАЗУЕМОЙ (not_verifiable: unresolved_approx /
+> unresolved_no_sigma / unresolved_estimated); наблюдавшиеся
+> ground/isomer-состояния без собственного T1/2 учтены явно
+> (no_half_life_unresolved — отсутствие T1/2 не считается
+> доказательством короткого времени жизни). (2) строгий fail-closed
+> парсер Data/nubaseAudit.ts: 5 869 строк → 5 843 записи, 0
+> повреждённых, 0 дубликатов (Z, A, i, s), обрезанные/malformed
+> строки не теряются молча; пустое поле массы не трактуется как
+> измеренная; SHA-256 1585a5ee… фактических байтов входа вычисляется
+> при каждом запуске (библиография отделена от метаданных запуска
+> NubaseAuditRunMetadata; синтетические фрагменты —
+> unverified/fixture). (3) classificationBasis усилена полной
+> ссылкой NubaseStateRowRef на конкретную строку источника (Z, A,
+> i, s, recordId — все поля обязательны; дубликаты sibling-строк и
+> самоссылки отклоняются). (4) повторное ранжирование 14 элементов
+> по проверенному источнику: состав кандидатов не изменился
+> (44/3/43), полнота ПЕРЕСЧИТАНА — 3 complete (Z=93, 94, 98) /
+> 11 not_verifiable (Z=43, 61, 84, 85, 86, 87, 88, 89, 95, 96,
+> 97) / 20 incomplete; complete понижен у Z=43, 85, 87, 88, 95 —
+> точечные исключения R3 были необоснованными. Тесты 1356 → 1381
+> (dataNubaseAudit.test +23, coreElements.test +2; 34 файла; фикс-
+> коммит CI C2b), Golden baseline не изменён. См. §2.18 и §4.
 >
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -1644,7 +1675,8 @@ i>=3 — НЕ уровень автоматически): состав канд�
 6 not_verifiable (Z=61, 84, 86, 89, 96, 97 — наблюдавшиеся
 состояния с нижними пределами T1/2 без верхней границы, полнота
 не доказуема и не сохраняется complete по предположению) /
-20 incomplete (Z=99–118).
+20 incomplete (Z=99–118) — статусы аудита R2, пересчитаны
+аудитами R3/R4 (см. ниже и шапку).
 
 Аудит R3 (2026-11-01): контекстная классификация состояний NUBASE2020 —
 цепное правило classifyNubaseState (Core/elements.ts): (1, m) и (2, n) —
@@ -1657,14 +1689,40 @@ NuclideCandidate несёт classification и classificationBasis. Правил�
 фактора 2 для «~v» удалено (не подтверждено источником) — точечное
 правило: значение без опубликованной σ исключается, только если оно
 ниже нижней границы 1σ-интервала якоря, иначе полнота не доказуема
-(not_verifiable). Повторное ранжирование всех наблюдавшихся строк:
-состав 44/3/43 и полнота 8/6/20 НЕ изменились; уточнённые счётчики
+(not_verifiable) (точечное правило удалено аудитом R4 — см. ниже).
+Повторное ранжирование всех наблюдавшихся строк:
+состав 44/3/43 и полнота 8/6/20 (статусы аудита R3, пересчитаны
+аудитом R4) НЕ изменились; уточнённые счётчики
 строк — Tc 67, Pm 62, Po 72, At 72, Rn 62, Fr 71, Ra 56, Ac 45,
 Np 32, Pu 32, Am 33, Cm 30, Bk 29, Cf 23 (21 наблюдавшийся
 дополнительный изомер у 8 элементов; уровни вне контекста
 кандидатами не являются). Ранжирование воспроизводится утилитой
 Data/nubaseAudit.ts (+22 теста dataNubaseAudit.test); SHA-256 локально
 проверенной копии файла и ограничения — elementDataAttribution.md §7.1.
+
+Аудит R4 (2026-11-01): точечное правило исключения значений без σ
+удалено — отсутствие σ есть отсутствие информации о
+неопределённости; приближения «~v», измеренные значения без σ и
+оценки «v#» не исключаются, а делают полноту НЕ ДОКАЗУЕМОЙ
+(not_verifiable с причинами unresolved_approx /
+unresolved_no_sigma / unresolved_estimated); наблюдавшиеся
+ground/isomer-состояния без собственного T1/2 учтены явно
+(no_half_life_unresolved). Парсер утилиты Data/nubaseAudit.ts
+строгий и fail-closed (5 869 строк → 5 843 записи, 0 повреждённых,
+0 дубликатов; обрезанные/malformed строки попадают в диагностику и
+не теряются молча; SHA-256 фактического входа вычисляется и
+сверяется; синтетические фрагменты — unverified/fixture).
+classificationBasis усилена полной ссылкой NubaseStateRowRef на
+конкретную строку источника (Z, A, i, s, recordId; дубликаты
+sibling-строк и самоссылки отклоняются). Повторное ранжирование
+14 элементов по проверенному источнику: состав кандидатов не
+изменился (44 записи / 3 изомерных состояния / 43 уникальные
+пары (Z,A)); полнота ПЕРЕСЧИТАНА — 3 complete (Z=93, 94, 98) /
+11 not_verifiable (Z=43, 61, 84, 85, 86, 87, 88, 89, 95, 96,
+97) / 20 incomplete (Z=99–118); статус complete понижен у
+Z=43, 85, 87, 88, 95 — точечные исключения аудита R3 для этих
+строк были необоснованными (блокирующие строки и причины —
+elementDataAttribution.md §7.1).
 
 ## 3. Интеграция (точки контакта с легаси)
 
@@ -1721,7 +1779,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6) + корректирующая ревизия Stage 4.3.2 (+12: coreNasaPolynomialForm.test) + финальная научная корректировка 4.3.2 (+7: coreSpecies.test) + Stage 4.3.3 (+36: coreElements.test) + корректирующая ревизия после аудита Stage 4.3.3 (+14: coreElements.test) + аудит R2 Stage 4.3.3 (+11: corePhysicalQuantity.test +4, coreElements.test +7) + аудит R3 Stage 4.3.3 (+6: coreElements.test — контекстная классификация состояний NUBASE2020 classifyNubaseState)
+## 4. Тесты ядра (513 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6) + корректирующая ревизия Stage 4.3.2 (+12: coreNasaPolynomialForm.test) + финальная научная корректировка 4.3.2 (+7: coreSpecies.test) + Stage 4.3.3 (+36: coreElements.test) + корректирующая ревизия после аудита Stage 4.3.3 (+14: coreElements.test) + аудит R2 Stage 4.3.3 (+11: corePhysicalQuantity.test +4, coreElements.test +7) + аудит R3 Stage 4.3.3 (+6: coreElements.test — контекстная классификация состояний NUBASE2020 classifyNubaseState) + аудит R4 Stage 4.3.3 (+2: coreElements.test — полная ссылка NubaseStateRowRef в classificationBasis)
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -1730,7 +1788,7 @@ golden-траектория 100 шагов воспроизводится чис
 | coreThermodynamics.test | 66 | 4.3.1: валидная запись с известными значениями; оценочные значения с методом; unknown без числовой подстановки; отсутствие provenance у known/estimated; некорректные единицы и размерности; конверсия J/mol ↔ kJ/mol; сегменты NASA-7 (корректные/пересекающиеся/неупорядоченные); fitted без исходных Cp-таблиц; контрольные точки и диапазоны; reference state (обязательность, фаза записи, автоматические 1 bar/298.15 K не назначаются); интеграция в validateSpecies (отсутствие thermodynamics = не предоставлены); совместимость SpeciesCatalog и legacy-адаптеров; детерминированность и отсутствие побочных эффектов; 4.3.1 hardening: reference state при числовых Cp-данных (таблица/NASA-7/оба без reference state — ошибка; с корректным reference state проходят; несовпадение фазы — ошибка); безопасная runtime-валидация (null вместо ScientificValue/referenceState/heatCapacity/таблиц/точек/NASA-7/сегментов/диапазонов/derivation/provenance, битые quantity — диагностики без исключений, детерминированность);provenance отдельных Cp-точек (наследование таблицы; origin unknown/без идентификации источника/derived_computed без метода/неизвестный origin — ошибки; корректный точечный и с методом — проходят); заключительная проверка: повреждённая bounded-неопределённость у known/estimated — диагностики; температура Cp-точки, граница rangeK и температура reference state в чужой размерности — диагностика без использования значения в порядке/диапазонах/положительности; детерминированность |
 | coreScientificValue.test | 19 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации; заключительная проверка 4.3.1: bounded-неопределённость (above/below принимаются; отсутствие direction, null и постороннее значение — ошибки валидации; конструкторы — ScientificValueError invalid_uncertainty; конечность bound сохранена) |
 | coreSpecies.test | 25 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе; финальная корректировка 4.3.2: molarMassProvenance — recordId обязателен (отсутствие, null, пустая/пробельная строка, не-строка — ошибки; непустой — проходит; отсутствие самого поля — норма; recordId не заменяет идентификацию источника) |
-| coreElements.test | 64 | валидатор ChemicalElement (Z вне 1…118, символ не IUPAC, пустые названия, provenance не идентифицирует источник, группа/блок null без причин, категория, интервальный вес — границы и исходная нотация, скобочный вес — неопределённость и исходная нотация, not_assigned с reason, изотопные записи — целые массовые числа, распространённости [0,1], recordId, кандидаты — Z владельца, recordId, массовое число, причина; unknown без числовой подстановки), каталог (поиск по Z/символу, дубликаты Z и символа — ElementError, invalid_element), checkElementCountsReference, provenanceIdentifiesSource, ElementError; корректирующая ревизия после аудита: кандидаты — Tc-98 у H отклонён, несогласованное nuclideNotation (символ владельца/массовое число/суффикс состояния), A < Z, recordId ≠ provenance.recordId, дубликат (массовое число + состояние); T1/2 — eV/kg/K отклонены (обязательна размерность времени), 0 и отрицательное значение, недопустимые статусы, невалидная неопределённость, положительный цикл по всем 8 единицам времени; веса строго положительны (отрицательная граница интервала, отрицательное значение), not_assigned с числовыми полями, изотопы A < Z и повторное массовое число; аудит R2: stateIndex/stateCode — согласованность i и s, ground ⇒ i=0, isomeric ⇒ не IAS-коды (i/j), дубликат строки источника (A, i, s), единицы y/ky/My у 12 записей NUBASE2020, согласованность dataStatus ↔ halfLife.status, единый recordId строки NUBASE2020 у кандидата и halfLife provenance; аудит R3: контекстная классификация classifyNubaseState (цепное правило m→n→p→q→r→x по составу группы (Z, A), уровни/резонансы/IAS вне контекста, indeterminate при рассогласовании пары (i, s)), classification и classificationBasis у NuclideCandidate |
+| coreElements.test | 66 | валидатор ChemicalElement (Z вне 1…118, символ не IUPAC, пустые названия, provenance не идентифицирует источник, группа/блок null без причин, категория, интервальный вес — границы и исходная нотация, скобочный вес — неопределённость и исходная нотация, not_assigned с reason, изотопные записи — целые массовые числа, распространённости [0,1], recordId, кандидаты — Z владельца, recordId, массовое число, причина; unknown без числовой подстановки), каталог (поиск по Z/символу, дубликаты Z и символа — ElementError, invalid_element), checkElementCountsReference, provenanceIdentifiesSource, ElementError; корректирующая ревизия после аудита: кандидаты — Tc-98 у H отклонён, несогласованное nuclideNotation (символ владельца/массовое число/суффикс состояния), A < Z, recordId ≠ provenance.recordId, дубликат (массовое число + состояние); T1/2 — eV/kg/K отклонены (обязательна размерность времени), 0 и отрицательное значение, недопустимые статусы, невалидная неопределённость, положительный цикл по всем 8 единицам времени; веса строго положительны (отрицательная граница интервала, отрицательное значение), not_assigned с числовыми полями, изотопы A < Z и повторное массовое число; аудит R2: stateIndex/stateCode — согласованность i и s, ground ⇒ i=0, isomeric ⇒ не IAS-коды (i/j), дубликат строки источника (A, i, s), единицы y/ky/My у 12 записей NUBASE2020, согласованность dataStatus ↔ halfLife.status, единый recordId строки NUBASE2020 у кандидата и halfLife provenance; аудит R3: контекстная классификация classifyNubaseState (цепное правило m→n→p→q→r→x по составу группы (Z, A), уровни/резонансы/IAS вне контекста, indeterminate при рассогласовании пары (i, s)), classification и classificationBasis у NuclideCandidate; аудит R4: classificationBasis — полная ссылка NubaseStateRowRef (atomicNumber, massNumber, stateIndex, stateCode, recordId — все обязательны), согласование (Z, A) sibling-строк с кандидатом, дубликаты sibling-строк и самоссылки отклоняются |
 | coreReservoir.test | 56 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён); 4.1.1.3.1: строгие записи — Map/Set/Date/RegExp/экземпляры классов в properties/material.entries/energy — invalid, Object.create(null) валиден |
 | coreFluxLedger.test | 88 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries; 4.1.1.3.1: Map/Date в entries — not_verifiable, а не «известная пустота» |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
@@ -1744,9 +1802,14 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 34 тест-файла, 1356 тестов (после аудита R3
+Всего в проекте 34 тест-файла, 1381 тест (после аудита R4
 Stage 4.3.3 — фактические итоги Vitest
-«Test Files 34 passed (34) / Tests 1356 passed (1356)»: аудит R3
+«Test Files 34 passed (34) / Tests 1381 passed (1381)»: аудит R4
+добавил +25 — dataNubaseAudit.test +23 (строгий fail-closed парсер
+C3, полнота R4 C1/C2, метаданные запуска и SHA-256 C4, фикс-коммиты
+346724c0 и 8a6b5c2e CI) и coreElements.test +2 (полная ссылка
+NubaseStateRowRef в classificationBasis, C5); до этого после
+аудита R3 — 34 файла / 1356: аудит R3
 добавил +28 — coreElements.test +6 (контекстная классификация
 classifyNubaseState, C1) и dataNubaseAudit.test +22 (утилита аудита
 NUBASE2020, C3; фикс-коммит CI — ненулевые типы хелперов теста),
