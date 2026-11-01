@@ -341,8 +341,8 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(ic.isomericStates).toBe(3);
     expect(ic.uniqueNuclides).toBe(43);
     expect(ic.experimental).toBe(44);
-    expect(ic.completeElements).toBe(8);
-    expect(ic.notVerifiableElements).toBe(6);
+    expect(ic.completeElements).toBe(3);
+    expect(ic.notVerifiableElements).toBe(11);
     expect(ic.incompleteElements).toBe(20);
     expect(ic.incompleteElements).toBe(20);
     expect(cov.candidateElements).toBe(ic.elements);
@@ -388,7 +388,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
 
   it('Tc: Tc-97 и Tc-98 — равноправные кандидаты, 1σ-интервалы перекрываются', () => {
     const c = expectKnownCandidates(buildElement(43));
-    expect(c.completeness).toBe('complete');
+    expect(c.completeness).toBe('not_verifiable');
     expect(c.completenessNote ?? '').toContain('полнота НЕ является доказательством');
     const cands = c.candidates ?? [];
     expect(cands).toHaveLength(2);
@@ -611,7 +611,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(isomer.massNumber).toBe(293);
   });
 
-  it('полнота: complete у 8 (Z=43,85,87,88,93,94,95,98), not_verifiable у 6 (Z=61,84,86,89,96,97), incomplete у 20 (Z=99–118)', () => {
+  it('полнота (аудит R4): complete у 3 (Z=93,94,98), not_verifiable у 11, incomplete у 20 (Z=99–118)', () => {
     const els = allElements();
     const known = els.filter((e) => e.representativeIsotopeCandidates.status === 'known');
     const completeZ = known
@@ -623,17 +623,25 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     const incompleteZ = known
       .filter((e) => e.representativeIsotopeCandidates.completeness === 'incomplete')
       .map((e) => e.atomicNumber);
-    expect(completeZ).toEqual([43, 85, 87, 88, 93, 94, 95, 98]);
-    expect(notVerifiableZ).toEqual([61, 84, 86, 89, 96, 97]);
+    expect(completeZ).toEqual([93, 94, 98]);
+    expect(notVerifiableZ).toEqual([43, 61, 84, 85, 86, 87, 88, 89, 95, 96, 97]);
     expect(incompleteZ).toEqual(Array.from({ length: 20 }, (_, i) => 99 + i));
   });
 
-  it('not_verifiable (аудит R2): полнота не доказуема из-за нижних пределов T1/2 без верхней границы', () => {
+  it('not_verifiable (аудит R4): пределы без верхней границы, значения без σ, состояния без T1/2', () => {
+    // строки-основания: нижний предел «>x» без верхней границы; приближение «~v»
+    // или оценённое «v#» без опубликованной σ; измеренное значение без σ;
+    // точечное правило исключения удалено (R4), номиналы не доказывают неконкурентность
     const anchors: Array<[number, string, string]> = [
+      [43, '87Tcm', '2# s'],
       [61, '141Pmn', '>2 µs'],
       [84, '203Pon', '>200 ns'],
+      [85, '196Atm', '20# ms'],
       [86, '205Rnm', '>10 s'],
+      [87, '206Fr', '~16 s'],
+      [88, '231Ram', '~53 µs'],
       [89, '234Acm', '>93 s'],
+      [95, '244Amp', '~6.5 µs'],
       [96, '244Cmn', '>500 ns'],
       [97, '248Bk', '>9 y']
     ];
@@ -645,7 +653,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
       expect(c.completenessNote ?? '', 'Z=' + z).toContain(limit);
       expect(c.completenessNote ?? '', 'Z=' + z).toContain('нижн');
     }
-    // complete-элементы: примечание фиксирует повторное ранжирование и счётчики наблюдавшихся строк
+    // Tc и At: примечание фиксирует повторное ранжирование и счётчики наблюдавшихся строк
     const tc = expectKnownCandidates(buildElement(43));
     expect(tc.completenessNote ?? '').toContain('67 экспериментально наблюдавшихся строк');
     expect(tc.completenessNote ?? '').toContain('2 кандидата после отбора');
