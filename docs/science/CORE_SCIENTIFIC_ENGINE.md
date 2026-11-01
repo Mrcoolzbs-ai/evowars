@@ -1,3 +1,4 @@
+
 # CORE_SCIENTIFIC_ENGINE — Научное ядро проекта (Stage 4.1)
 
 > Stage 4.1. Реализация: ветка `stage-3-planetary-physics`, коммиты
@@ -444,6 +445,14 @@
 > coreNasaPolynomialForm.test (+12) и дополнение
 > dataThermodynamicCatalog.test (+4) — по CI 31 файл / 1205 тестов
 > (базлайн 30/1189 + 16). См. §2.17 и §4.
+> Ревизия Stage 4.3.2, финальная научная корректировка перед 4.3.3
+> (2026-11-01): species.ts — validateSpecies требует непустой
+> recordId у molarMassProvenance (отсутствие самого поля у старых
+> записей по-прежнему допустимо); thermodynamics.ts — заголовок
+> актуализирован: первая партия NASA CEA импортирована, вычислитель
+> NASA-полиномов не реализован, дополнительные источники и
+> расширение каталога — будущие работы. Тесты +7 (coreSpecies.test
+> 18 → 25; по CI 31 файл / 1212 тестов, базлайн 31/1205 + 7).
 
 ## 1. Слои ядра (`src/modules/Core/`)
 
@@ -451,7 +460,7 @@
 |---|---|---|
 | `physicalQuantity.ts` | Величины | значение + единица + размерность; преобразование единиц; runtime-контроль размерностей; запрет NaN/±Inf |
 | `scientificValue.ts` | Семантика данных | статусы known/estimated/unknown/not_applicable/not_implemented/invalid; неопределённость; provenance |
-| `species.ts` | Химия (контракт) | формальный элементный состав, заряд, фаза; каталог видов; проверка элементного/зарядового баланса; собственное происхождение молярной массы (molarMassProvenance) — корректирующая ревизия 4.3.2 |
+| `species.ts` | Химия (контракт) | формальный элементный состав, заряд, фаза; каталог видов; проверка элементного/зарядового баланса; собственное происхождение молярной массы (molarMassProvenance) с обязательным непустым recordId (финальная корректировка 4.3.2) |
 | `thermodynamics.ts` | Термодинамика (4.3.1) | ThermodynamicProperties вида+фазы: ΔfH°/ΔfG° (J/mol), S° (J/(mol·K)), исходные табличные Cp-точки, NASA-7 как производная аппроксимация; ThermoReferenceState; per-value ThermoDataProvenance с типизированным origin; validateThermodynamicProperties; типизированные формы полиномов nasa7_classic/nasa_cea с валидацией соответствия и integralConstants (корректирующая ревизия 4.3.2); без вычислителя NASA-7 |
 | `reservoir.ts` | Вещество и энергия | материальный инвентарь с явным основанием; энергетический инвентарь (запас/мощность/поток раздельно); иммутабельные записи |
 | `fluxLedger.ts` | Потоки | внутренние/внешние переносы; rate против integrated; атомарное применение; revert; аудиты сохранения |
@@ -1466,7 +1475,9 @@ integralConstants сегментов (корректирующая ревизи�
 вычислитель NASA-7 (будущий подэтап) обязан учитывать члены T^-2 и
 T^-1. Корректирующая ревизия расширила контракты Core с сохранением
 обратной совместимости (thermodynamics.ts: типизированные формы
-сегментов; species.ts: molarMassProvenance); вычислитель NASA-7
+сегментов; species.ts: molarMassProvenance с обязательным
+непустым recordId — финальная корректировка перед 4.3.3);
+вычислитель NASA-7
 по-прежнему НЕ реализован и не заявляется.
 
 ## 3. Интеграция (точки контакта с легаси)
@@ -1524,7 +1535,7 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6) + корректирующая ревизия Stage 4.3.2 (+12: coreNasaPolynomialForm.test)
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6) + корректирующая ревизия Stage 4.3.2 (+12: coreNasaPolynomialForm.test) + финальная научная корректировка 4.3.2 (+7: coreSpecies.test)
 
 | Файл | it() | Покрытие |
 |---|---|---|
@@ -1532,7 +1543,7 @@ golden-траектория 100 шагов воспроизводится чис
 | coreNasaPolynomialForm.test | 12 | 4.3.2 корректирующая: реестр форм (nasa7_classic/nasa_cea, NASA-9 вне реестра); базисы степеней ([0..4] против [-2..4]); валидные сегменты обеих форм; nasa7_classic не принимает integralConstants; nasa_cea требует их (отсутствие/NaN — ошибки); отсутствие form не компенсируется note/rawInput; неизвестные формы (nasa9/chemkin/shomate) отклоняются; смешение форм отклоняется; 7 конечных коэффициентов; сегмент реального каталога не проходит в чужой форме в обе стороны |
 | coreThermodynamics.test | 66 | 4.3.1: валидная запись с известными значениями; оценочные значения с методом; unknown без числовой подстановки; отсутствие provenance у known/estimated; некорректные единицы и размерности; конверсия J/mol ↔ kJ/mol; сегменты NASA-7 (корректные/пересекающиеся/неупорядоченные); fitted без исходных Cp-таблиц; контрольные точки и диапазоны; reference state (обязательность, фаза записи, автоматические 1 bar/298.15 K не назначаются); интеграция в validateSpecies (отсутствие thermodynamics = не предоставлены); совместимость SpeciesCatalog и legacy-адаптеров; детерминированность и отсутствие побочных эффектов; 4.3.1 hardening: reference state при числовых Cp-данных (таблица/NASA-7/оба без reference state — ошибка; с корректным reference state проходят; несовпадение фазы — ошибка); безопасная runtime-валидация (null вместо ScientificValue/referenceState/heatCapacity/таблиц/точек/NASA-7/сегментов/диапазонов/derivation/provenance, битые quantity — диагностики без исключений, детерминированность);provenance отдельных Cp-точек (наследование таблицы; origin unknown/без идентификации источника/derived_computed без метода/неизвестный origin — ошибки; корректный точечный и с методом — проходят); заключительная проверка: повреждённая bounded-неопределённость у known/estimated — диагностики; температура Cp-точки, граница rangeK и температура reference state в чужой размерности — диагностика без использования значения в порядке/диапазонах/положительности; детерминированность |
 | coreScientificValue.test | 19 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации; заключительная проверка 4.3.1: bounded-неопределённость (above/below принимаются; отсутствие direction, null и постороннее значение — ошибки валидации; конструкторы — ScientificValueError invalid_uncertainty; конечность bound сохранена) |
-| coreSpecies.test | 18 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе |
+| coreSpecies.test | 25 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе; финальная корректировка 4.3.2: molarMassProvenance — recordId обязателен (отсутствие, null, пустая/пробельная строка, не-строка — ошибки; непустой — проходит; отсутствие самого поля — норма; recordId не заменяет идентификацию источника) |
 | coreReservoir.test | 56 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён); 4.1.1.3.1: строгие записи — Map/Set/Date/RegExp/экземпляры классов в properties/material.entries/energy — invalid, Object.create(null) валиден |
 | coreFluxLedger.test | 88 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries; 4.1.1.3.1: Map/Date в entries — not_verifiable, а не «известная пустота» |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
