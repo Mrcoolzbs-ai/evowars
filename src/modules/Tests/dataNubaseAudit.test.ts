@@ -1036,7 +1036,7 @@ describe('Stage 4.3.3 (аудит R4): SHA-256 фактического вход
     }
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('ASCII');
-    expect((error as Error).message).toContain('позиции 11');
+    expect((error as Error).message).toContain('позиции 12');
   });
 
   it('константы локально проверенной копии: SHA-256, размер, дата получения, версия парсера', () => {
