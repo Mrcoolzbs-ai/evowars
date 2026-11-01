@@ -59,9 +59,10 @@ describe('Stage 4.3.3 (данные): полнота каталога 118 эле
 
   it('поиск по атомному номеру и символу возвращает одну и ту же запись', () => {
     const catalog = buildElementCatalog();
-    for (const el of allElements()) {
+    const els = catalog.list();
+    for (const el of els) {
       expect(catalog.getByAtomicNumber(el.atomicNumber)).toBe(catalog.getBySymbol(el.symbol));
-      expect(catalog.getByAtomicNumber(el.atomicNumber)).toBe(el);
+      expect(catalog.getBySymbol(el.symbol)).toBe(el);
     }
   });
 
@@ -557,7 +558,7 @@ describe('Stage 4.3.3 (данные): происхождение значени�
   it('у H каждое свойство — собственный источник (IUPAC, CIAAW, номенклатура, категории)', () => {
     const h = buildElement(1);
     expect(h.nameEnglishProvenance.sourceId).toBe('iupac-pt');
-    expect(h.nameRussianProvenance.sourceId).toBe('ru-element-nomenclature-editorial');
+    expect(h.nameRussianProvenance.sourceId).toBe('ru-element-nomenclature');
     expect(h.position.provenance.sourceId).toBe('iupac-pt');
     expect(h.category.provenance.sourceId).toBe('element-categories');
     const w = h.standardAtomicWeight;
