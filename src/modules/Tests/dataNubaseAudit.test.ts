@@ -28,6 +28,7 @@ import {
   auditNubaseElement,
   auditNubaseText
 } from '../Data/nubaseAudit';
+import type { NubaseAuditRow } from '../Data/nubaseAudit';
 
 // Фикстуры — ДОСЛОВНЫЕ строки официального ASCII-файла NUBASE2020
 // (сгенерированы из локально проверенной копии файла построчно;
@@ -124,7 +125,7 @@ function rowsOf(lines: readonly string[]): ReturnType<typeof parseNubaseAuditTex
   return parseNubaseAuditText(lines.join('\n'));
 }
 
-function parseOrThrow(line: string): ReturnType<typeof parseNubaseAuditLine> {
+function parseOrThrow(line: string): NubaseAuditRow {
   const row = parseNubaseAuditLine(line);
   if (row === null) {
     throw new Error('строка NUBASE2020 должна разбираться: ' + line.slice(0, 20));
@@ -136,7 +137,7 @@ function reportOrThrow(z: number, lines: readonly string[]): ReturnType<typeof a
   return auditNubaseElement(z, rowsOf(lines));
 }
 
-function anchorOrThrow(report: ReturnType<typeof auditNubaseElement>): ReturnType<typeof parseNubaseAuditLine> {
+function anchorOrThrow(report: ReturnType<typeof auditNubaseElement>): NubaseAuditRow {
   if (report.anchor === null) {
     throw new Error('в отчёте аудита должен быть якорь');
   }
