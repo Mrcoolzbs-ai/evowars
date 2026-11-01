@@ -29,7 +29,7 @@ function allElements(): readonly ChemicalElement[] {
   return buildElementCatalog().list();
 }
 
-function expectKnownCandidates(el: ChemicalElement): Extract<RepresentativeIsotopeCandidates, { status: 'known' }> {
+function expectKnownCandidates(el: ChemicalElement): RepresentativeIsotopeCandidates {
   const c = el.representativeIsotopeCandidates;
   if (c.status !== 'known') {
     throw new Error('у Z=' + el.atomicNumber + ' ожидались известные кандидаты, получен ' + c.status);
