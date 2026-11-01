@@ -490,6 +490,28 @@
 > +36, dataElementCatalog +50, ранее в доках ошибочно +37/+49).
 > Golden baseline не изменён. См. §2.18 и §4.
 
+> Корректирующая ревизия R2 аудита Stage 4.3.3 (2026-11-01):
+> (1) год NUBASE2020 — тропический (1 y = 365.2422 сут =
+> 31 556 926 с), а не юлианский: в реестре единиц времени
+> зарегистрированы самостоятельные y, ky, My с официальным
+> SI-фактором NUBASE2020; 12 записей каталога перенесены без
+> пересчёта значений и неопределённостей; юлианские yr/ka/Ma
+> остаются отдельными единицами реестра, легаси Units.YEAR_S не
+> изменён. (2) модель состояния NuclideCandidate расширена полями
+> stateIndex (i) / stateCode (s) NUBASE2020 с интерпретацией пары
+> (i, s) по шапке официального файла (i>=3 — НЕ уровень
+> автоматически; контрольные примеры: 92Tc p — i=3, 205Po p — i=3,
+> 57.4(9) ms, 205Po q — i=4, 115(10) ns); (3) повторное
+> ранжирование всех экспериментально наблюдавшихся строк 14
+> элементов: состав кандидатов не изменился (44 записи / 3 изомерных
+> состояния / 43 (Z,A)), полнота — 8 complete / 6 not_verifiable
+> (Z=61, 84, 86, 89, 96, 97 — нижние пределы T1/2 без верхней
+> границы) / 20 incomplete; (4) валидатор: dataStatus ↔
+> halfLife.status, единый recordId строки NUBASE2020 у кандидата и
+> halfLife provenance. Тесты +14 (corePhysicalQuantity.test +4,
+> coreElements.test +7, dataElementCatalog.test +3; по CI
+> 33 файла / 1328). Golden baseline не изменён. См. §2.18 и §4.
+>
 ## 1. Слои ядра (`src/modules/Core/`)
 
 | Файл | Слой | Ответственность |
@@ -1580,6 +1602,32 @@ CIAAW несёт applicability/limitations (normal materials — справоч�
 выбирается: перекрытие не доказывает статистической эквивалентности
 значений, единственный кандидат не назначается.
 
+Корректирующая ревизия R2 аудита (2026-11-01): единицы времени
+NUBASE2020 — тропический год (1 y = 365.2422 сут = 31 556 926 с)
+и его кратные ky, My зарегистрированы в physicalQuantity как
+самостоятельные (SI-факторы 31 556 926 с, ×1000, ×1 000 000); 12
+записей каталога на y/ky/My (Tc-97, Tc-98, Np-237, Pu-244, Cm-247,
+Pm-145, Po-209, Ac-227, Cf-251, Ra-226, Am-243, Bk-247) используют
+их без пересчёта значений и неопределённостей; юлианские yr/ka/Ma
+и легаси Units.YEAR_S не изменены. Модель NuclideCandidate
+расширена полями stateIndex (i, 0–9) и stateCode (s; реестр кодов:
+0 — «», 1 m, 2 n, 3 p, 4 q, 5 r, 6 x, 8 i, 9 j): уникальность
+кандидата — по строке источника (A, i, s), Isom.Unc=* хранится
+отдельно от вида состояния; валидатор проверяет согласованность
+i и s, ground ⇒ i=0, isomeric ⇒ не IAS-коды (8 i, 9 j),
+согласованность dataStatus с halfLife.status и единство recordId
+строки NUBASE2020 у кандидата и halfLife provenance. Повторное
+ранжирование всех экспериментально наблюдавшихся строк 14
+элементов с корректной интерпретацией пары (i, s) (i=3,4,5,6 и
+s=p,q,r,x могут обозначать дополнительные изомерные состояния,
+i>=3 — НЕ уровень автоматически): состав кандидатов не изменился
+(44 записи / 3 изомерных состояния / 43 уникальные пары (Z,A));
+полнота — 8 complete (Z=43, 85, 87, 88, 93, 94, 95, 98) /
+6 not_verifiable (Z=61, 84, 86, 89, 96, 97 — наблюдавшиеся
+состояния с нижними пределами T1/2 без верхней границы, полнота
+не доказуема и не сохраняется complete по предположению) /
+20 incomplete (Z=99–118).
+
 ## 3. Интеграция (точки контакта с легаси)
 
 1. `GeneratedWorld.coreWorldState?: CoreWorldState` — опциональное поле.
@@ -1635,16 +1683,16 @@ golden-траектория 100 шагов воспроизводится чис
 дублирование вспомогательных функций (аудит §2.7) и легаси-ветка
 характеристик тела (§2.6) пока не удалены — контракты для этого готовы.
 
-## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6) + корректирующая ревизия Stage 4.3.2 (+12: coreNasaPolynomialForm.test) + финальная научная корректировка 4.3.2 (+7: coreSpecies.test) + Stage 4.3.3 (+36: coreElements.test) + корректирующая ревизия после аудита Stage 4.3.3 (+14: coreElements.test)
+## 4. Тесты ядра (505 тестов, 15 файлов; Stage 4.1 + ревизии 4.1.1 + 4.1.1.2 + 4.1.1.3 + 4.1.1.3.1 + 4.2.1 + 4.2.1.2 + 4.2.2 + 4.2.2.1 + 4.2.2.2 + 4.2.2.3 + 4.2.2.4 + 4.2.2.5 + 4.2.2.5.1 (все эти ревизии — без новых core-тестов)) + 4.3.1 (+37: coreThermodynamics.test) + 4.3.1 hardening (+23: coreThermodynamics.test) + 4.3.1 заключительная проверка валидатора (+11: coreScientificValue.test +5, coreThermodynamics.test +6) + корректирующая ревизия Stage 4.3.2 (+12: coreNasaPolynomialForm.test) + финальная научная корректировка 4.3.2 (+7: coreSpecies.test) + Stage 4.3.3 (+36: coreElements.test) + корректирующая ревизия после аудита Stage 4.3.3 (+14: coreElements.test) + аудит R2 Stage 4.3.3 (+11: corePhysicalQuantity.test +4, coreElements.test +7)
 
 | Файл | it() | Покрытие |
 |---|---|---|
-| corePhysicalQuantity.test | 21 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение |
+| corePhysicalQuantity.test | 25 | преобразования, round-trip, несовместимые размерности, составные размерности, NaN/Inf, неизвестные единицы, нули/отрицательные, переполнение; аудит R2: единицы тропического года NUBASE2020 y/ky/My (SI-фактор 31 556 926 с, отличие от юлианских yr/ka/Ma, размерность времени) |
 | coreNasaPolynomialForm.test | 12 | 4.3.2 корректирующая: реестр форм (nasa7_classic/nasa_cea, NASA-9 вне реестра); базисы степеней ([0..4] против [-2..4]); валидные сегменты обеих форм; nasa7_classic не принимает integralConstants; nasa_cea требует их (отсутствие/NaN — ошибки); отсутствие form не компенсируется note/rawInput; неизвестные формы (nasa9/chemkin/shomate) отклоняются; смешение форм отклоняется; 7 конечных коэффициентов; сегмент реального каталога не проходит в чужой форме в обе стороны |
 | coreThermodynamics.test | 66 | 4.3.1: валидная запись с известными значениями; оценочные значения с методом; unknown без числовой подстановки; отсутствие provenance у known/estimated; некорректные единицы и размерности; конверсия J/mol ↔ kJ/mol; сегменты NASA-7 (корректные/пересекающиеся/неупорядоченные); fitted без исходных Cp-таблиц; контрольные точки и диапазоны; reference state (обязательность, фаза записи, автоматические 1 bar/298.15 K не назначаются); интеграция в validateSpecies (отсутствие thermodynamics = не предоставлены); совместимость SpeciesCatalog и legacy-адаптеров; детерминированность и отсутствие побочных эффектов; 4.3.1 hardening: reference state при числовых Cp-данных (таблица/NASA-7/оба без reference state — ошибка; с корректным reference state проходят; несовпадение фазы — ошибка); безопасная runtime-валидация (null вместо ScientificValue/referenceState/heatCapacity/таблиц/точек/NASA-7/сегментов/диапазонов/derivation/provenance, битые quantity — диагностики без исключений, детерминированность);provenance отдельных Cp-точек (наследование таблицы; origin unknown/без идентификации источника/derived_computed без метода/неизвестный origin — ошибки; корректный точечный и с методом — проходят); заключительная проверка: повреждённая bounded-неопределённость у known/estimated — диагностики; температура Cp-точки, граница rangeK и температура reference state в чужой размерности — диагностика без использования значения в порядке/диапазонах/положительности; детерминированность |
 | coreScientificValue.test | 19 | все 6 статусов, unknown≠0, na≠ni, invalid unusable, метод estimated, uncertainty, provenance при конвертации; заключительная проверка 4.3.1: bounded-неопределённость (above/below принимаются; отсутствие direction, null и постороннее значение — ошибки валидации; конструкторы — ScientificValueError invalid_uncertainty; конечность bound сохранена) |
 | coreSpecies.test | 25 | валидация, каталог, CO2(g)/CO2(aq), фазы, элементный/зарядовый баланс, непроверяемость при неизвестном составе; финальная корректировка 4.3.2: molarMassProvenance — recordId обязателен (отсутствие, null, пустая/пробельная строка, не-строка — ошибки; непустой — проходит; отсутствие самого поля — норма; recordId не заменяет идентификацию источника) |
-| coreElements.test | 50 | валидатор ChemicalElement (Z вне 1…118, символ не IUPAC, пустые названия, provenance не идентифицирует источник, группа/блок null без причин, категория, интервальный вес — границы и исходная нотация, скобочный вес — неопределённость и исходная нотация, not_assigned с reason, изотопные записи — целые массовые числа, распространённости [0,1], recordId, кандидаты — Z владельца, recordId, массовое число, причина; unknown без числовой подстановки), каталог (поиск по Z/символу, дубликаты Z и символа — ElementError, invalid_element), checkElementCountsReference, provenanceIdentifiesSource, ElementError; корректирующая ревизия после аудита: кандидаты — Tc-98 у H отклонён, несогласованное nuclideNotation (символ владельца/массовое число/суффикс состояния), A < Z, recordId ≠ provenance.recordId, дубликат (массовое число + состояние); T1/2 — eV/kg/K отклонены (обязательна размерность времени), 0 и отрицательное значение, недопустимые статусы, невалидная неопределённость, положительный цикл по всем 8 единицам времени; веса строго положительны (отрицательная граница интервала, отрицательное значение), not_assigned с числовыми полями, изотопы A < Z и повторное массовое число |
+| coreElements.test | 58 | валидатор ChemicalElement (Z вне 1…118, символ не IUPAC, пустые названия, provenance не идентифицирует источник, группа/блок null без причин, категория, интервальный вес — границы и исходная нотация, скобочный вес — неопределённость и исходная нотация, not_assigned с reason, изотопные записи — целые массовые числа, распространённости [0,1], recordId, кандидаты — Z владельца, recordId, массовое число, причина; unknown без числовой подстановки), каталог (поиск по Z/символу, дубликаты Z и символа — ElementError, invalid_element), checkElementCountsReference, provenanceIdentifiesSource, ElementError; корректирующая ревизия после аудита: кандидаты — Tc-98 у H отклонён, несогласованное nuclideNotation (символ владельца/массовое число/суффикс состояния), A < Z, recordId ≠ provenance.recordId, дубликат (массовое число + состояние); T1/2 — eV/kg/K отклонены (обязательна размерность времени), 0 и отрицательное значение, недопустимые статусы, невалидная неопределённость, положительный цикл по всем 8 единицам времени; веса строго положительны (отрицательная граница интервала, отрицательное значение), not_assigned с числовыми полями, изотопы A < Z и повторное массовое число; аудит R2: stateIndex/stateCode — согласованность i и s, ground ⇒ i=0, isomeric ⇒ не IAS-коды (i/j), дубликат строки источника (A, i, s), единицы y/ky/My у 12 записей NUBASE2020, согласованность dataStatus ↔ halfLife.status, единый recordId строки NUBASE2020 у кандидата и halfLife provenance |
 | coreReservoir.test | 56 | basis, insufficient_amount, иммутабельность, basis_mismatch, arbitrary_units, свойства ScientificValue, энергия (null≠0, NaN), amount↔mass с convert ДО деления и контролем переполнения (1000 г / 0.018 кг/моль = 55.5556 моль), validateReservoirRecord; 4.1.1.2: обязательность properties + materialApplicability (not_applicable; конфликт и мусор — ошибки); 4.1.1.3: словари ≠ массивы (properties/material.entries: [] — invalid, {} — valid, known-zero сохранён); 4.1.1.3.1: строгие записи — Map/Set/Date/RegExp/экземпляры классов в properties/material.entries/energy — invalid, Object.create(null) валиден |
 | coreFluxLedger.test | 88 | внутренние/внешние, rate≠integrated, идемпотентность, revert, РЕАЛЬНЫЕ переносы энергии (applyFlux/revertFlux меняют storedJ), аудиты со статусами и областью времени (FluxAuditScope, untimed), basis-aware балансы элементов/заряда (масса через молярную массу: 1 моль CO2 = 0.044 кг → 1 моль C), auditReservoirFluxes, validateFluxLedger, ghost-резервуары; 4.1.1.2: unknown ≠ known-empty ≠ known-zero, полный пофазовый union-баланс, untimed не маскируется как balanced; 4.1.1.3: materialApplicability в пофазовом аудите (маркер в обоих состояниях; unknown ≠ not_applicable), reservoirsToMolarCounts отвергает массив entries; 4.1.1.3.1: Map/Date в entries — not_verifiable, а не «известная пустота» |
 | coreSimulationClock.test | 17 | шаги, запрет zero/negative/NaN, сегментация 1e16+0.001, сравнение моментов, round-trip сериализации, yearsToSeconds |
@@ -1658,10 +1706,15 @@ golden-траектория 100 шагов воспроизводится чис
 | coreInvariantAuditor.test | 15 | 4.2.1: balanced/imbalanced/approximate/not_verifiable, внутренние потоки ≠ дисбаланс, внешние источники/стоки, неизвестный материал/энергия, untimed, неполная граница, отрицательные запасы |
 | coreThermalState.test | 91 | 4.2.2: термодинамическая валидация («только K», размерность Θ, known/estimated конечны и ≥ 0, unknown без чисел, invalid — только диагностика, hasUsableTemperature/temperatureValueOrNull); профиль атмосферы (single_layer_estimate + обязательные limitations, unknown — 0 слоёв, дубли/пустые layerId, слои не в K, altitudeRangeM); BodyThermalState в validateWorldState (схема 1.2.0, 1.1.0 поддерживается, invalid_thermal_state; reservoirTemperature не в K → invalid_reservoir; миграция 1.2→1.3 thermalState не создаёт); адаптеры пресетов (historical_game 95 K → estimated «game_assumption» + rawInput, observational_reference 94 K «НЕ измерение» + sourceName, hypothetical, пользовательская, null/NaN/отрицательная; planetThermalState: T_eq known отдельно, surface unknown, effective not_applicable; центральные: star/substellar known\|unknown (среднее по классу НЕ подставляется), jet not_applicable; wiring coreWorldStateFromLegacyWorld); resolver (резервуар/слой с provenance, отсутствие → синтезированный unknown с причиной, T_eq/surfaceTemperature/соседние области НЕ fallback, заявленный unknown сохраняется, invalid не используется, чужое тело, invalid_place throw ×3, иммутабельность, детерминизм); диагностика (noted, threshold_exceeded, not_comparable, invalid_threshold throw, входы не изменяются); фазовый анализ (temperatureBasis + числовое совпадение с легаси, unknown → все компоненты unknown, числовой API без регрессии); регрессии пресетов (methane_ethane 95/1.5/historical_game, titan_reference 94 observational_reference ≠ methane_ethane, earth/venus/mars, not_applicable ≠ unknown); 4.2.2.1: строгая форма (estimated без method, NaN/±Inf/отрицательные, known без quantity, статусы не превращаются в число), T_eq из EnergyBalance с confidence estimated НЕ повышается до known, teff-диапазон 2500–4000 K сохранён в rawInput и не схлопнут в среднее, presetNotes → provenance.note (sourceName только observational_reference), resolver: пустые/пробельные id → invalid_place, orphan-резервуар → unknown, слой из unknown-профиля не читается, location-aware фазовый скрининг (слой surface_boundary — числовой паритет и unknown без fallback); 4.2.2.2: presetNotes ≠ sourceName (observational_reference — классификация, не библиография; sourceName undefined при только presetNotes), presetSourceName переносится в sourceName, provenance профиля слоя сохраняется, РЕАЛЬНЫЙ computeEnergyBudget (estimated сохранён, rawInput A (альбедо Бонда)/f/ε, метод/uncertainty перенесены, surfaceTemperature НЕ заполняется), миграция легаси surfaceTemperature без выдуманного provenance, location в temperatureBasis (слой — да, ScientificValue — нет) |
 
-Всего в проекте 33 тест-файла, 1314 тестов (после корректирующей
-ревизии после аудита Stage 4.3.3 — фактические итоги Vitest
-«Test Files 33 passed (33) / Tests 1314 passed (1314)» из CI
-этапа: coreElements.test +14, dataElementCatalog.test +2; после
+Всего в проекте 33 тест-файла, 1328 тестов (после корректирующей
+ревизии R2 аудита Stage 4.3.3 — фактические итоги Vitest
+«Test Files 33 passed (33) / Tests 1328 passed (1328)»: аудит R2
+добавил +14 — corePhysicalQuantity.test +4, coreElements.test +7,
+dataElementCatalog.test +3; после корректирующей ревизии после
+аудита Stage 4.3.3 — 1314 (coreElements.test +14,
+dataElementCatalog.test +2; фактические количества после неё:
+coreElements.test 51, dataElementCatalog.test 51 — фактическое
+распределение +15/+1, ранее ошибочно указывалось +14/+2); после
 Stage 4.3.3 — 33 файла / 1298 тестов (фактические итоги CI;
 фактическое распределение: coreElements.test +36,
 dataElementCatalog.test +50 — ранее здесь ошибочно указывалось
