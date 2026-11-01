@@ -997,9 +997,17 @@ export function auditNubaseElement(
   let unresolvedPresent = false;
 
   for (const group of groups) {
+    // Аудит R4, C5: ссылки на строки группы — КОНКРЕТНЫЕ строки
+    // источника (Z, A, i, s, recordId): classifyNubaseState проверяет,
+    // что все строки группы относятся к тому же (Z, A), recordId
+    // уникальны и классифицируемая строка присутствует в группе ровно
+    // один раз — дубликаты строк не формируют цепочку изомеров.
     const refs: NubaseStateRowRef[] = group.map((r) => ({
+      atomicNumber: r.atomicNumber,
+      massNumber: r.massNumber,
       stateIndex: r.stateIndex,
-      stateCode: r.stateCode as NubaseStateRowRef['stateCode']
+      stateCode: r.stateCode as NubaseStateRowRef['stateCode'],
+      recordId: r.recordId
     }));
     for (let k = 0; k < group.length; k++) {
       const row = group[k];

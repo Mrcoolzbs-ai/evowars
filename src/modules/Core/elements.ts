@@ -295,10 +295,24 @@ export const NUBASE_STATE_CLASSIFICATIONS: readonly NubaseStateClassificationKin
   'indeterminate'
 ];
 
-/** Ссылка на строку состояния NUBASE2020 конкретного нуклида (Z, A). */
+/**
+ * Ссылка на КОНКРЕТНУЮ строку состояния NUBASE2020 нуклида (Z, A)
+ * (аудит R4, C5). Пара (i, s) идентифицирует строку только ВНУТРИ
+ * нуклида: без атомного номера, массового числа и recordId нельзя
+ * доказать, что sibling-строки основания классификации относятся к
+ * тому же (Z, A) и к реальным строкам источника. Все поля обязательны.
+ */
 export interface NubaseStateRowRef {
+  /** Атомный номер Z нуклида-владельца строки (целое, 1…118). */
+  atomicNumber: number;
+  /** Массовое число A нуклида-владельца строки (целое, >= 1). */
+  massNumber: number;
+  /** Индекс состояния i NUBASE2020. */
   stateIndex: number;
+  /** Буквенный код состояния s NUBASE2020 (согласован с i). */
   stateCode: NuclideStateCode;
+  /** Идентификатор конкретной строки источника (непустой). */
+  recordId: string;
 }
 
 /**
@@ -316,6 +330,11 @@ export type StateClassificationBasisRule = 'format' | 'context-more-than-two-iso
  * дополнительных изомеров) ссылки на sibling-строки того же
  * (Z, A), подтверждающие наличие более двух изомерных состояний.
  * Научное основание НЕ ограничивается текстовой заметкой stateNote.
+ * Аудит R4, C5: каждая sibling-ссылка — КОНКРЕТНАЯ строка источника
+ * (Z, A, i, s, recordId), а не только пара (i, s): валидатор
+ * проверяет принадлежность тому же (Z, A), собственный непустой
+ * уникальный recordId, отсутствие самоссылки и предшествование
+ * строке кандидата в цепочке изомеров.
  */
 export interface StateClassificationBasis {
   rule: StateClassificationBasisRule;
@@ -353,19 +372,97 @@ export interface NubaseStateClassification {
  * (в группе есть m, n, p). Примеры уровней вне контекста среди 14
  * ранжируемых элементов: 236Np p, 243Np p, 243Cm p, 239Bk p…243Bk p,
  * 245Cf p; полный цепной изомер 6-го порядка: 214Ra x.
+ *
+ * Аудит R4, C5: классификация доказуема только для КОНКРЕТНОЙ строки
+ * источника (Z, A, i, s, recordId) внутри группы валидных строк ТОГО
+ * ЖЕ (Z, A) с уникальными recordId и парами (i, s), в которой
+ * классифицируемая строка присутствует РОВНО один раз. Чужие (Z, A)
+ * строки, дубликаты recordId и дублирование строк источника не могут
+ * искусственно сформировать цепочку изомеров — в этих случаях
+ * классификация indeterminate, тип состояния не угадывается.
  */
+/**
+ * Валидность ссылки на строку состояния NUBASE2020 (аудит R4, C5):
+ * целые атомный номер (1…118) и массовое число (>= 1), согласованная
+ * пара (i, s) и непустой recordId. Ссылка без этих полей не
+ * идентифицирует конкретную строку источника.
+ */
+function isNubaseStateRowRef(value: unknown): value is NubaseStateRowRef {
+  if (!isNonNullObject(value)) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.atomicNumber === 'number' &&
+    Number.isInteger(v.atomicNumber) &&
+    v.atomicNumber >= 1 &&
+    v.atomicNumber <= 118 &&
+    typeof v.massNumber === 'number' &&
+    Number.isInteger(v.massNumber) &&
+    v.massNumber >= 1 &&
+    typeof v.stateIndex === 'number' &&
+    Number.isInteger(v.stateIndex) &&
+    NUBASE_STATE_CODE_BY_INDEX[v.stateIndex as number] === v.stateCode &&
+    typeof v.recordId === 'string' &&
+    v.recordId.trim() !== ''
+  );
+}
+
 export function classifyNubaseState(
   row: NubaseStateRowRef,
   groupRows: readonly NubaseStateRowRef[]
 ): NubaseStateClassification {
+  // Аудит R4, C5: классификация доказуема только для КОНКРЕТНОЙ строки
+  // реального нуклида (Z, A) с recordId. Ссылка без этих полей, группа
+  // с чужими (Z, A) строками или дубликаты строк источника контекста
+  // НЕ доказывают — тип состояния не угадывается.
+  if (!isNubaseStateRowRef(row)) {
+    return { classification: 'indeterminate' };
+  }
+  for (const g of groupRows) {
+    if (
+      !isNubaseStateRowRef(g) ||
+      g.atomicNumber !== row.atomicNumber ||
+      g.massNumber !== row.massNumber
+    ) {
+      return { classification: 'indeterminate' };
+    }
+  }
+  // Уникальность строк группы (аудит R4, C5): в реальной группе
+  // NUBASE2020 каждая пара (Z, A, i, s) и каждый recordId представлены
+  // РОВНО один раз (парсер отклоняет дубликаты); классифицируемая строка
+  // присутствует в своей группе РОВНО один раз (по recordId и по паре
+  // (i, s)). Дублирование строк источника (повтор recordId ИЛИ пары
+  // (i, s)) не может искусственно сформировать цепочку изомеров: группа
+  // с дубликатами не соответствует реальному нуклиду, тип состояния
+  // не угадывается.
+  const recordIds = new Set<string>();
+  const statePairs = new Set<string>();
+  let rowSeenByRecord = 0;
+  let rowSeenByPair = 0;
+  for (const g of groupRows) {
+    if (recordIds.has(g.recordId)) {
+      return { classification: 'indeterminate' };
+    }
+    recordIds.add(g.recordId);
+    const pairKey = g.stateIndex + '|' + g.stateCode;
+    if (statePairs.has(pairKey)) {
+      return { classification: 'indeterminate' };
+    }
+    statePairs.add(pairKey);
+    if (g.recordId === row.recordId) {
+      rowSeenByRecord += 1;
+    }
+    if (g.stateIndex === row.stateIndex && g.stateCode === row.stateCode) {
+      rowSeenByPair += 1;
+    }
+  }
+  if (rowSeenByRecord !== 1 || rowSeenByPair !== 1) {
+    return { classification: 'indeterminate' };
+  }
   const i = row.stateIndex;
   const s = row.stateCode;
-  if (
-    typeof i !== 'number' ||
-    !Number.isInteger(i) ||
-    typeof s !== 'string' ||
-    NUBASE_STATE_CODE_BY_INDEX[i] !== s
-  ) {
+  if (NUBASE_STATE_CODE_BY_INDEX[i] !== s) {
     return { classification: 'indeterminate' };
   }
   if (i === 0) {
@@ -377,7 +474,7 @@ export function classifyNubaseState(
   if (i === 1 || i === 2) {
     return { classification: 'isomer', basis: { rule: 'format' } };
   }
-  const chain: ReadonlyArray<NubaseStateRowRef> = [
+  const chain: ReadonlyArray<{ stateIndex: number; stateCode: NuclideStateCode }> = [
     { stateIndex: 1, stateCode: 'm' },
     { stateIndex: 2, stateCode: 'n' },
     { stateIndex: 3, stateCode: 'p' },
@@ -385,9 +482,10 @@ export function classifyNubaseState(
     { stateIndex: 5, stateCode: 'r' }
   ];
   const needed = chain.slice(0, i - 1);
-  const hasRow = (ref: NubaseStateRowRef): boolean =>
-    groupRows.some((r) => r.stateIndex === ref.stateIndex && r.stateCode === ref.stateCode);
-  if (!needed.every(hasRow)) {
+  const found: ReadonlyArray<NubaseStateRowRef | undefined> = needed.map((ref) =>
+    groupRows.find((g) => g.stateIndex === ref.stateIndex && g.stateCode === ref.stateCode)
+  );
+  if (found.some((g) => g === undefined)) {
     if (i === 5) {
       return { classification: 'resonance' };
     }
@@ -396,11 +494,20 @@ export function classifyNubaseState(
     }
     return { classification: 'level' };
   }
+  // Основание указывает на КОНКРЕТНЫЕ sibling-строки группы (Z, A,
+  // i, s, recordId), доказывающие контекст более двух изомерных
+  // состояний у этого нуклида.
   return {
     classification: 'isomer',
     basis: {
       rule: 'context-more-than-two-isomers',
-      siblingStates: needed.map((ref) => ({ stateIndex: ref.stateIndex, stateCode: ref.stateCode }))
+      siblingStates: (found as readonly NubaseStateRowRef[]).map((g) => ({
+        atomicNumber: g.atomicNumber,
+        massNumber: g.massNumber,
+        stateIndex: g.stateIndex,
+        stateCode: g.stateCode,
+        recordId: g.recordId
+      }))
     }
   };
 }
@@ -919,9 +1026,41 @@ export function validateChemicalElement(element: unknown): string[] {
                 if (!Array.isArray(siblings) || siblings.length === 0) {
                   errors.push(where(`кандидат ${label}: classificationBasis дополнительного изомера обязан содержать непустой список sibling-строк того же (Z, A)`));
                 } else {
+                  // Аудит R4, C5: sibling-строки — КОНКРЕТНЫЕ строки того
+                  // же (Z, A), что и кандидат: целые Z и A, согласованная
+                  // пара (i, s), собственный непустой recordId; дубли
+                  // sibling-строк, самоссылка кандидата и непредшествующие
+                  // строки цепочки запрещены.
+                  const siblingRecordIds = new Set<string>();
+                  const siblingPairs = new Set<string>();
                   for (const sib of siblings) {
-                    if (!isNonNullObject(sib) || NUBASE_STATE_CODE_BY_INDEX[(sib as Record<string, unknown>).stateIndex as number] !== (sib as Record<string, unknown>).stateCode) {
-                      errors.push(where(`кандидат ${label}: каждая sibling-строка основания классификации обязана быть согласованной парой (i, s) NUBASE2020`));
+                    if (!isNubaseStateRowRef(sib)) {
+                      errors.push(where(`кандидат ${label}: каждая sibling-строка основания классификации обязана быть ссылкой на конкретную строку NUBASE2020: целые атомный номер (1…118) и массовое число, согласованная пара (i, s) и непустой recordId (аудит R4)`));
+                      continue;
+                    }
+                    if (
+                      typeof c.atomicNumber === 'number' &&
+                      typeof c.massNumber === 'number' &&
+                      (sib.atomicNumber !== c.atomicNumber || sib.massNumber !== c.massNumber)
+                    ) {
+                      errors.push(where(`кандидат ${label}: sibling-строки основания обязаны относиться к тому же (Z, A), что и кандидат (Z=${String(c.atomicNumber)}, A=${String(c.massNumber)}), получено (Z=${String(sib.atomicNumber)}, A=${String(sib.massNumber)}), recordId ${sib.recordId} (аудит R4)`));
+                    }
+                    if (isNonEmptyString(c.recordId) && sib.recordId === c.recordId) {
+                      errors.push(where(`кандидат ${label}: кандидат не может ссылаться сам на себя как на предшествующую строку цепочки изомеров (recordId ${sib.recordId}) (аудит R4)`));
+                    }
+                    if (sib.stateIndex >= (c.stateIndex as number)) {
+                      errors.push(where(`кандидат ${label}: sibling-строка (i=${String(sib.stateIndex)}, s=${String(sib.stateCode)}) обязана ПРЕДШЕСТВОВАТЬ кандидату (i=${String(c.stateIndex)}) в цепочке изомеров m→n→p→q→r (аудит R4)`));
+                    }
+                    if (siblingRecordIds.has(sib.recordId)) {
+                      errors.push(where(`кандидат ${label}: дубли sibling-строк запрещены — recordId ${sib.recordId} повторяется в основании классификации (аудит R4)`));
+                    } else {
+                      siblingRecordIds.add(sib.recordId);
+                    }
+                    const pairKey = sib.stateIndex + '|' + sib.stateCode;
+                    if (siblingPairs.has(pairKey)) {
+                      errors.push(where(`кандидат ${label}: дубли sibling-строк запрещены — пара (i=${String(sib.stateIndex)}, s=${String(sib.stateCode)}) того же (Z, A) повторяется в основании классификации с recordId ${sib.recordId}: в NUBASE2020 каждая пара (i, s) представлена ровно один раз (аудит R4)`));
+                    } else {
+                      siblingPairs.add(pairKey);
                     }
                   }
                   const requiredChain: ReadonlyArray<{ stateIndex: number; stateCode: string }> = [
