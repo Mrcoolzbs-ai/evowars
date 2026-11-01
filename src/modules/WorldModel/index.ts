@@ -12,8 +12,11 @@ import type {
   CradleLocalEnvironment,
   CradleLocationType,
   LocalEnvironmentComponent,
-  EnergySourceClass
+  EnergySourceClass,
+  BodyPhysicalSample
 } from '../../types';
+import { earthMassesToKg, earthRadiiToM, kgToEarthMasses, mToEarthRadii, ms2ToG, G } from '../Units';
+import type { DeterministicRandom } from '../Generator/random';
 
 // ============================================
 // ЛОКАЛЬНАЯ СРЕДА КОЛЫБЕЛИ ЖИЗНИ
@@ -162,6 +165,127 @@ export function determineCradleLocalEnvironment(params: {
 // ФУНКЦИИ РАСЧЕТА ФИЗИЧЕСКИХ ХАРАКТЕРИСТИК
 // ============================================
 
+// ============================================
+// ФИЗИЧЕСКИЕ ПАРАМЕТРЫ ПЛАНЕТЫ (ЭТАП 3)
+// ============================================
+
+/**
+ * Диапазон физически допустимых средних плотностей твёрдых тел:
+ * от водяного льда (~1000 кг/м³) до железо-никелевых тел (~13000 кг/м³).
+ * Комбинации массы и радиуса вне диапазона считаются нефизическими.
+ */
+export const PLAUSIBLE_DENSITY_RANGE_KG_M3 = { min: 1000, max: 13000 };
+
+/** Максимальное число попыток сэмплирования физически согласованной пары. */
+const MAX_SAMPLING_ATTEMPTS = 40;
+
+/**
+ * Детерминированное сэмплирование физических параметров небесного тела:
+ * масса и радиус выбираются из диапазонов каталога через PRNG, затем
+ * рассчитываются плотность и гравитация:
+ *   ρ = M / (4/3·π·R³)
+ *   g = G·M/R²
+ *
+ * Физическая согласованность проверяется по средней плотности:
+ * комбинации, создающие невозможную плотность, не принимаются —
+ * сэмплирование повторяется (конечное число попыток; если ни одна
+ * попытка не успешна, результат помечается plausible: false и НЕ
+ * скрывается).
+ */
+export function sampleBodyPhysics(
+  body: CelestialBodyOption,
+  rng: DeterministicRandom
+): BodyPhysicalSample {
+  if (!body.massRange || !body.radiusRange) {
+    throw new Error(`Для тела ${body.id} не заданы диапазоны массы/радиуса: физические параметры не определяются`);
+  }
+
+  let massEarth = 0;
+  let radiusEarth = 0;
+  let densityKgM3 = 0;
+  let plausible = false;
+  let attempts = 0;
+
+  do {
+    massEarth = rng.nextFloatRange(body.massRange.min, body.massRange.max);
+    radiusEarth = rng.nextFloatRange(body.radiusRange.min, body.radiusRange.max);
+    const massKg = earthMassesToKg(massEarth);
+    const radiusM = earthRadiiToM(radiusEarth);
+    densityKgM3 = massKg / ((4 / 3) * Math.PI * radiusM ** 3);
+    plausible =
+      densityKgM3 >= PLAUSIBLE_DENSITY_RANGE_KG_M3.min &&
+      densityKgM3 <= PLAUSIBLE_DENSITY_RANGE_KG_M3.max;
+    attempts++;
+  } while (!plausible && attempts < MAX_SAMPLING_ATTEMPTS);
+
+  const massKg = earthMassesToKg(massEarth);
+  const radiusM = earthRadiiToM(radiusEarth);
+  const surfaceGravityMs2 = (G * massKg) / (radiusM * radiusM);
+
+  return {
+    massKg: {
+      value: massKg,
+      unit: 'кг',
+      confidence: 'estimated',
+      method: `сэмплировано из диапазона ${body.massRange.min}–${body.massRange.max} M⊕ (PRNG)`,
+      parameters: { 'M (M⊕)': massEarth },
+      uncertainty: 'объект представляет класс; значение выбрано внутри диапазона каталога',
+      source: '',
+      applicability: 'диапазон каталога — модельное представление класса тел'
+    },
+    radiusM: {
+      value: radiusM,
+      unit: 'м',
+      confidence: 'estimated',
+      method: `сэмплировано из диапазона ${body.radiusRange.min}–${body.radiusRange.max} R⊕ (PRNG)`,
+      parameters: { 'R (R⊕)': radiusEarth },
+      uncertainty: 'значение выбрано внутри диапазона каталога',
+      source: ''
+    },
+    densityKgM3: {
+      value: densityKgM3,
+      unit: 'кг/м³',
+      confidence: 'derived',
+      method: 'средняя плотность из массы и радиуса',
+      formula: 'ρ = M / (4/3·π·R³)',
+      parameters: { 'M (кг)': massKg, 'R (м)': radiusM },
+      source: ''
+    },
+    surfaceGravityMs2: {
+      value: surfaceGravityMs2,
+      unit: 'м/с²',
+      confidence: 'derived',
+      method: 'поверхностная гравитация из массы и радиуса',
+      formula: 'g = G·M/R²',
+      parameters: { 'M (кг)': massKg, 'R (м)': radiusM, 'G (м³·кг⁻¹·с⁻²)': G },
+      source: 'гравитационная постоянная: CODATA 2018'
+    },
+    surfaceGravityInG: {
+      value: ms2ToG(surfaceGravityMs2),
+      unit: 'g',
+      confidence: 'derived',
+      method: 'нормировка относительно земной гравитации g⊕ = 9.80665 м/с²',
+      formula: 'g/g⊕',
+      parameters: { 'g (м/с²)': surfaceGravityMs2 },
+      source: ''
+    },
+    consistencyCheck: {
+      plausible,
+      densityRangeKgM3: PLAUSIBLE_DENSITY_RANGE_KG_M3,
+      note: plausible
+        ? `средняя плотность ${densityKgM3.toFixed(0)} кг/м³ попадает в диапазон физически допустимых значений (${PLAUSIBLE_DENSITY_RANGE_KG_M3.min}–${PLAUSIBLE_DENSITY_RANGE_KG_M3.max} кг/м³)`
+        : `после ${MAX_SAMPLING_ATTEMPTS} попыток не найдена физически согласованная комбинация: средняя плотность ${densityKgM3.toFixed(0)} кг/м³ вне диапазона ${PLAUSIBLE_DENSITY_RANGE_KG_M3.min}–${PLAUSIBLE_DENSITY_RANGE_KG_M3.max} кг/м³; результат помечен как нефизический`
+    },
+    samplingMethod:
+      'масса и радиус сэмплируются независимо равномерно из диапазонов каталога; ' +
+      'комбинации с невозможной средней плотностью отбираются (повторное сэмплирование)',
+    notes: [
+      'значения массы и радиуса НЕ одинаковы для всех объектов класса: они выбираются из диапазона',
+      'сэмплирование детерминированно: одинаковый seed и позиция в потоке PRNG дают одинаковый результат'
+    ]
+  };
+}
+
 /**
  * Расчет физических характеристик, зависящих только от небесного тела,
  * центрального объекта и атмосферы (без колыбели жизни).
@@ -171,28 +295,46 @@ export function determineCradleLocalEnvironment(params: {
  * незаданными — они НЕ подменяются характеристиками колыбели жизни,
  * потому что локальная среда возникновения жизни может существенно
  * отличаться от поверхности планеты.
+ *
+ * Этап 3: если передана сэмплированная физическая модель тела
+ * (bodyPhysics), масса/радиус/гравитация берутся из неё, а не из
+ * легаси-средних значений.
  */
 export function calculateBodyCharacteristics(params: {
   centralObject: CentralObjectOption;
   celestialBody: CelestialBodyOption;
   atmosphere?: AtmosphereState;
+  bodyPhysics?: BodyPhysicalSample;
 }): PhysicalCharacteristics {
   const characteristics: PhysicalCharacteristics = {};
 
-  // Расчет массы и радиуса
-  const { mass, radius } = calculateMassAndRadius(params.celestialBody);
-  if (mass) characteristics.mass = mass;
-  if (radius) characteristics.radius = radius;
+  if (params.bodyPhysics) {
+    // Этап 3: сэмплированные физические параметры (SI) с обратной
+    // нормировкой к земным единицам для отображения.
+    characteristics.mass = kgToEarthMasses(params.bodyPhysics.massKg.value ?? 0);
+    characteristics.radius = mToEarthRadii(params.bodyPhysics.radiusM.value ?? 0);
+    characteristics.surfaceGravity = params.bodyPhysics.surfaceGravityInG.value ?? undefined;
+  } else {
+    // Легаси-режим (этап 2): средние значения диапазонов.
+    const { mass, radius } = calculateMassAndRadius(params.celestialBody);
+    if (mass) characteristics.mass = mass;
+    if (radius) characteristics.radius = radius;
 
-  // Расчет гравитации на поверхности
-  const gravity = calculateSurfaceGravity(params.celestialBody);
-  if (gravity) characteristics.surfaceGravity = gravity;
-
-  // Температура поверхности: только известные данные атмосферы.
-  // Не подменяем её температурой колыбели жизни.
-  if (typeof params.atmosphere?.temperature === 'number') {
-    characteristics.surfaceTemperature = params.atmosphere.temperature;
+    const gravity = calculateSurfaceGravity(params.celestialBody);
+    if (gravity) characteristics.surfaceGravity = gravity;
   }
+
+  // Stage 4.2.2: пресетная температура атмосферы больше НЕ становится
+  // температурой поверхности. Это РАЗНЫЕ величины:
+  // - температура атмосферы (atmosphere.temperature) — допущение
+  //   генератора о газовой оболочке (пресет), а не измерение;
+  // - температура поверхности (physicalCharacteristics.surfaceTemperature)
+  //   — свойство твёрдой поверхности, до радиационно-конвективной
+  //   модели (RCM) неизвестное;
+  // - равновесная температура T_eq (energyBudget) — радиационная
+  //   оценка серого тела, а не температура поверхности.
+  // Копирование любой из этих величин в surfaceTemperature запрещено:
+  // типизированный путь — BodyThermalState (Core/thermalState).
 
   // Атмосферное давление: только известные данные атмосферы.
   if (typeof params.atmosphere?.totalPressure === 'number') {
@@ -591,5 +733,8 @@ export default {
   getCradleLocationType,
   createWorldDescription,
   createShortDescription,
-  updateWorld
+  updateWorld,
+  sampleBodyPhysics
 };
+
+

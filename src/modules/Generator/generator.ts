@@ -17,6 +17,15 @@
 // 9. Полные физические характеристики.
 // 10. Источники энергии.
 // 11. Проверка совместимости на реальных данных мира.
+//
+// Этап 3 — физическая модель (причинно-следственная цепочка):
+// после выбора атмосферы сэмплируются физические параметры тела
+// (масса/радиус/плотность/гравитация), строится система центрального
+// объекта, орбита, атмосферная физическая модель (молярные доли,
+// парциальные давления, столб), фазовый скрининг, геологический
+// анализ, энергетический бюджет и начальное состояние химической
+// эволюции. Каждый следующий этап использует данные предыдущих,
+// а не независимую случайность.
 
 import { createRandom } from './random';
 import type {
@@ -36,18 +45,37 @@ import type {
   EvolutionImplications,
   FixedCategories,
   CradleLocalEnvironment,
-  EnergySourceClass
+  EnergySourceClass,
+  GeologicalAnalysis
 } from '../../types';
 import { GENERATOR_VERSION } from '../../types';
 
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles } from '../Data';
+import { getEarliestUniverseAgeGyr } from '../Data/starPhysical';
 import { checkCompatibility, CRADLE_RELATED_CATEGORIES } from '../Compatibility';
-import { createAtmosphere, normalizeAtmosphere } from '../Atmosphere';
+import type { CoreWorldState } from '../Core/worldState';
+import { createAtmosphere, normalizeAtmosphere, computeAtmospherePhysicalModel } from '../Atmosphere';
 import {
   calculatePhysicalCharacteristics,
   calculateBodyCharacteristics,
-  determineCradleLocalEnvironment
+  determineCradleLocalEnvironment,
+  sampleBodyPhysics
 } from '../WorldModel';
+import { buildCentralObjectSystem, sampleOrbit } from '../OrbitalMechanics';
+import { analyzeAtmospherePhasesWithProvenance } from '../PhaseEquilibrium';
+import { analyzeGeology } from '../Geology';
+import { computeEnergyBudget } from '../EnergyBalance';
+import { createChemicalState } from '../ChemicalEvolution';
+import {
+  atmospherePresetTemperatureToScientificValue,
+  atmosphericProfileFromPreset,
+  physValueToScientificValue
+} from '../Core/adapters';
+import {
+  diagnosePresetEquilibriumDivergence,
+  type AtmosphereTemperatureLayer
+} from '../Core/thermalState';
+import { unknownValue } from '../Core/scientificValue';
 
 // ============================================
 // ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
@@ -76,12 +104,36 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
   // 6. Атмосфера
   const atmosphere = generateAtmosphere(rng, settings);
 
+  // 6a. Физические параметры тела (этап 3): масса, радиус, плотность,
+  // гравитация сэмплируются детерминированно из диапазонов каталога.
+  const bodyPhysics = sampleBodyPhysics(celestialBody, rng);
+
+  // 6b. Структурированная система центрального объекта (звезда /
+  // остаток / субзвёздный объект / система гиганта / система джета).
+  const centralObjectSystem = buildCentralObjectSystem(centralObject);
+
+  // 6c. Орбитальная конфигурация: вокруг звезды, родительской планеты
+  // (для спутников), свободное плавание или окрестность джета.
+  // Масса и радиус самой луны (bodyPhysics) НЕ являются параметрами
+  // родительской планеты и не передаются как таковые: спутниковая
+  // орбита масштабируется радиусом РОДИТЕЛЬСКОГО тела, которое
+  // известно только в системе одинокого газового гиганта (родитель
+  // сам является центральным объектом — данные класса каталога).
+  // В остальных случаях параметры родителя неизвестны, и орбита
+  // не определяется (null), а не выдумывается.
+  const orbit = sampleOrbit(rng, {
+    centralObject,
+    celestialBody
+  });
+
   // 7. Характеристики небесного тела, зависящие только от тела,
-  // центрального объекта и атмосферы (без колыбели)
+  // центрального объекта и атмосферы (без колыбели).
+  // При наличии физической выборки используются её масса/радиус/гравитация.
   const bodyCharacteristics = calculateBodyCharacteristics({
     centralObject,
     celestialBody,
-    atmosphere
+    atmosphere,
+    bodyPhysics
   });
 
   // 8. Колыбель жизни: сначала варианты, поддерживаемые данным миром
@@ -108,10 +160,93 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     atmosphere
   });
 
-  // 11. Источники энергии
-  const energySources = determineEnergySources(centralObject, cradle);
+  // 10a. Физическая модель атмосферы (этап 3): молярные доли, давление
+  // в Па, парциальные давления, атмосферный столб. Столб рассчитывается
+  // только при известной гравитации сэмплированного тела.
+  const atmospherePhysics = computeAtmospherePhysicalModel(atmosphere, {
+    surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
+  });
+
+  // 10b. Фазовый скрининг компонентов атмосферы при ЛОКАЛЬНОЙ
+  // температуре приповерхностного слоя (Stage 4.2.2.1: скрининг
+  // привязан к явно обозначенной области — слою 'surface_boundary'
+  // из AtmosphericTemperatureProfile (однослойная модель текущего
+  // этапа). Контракт общий: слой несёт ScientificValue со статусом
+  // и provenance, вторая параллельная система значений не создаётся.
+  // Числовой результат скрининга НЕ меняется, детерминизм сохранён;
+  // эта температура НЕ surfaceTemperature, и T_eq НЕ используется
+  // как fallback: без пригодной пресетной температуры слой
+  // формируется unknown, и скрининг остаётся unknown.)
+  const atmosphereTemperatureProfile = atmosphericProfileFromPreset(atmosphere);
+  const surfaceBoundaryLayer: AtmosphereTemperatureLayer = atmosphereTemperatureProfile?.layers[0] ?? {
+    layerId: 'surface_boundary',
+    temperature: unknownValue(
+      'локальная температура приповерхностного слоя атмосферы неизвестна: пригодной пресетной температуры нет — фазовый скрининг остаётся unknown, подстановка T_eq или температуры поверхности запрещена'
+    ),
+    note: 'слой не заполнен из пресета: температура отсутствует или непригодна'
+  };
+  const phaseAnalysis = analyzeAtmospherePhasesWithProvenance(
+    atmospherePhysics,
+    surfaceBoundaryLayer
+  );
+
+  // 10c. Геологический анализ: раздельные источники внутреннего тепла
+  // (остаточное, радиогенное, приливное) без автоматической геотермы.
+  const geologyAnalysis = analyzeGeology({ celestialBody, centralObject, orbit });
+
+  // 10d. Энергетический бюджет: поток излучения и равновесная температура
+  // из светимости класса и орбитального расстояния (или unknown).
+  const energyBudget = computeEnergyBudget({
+    centralObjectId: centralObject.id,
+    centralObjectSystem: centralObjectSystem ?? undefined,
+    orbit,
+    geologyAnalysis
+  });
+
+  // 10e. Диагностика «пресетная температура vs T_eq» (Stage 4.2.2.1):
+  // в реальном генерационном контуре фиксируются ОБЕ исходные величины
+  // и их абсолютная разница. Это информационная запись: пресетная
+  // температура атмосферы и равновесная температура серого тела —
+  // РАЗНЫЕ физические величины, и их численное расхождение НЕ
+  // объявляется физическим противоречием. Порог НЕ задаётся:
+  // универсального порога в K не существует и скрытого значения
+  // по умолчанию нет (verdict 'noted'). Если одна из величин
+  // неизвестна/непригодна — 'not_comparable'. Сами температуры
+  // диагностикой НЕ изменяются.
+  const presetTemperatureForDivergence = atmospherePresetTemperatureToScientificValue(atmosphere);
+  const equilibriumTemperatureForDivergence = physValueToScientificValue(
+    energyBudget.equilibriumTemperature
+  );
+  const presetEquilibriumDivergence = diagnosePresetEquilibriumDivergence(
+    presetTemperatureForDivergence,
+    equilibriumTemperatureForDivergence
+  );
+  const presetEquilibriumDivergenceWarning: GenerationWarning = {
+    id: 'note_preset_equilibrium_divergence',
+    ruleId: 'preset_equilibrium_divergence',
+    category: 'atmosphere',
+    severity: 'info',
+    message: presetEquilibriumDivergence.message,
+    suggestions: [
+      'Помните: пресетная температура атмосферы и T_eq — разные величины с разным происхождением',
+      'Проверьте исходные допущения пресета и энергетического бюджета, если расхождение существенно для сценария'
+    ],
+    affectedFields: ['atmosphere', 'energyBudget']
+  };
+
+  // 11. Источники энергии. Геотермальная энергия добавляется ТОЛЬКО
+  // если геологический анализ подтвердил её доступность.
+  const energySources = determineEnergySources(centralObject, cradle, geologyAnalysis);
+
+  // 11a. Начальное состояние химической эволюции: инвентарь веществ
+  // (моль/м² столба при известных данных, иначе нормированный игровой).
+  const chemicalState = createChemicalState({
+    atmospherePhysicalModel: atmospherePhysics,
+    surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
+  });
 
   // 12. Проверка совместимости на РЕАЛЬНЫХ данных сгенерированного мира
+  // (включая фазовый скрининг атмосферы)
   const compatibilityWarnings = checkCompatibility({
     mode,
     cosmology,
@@ -122,10 +257,19 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     cradleLocalEnvironment,
     physicalCharacteristics,
     atmosphere,
-    energySources
+    energySources,
+    phaseAnalysis
   }, mode);
 
-  const allWarnings = [...modeWarnings, ...cradleWarnings, ...compatibilityWarnings];
+  // Диагностика «пресет vs T_eq» — информационная запись: попадает
+  // в предупреждения мира вместе с режимными, колыбельными и
+  // совместимостными (Stage 4.2.2.1).
+  const allWarnings = [
+    ...modeWarnings,
+    ...cradleWarnings,
+    ...compatibilityWarnings,
+    presetEquilibriumDivergenceWarning
+  ];
 
   const causalChain = createCausalChain({
     cosmology,
@@ -176,6 +320,14 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     physicalCharacteristics,
     energySources,
     atmosphere,
+    centralObjectSystem: centralObjectSystem ?? undefined,
+    orbit,
+    bodyPhysics,
+    atmospherePhysics,
+    phaseAnalysis,
+    geologyAnalysis,
+    energyBudget,
+    chemicalState,
     appliedRules: allWarnings.map(w => w.ruleId),
     warnings: allWarnings,
     scientificStatus,
@@ -219,14 +371,21 @@ function selectCentralObject(
   }
   const epochAge = epoch.ageRange;
   // В аномальном режиме возрастные ограничения не применяются
-  // (соответствует exemptInAnomalousMode правила age_central_object_compatibility)
+  // (соответствует exemptInAnomalousMode правила age_central_object_compatibility).
+  //
+  // Этап 3: класс центрального объекта отсекается ТОЛЬКО если Вселенная
+  // ещё слишком молода для формирования объектов этого класса
+  // (например, белые карлики не существуют до появления звёзд-предшественниц).
+  // Короткоживущая звезда (голубой гигант) НЕ запрещена в древней
+  // Вселенной: она могла сформироваться недавно — это отмечается
+  // предупреждением short_lived_star_recent_formation, а не фильтром.
   const ageCompatibleObjects = mode === 'anomalous'
     ? centralObjects
     : centralObjects.filter((obj) => {
-        if (obj.minAge === null && obj.maxAge === null) return true;
-        if (obj.minAge !== null && epochAge.min < obj.minAge) return false;
-        if (obj.maxAge !== null && epochAge.max > obj.maxAge) return false;
-        return true;
+        const earliest =
+          obj.existenceWindow?.earliestUniverseAgeGyr ??
+          getEarliestUniverseAgeGyr(obj.id);
+        return epochAge.max >= earliest;
       });
   if (ageCompatibleObjects.length === 0) {
     console.warn('No central objects compatible with selected epoch, using all');
@@ -269,8 +428,30 @@ function selectCelestialBody(
  *
  * Если пользователь зафиксировал колыбель вручную, она используется
  * как есть: несовместимость фиксируется предупреждениями совместимости.
+ *
+ * Stage 4.2.2.4: функция экспортирована для интеграционных тестов
+ * САМОГО selector'а (не только predicate isCradleSupportedOnWorld) и
+ * принимает ОПЦИОНАЛЬНЫЙ типизированный контекст доказательств
+ * (coreWorldState, cradleLocalEnvironment), который передаётся в
+ * isCradleSupportedOnWorld → checkCompatibility. В реальном
+ * генерационном контуре эти поля НЕ передаются: научное ядро строится
+ * ПОСЛЕ выбора колыбели, доказанных температурных ошибок на этапе
+ * выбора не существует, и selector не выдумывает доказательств —
+ * температурный результат остаётся условным
+ * (cradle_temperature_unproven).
+ *
+ * Stage 4.2.2.5 (candidate-specific cradle context): локальная
+ * среда принадлежит КАЖДОМУ кандидату отдельно — один
+ * CradleLocalEnvironment на всех кандидатов НЕ применяется
+ * (locationType, состав и localReservoirId у каждого свои).
+ * Контекст принимает карту cradleLocalEnvironmentsById
+ * (ID кандидата → его среда); для кандидата без явной среды
+ * selector вычисляет её сам через determineCradleLocalEnvironment
+ * (тот же путь, что и в реальном контуре). coreWorldState
+ * остаётся общим для всех кандидатов; фиктивное ядро не
+ * создаётся; перенос evidence между кандидатами исключён.
  */
-function selectCradle(
+export function selectCradle(
   rng: ReturnType<typeof createRandom>,
   settings: GenerationSettings,
   context: {
@@ -279,6 +460,26 @@ function selectCradle(
     celestialBody: CelestialBodyOption;
     atmosphere: AtmosphereState;
     bodyCharacteristics: PhysicalCharacteristics;
+    /**
+     * Stage 4.2.2.4: типизированное состояние ядра (optional typed
+     * evidence). Передаётся в isCradleSupportedOnWorld →
+     * checkCompatibility; в реальном генерационном контуре ядро ещё
+     * не построено и поле не передаётся.
+     */
+    coreWorldState?: CoreWorldState;
+    /**
+     * Stage 4.2.2.5 (candidate-specific): локальные среды
+     * кандидатов ПО ОТДЕЛЬНОСТИ, по ID кандидата. Среда описывает
+     * конкретную колыбель: применять один CradleLocalEnvironment
+     * ко всем кандидатам нельзя (locationType, состав и
+     * localReservoirId у каждого кандидата свои). Для кандидата
+     * без явной среды selector вычисляет её сам через
+     * determineCradleLocalEnvironment — тот же путь, что и в
+     * реальном контуре. Перенос localReservoirId/locationType с
+     * одного кандидата на другого исключён. В реальном контуре
+     * не передаётся.
+     */
+    cradleLocalEnvironmentsById?: Partial<Record<string, CradleLocalEnvironment>>;
   }
 ): { cradle: CradleOption; cradleWarnings: GenerationWarning[] } {
   const cradleWarnings: GenerationWarning[] = [];
@@ -294,9 +495,19 @@ function selectCradle(
 
   const weights = settings.weights?.cradle || {};
 
-  // Оцениваем каждую колыбель реальными правилами совместимости
+  // Оцениваем каждую колыбель реальными правилами совместимости.
+  // Stage 4.2.2.5: каждый кандидат проверяется по СВОЕЙ локальной
+  // среде — явная среда берётся из карты по ID кандидата, без
+  // явной среды вычисляется per-candidate внутри
+  // isCradleSupportedOnWorld (determineCradleLocalEnvironment,
+  // тот же путь, что и в реальном контуре). Чужой locationType,
+  // состав и localReservoirId к кандидату НЕ применяются; перенос
+  // среды/evidence между кандидатами исключён.
   const supportedCradles = cradles.filter((cradle) =>
-    isCradleSupportedOnWorld(cradle, context)
+    isCradleSupportedOnWorld(cradle, {
+      ...context,
+      cradleLocalEnvironment: context.cradleLocalEnvironmentsById?.[cradle.id]
+    })
   );
 
   if (supportedCradles.length === 0) {
@@ -329,7 +540,24 @@ function selectCradle(
  * проверка): колыбель поддержана, если ни одно правило категорий,
  * относящихся к колыбели, не даёт ошибки.
  */
-function isCradleSupportedOnWorld(
+// Stage 4.2.2.2: экспортируется для интеграционных тестов семантики
+// «оценочное расхождение не отбрасывает колыбель» — фильтрация
+// кандидатов идёт по severity error, а оценочные расхождения
+// являются предупреждениями (cradle_temperature_estimate_outside_range).
+//
+// Stage 4.2.2.3: контекст дополнен ОПЦИОНАЛЬНЫМИ полями coreWorldState
+// и cradleLocalEnvironment. В реальном генерационном контуре на
+// момент выбора колыбели типизированное состояние ядра ещё не
+// построено (ядро инициализируется ПОСЛЕ генерации), поэтому
+// selectCradle их не передаёт — доказанных температурных ошибок на
+// этапе выбора быть не может, а оценочные расхождения колыбель не
+// исключают. Поля позволяют интеграционным тестам провести через
+// РЕАЛЬНЫЙ путь фильтрации (isCradleSupportedOnWorld →
+// checkCompatibility → severity error) миры с доказанными
+// типизированными нарушениями (Stage 4.2.2.3: известная температура
+// СО содержательным provenance, принадлежащая указанной локальной
+// области, например резервуару по явной ссылке localReservoirId).
+export function isCradleSupportedOnWorld(
   cradle: CradleOption,
   context: {
     mode: GenerationMode;
@@ -337,13 +565,21 @@ function isCradleSupportedOnWorld(
     celestialBody: CelestialBodyOption;
     atmosphere: AtmosphereState;
     bodyCharacteristics: PhysicalCharacteristics;
+    /** Stage 4.2.2.3: типизированное состояние ядра (для тестов реального пути фильтрации). */
+    coreWorldState?: CoreWorldState;
+    /**
+     * Stage 4.2.2.3: готовая локальная среда колыбели; без поля
+     * вычисляется как обычно (determineCradleLocalEnvironment).
+     */
+    cradleLocalEnvironment?: CradleLocalEnvironment;
   }
 ): boolean {
-  const cradleLocalEnvironment = determineCradleLocalEnvironment({
-    cradle,
-    celestialBody: context.celestialBody,
-    atmosphere: context.atmosphere
-  });
+  const cradleLocalEnvironment = context.cradleLocalEnvironment ??
+    determineCradleLocalEnvironment({
+      cradle,
+      celestialBody: context.celestialBody,
+      atmosphere: context.atmosphere
+    });
 
   const warnings = checkCompatibility({
     mode: context.mode,
@@ -352,7 +588,8 @@ function isCradleSupportedOnWorld(
     atmosphere: context.atmosphere,
     cradle,
     cradleLocalEnvironment,
-    physicalCharacteristics: context.bodyCharacteristics
+    physicalCharacteristics: context.bodyCharacteristics,
+    coreWorldState: context.coreWorldState
   }, context.mode);
 
   // Ошибка в правилах, относящихся к колыбели, означает,
@@ -426,22 +663,40 @@ function generateAtmosphere(rng: ReturnType<typeof createRandom>, settings: Gene
 
 function determineEnergySources(
   centralObject: CentralObjectOption,
-  cradle: CradleOption
+  cradle: CradleOption,
+  geologyAnalysis?: GeologicalAnalysis
 ): EnergySources {
   const primary: EnergySources['primary'] = [];
   const secondary: EnergySources['secondary'] = [];
   centralObject.potentialEnergySources.forEach(source => {
+    // Геотермальная энергия — не автоматическое свойство мира: Potential
+    // список центрального объекта — это меню, а не гарантия. Геотерма
+    // подтверждается только геологическим анализом самого тела (этап 3).
+    if (source === 'geothermal' && !geologyAnalysis?.geothermalEnergyAvailable) {
+      return;
+    }
     if (!primary.includes(source as EnergySourceClass)) {
       primary.push(source as EnergySourceClass);
     }
   });
   cradle.availableEnergySources.forEach(source => {
+    // Геотермальная энергия колыбели — не автоматическое свойство мира:
+    // она входит в источники мира, только если геологический анализ
+    // подтвердил доступное внутреннее тепло (этап 3).
+    if (source === 'geothermal' && !geologyAnalysis?.geothermalEnergyAvailable) {
+      return;
+    }
     if (!primary.includes(source) && !secondary.includes(source)) {
       secondary.push(source);
     }
   });
-  if (!primary.includes('geothermal') && !secondary.includes('geothermal')) {
-    secondary.push('geothermal');
+  // Геотермальная энергия НЕ добавляется автоматически каждому миру:
+  // только если геологический анализ подтвердил наличие доступного
+  // внутреннего тепла (этап 3).
+  if (geologyAnalysis?.geothermalEnergyAvailable) {
+    if (!primary.includes('geothermal') && !secondary.includes('geothermal')) {
+      secondary.push('geothermal');
+    }
   }
   return {
     primary,
