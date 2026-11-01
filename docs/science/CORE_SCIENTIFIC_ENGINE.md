@@ -1,4 +1,3 @@
-
 # CORE_SCIENTIFIC_ENGINE — Научное ядро проекта (Stage 4.1)
 
 > Stage 4.1. Реализация: ветка `stage-3-planetary-physics`, коммиты
