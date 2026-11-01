@@ -559,19 +559,23 @@ export function validateChemicalElement(element: unknown): string[] {
             continue;
           }
           if (ab.kind === 'interval') {
-            if (typeof ab.lower !== 'number' || !Number.isFinite(ab.lower) || typeof ab.upper !== 'number' || !Number.isFinite(ab.upper)) {
+            const abLower = ab.lower;
+            const abUpper = ab.upper;
+            if (typeof abLower !== 'number' || !Number.isFinite(abLower) || typeof abUpper !== 'number' || !Number.isFinite(abUpper)) {
               errors.push(where('границы интервала распространённости должны быть конечными числами'));
-            } else if (ab.lower > ab.upper) {
-              errors.push(where(`нижняя граница распространённости больше верхней: [${String(ab.lower)}, ${String(ab.upper)}]`));
-            }
-            if (ab.lower < 0 || ab.upper > 1) {
-              errors.push(where(`долевая распространённость должна быть в [0, 1], получено [${String(ab.lower)}, ${String(ab.upper)}]`));
+            } else {
+              if (abLower > abUpper) {
+                errors.push(where(`нижняя граница распространённости больше верхней: [${String(abLower)}, ${String(abUpper)}]`));
+              }
+              if (abLower < 0 || abUpper > 1) {
+                errors.push(where(`долевая распространённость должна быть в [0, 1], получено [${String(abLower)}, ${String(abUpper)}]`));
+              }
             }
           } else if (ab.kind === 'value') {
             if (typeof ab.value !== 'number' || !Number.isFinite(ab.value) || ab.value < 0 || ab.value > 1) {
               errors.push(where(`долевая распространённость должна быть числом в [0, 1], получено ${String(ab.value)}`));
             }
-            if (ab.uncertainty !== null && (typeof ab.uncertainty !== 'number' || !Number.isFinite(ab.uncertainty) || ab.uncertainty < 0)) {
+            if (ab.uncertainty != null && (typeof ab.uncertainty !== 'number' || !Number.isFinite(ab.uncertainty) || ab.uncertainty < 0)) {
               errors.push(where(`неопределённость распространённости должна быть неотрицательным числом или null, получено ${String(ab.uncertainty)}`));
             }
           } else {
