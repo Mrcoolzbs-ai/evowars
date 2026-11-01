@@ -594,6 +594,20 @@ describe('Stage 4.3.3 (данные): происхождение значени�
     expect(h.isotopicComposition.provenance?.sourceId).toBe('ciaaw-iso');
   });
 
+  it('CIAAW provenance фиксирует область применимости (normal materials) и ограничения', () => {
+    const h = buildElement(1);
+    const saw = h.standardAtomicWeight.provenance;
+    expect(saw.applicability ?? '').toContain('normal materials');
+    expect(saw.applicability ?? '').toContain('НЕ универсальные');
+    expect(saw.limitations ?? '').toContain('экзопланет');
+    expect(saw.limitations ?? '').toContain('нуклеосинтеза');
+    const iso = h.isotopicComposition.provenance;
+    expect(iso?.applicability ?? '').toContain('normal materials');
+    expect(iso?.applicability ?? '').toContain('представительные');
+    expect(iso?.limitations ?? '').toContain('НЕ универсальные изотопные доли');
+    expect(iso?.limitations ?? '').toContain('экзопланет');
+  });
+
   it('все веса, изотопные записи и кандидаты несут recordId своего источника', () => {
     for (const el of allElements()) {
       const w = el.standardAtomicWeight;
