@@ -155,7 +155,7 @@ describe('Stage 4.3.2 (корректирующая ревизия): типиз�
     const bad = { ...ceaSegment() } as Record<string, unknown>;
     delete bad.form;
     const errors = issuesOf([bad as unknown as NasaCeaSegment]);
-    expect(errors.some((e) => e.includes('типизированную математическую форму'))).toBe(true);
+    expect(errors.some((e) => e.includes('типизированная математическая форма'))).toBe(true);
     expect(errors.some((e) => e.includes('не выводится из note или provenance.rawInput'))).toBe(true);
   });
 
