@@ -21,9 +21,16 @@ import {
   ElementError,
   ELEMENT_COUNT,
   ELEMENT_BLOCKS,
-  ELEMENT_CATEGORIES
+  ELEMENT_CATEGORIES,
+  classifyNubaseState,
+  NUBASE_STATE_CODE_BY_INDEX
 } from '../Core/elements';
-import type { ChemicalElement, NuclideCandidate } from '../Core/elements';
+import type {
+  ChemicalElement,
+  NuclideCandidate,
+  NubaseStateRowRef,
+  StateClassificationBasis
+} from '../Core/elements';
 import { unknownValue, knownValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 
@@ -86,6 +93,7 @@ function makeCandidate(): NuclideCandidate {
     state: 'ground',
     stateIndex: 0,
     stateCode: '',
+    classification: 'ground',
     recordId: 'test:A=1',
     halfLife: knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } }),
     halfLifeRawNotation: '4.2(3) My',
@@ -100,18 +108,38 @@ function makeCandidate(): NuclideCandidate {
  * Валидный изомерный кандидат с явной строкой состояния NUBASE2020
  * (i, s): recordId, provenance.recordId и recordId периода полураспада
  * идентифицируют одну и ту же строку источника (аудит R2).
+ * Аудит R3: изомерный кандидат несёт научную классификацию isomer;
+ * для ДОПОЛНИТЕЛЬНЫХ изомеров (i>=3) основание classificationBasis
+ * передаётся тестом явно — без него валидатор требует контекст.
  */
-function makeStateCandidate(stateIndex: number, stateCode: string): NuclideCandidate {
+function makeStateCandidate(
+  stateIndex: number,
+  stateCode: string,
+  classificationBasis?: StateClassificationBasis
+): NuclideCandidate {
   const recordId = 'test:A=1 i=' + stateIndex + ' s=' + stateCode;
   return {
     ...makeCandidate(),
     state: 'isomeric',
     stateIndex,
     stateCode: stateCode as NuclideCandidate['stateCode'],
+    classification: 'isomer',
+    ...(classificationBasis !== undefined ? { classificationBasis } : {}),
     nuclideNotation: 'H-1' + stateCode,
     recordId,
     halfLife: knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId } }),
     provenance: { ...PROVENANCE, recordId }
+  };
+}
+
+/** Основание «дополнительный изомер при подтверждённом контексте» (аудит R3). */
+function contextBasis(refs: ReadonlyArray<[number, string]>): StateClassificationBasis {
+  return {
+    rule: 'context-more-than-two-isomers',
+    siblingStates: refs.map(([i, s]) => ({
+      stateIndex: i,
+      stateCode: s as NuclideCandidate['stateCode']
+    }))
   };
 }
 
@@ -392,14 +420,20 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(badI.some((e) => e.includes('изомерное состояние требует обозначение «H-1m»'))).toBe(true);
   });
 
-  it('кандидат (R2): согласованность индекса i и кода s NUBASE2020; i=3↔p — дополнительный изомер', () => {
+  it('кандидат (R2/R3): согласованность пары (i, s); i=3↔p — дополнительный изомер ТОЛЬКО при подтверждённом контексте', () => {
     // i=1 с кодом p — рассогласование пары (i, s)
     const mismatch = makeStateCandidate(1, 'p');
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([mismatch]); }));
     expect(bad.some((e) => e.includes('не согласованы'))).toBe(true);
-    // i=3 с кодом p — согласовано: строка дополнительного изомера NUBASE2020
-    const extra = makeStateCandidate(3, 'p');
-    const ok = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([extra]); }));
+    // Аудит R3: i=3, s=p БЕЗ подтверждённого контекста НЕ проходит как
+    // изомер автоматически — основание классификации обязательно
+    const noBasis = makeStateCandidate(3, 'p');
+    const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([noBasis]); }));
+    expect(res.some((e) => e.includes('требуется classificationBasis'))).toBe(true);
+    expect(res.some((e) => e.includes('контексте более двух изомерных состояний'))).toBe(true);
+    // i=3, s=p с контекстом (sibling-строки m и n того же (Z, A)) — валиден
+    const withBasis = makeStateCandidate(3, 'p', contextBasis([[1, 'm'], [2, 'n']]));
+    const ok = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([withBasis]); }));
     expect(ok).toEqual([]);
   });
 
@@ -427,9 +461,9 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(res4.some((e) => e.includes('изомерное состояние — возбуждённая строка NUBASE2020'))).toBe(true);
   });
 
-  it('кандидат (R2): несколько РАЗЛИЧНЫХ изомерных состояний одного A (s=m и s=p) — не дубликат', () => {
+  it('кандидат (R2/R3): несколько РАЗЛИЧНЫХ изомерных состояний одного A — не дубликат (доп. изомер с контекстом)', () => {
     const m = makeStateCandidate(1, 'm');
-    const p = makeStateCandidate(3, 'p');
+    const p = makeStateCandidate(3, 'p', contextBasis([[1, 'm'], [2, 'n']]));
     const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([m, p]); }));
     expect(res.some((e) => e.includes('дубликат'))).toBe(false);
     expect(res).toEqual([]);
@@ -572,6 +606,154 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
       const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
       expect(bad, 'unit ' + unit).toEqual([]);
     }
+  });
+
+  // ===== Аудит R3 (Stage 4.3.3): контекстная классификация состояний =====
+
+  it('кандидат (R3): научная классификация обязательна; level/resonance/ias/indeterminate — не кандидаты', () => {
+    const noCls = makeCandidate();
+    delete (noCls as unknown as Record<string, unknown>).classification;
+    const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([noCls]); }));
+    expect(res1.some((e) => e.includes('научная классификация состояния NUBASE2020 (classification) обязательна'))).toBe(true);
+    for (const cls of ['level', 'resonance', 'ias', 'indeterminate']) {
+      const cand = makeStateCandidate(1, 'm');
+      (cand as unknown as Record<string, unknown>).classification = cls;
+      const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+      expect(res.some((e) => e.includes('кандидатами могут быть только строки, классифицированные как ground или isomer')), 'cls ' + cls).toBe(true);
+    }
+  });
+
+  it('кандидат (R3): классификация согласована с видом состояния (ground/isomeric)', () => {
+    const wrongGround = makeCandidate();
+    (wrongGround as unknown as Record<string, unknown>).classification = 'isomer';
+    const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([wrongGround]); }));
+    expect(res1.some((e) => e.includes('классификация isomer допустима только для изомерного состояния'))).toBe(true);
+    const wrongIsomer = makeStateCandidate(1, 'm');
+    (wrongIsomer as unknown as Record<string, unknown>).classification = 'ground';
+    const res2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([wrongIsomer]); }));
+    expect(res2.some((e) => e.includes('классификация ground допустима только для основного состояния'))).toBe(true);
+  });
+
+  it('кандидат (R3): основание дополнительного изомера проверяется машинно (цепочка sibling-строк)', () => {
+    // (4, q): контекст требует m, n И p — без p цепочка не доказана
+    const qBad = makeStateCandidate(4, 'q', contextBasis([[1, 'm'], [2, 'n']]));
+    const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([qBad]); }));
+    expect(res1.some((e) => e.includes('classificationBasis не доказывает контекст'))).toBe(true);
+    // (4, q) с полной цепочкой m, n, p — валиден
+    const qOk = makeStateCandidate(4, 'q', contextBasis([[1, 'm'], [2, 'n'], [3, 'p']]));
+    const res2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([qOk]); }));
+    expect(res2).toEqual([]);
+    // правило format не доказывает контекст дополнительного изомера
+    const qFormat = makeStateCandidate(4, 'q', { rule: 'format' });
+    const res3 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([qFormat]); }));
+    expect(res3.some((e) => e.includes('обязан использовать правило context-more-than-two-isomers'))).toBe(true);
+    // стандартный изомер с контекст-правилом — ошибка: его классифицирует сам формат
+    const mCtx = makeStateCandidate(1, 'm', contextBasis([[1, 'm'], [2, 'n']]));
+    const res4 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([mCtx]); }));
+    expect(res4.some((e) => e.includes('classificationBasis допускается только с правилом format'))).toBe(true);
+    // рассогласованная sibling-строка (2, m) в основании — ошибки
+    const pBadSibling = makeStateCandidate(3, 'p', {
+      rule: 'context-more-than-two-isomers',
+      siblingStates: [
+        { stateIndex: 1, stateCode: 'm' },
+        { stateIndex: 2, stateCode: 'm' }
+      ]
+    });
+    const res5 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([pBadSibling]); }));
+    expect(res5.some((e) => e.includes('согласованной парой (i, s)'))).toBe(true);
+    expect(res5.some((e) => e.includes('требуются sibling-строки'))).toBe(true);
+  });
+
+  it('classifyNubaseState: контрольные примеры 92Tc p и 205Po p/q — дополнительные изомеры при контексте', () => {
+    // Группа 92Tc NUBASE2020: ground (i=0), m (i=1), n (i=2), p (i=3)
+    const tc92: NubaseStateRowRef[] = [
+      { stateIndex: 0, stateCode: '' },
+      { stateIndex: 1, stateCode: 'm' },
+      { stateIndex: 2, stateCode: 'n' },
+      { stateIndex: 3, stateCode: 'p' }
+    ];
+    expect(classifyNubaseState(tc92[0], tc92)).toEqual({ classification: 'ground' });
+    expect(classifyNubaseState(tc92[1], tc92)).toEqual({ classification: 'isomer', basis: { rule: 'format' } });
+    expect(classifyNubaseState(tc92[3], tc92)).toEqual({
+      classification: 'isomer',
+      basis: {
+        rule: 'context-more-than-two-isomers',
+        siblingStates: [
+          { stateIndex: 1, stateCode: 'm' },
+          { stateIndex: 2, stateCode: 'n' }
+        ]
+      }
+    });
+    // Группа 205Po NUBASE2020: ground, m, n, p (i=3), q (i=4) — p и q
+    // дополнительные изомеры (контрольный пример файла)
+    const po205: NubaseStateRowRef[] = [
+      { stateIndex: 0, stateCode: '' },
+      { stateIndex: 1, stateCode: 'm' },
+      { stateIndex: 2, stateCode: 'n' },
+      { stateIndex: 3, stateCode: 'p' },
+      { stateIndex: 4, stateCode: 'q' }
+    ];
+    expect(classifyNubaseState(po205[3], po205).classification).toBe('isomer');
+    expect(classifyNubaseState(po205[3], po205).basis?.rule).toBe('context-more-than-two-isomers');
+    expect(classifyNubaseState(po205[4], po205).classification).toBe('isomer');
+    expect(classifyNubaseState(po205[4], po205).basis?.siblingStates).toEqual([
+      { stateIndex: 1, stateCode: 'm' },
+      { stateIndex: 2, stateCode: 'n' },
+      { stateIndex: 3, stateCode: 'p' }
+    ]);
+  });
+
+  it('classifyNubaseState: 214Ra x — изомер при полной цепочке m,n,p,q,r; пары реестра детерминированы', () => {
+    const ra214: NubaseStateRowRef[] = [
+      { stateIndex: 0, stateCode: '' },
+      { stateIndex: 1, stateCode: 'm' },
+      { stateIndex: 2, stateCode: 'n' },
+      { stateIndex: 3, stateCode: 'p' },
+      { stateIndex: 4, stateCode: 'q' },
+      { stateIndex: 5, stateCode: 'r' },
+      { stateIndex: 6, stateCode: 'x' }
+    ];
+    const x = classifyNubaseState(ra214[6], ra214);
+    expect(x.classification).toBe('isomer');
+    expect(x.basis?.siblingStates).toHaveLength(5);
+    // каждая пара реестра классифицируется детерминированно; вне
+    // контекста изомерами остаются только стандартные строки (1, m), (2, n)
+    for (const key of Object.keys(NUBASE_STATE_CODE_BY_INDEX)) {
+      const i = Number(key);
+      const row: NubaseStateRowRef = { stateIndex: i, stateCode: NUBASE_STATE_CODE_BY_INDEX[i] };
+      const alone = classifyNubaseState(row, [row]);
+      expect(classifyNubaseState(row, [row]), 'i=' + i).toEqual(alone);
+      if (i === 1 || i === 2) {
+        expect(alone.classification, 'i=' + i).toBe('isomer');
+      } else {
+        expect(alone.classification, 'i=' + i).not.toBe('isomer');
+      }
+    }
+  });
+
+  it('classifyNubaseState: p/q без контекста — уровни, r без контекста — резонанс, x без цепочки — indeterminate, IAS и рассогласования', () => {
+    // (3, p) без m, n в группе: уровень, а не изомер
+    const loneP: NubaseStateRowRef[] = [
+      { stateIndex: 0, stateCode: '' },
+      { stateIndex: 3, stateCode: 'p' }
+    ];
+    expect(classifyNubaseState(loneP[1], loneP)).toEqual({ classification: 'level' });
+    // (4, q) с m, n, но без (3, p): цепочка разорвана — уровень
+    const qNoP: NubaseStateRowRef[] = [
+      { stateIndex: 1, stateCode: 'm' },
+      { stateIndex: 2, stateCode: 'n' },
+      { stateIndex: 4, stateCode: 'q' }
+    ];
+    expect(classifyNubaseState(qNoP[2], qNoP)).toEqual({ classification: 'level' });
+    // (5, r) без полной цепочки: резонанс
+    expect(classifyNubaseState({ stateIndex: 5, stateCode: 'r' }, [{ stateIndex: 5, stateCode: 'r' }])).toEqual({ classification: 'resonance' });
+    // (6, x) без полной цепочки: формат не задаёт тип x вне контекста — indeterminate, НЕ изомер
+    expect(classifyNubaseState({ stateIndex: 6, stateCode: 'x' }, [{ stateIndex: 6, stateCode: 'x' }])).toEqual({ classification: 'indeterminate' });
+    // IAS: (8, i) и (9, j) — кандидатами не являются
+    expect(classifyNubaseState({ stateIndex: 8, stateCode: 'i' }, [{ stateIndex: 8, stateCode: 'i' }])).toEqual({ classification: 'ias' });
+    expect(classifyNubaseState({ stateIndex: 9, stateCode: 'j' }, [{ stateIndex: 9, stateCode: 'j' }])).toEqual({ classification: 'ias' });
+    // рассогласованная пара (1, p) — indeterminate, тип состояния не угадывается
+    expect(classifyNubaseState({ stateIndex: 1, stateCode: 'p' as NuclideCandidate['stateCode'] }, [{ stateIndex: 1, stateCode: 'm' }])).toEqual({ classification: 'indeterminate' });
   });
 
   it('интервальный атомный вес с неположительными границами — ошибка', () => {

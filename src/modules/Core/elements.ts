@@ -238,10 +238,13 @@ export type NuclideStateKind = 'ground' | 'isomeric';
 
 /**
  * Буквенный код состояния s из NUBASE2020: '' — основное состояние;
- * m, n, p, q, r, x — изомерные состояния (у одного нуклида их может
- * быть несколько: s=m,n — обычные изомеры, s=p,q,r,x — дополнительные
- * при более чем двух изомерных состояниях); i, j — изоаналоговые
- * состояния (IAS), кандидатами не являются.
+ * m, n — стандартные изомерные состояния; p, q, r, x — обычно
+ * уровни/резонансы, которые по шапке официального файла МОГУТ
+ * обозначать дополнительные изомерные состояния, но ТОЛЬКО когда у
+ * данного нуклида (Z, A) представлено более двух изомерных состояний
+ * (аудит R3: доказывается контекстом, а не парой (i, s) самой по
+ * себе — см. classifyNubaseState); i, j — изоаналоговые состояния
+ * (IAS), кандидатами не являются.
  */
 export type NuclideStateCode = '' | 'm' | 'n' | 'p' | 'q' | 'r' | 'x' | 'i' | 'j';
 
@@ -261,6 +264,146 @@ export const NUBASE_STATE_CODE_BY_INDEX: Readonly<Record<number, NuclideStateCod
   8: 'i',
   9: 'j'
 };
+
+/**
+ * НАУЧНАЯ классификация строки состояния NUBASE2020 (аудит R3).
+ * НЕ выводится из пары (i, s) самой по себе: согласно шапке
+ * официального файла, i=3,4,5,6 и s=p,q,r,x обозначают
+ * дополнительные изомерные состояния ТОЛЬКО когда у данного
+ * нуклида (Z, A) представлено более двух изомерных состояний;
+ * вне этого контекста i=3,4 — обычно уровни, i=5 — обычно
+ * резонанс, i=8,9 (s=i,j) — IAS. level — ядерный уровень;
+ * resonance — резонанс; ias — изоаналоговое состояние;
+ * indeterminate — научный тип состояния НЕ выводится из формата
+ * (рассогласованная пара (i, s), s=x без полного контекста) и
+ * НЕ угадывается. Кандидатами могут быть только ground/isomer.
+ */
+export type NubaseStateClassificationKind =
+  | 'ground'
+  | 'isomer'
+  | 'level'
+  | 'resonance'
+  | 'ias'
+  | 'indeterminate';
+
+export const NUBASE_STATE_CLASSIFICATIONS: readonly NubaseStateClassificationKind[] = [
+  'ground',
+  'isomer',
+  'level',
+  'resonance',
+  'ias',
+  'indeterminate'
+];
+
+/** Ссылка на строку состояния NUBASE2020 конкретного нуклида (Z, A). */
+export interface NubaseStateRowRef {
+  stateIndex: number;
+  stateCode: NuclideStateCode;
+}
+
+/**
+ * Правило доказательства классификации состояния:
+ * format — стандартное состояние по самому формату NUBASE2020
+ * (i=0 — основное; i=1,m / i=2,n — стандартные изомеры);
+ * context-more-than-two-isomers — дополнительный изомер,
+ * доказанный контекстом: у (Z, A) представлено более двух
+ * изомерных состояний (ссылки на sibling-строки обязательны).
+ */
+export type StateClassificationBasisRule = 'format' | 'context-more-than-two-isomers';
+
+/**
+ * Машинно-проверяемое основание классификации: правило и (для
+ * дополнительных изомеров) ссылки на sibling-строки того же
+ * (Z, A), подтверждающие наличие более двух изомерных состояний.
+ * Научное основание НЕ ограничивается текстовой заметкой stateNote.
+ */
+export interface StateClassificationBasis {
+  rule: StateClassificationBasisRule;
+  siblingStates?: readonly NubaseStateRowRef[];
+}
+
+/** Результат контекстной классификации строки состояния NUBASE2020. */
+export interface NubaseStateClassification {
+  classification: NubaseStateClassificationKind;
+  /** Основание ОБЯЗАТЕЛЬНО для дополнительных изомеров (аудит R3). */
+  basis?: StateClassificationBasis;
+}
+
+/**
+ * Контекстная классификация строки состояния NUBASE2020 (аудит R3,
+ * Stage 4.3.3). Требует ВСЕ строки данного (Z, A), а не только
+ * отобранных кандидатов: число представленных изомерных состояний
+ * определяется контекстом нуклида. Цепное правило (шапка файла
+ * NUBASE2020; пара (i, s) идентифицирует строку, научный тип
+ * состояния — контекстом):
+ *   i=0, s='' → ground;
+ *   i=1, s=m / i=2, s=n → стандартный изомер (основание — формат);
+ *   i=8, s=i / i=9, s=j → IAS (кандидатами не являются);
+ *   i=3, s=p → изомер ТОЛЬКО при строках (1, m) и (2, n) в группе —
+ *     иначе уровень;
+ *   i=4, s=q → изомер ТОЛЬКО при (1, m), (2, n) и (3, p) — иначе уровень;
+ *   i=5, s=r → изомер ТОЛЬКО при (1, m), (2, n), (3, p), (4, q) —
+ *     иначе резонанс;
+ *   i=6, s=x → изомер ТОЛЬКО при полной цепочке (1, m), (2, n),
+ *     (3, p), (4, q), (5, r) — иначе indeterminate (формат НЕ задаёт
+ *     типа x вне контекста — не угадываем);
+ *   рассогласованные пары (i, s) → indeterminate.
+ * Контрольные примеры файла NUBASE2020: 92Tc p — дополнительный
+ * изомер (в группе есть m, n); 205Po p и q — дополнительные изомеры
+ * (в группе есть m, n, p). Примеры уровней вне контекста среди 14
+ * ранжируемых элементов: 236Np p, 243Np p, 243Cm p, 239Bk p…243Bk p,
+ * 245Cf p; полный цепной изомер 6-го порядка: 214Ra x.
+ */
+export function classifyNubaseState(
+  row: NubaseStateRowRef,
+  groupRows: readonly NubaseStateRowRef[]
+): NubaseStateClassification {
+  const i = row.stateIndex;
+  const s = row.stateCode;
+  if (
+    typeof i !== 'number' ||
+    !Number.isInteger(i) ||
+    typeof s !== 'string' ||
+    NUBASE_STATE_CODE_BY_INDEX[i] !== s
+  ) {
+    return { classification: 'indeterminate' };
+  }
+  if (i === 0) {
+    return { classification: 'ground' };
+  }
+  if (i === 8 || i === 9) {
+    return { classification: 'ias' };
+  }
+  if (i === 1 || i === 2) {
+    return { classification: 'isomer', basis: { rule: 'format' } };
+  }
+  const chain: ReadonlyArray<NubaseStateRowRef> = [
+    { stateIndex: 1, stateCode: 'm' },
+    { stateIndex: 2, stateCode: 'n' },
+    { stateIndex: 3, stateCode: 'p' },
+    { stateIndex: 4, stateCode: 'q' },
+    { stateIndex: 5, stateCode: 'r' }
+  ];
+  const needed = chain.slice(0, i - 1);
+  const hasRow = (ref: NubaseStateRowRef): boolean =>
+    groupRows.some((r) => r.stateIndex === ref.stateIndex && r.stateCode === ref.stateCode);
+  if (!needed.every(hasRow)) {
+    if (i === 5) {
+      return { classification: 'resonance' };
+    }
+    if (i === 6) {
+      return { classification: 'indeterminate' };
+    }
+    return { classification: 'level' };
+  }
+  return {
+    classification: 'isomer',
+    basis: {
+      rule: 'context-more-than-two-isomers',
+      siblingStates: needed.map((ref) => ({ stateIndex: ref.stateIndex, stateCode: ref.stateCode }))
+    }
+  };
+}
 
 /** Статус ядерных данных: экспериментальные или оценочные (экстраполяция NUBASE). */
 export type NuclideDataStatus = 'experimental' | 'estimated';
@@ -289,6 +432,22 @@ export interface NuclideCandidate {
   stateIndex: number;
   /** Буквенный код состояния s из NUBASE2020 ('' у основного состояния). */
   stateCode: NuclideStateCode;
+  /**
+   * НАУЧНАЯ классификация строки источника (аудит R3): пара (i, s)
+   * идентифицирует строку, но её научный тип (изомер/уровень/
+   * резонанс/IAS) определяется КОНТЕКСТОМ (Z, A), а не парой самой
+   * по себе (см. classifyNubaseState). Кандидатами могут быть
+   * только строки, классифицированные как ground или isomer.
+   */
+  classification: NubaseStateClassificationKind;
+  /**
+   * Машинно-проверяемое основание классификации. Для ДОПОЛНИТЕЛЬНЫХ
+   * изомеров (i=3…6 / s=p,q,r,x) ОБЯЗАТЕЛЬНО: правило
+   * context-more-than-two-isomers и sibling-строки того же (Z, A),
+   * подтверждающие наличие более двух изомерных состояний.
+   * Для ground и стандартных изомеров (i=1,m / i=2,n) не требуется.
+   */
+  classificationBasis?: StateClassificationBasis;
   stateNote?: string;
   /** Идентификатор строки источника. */
   recordId: string;
@@ -720,6 +879,74 @@ export function validateChemicalElement(element: unknown): string[] {
           }
           if (stateIndexOk && c.state === 'isomeric' && (c.stateIndex === 0 || c.stateCode === 'i' || c.stateCode === 'j')) {
             errors.push(where(`кандидат ${label}: изомерное состояние — возбуждённая строка NUBASE2020 (i>=1, s=m/n/p/q/r/x), а не основная (i=0) и не IAS (s=i/j)`));
+          }
+          // Научная классификация строки источника (аудит R3): пара (i, s)
+          // сама по себе НЕ определяет научный тип состояния —
+          // дополнительные изомеры (i=3…6 / s=p,q,r,x) доказываются
+          // контекстом (Z, A); уровень, резонанс, IAS и неопределимые
+          // строки кандидатами не являются.
+          const classificationOk =
+            typeof c.classification === 'string' &&
+            (NUBASE_STATE_CLASSIFICATIONS as readonly string[]).includes(c.classification);
+          if (!classificationOk) {
+            errors.push(where(`кандидат ${label}: научная классификация состояния NUBASE2020 (classification) обязательна и должна быть одной из ground/isomer/level/resonance/ias/indeterminate, получено ${String(c.classification)}`));
+          }
+          if (classificationOk && c.classification !== 'ground' && c.classification !== 'isomer') {
+            errors.push(where(`кандидат ${label}: кандидатами могут быть только строки, классифицированные как ground или isomer (аудит R3); строка классифицирована как ${String(c.classification)} — уровни, резонансы, IAS и неопределимые строки кандидатами не являются`));
+          }
+          if (classificationOk) {
+            if (c.classification === 'ground' && c.state !== 'ground') {
+              errors.push(where(`кандидат ${label}: классификация ground допустима только для основного состояния (state=ground)`));
+            }
+            if (c.classification === 'isomer' && c.state !== 'isomeric') {
+              errors.push(where(`кандидат ${label}: классификация isomer допустима только для изомерного состояния (state=isomeric)`));
+            }
+          }
+          if (classificationOk && c.classification === 'isomer' && stateIndexOk && stateCodeOk) {
+            const standardIsomerPair =
+              (c.stateIndex === 1 && c.stateCode === 'm') ||
+              (c.stateIndex === 2 && c.stateCode === 'n');
+            const basis = c.classificationBasis;
+            if (!standardIsomerPair) {
+              // Дополнительный изомер: основание ОБЯЗАТЕЛЬНО и машинно проверяемо.
+              if (!isNonNullObject(basis)) {
+                errors.push(where(`кандидат ${label}: строка (i=${String(c.stateIndex)}, s=${String(c.stateCode)}) может быть дополнительным изомером ТОЛЬКО при подтверждённом контексте более двух изомерных состояний у этого (Z, A): требуется classificationBasis (правило context-more-than-two-isomers со sibling-строками) — по паре (i, s) научный тип состояния не угадывается (аудит R3)`));
+              } else {
+                if (basis.rule !== 'context-more-than-two-isomers') {
+                  errors.push(where(`кандидат ${label}: classificationBasis дополнительного изомера обязан использовать правило context-more-than-two-isomers, получено ${String(basis.rule)}`));
+                }
+                const siblings = basis.siblingStates;
+                if (!Array.isArray(siblings) || siblings.length === 0) {
+                  errors.push(where(`кандидат ${label}: classificationBasis дополнительного изомера обязан содержать непустой список sibling-строк того же (Z, A)`));
+                } else {
+                  for (const sib of siblings) {
+                    if (!isNonNullObject(sib) || NUBASE_STATE_CODE_BY_INDEX[(sib as Record<string, unknown>).stateIndex as number] !== (sib as Record<string, unknown>).stateCode) {
+                      errors.push(where(`кандидат ${label}: каждая sibling-строка основания классификации обязана быть согласованной парой (i, s) NUBASE2020`));
+                    }
+                  }
+                  const requiredChain: ReadonlyArray<{ stateIndex: number; stateCode: string }> = [
+                    { stateIndex: 1, stateCode: 'm' },
+                    { stateIndex: 2, stateCode: 'n' },
+                    { stateIndex: 3, stateCode: 'p' },
+                    { stateIndex: 4, stateCode: 'q' },
+                    { stateIndex: 5, stateCode: 'r' }
+                  ].slice(0, (c.stateIndex as number) - 1);
+                  for (const req of requiredChain) {
+                    const present = (siblings as unknown[]).some(
+                      (sib) =>
+                        isNonNullObject(sib) &&
+                        (sib as Record<string, unknown>).stateIndex === req.stateIndex &&
+                        (sib as Record<string, unknown>).stateCode === req.stateCode
+                    );
+                    if (!present) {
+                      errors.push(where(`кандидат ${label}: classificationBasis не доказывает контекст: для строки s=${String(c.stateCode)} требуются sibling-строки (включая i=${String(req.stateIndex)}, s=${req.stateCode}) того же (Z, A)`));
+                    }
+                  }
+                }
+              }
+            } else if (basis !== undefined && (!isNonNullObject(basis) || (basis as Record<string, unknown>).rule !== 'format')) {
+              errors.push(where(`кандидат ${label}: стандартный изомер (i=1,m / i=2,n) классифицируется самим форматом NUBASE2020; classificationBasis допускается только с правилом format`));
+            }
           }
           // Согласованность обозначения нуклида с элементом-владельцем:
           // символ владельца, массовое число и суффикс состояния —
