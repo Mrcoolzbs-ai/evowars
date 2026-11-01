@@ -37,6 +37,16 @@ import {
   NUBASE2020_PROVENANCE,
   isotopeCandidateCoverage
 } from './elementIsotopeCandidates';
+import {
+  NUBASE2020_AUDIT_SOURCE,
+  NUBASE_AUDIT_RANKED_ELEMENTS,
+  NUBASE_AUDIT_UNIT_SECONDS,
+  nubaseAuditUnitSeconds,
+  parseNubaseAuditLine,
+  parseNubaseAuditText,
+  auditNubaseElement,
+  auditNubaseText
+} from './nubaseAudit';
 
 export {
   cosmologies,
@@ -93,3 +103,28 @@ export {
 };
 export type { ElementCatalogCoverage } from './elements';
 export type { IsotopeCandidateCoverage } from './elementIsotopeCandidates';
+
+// Stage 4.3.3 (аудит R3): воспроизводимая утилита аудита NUBASE2020 —
+// парсер фиксированных колонок официального ASCII-файла, контекстная
+// классификация состояний (i, s) и ранжирование кандидатов. Полный
+// ASCII-файл NUBASE2020 в репозиторий не включается (отдельная
+// лицензия файла AMDC не подтверждена): полный прогон выполняется на
+// локально предоставленной копии официального файла.
+export {
+  NUBASE2020_AUDIT_SOURCE,
+  NUBASE_AUDIT_RANKED_ELEMENTS,
+  NUBASE_AUDIT_UNIT_SECONDS,
+  nubaseAuditUnitSeconds,
+  parseNubaseAuditLine,
+  parseNubaseAuditText,
+  auditNubaseElement,
+  auditNubaseText
+};
+export type {
+  NubaseAuditSource,
+  NubaseAuditRow,
+  NubaseAuditHalfLifeKind,
+  NubaseAuditExclusion,
+  NubaseAuditElementReport,
+  NubaseAuditReport
+} from './nubaseAudit';
