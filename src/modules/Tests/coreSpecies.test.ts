@@ -1,3 +1,4 @@
+
 // ============================================
 // STAGE 4.1 - Тесты химических видов: состав, заряд, фазы, каталог
 // ============================================
@@ -182,5 +183,58 @@ describe('Stage 4.1 ScientificSpecies: элементный и зарядовы�
     expect(result.balanced).toBe(false);
     expect(result.reason).toContain('непроверяем');
     expect(result.reason).toContain('mystery');
+  });
+});
+describe('Stage 4.3.2 (финальная научная корректировка): molarMassProvenance требует непустой recordId', () => {
+  it('отсутствие molarMassProvenance — норма (обратная совместимость старых записей)', () => {
+    const species = makeSpecies();
+    expect(species.molarMassProvenance).toBeUndefined();
+    expect(validateSpecies(species)).toEqual([]);
+  });
+
+  it('molarMassProvenance с непустым recordId проходит валидацию', () => {
+    const errors = validateSpecies(makeSpecies({
+      molarMassProvenance: { sourceName: 'NASA Glenn CEA Thermodynamic Database', recordId: 'H2O' }
+    }));
+    expect(errors).toEqual([]);
+  });
+
+  it('отсутствие recordId — диагностическая ошибка', () => {
+    const errors = validateSpecies(makeSpecies({
+      molarMassProvenance: { sourceName: 'NASA Glenn CEA Thermodynamic Database' }
+    }));
+    expect(errors.some((e) => e.includes('recordId'))).toBe(true);
+  });
+
+  it('recordId null — диагностическая ошибка', () => {
+    const errors = validateSpecies(makeSpecies({
+      molarMassProvenance: { sourceName: 'NASA Glenn CEA Thermodynamic Database', recordId: null as unknown as string }
+    }));
+    expect(errors.some((e) => e.includes('recordId'))).toBe(true);
+  });
+
+  it('пустая и пробельная recordId — диагностические ошибки', () => {
+    const empty = validateSpecies(makeSpecies({
+      molarMassProvenance: { sourceName: 'NASA Glenn CEA Thermodynamic Database', recordId: '' }
+    }));
+    const blank = validateSpecies(makeSpecies({
+      molarMassProvenance: { sourceName: 'NASA Glenn CEA Thermodynamic Database', recordId: '   ' }
+    }));
+    expect(empty.some((e) => e.includes('recordId'))).toBe(true);
+    expect(blank.some((e) => e.includes('recordId'))).toBe(true);
+  });
+
+  it('нечисловой recordId (повреждённые данные) — диагностическая ошибка', () => {
+    const errors = validateSpecies(makeSpecies({
+      molarMassProvenance: { sourceName: 'NASA Glenn CEA Thermodynamic Database', recordId: 42 as unknown as string }
+    }));
+    expect(errors.some((e) => e.includes('recordId'))).toBe(true);
+  });
+
+  it('recordId не заменяет идентификацию источника: без sourceName/sourceId/datasetId/reference — ошибка', () => {
+    const errors = validateSpecies(makeSpecies({
+      molarMassProvenance: { recordId: 'H2O' }
+    }));
+    expect(errors.some((e) => e.includes('должен идентифицировать источник'))).toBe(true);
   });
 });
