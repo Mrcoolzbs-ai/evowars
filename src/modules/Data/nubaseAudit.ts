@@ -1,7 +1,15 @@
 // ============================================
 // NUBASE2020 AUDIT UTILITY - воспроизводимый аудит ранжирования
-// изотопов-кандидатов (Stage 4.3.3, аудит R3)
+// изотопов-кандидатов (Stage 4.3.3, аудит R4)
 // ============================================
+//
+// Корректирующая ревизия R4 (политика неопределённостей): отсутствие
+// опубликованной числовой σ — это отсутствие информации о
+// неопределённости. Оно НЕ разрешает считать номинальное значение
+// точной точкой и доказывать по нему полноту ранжирования.
+// Точечное правило аудита R3 (исключение «~v» и измеренных значений
+// без σ, чья точка ниже нижней границы 1σ-интервала якоря) УДАЛЕНО
+// как не подтверждённое опубликованной методикой NUBASE2020.
 //
 // Назначение: сделать результат аудита ранжирования 14 элементов
 // (Data/elementIsotopeCandidates.ts) ПОВТОРЯЕМЫМ. Утилита разбирает
@@ -22,15 +30,19 @@
 //      интервалом якоря; нижний предел «>x» не ограничен сверху и
 //      исключению не подлежит (полнота не доказуема —
 //      not_verifiable); верхний предел «<x» исключается, только
-//      если x ниже нижней границы интервала якоря; приближение
-//      «~v» и измеренное значение без опубликованной σ НЕ получают
-//      искусственной неопределённости (правило фактора 2 аудита R2
-//      удалено как не подтверждённое источником): точечное
-//      значение исключается, только если оно ниже нижней границы
-//      1σ-интервала якоря, с ссылкой на строку-обоснование; если
-//      точка не ниже границы и σ не опубликована, полнота НЕ
-//      ДОКАЗУЕМА — not_verifiable; отсутствие σ не заменяется
-//      нулевой или выдуманной неопределённостью;
+//      если x ниже нижней границы интервала якоря (исключение
+//      обосновано ОПУБЛИКОВАННОЙ границей, а не точечным
+//      предположением); приближение «~v», измеренное значение без
+//      опубликованной σ и оценённое систематикой «v#» НЕ получают
+//      искусственной неопределённости и НЕ исключаются точечным
+//      правилом (аудит R4): номинальное значение без σ не
+//      доказывает, что истинный T1/2 строки ниже нижней границы
+//      интервала якоря — полнота НЕ ДОКАЗУЕМА (not_verifiable с
+//      причинами unresolved_approx / unresolved_no_sigma /
+//      unresolved_estimated); наблюдавшееся ground/isomer-состояние
+//      без собственного T1/2 также не доказывает неконкурентность
+//      (причина no_half_life_unresolved); отсутствие σ не
+//      заменяется нулевой или выдуманной неопределённостью;
 //   5) при перекрытии опубликованных 1σ-интервалов все
 //      пересекающиеся кандидаты остаются РАВНОПРАВНЫМИ.
 //
@@ -103,7 +115,7 @@ export const NUBASE2020_AUDIT_SOURCE: NubaseAuditSource = {
   localCopySha256: '5646189e91c9c04016005a12e34f74b73e4ea4dec57a14ed5d6d948fe0ee83ce',
   localCopySha256Note:
     'SHA-256 вычислен для локально проверенной копии файла, использованной при аудите; AMDC не публикует официальный контрольный хеш распределения — значение НЕ заявляется как официальный хеш и не является хешем зеркальной копии',
-  parserVersion: 'nubase-audit-r3/1.0.0',
+  parserVersion: 'nubase-audit-r4/1.0.0',
   limitations: [
     'полный ASCII-файл NUBASE2020 не включается в репозиторий: отдельная лицензия файла AMDC не подтверждена; полный прогон утилиты требует локальной копии официального файла',
     'статусы incomplete (Z=99-118) назначены каталогом (область активных исследований) и утилитой не вычисляются',
@@ -330,18 +342,29 @@ export function parseNubaseAuditText(text: string): readonly NubaseAuditRow[] {
 // 4. АУДИТ ЭЛЕМЕНТА: КЛАССИФИКАЦИЯ И РАНЖИРОВАНИЕ
 // ============================================
 
+/**
+ * Причина исключения строки из ранжирования или понижения полноты
+ * (аудит R4). Значения без опубликованной числовой σ НИКОГДА не
+ * исключаются точечным правилом: номинал без σ не доказывает
+ * положения истинного значения относительно интервала якоря.
+ */
+export type NubaseAuditExclusionKind =
+  | 'lower_limit_unbounded'
+  | 'upper_limit_excluded'
+  | 'unresolved_upper_limit'
+  | 'unresolved_no_sigma'
+  | 'unresolved_approx'
+  | 'unresolved_estimated'
+  | 'no_half_life_unresolved'
+  | 'stable_state_present'
+  | 'indeterminate_state_unresolved'
+  | 'interval_disjoint'
+  | 'anchor_without_sigma'
+  | 'unresolved_unit';
+
 /** Причина исключения строки из ранжирования или понижения полноты. */
 export interface NubaseAuditExclusion {
-  kind:
-    | 'lower_limit_unbounded'
-    | 'approx_point_excluded'
-    | 'no_sigma_point_excluded'
-    | 'upper_limit_excluded'
-    | 'unresolved_no_sigma'
-    | 'unresolved_approx'
-    | 'unresolved_upper_limit'
-    | 'anchor_without_sigma'
-    | 'unresolved_unit';
+  kind: NubaseAuditExclusionKind;
   /** Строка-обоснование (сама исключаемая/оспариваемая строка источника). */
   row: NubaseAuditRow;
   /** Объяснение правила. */
@@ -375,6 +398,14 @@ export interface NubaseAuditElementReport {
   candidates: readonly NubaseAuditRow[];
   /** Полнота В ПРЕДЕЛАХ NUBASE2020 (статусы incomplete каталога здесь не вычисляются). */
   completeness: 'complete' | 'not_verifiable' | 'no_anchor';
+  /**
+   * Наблюдавшиеся уровни/резонансы/IAS/неопределимые строки без
+   * собственного пригодного для ранжирования T1/2 (аудит R4,
+   * явный учёт состояний без T1/2): кандидатами они не являются,
+   * но отсутствие T1/2 не считается доказательством короткого
+   * времени жизни и не теряется молча.
+   */
+  nonCandidateStatesWithoutHalfLife: number;
   /** Причины: пределы, приближения, значения без σ, несовместимые единицы. */
   reasons: readonly NubaseAuditExclusion[];
 }
@@ -429,9 +460,11 @@ export function auditNubaseElement(
   let resonances = 0;
   let ias = 0;
   let indeterminate = 0;
+  let nonCandidateStatesWithoutHalfLife = 0;
   const halfLifeKinds: Record<NubaseAuditHalfLifeKind, number> = { ...EMPTY_HALF_LIFE_KINDS };
   const eligible: NubaseAuditRow[] = [];
   const reasons: NubaseAuditExclusion[] = [];
+  let unresolvedPresent = false;
 
   for (const group of groups) {
     const refs: NubaseStateRowRef[] = group.map((r) => ({
@@ -468,8 +501,59 @@ export function auditNubaseElement(
         row.halfLifeKind === 'approx' ||
         row.halfLifeKind === 'lower_limit' ||
         row.halfLifeKind === 'upper_limit';
-      if ((cls === 'ground' || cls === 'isomer') && ownRankedHalfLife) {
-        eligible.push(row);
+      if (cls === 'ground' || cls === 'isomer') {
+        if (ownRankedHalfLife) {
+          eligible.push(row);
+        } else if (row.halfLifeKind === 'estimated') {
+          // Оценённое систематикой «v#» значение без опубликованной
+          // числовой σ: номинал не доказывает неконкурентность (аудит R4).
+          unresolvedPresent = true;
+          reasons.push({
+            kind: 'unresolved_estimated',
+            row,
+            explanation:
+              'оценённое систематикой «v#» значение T1/2 без опубликованной числовой σ: номинал не доказывает, что истинный T1/2 состояния ниже нижней границы 1σ-интервала якоря, искусственная неопределённость не вводится — полнота не доказуема'
+          });
+        } else if (row.halfLifeKind === 'stable') {
+          // Наблюдавшееся стабильное ground/isomer-состояние: ранжирование
+          // измеренных значений не устанавливает самое долгоживущее
+          // состояние элемента (аудит R4).
+          unresolvedPresent = true;
+          reasons.push({
+            kind: 'stable_state_present',
+            row,
+            explanation:
+              'наблюдавшееся стабильное состояние (stbl): его время жизни не ограничено, ранжирование измеренных T1/2 не устанавливает самое долгоживущее состояние элемента — полнота не доказуема'
+          });
+        } else {
+          // Собственный T1/2 отсутствует (включая p-unst): отсутствие
+          // опубликованного T1/2 НЕ считается доказательством короткого
+          // времени жизни (аудит R4, Part II §5).
+          unresolvedPresent = true;
+          reasons.push({
+            kind: 'no_half_life_unresolved',
+            row,
+            explanation:
+              'наблюдавшееся ground/isomer-состояние без собственного опубликованного T1/2: источник не устанавливает, что оно не может конкурировать с якорем, — полнота не доказуема'
+          });
+        }
+      } else {
+        // Уровни, резонансы, IAS: кандидатами не являются, но отсутствие
+        // собственного T1/2 учитывается явно, а не молча (аудит R4).
+        if (!ownRankedHalfLife) {
+          nonCandidateStatesWithoutHalfLife += 1;
+        }
+        if (cls === 'indeterminate') {
+          // Неопределимая строка: научный тип состояния не выводится —
+          // доказать, что она не является ground/isomer, нельзя (аудит R4).
+          unresolvedPresent = true;
+          reasons.push({
+            kind: 'indeterminate_state_unresolved',
+            row,
+            explanation:
+              'наблюдавшаяся строка с неопределимой классификацией состояния: доказать, что она не является ground/isomer-конкурентом якоря, нельзя — полнота не доказуема'
+          });
+        }
       }
     }
   }
@@ -497,10 +581,11 @@ export function auditNubaseElement(
       resonances,
       ias,
       indeterminate,
+      nonCandidateStatesWithoutHalfLife,
       halfLifeKinds,
       anchor: null,
       candidates: [],
-      completeness: 'no_anchor',
+      completeness: unresolvedPresent ? 'not_verifiable' : 'no_anchor',
       reasons
     };
   }
@@ -523,6 +608,7 @@ export function auditNubaseElement(
       resonances,
       ias,
       indeterminate,
+      nonCandidateStatesWithoutHalfLife,
       halfLifeKinds,
       anchor,
       candidates: [anchor],
@@ -536,7 +622,9 @@ export function auditNubaseElement(
     (anchor.halfLifeSeconds as number) + anchor.halfLifeSigma * anchorFactor;
 
   const candidates: NubaseAuditRow[] = [anchor];
-  let completeness: 'complete' | 'not_verifiable' = 'complete';
+  let completeness: 'complete' | 'not_verifiable' = unresolvedPresent
+    ? 'not_verifiable'
+    : 'complete';
 
   for (const r of eligible) {
     if (r === anchor) {
@@ -554,23 +642,16 @@ export function auditNubaseElement(
     }
     if (r.halfLifeKind === 'measured') {
       if (r.halfLifeSigma === null) {
-        // Измеренное значение без опубликованной σ: ТОЛЬКО точечное правило.
-        if ((r.halfLifeSeconds as number) < anchorLow) {
-          reasons.push({
-            kind: 'no_sigma_point_excluded',
-            row: r,
-            explanation:
-              'измеренное значение без опубликованной σ: точка ниже нижней границы 1σ-интервала якоря — исключено точечным правилом без выдуманной неопределённости'
-          });
-        } else {
-          reasons.push({
-            kind: 'unresolved_no_sigma',
-            row: r,
-            explanation:
-              'измеренное значение без опубликованной σ не ниже нижней границы интервала якоря: строгий 1σ-рейтинг невозможен, полнота не доказуема'
-          });
-          completeness = 'not_verifiable';
-        }
+        // Измеренное значение без опубликованной σ: точечное правило
+        // УДАЛЕНО (аудит R4) — номинал без σ не доказывает
+        // неконкурентность ни при каком соотношении с якорем.
+        reasons.push({
+          kind: 'unresolved_no_sigma',
+          row: r,
+          explanation:
+            'измеренное значение без опубликованной σ: отсутствие σ — отсутствие информации о неопределённости, номинальное значение не принимается точной точкой и не доказывает, что истинный T1/2 ниже нижней границы 1σ-интервала якоря — полнота не доказуема'
+        });
+        completeness = 'not_verifiable';
         continue;
       }
       const f = nubaseAuditUnitSeconds(r.halfLifeUnit);
@@ -588,28 +669,28 @@ export function auditNubaseElement(
       const high = (r.halfLifeSeconds as number) + r.halfLifeSigma * f;
       if (low <= anchorHigh && high >= anchorLow) {
         candidates.push(r);
+      } else {
+        // У строки и якоря опубликованные σ: непересечение интервалов
+        // ДОКАЗЫВАЕТ неконкурентность (исключение обосновано).
+        reasons.push({
+          kind: 'interval_disjoint',
+          row: r,
+          explanation:
+            '1σ-интервалы строки и якоря не пересекаются (у обеих строк опубликованы σ) — исключение обосновано опубликованными неопределённостями'
+        });
       }
       continue;
     }
     if (r.halfLifeKind === 'approx') {
       // Приближение «~v»: σ не опубликована, искусственная
-      // неопределённость не вводится (правило фактора 2 удалено).
-      if ((r.halfLifeSeconds as number) < anchorLow) {
-        reasons.push({
-          kind: 'approx_point_excluded',
-          row: r,
-          explanation:
-            'приближение «~v» без опубликованной σ: точка ниже нижней границы 1σ-интервала якоря — исключено точечным правилом, искусственная неопределённость не вводится'
-        });
-      } else {
-        reasons.push({
-          kind: 'unresolved_approx',
-          row: r,
-          explanation:
-            'приближение «~v» без опубликованной σ не ниже нижней границы интервала якоря: строгий 1σ-рейтинг невозможен, полнота не доказуема'
-        });
-        completeness = 'not_verifiable';
-      }
+      // неопределённость не вводится; точечное правило УДАЛЕНО (аудит R4).
+      reasons.push({
+        kind: 'unresolved_approx',
+        row: r,
+        explanation:
+          'приближение «~v» без опубликованной σ: отсутствие σ — отсутствие информации о неопределённости, номинальное значение не принимается точной точкой и не доказывает, что истинный T1/2 ниже нижней границы 1σ-интервала якоря — полнота не доказуема'
+      });
+      completeness = 'not_verifiable';
       continue;
     }
     if (r.halfLifeKind === 'lower_limit') {
@@ -652,6 +733,7 @@ export function auditNubaseElement(
     resonances,
     ias,
     indeterminate,
+    nonCandidateStatesWithoutHalfLife,
     halfLifeKinds,
     anchor,
     candidates,

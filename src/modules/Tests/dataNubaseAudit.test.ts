@@ -1,5 +1,5 @@
 // ============================================
-// STAGE 4.3.3 (аудит R3) — Тесты воспроизводимой утилиты аудита
+// STAGE 4.3.3 (аудит R4) — Тесты воспроизводимой утилиты аудита
 // NUBASE2020: парсер фиксированных колонок, наблюдаемость строк,
 // контекстная классификация (i, s), ранжирование и полнота
 // ============================================
@@ -12,10 +12,19 @@
 // дополнительные изомеры ДОКАЗАННОГО контекста; 183Au p и 255No p —
 // уровни вне контекста (не превращаются в изомеры по букве); 28Si —
 // резонанс и IAS; 98Y — полная цепочка m,n,p,q,r,x (x — изомер
-// 6-го порядка). Правило фактора 2 для ~v удалено (аудит R3):
-// приближения и измеренные значения без опубликованной σ НЕ
-// получают искусственной неопределённости — только точечное
-// правило против нижней границы 1σ-интервала якоря.
+// 6-го порядка). Политика неопределённостей аудита R4: точечное
+// правило R3 УДАЛЕНО — приближения «~v», измеренные значения без
+// опубликованной σ и оценки «v#» НЕ получают искусственной
+// неопределённости и НЕ исключаются точечным предположением:
+// отсутствие σ — отсутствие информации о неопределённости,
+// номинал не доказывает положения истинного T1/2 относительно
+// интервала якоря (not_verifiable: unresolved_approx /
+// unresolved_no_sigma / unresolved_estimated); ground/isomer-состояние
+// без собственного T1/2 — no_half_life_unresolved; стабильное
+// состояние — stable_state_present. Исключение обосновано ТОЛЬКО
+// опубликованными данными: непересечение 1σ-интервалов (у обеих строк
+// есть σ) — interval_disjoint; верхний предел ниже нижней границы
+// интервала якоря — upper_limit_excluded.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -120,6 +129,21 @@ const NUBASE_83TC_LINE =
 // Строка заголовка файла (не запись данных).
 const NUBASE_HEADER_LINE =
   '# Nubase2020 citation: F.G. Kondev, M. Wang, W.J. Huang, S. Naimi, and G. Audi, Chin. Phys. C45, 030001 (2021)';
+// 87Tcm: наблюдавшийся изомер с ОЦЕНЁННЫМ систематикой T1/2 «2# s» —
+// номинал без опубликованной числовой σ не доказывает неконкурентность
+// (аудит R4, причина unresolved_estimated).
+const NUBASE_87TCM_LINE =
+  '087 0431   87Tc m -57683          4           7          1         *    2#     s        1/2-#                          B+ ?;IT ?';
+// 250Bk: ground, m, n (измеренные с σ) и p — наблюдавшийся дополнительный
+// изомер БЕЗ собственного T1/2 (аудит R4, причина no_half_life_unresolved);
+// якорь группы — 247Bk 1.38(25) ky.
+const NUBASE_250BK_LINES: readonly string[] = [
+  '247 0970   247Bk   65490          5                                     1.38  ky 0.25   3/2-          15          1965 A~100;SF ?',
+  '250 0970   250Bk   72952.0        2.9                                   3.212  h 0.005  2-            01          1954 B-=100',
+  '250 0971   250Bkm  72987.6        2.9        35.59       0.10          29     us 1      4+            01          1966 IT=100',
+  '250 0972   250Bkn  73038          3          85.6        1.6          213     us 8      7+            01          1972 IT=100',
+  '250 0973   250Bkp  73163.8        2.9       211.80       0.20                           2+            01               IT=100',
+];
 
 function rowsOf(lines: readonly string[]): ReturnType<typeof parseNubaseAuditText> {
   return parseNubaseAuditText(lines.join('\n'));
@@ -145,12 +169,12 @@ function anchorOrThrow(report: ReturnType<typeof auditNubaseElement>): NubaseAud
 }
 
 // Замена полей T/unit/dT (колонки 70-88 шапки NUBASE2020) в дословной
-// строке файла для граничных тестов точечного правила аудита R3.
+// строке файла для синтетических граничных тестов политики R4.
 function replaceHalfLife(line: string, t: string, unit: string, dT: string): string {
   return line.slice(0, 69) + t.padStart(9) + unit.padEnd(2) + ' ' + dT.padStart(7) + line.slice(88);
 }
 
-describe('Stage 4.3.3 (аудит R3): парсер фиксированных колонок NUBASE2020', () => {
+describe('Stage 4.3.3 (аудит R4): парсер фиксированных колонок NUBASE2020', () => {
   it('205Po (ground): A, Z, i, s, обозначение, измеренный T1/2 1.74 h со σ 0.08, SI-секунды', () => {
     const row = parseOrThrow(NUBASE_205PO_LINES[0]);
     expect(row.massNumber).toBe(205);
@@ -297,7 +321,7 @@ describe('Stage 4.3.3 (аудит R3): парсер фиксированных �
   });
 });
 
-describe('Stage 4.3.3 (аудит R3): группы (Z, A) и контекстная классификация состояний', () => {
+describe('Stage 4.3.3 (аудит R4): группы (Z, A) и контекстная классификация состояний', () => {
   it('92Tc — контрольный пример шапки NUBASE2020: p — ДОПОЛНИТЕЛЬНЫЙ изомер при (1, m) и (2, n) в группе', () => {
     const r = reportOrThrow(43, NUBASE_92TC_LINES);
     expect(r.observedRows).toBe(4);
@@ -318,12 +342,24 @@ describe('Stage 4.3.3 (аудит R3): группы (Z, A) и контекстн
     expect(anchor.halfLifeSigma).toBe(0.15);
     expect(anchor.halfLifeSeconds).toBe(255);
     expect(r.candidates).toHaveLength(1);
-    // n и p: верхние пределы <0.1 us ниже нижней границы якоря — исключены
-    expect(r.reasons).toHaveLength(2);
-    expect(r.reasons.map((x) => x.kind).sort()).toEqual(['upper_limit_excluded', 'upper_limit_excluded']);
-    expect(r.reasons.map((x) => x.row.stateIndex).sort()).toEqual([2, 3]);
+    // m: измеренный с σ, 1σ-интервал не пересекается с якорем — interval_disjoint;
+    // n и p: верхние пределы <0.1 us ниже нижней границы якоря — upper_limit_excluded
+    expect(r.reasons).toHaveLength(3);
+    expect(r.reasons.map((x) => x.kind).sort()).toEqual([
+      'interval_disjoint',
+      'upper_limit_excluded',
+      'upper_limit_excluded'
+    ]);
+    expect(r.reasons.map((x) => x.row.stateIndex).sort()).toEqual([1, 2, 3]);
+    const disjoint = r.reasons.find((x) => x.kind === 'interval_disjoint');
+    if (disjoint === undefined) throw new Error('нужна причина interval_disjoint для 92Tcm');
+    expect(disjoint.row.stateIndex).toBe(1);
+    expect(disjoint.row.halfLifeRaw).toBe('1.03');
+    expect(disjoint.row.halfLifeSigma).toBe(0.06);
     for (const reason of r.reasons) {
-      expect(reason.row.halfLifeSeconds).toBeCloseTo(1e-7, 12);
+      if (reason.kind === 'upper_limit_excluded') {
+        expect(reason.row.halfLifeSeconds).toBeCloseTo(1e-7, 12);
+      }
     }
   });
 
@@ -341,8 +377,16 @@ describe('Stage 4.3.3 (аудит R3): группы (Z, A) и контекстн
     expect(anchor.halfLifeUnit).toBe('h');
     expect(anchor.halfLifeSigma).toBe(0.08);
     expect(r.candidates).toHaveLength(1);
-    // m, n, p, q — измеренные с σ, интервалы не пересекаются с якорем: причин нет
-    expect(r.reasons).toHaveLength(0);
+    // m, n, p, q — измеренные с σ, интервалы не пересекаются с якорем:
+    // исключение обосновано опубликованными σ (interval_disjoint)
+    expect(r.reasons).toHaveLength(4);
+    expect(r.reasons.map((x) => x.kind).sort()).toEqual([
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint'
+    ]);
+    expect(r.reasons.map((x) => x.row.stateIndex).sort()).toEqual([1, 2, 3, 4]);
   });
 
   it('183Au — p УРОВЕНЬ (нет (2, n) в группе), не изомер и не конкурент; нижний предел m оспаривает полноту', () => {
@@ -381,9 +425,11 @@ describe('Stage 4.3.3 (аудит R3): группы (Z, A) и контекстн
     expect(anchor.halfLifeSigma).toBe(0.18);
     expect(r.candidates).toHaveLength(1);
     expect(r.reasons).toHaveLength(0);
+    // уровень p имеет собственный нижний предел — учитывается без причин
+    expect(r.nonCandidateStatesWithoutHalfLife).toBe(0);
   });
 
-  it('28Si — резонанс r (i=5 без цепочки) и IAS i/j не кандидаты; полнота no_anchor (ground stbl)', () => {
+  it('28Si — резонанс r (i=5 без цепочки) и IAS i/j не кандидаты; полнота not_verifiable: stable ground без якоря', () => {
     const r = reportOrThrow(14, NUBASE_28SI_LINES);
     expect(r.observedRows).toBe(4);
     expect(r.grounds).toBe(1);
@@ -392,9 +438,17 @@ describe('Stage 4.3.3 (аудит R3): группы (Z, A) и контекстн
     expect(r.levels).toBe(0);
     expect(r.resonances).toBe(1);
     expect(r.ias).toBe(2);
-    expect(r.completeness).toBe('no_anchor');
+    // измеренного якоря нет, но стабильное ground-состояние оспаривает
+    // полноту ранжирования: время жизни stbl не ограничено (аудит R4)
+    expect(r.completeness).toBe('not_verifiable');
     expect(r.anchor).toBeNull();
     expect(r.candidates).toHaveLength(0);
+    expect(r.reasons).toHaveLength(1);
+    expect(r.reasons[0].kind).toBe('stable_state_present');
+    expect(r.reasons[0].row.stateIndex).toBe(0);
+    expect(r.reasons[0].row.halfLifeKind).toBe('stable');
+    // резонанс r и IAS j без собственного T1/2 учтены явно, IAS i — с T1/2
+    expect(r.nonCandidateStatesWithoutHalfLife).toBe(2);
     // IAS с измеренным T1/2 (28Si i, 1.5 fs) в отбор не попадает
     const iasRow = rowsOf(NUBASE_28SI_LINES).find((x) => x.stateIndex === 8);
     if (iasRow === undefined) throw new Error('IAS-строка 28Si i должна разбираться');
@@ -418,11 +472,22 @@ describe('Stage 4.3.3 (аудит R3): группы (Z, A) и контекстн
     expect(anchor.halfLifeSigma).toBe(0.08);
     expect(anchor.halfLifeSeconds).toBeCloseTo(2.32, 12);
     expect(r.candidates).toHaveLength(1);
-    expect(r.reasons).toHaveLength(0);
+    // ground, m, p, q, r, x — измеренные с σ, интервалы не пересекаются
+    // с якорем: исключение обосновано опубликованными σ (interval_disjoint)
+    expect(r.reasons).toHaveLength(6);
+    expect(r.reasons.map((x) => x.kind).sort()).toEqual([
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint'
+    ]);
+    expect(r.reasons.map((x) => x.row.stateIndex).sort()).toEqual([0, 1, 3, 4, 5, 6]);
   });
 });
 
-describe('Stage 4.3.3 (аудит R3): ранжирование и статусы полноты', () => {
+describe('Stage 4.3.3 (аудит R4): ранжирование и статусы полноты', () => {
   it('Tc-97 4.21(16) My и Tc-98 4.2(3) My — перекрывающиеся 1σ-интервалы: 2 равноправных кандидата', () => {
     const r = auditNubaseElement(43, rowsOf([NUBASE_97TC_LINE, NUBASE_98TC_LINE]));
     expect(r.observedRows).toBe(2);
@@ -451,14 +516,21 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(anchor.halfLifeSigma).toBe(70);
     expect(anchor.halfLifeSeconds).toBe(180);
     expect(r.candidates).toHaveLength(1);
-    expect(r.reasons).toHaveLength(1);
-    expect(r.reasons[0].kind).toBe('lower_limit_unbounded');
-    expect(r.reasons[0].row.stateIndex).toBe(1);
-    expect(r.reasons[0].row.stateCode).toBe('m');
-    expect(r.reasons[0].row.halfLifeRaw).toBe('>93');
+    // ground 45(2) s: 1σ-интервал [43, 47] s не пересекается с интервалом
+    // якоря [110, 250] s — исключение обосновано опубликованными σ
+    // (interval_disjoint); m >93 s — нижний предел без верхней границы
+    expect(r.reasons).toHaveLength(2);
+    expect(r.reasons[0].kind).toBe('interval_disjoint');
+    expect(r.reasons[0].row.stateIndex).toBe(0);
+    expect(r.reasons[0].row.halfLifeValue).toBe(45);
+    expect(r.reasons[0].row.halfLifeSigma).toBe(2);
+    expect(r.reasons[1].kind).toBe('lower_limit_unbounded');
+    expect(r.reasons[1].row.stateIndex).toBe(1);
+    expect(r.reasons[1].row.stateCode).toBe('m');
+    expect(r.reasons[1].row.halfLifeRaw).toBe('>93');
   });
 
-  it('приближение ~v: 206Fr ~16 s точечно исключено против якоря 223Fr 22.00(7) m — БЕЗ выдуманной σ', () => {
+  it('приближение ~v: 206Fr ~16 s без σ НЕ исключается точкой против якоря 223Fr 22.00(7) m — полнота not_verifiable', () => {
     const rows = rowsOf([NUBASE_206FR_LINE, NUBASE_223FR_LINE]);
     const r = auditNubaseElement(87, rows);
     const anchor = anchorOrThrow(r);
@@ -466,10 +538,12 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(anchor.halfLifeValue).toBe(22.0);
     expect(anchor.halfLifeUnit).toBe('m');
     expect(anchor.halfLifeSigma).toBe(0.07);
-    expect(r.completeness).toBe('complete');
+    // отсутствие σ — отсутствие информации: номинал ~16 s не принимается
+    // точной точкой и не доказывает неконкурентность (аудит R4)
+    expect(r.completeness).toBe('not_verifiable');
     expect(r.candidates).toHaveLength(1);
     expect(r.reasons).toHaveLength(1);
-    expect(r.reasons[0].kind).toBe('approx_point_excluded');
+    expect(r.reasons[0].kind).toBe('unresolved_approx');
     expect(r.reasons[0].row.notation).toBe('206Fr');
     expect(r.reasons[0].row.halfLifeRaw).toBe('~16');
     expect(r.reasons[0].row.halfLifeUnit).toBe('s');
@@ -478,8 +552,9 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(r.reasons[0].row.halfLifeSigma).toBeNull();
   });
 
-  it('приближение ~v ВЫШЕ границы якоря: полнота not_verifiable, значение остаётся приближением', () => {
-    // ~1320 s против нижней границы якоря (22.00-0.07)*60 = 1315.8 s
+  it('приближение ~v с номиналом ВЫШЕ границы якоря: та же причина unresolved_approx — полнота не зависит от положения номинала', () => {
+    // ~1320 s против нижней границы якоря (22.00-0.07)*60 = 1315.8 s:
+    // под положением номинала полнота не выводится ни в одну сторону
     const synthetic = replaceHalfLife(NUBASE_206FR_LINE, '~1320', 's', '');
     const r = auditNubaseElement(87, rowsOf([synthetic, NUBASE_223FR_LINE]));
     expect(r.completeness).toBe('not_verifiable');
@@ -493,7 +568,7 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(r.reasons[0].row.halfLifeSigma).toBeNull();
   });
 
-  it('измеренное без σ: 187Pom 0.5 ms точечно исключено против 209Po 124(3) y — полнота complete', () => {
+  it('измеренное без σ: 187Pom 0.5 ms НЕ исключается точкой против 209Po 124(3) y — полнота not_verifiable', () => {
     const rows = rowsOf([NUBASE_187POM_LINE, NUBASE_209PO_LINE]);
     const r = auditNubaseElement(84, rows);
     const anchor = anchorOrThrow(r);
@@ -501,10 +576,12 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(anchor.halfLifeValue).toBe(124);
     expect(anchor.halfLifeUnit).toBe('y');
     expect(anchor.halfLifeSigma).toBe(3);
-    expect(r.completeness).toBe('complete');
+    // отсутствие σ — отсутствие информации: номинал 0.5 ms не принимается
+    // точной точкой и не доказывает неконкурентность (аудит R4)
+    expect(r.completeness).toBe('not_verifiable');
     expect(r.candidates).toHaveLength(1);
     expect(r.reasons).toHaveLength(1);
-    expect(r.reasons[0].kind).toBe('no_sigma_point_excluded');
+    expect(r.reasons[0].kind).toBe('unresolved_no_sigma');
     expect(r.reasons[0].row.stateIndex).toBe(1);
     expect(r.reasons[0].row.stateCode).toBe('m');
     expect(r.reasons[0].row.halfLifeRaw).toBe('0.5');
@@ -512,9 +589,10 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(r.reasons[0].row.halfLifeSigma).toBeNull();
   });
 
-  it('измеренное без σ ВЫШЕ границы якоря: полнота not_verifiable (σ не подставляется)', () => {
+  it('измеренное без σ с номиналом ВЫШЕ границы якоря: та же причина unresolved_no_sigma (σ не подставляется)', () => {
     // 123 y: выше нижней границы 1σ-интервала якоря (124-3=121 y),
-    // но ниже самого якоря 124 y — якорем остаётся 209Po
+    // но ниже самого якоря 124 y — якорем остаётся 209Po; под положением
+    // номинала полнота не выводится ни в одну сторону
     const synthetic = replaceHalfLife(NUBASE_187POM_LINE, '123', 'y', '');
     const r = auditNubaseElement(84, rowsOf([synthetic, NUBASE_209PO_LINE]));
     expect(r.completeness).toBe('not_verifiable');
@@ -528,9 +606,72 @@ describe('Stage 4.3.3 (аудит R3): ранжирование и статус�
     expect(r.reasons[0].row.halfLifeSeconds).toBeCloseTo(123 * 31556926, 3);
     expect(r.reasons[0].row.halfLifeSigma).toBeNull();
   });
+
+  it('оценка систематики: 87Tcm 2# s — наблюдавшийся изомер без числовой σ, полнота not_verifiable', () => {
+    const r = auditNubaseElement(43, rowsOf([NUBASE_87TCM_LINE, NUBASE_97TC_LINE]));
+    expect(r.observedRows).toBe(2);
+    expect(r.grounds).toBe(1);
+    expect(r.standardIsomers).toBe(1);
+    expect(r.additionalIsomers).toBe(0);
+    const anchor = anchorOrThrow(r);
+    expect(anchor.notation).toBe('97Tc');
+    expect(anchor.halfLifeValue).toBe(4.21);
+    expect(anchor.halfLifeUnit).toBe('My');
+    expect(anchor.halfLifeSigma).toBe(0.16);
+    // оценка «2# s» без опубликованной числовой σ: номинал не доказывает
+    // неконкурентность, искусственная неопределённость не вводится
+    expect(r.completeness).toBe('not_verifiable');
+    expect(r.candidates).toHaveLength(1);
+    expect(r.reasons).toHaveLength(1);
+    expect(r.reasons[0].kind).toBe('unresolved_estimated');
+    expect(r.reasons[0].row.notation).toBe('87Tc');
+    expect(r.reasons[0].row.stateIndex).toBe(1);
+    expect(r.reasons[0].row.stateCode).toBe('m');
+    expect(r.reasons[0].row.halfLifeKind).toBe('estimated');
+    expect(r.reasons[0].row.halfLifeValue).toBe(2);
+    expect(r.reasons[0].row.halfLifeSigma).toBeNull();
+    expect(r.nonCandidateStatesWithoutHalfLife).toBe(0);
+  });
+
+  it('состояние без собственного T1/2: 250Bkp (доп. изомер) оспаривает полноту против якоря 247Bk 1.38(25) ky', () => {
+    const r = reportOrThrow(97, NUBASE_250BK_LINES);
+    expect(r.observedRows).toBe(5);
+    expect(r.grounds).toBe(2);
+    expect(r.standardIsomers).toBe(2);
+    expect(r.additionalIsomers).toBe(1);
+    expect(r.levels).toBe(0);
+    expect(r.resonances).toBe(0);
+    expect(r.ias).toBe(0);
+    expect(r.indeterminate).toBe(0);
+    const anchor = anchorOrThrow(r);
+    expect(anchor.notation).toBe('247Bk');
+    expect(anchor.halfLifeValue).toBe(1.38);
+    expect(anchor.halfLifeUnit).toBe('ky');
+    expect(anchor.halfLifeSigma).toBe(0.25);
+    // отсутствие опубликованного T1/2 не считается доказательством
+    // короткого времени жизни (аудит R4)
+    expect(r.completeness).toBe('not_verifiable');
+    expect(r.candidates).toHaveLength(1);
+    expect(r.nonCandidateStatesWithoutHalfLife).toBe(0);
+    expect(r.reasons).toHaveLength(4);
+    expect(r.reasons[0].kind).toBe('no_half_life_unresolved');
+    expect(r.reasons[0].row.stateIndex).toBe(3);
+    expect(r.reasons[0].row.stateCode).toBe('p');
+    expect(r.reasons[0].row.notation).toBe('250Bk');
+    expect(r.reasons[0].row.halfLifeKind).toBe('none');
+    expect(r.reasons[0].row.halfLifeSeconds).toBeNull();
+    // 250Bk ground, m, n — измеренные с σ, интервалы не пересекаются
+    // с якорем 247Bk: исключение обосновано опубликованными σ
+    expect(r.reasons.slice(1).map((x) => x.kind).sort()).toEqual([
+      'interval_disjoint',
+      'interval_disjoint',
+      'interval_disjoint'
+    ]);
+    expect(r.reasons.slice(1).map((x) => x.row.stateIndex).sort()).toEqual([0, 1, 2]);
+  });
 });
 
-describe('Stage 4.3.3 (аудит R3): источник, единицы и детерминированность', () => {
+describe('Stage 4.3.3 (аудит R4): источник, единицы и детерминированность', () => {
   it('единицы времени NUBASE2020: тропический год y = 31 556 926 с, точные ky и My', () => {
     expect(NUBASE_AUDIT_UNIT_SECONDS['y']).toBe(31556926);
     expect(NUBASE_AUDIT_UNIT_SECONDS['ky']).toBe(31556926000);
@@ -554,7 +695,7 @@ describe('Stage 4.3.3 (аудит R3): источник, единицы и де�
     expect(NUBASE2020_AUDIT_SOURCE.doi).toBe('10.1088/1674-1137/abddae');
     expect(NUBASE2020_AUDIT_SOURCE.amdcPageUrl).toBe('https://amdc.impcas.ac.cn/web/nubase_en.html');
     expect(NUBASE2020_AUDIT_SOURCE.retrievedAt).toBe('2026-11-01');
-    expect(NUBASE2020_AUDIT_SOURCE.parserVersion).toBe('nubase-audit-r3/1.0.0');
+    expect(NUBASE2020_AUDIT_SOURCE.parserVersion).toBe('nubase-audit-r4/1.0.0');
     const sha = NUBASE2020_AUDIT_SOURCE.localCopySha256;
     expect(sha).toBe('5646189e91c9c04016005a12e34f74b73e4ea4dec57a14ed5d6d948fe0ee83ce');
     expect(sha).toMatch(/^[0-9a-f]{64}$/);
