@@ -619,6 +619,7 @@ export function validateChemicalElement(element: unknown): string[] {
       if (!Array.isArray(cand.candidates) || cand.candidates.length === 0) {
         errors.push(where('known-кандидаты требуют непустого списка нуклидов'));
       } else {
+        const seenCandidateKeys = new Set<string>();
         for (const c of cand.candidates) {
           if (!isNonNullObject(c)) {
             errors.push(where('кандидат должен быть объектом'));
@@ -630,6 +631,8 @@ export function validateChemicalElement(element: unknown): string[] {
           }
           if (typeof c.massNumber !== 'number' || !Number.isInteger(c.massNumber) || c.massNumber < 1) {
             errors.push(where(`кандидат ${label}: массовое число должно быть целым положительным, получено ${String(c.massNumber)}`));
+          } else if (typeof c.massNumber === 'number' && typeof el.atomicNumber === 'number' && Number.isInteger(el.atomicNumber) && c.massNumber < el.atomicNumber) {
+            errors.push(where(`кандидат ${label}: массовое число A=${String(c.massNumber)} не может быть меньше атомного номера Z=${String(el.atomicNumber)} элемента-владельца`));
           }
           if (!isNonEmptyString(c.nuclideNotation)) {
             errors.push(where(`кандидат ${label}: обозначение нуклида не может быть пустым`));
@@ -637,11 +640,46 @@ export function validateChemicalElement(element: unknown): string[] {
           if (c.state !== 'ground' && c.state !== 'isomeric') {
             errors.push(where(`кандидат ${label}: состояние должно быть ground/isomeric, получено ${String(c.state)}`));
           }
+          // Согласованность обозначения нуклида с элементом-владельцем:
+          // символ владельца, массовое число и суффикс состояния (аудит R1).
+          const ownerSymbolOk = typeof el.symbol === 'string' && /^[A-Z][a-z]?$/.test(el.symbol);
+          const candMassOk = typeof c.massNumber === 'number' && Number.isInteger(c.massNumber) && c.massNumber >= 1;
+          const candStateOk = c.state === 'ground' || c.state === 'isomeric';
+          if (ownerSymbolOk && candMassOk && candStateOk && isNonEmptyString(c.nuclideNotation)) {
+            const notation = c.nuclideNotation;
+            const prefix = `${el.symbol as string}-`;
+            if (!notation.startsWith(prefix)) {
+              errors.push(where(`кандидат ${label}: обозначение нуклида обязано начинаться с символа элемента-владельца «${prefix}…», получено «${notation}»`));
+            } else {
+              const rest = notation.slice(prefix.length);
+              const expected = c.state === 'isomeric' ? `${c.massNumber}m` : String(c.massNumber);
+              if (rest !== expected) {
+                errors.push(where(`кандидат ${label}: ${c.state === 'isomeric' ? 'изомерное' : 'основное'} состояние требует обозначение «${prefix}${expected}»${c.state === 'isomeric' ? ' с суффиксом изомера m' : ' без суффикса изомера'}, получено «${notation}»`));
+              }
+            }
+          }
+          // Уникальность записи (массовое число + состояние): одна строка
+          // источника не должна дублироваться (аудит R1).
+          if (typeof c.massNumber === 'number' && (c.state === 'ground' || c.state === 'isomeric')) {
+            const dupKey = `${String(c.massNumber)}:${String(c.state)}`;
+            if (seenCandidateKeys.has(dupKey)) {
+              errors.push(where(`кандидат ${label}: дубликат записи-кандидата (массовое число ${String(c.massNumber)} + состояние ${String(c.state)}): одна и та же строка источника не должна дублироваться`));
+            } else {
+              seenCandidateKeys.add(dupKey);
+            }
+          }
           if (c.dataStatus !== 'experimental' && c.dataStatus !== 'estimated') {
             errors.push(where(`кандидат ${label}: статус данных должен быть experimental/estimated, получено ${String(c.dataStatus)}`));
           }
           if (!isNonEmptyString(c.recordId)) {
             errors.push(where(`кандидат ${label}: recordId источника обязателен (дисциплина 4.3.2)`));
+          }
+          const candProv = isNonNullObject(c.provenance) ? (c.provenance as Record<string, unknown>) : undefined;
+          const candProvRecordId = candProv?.recordId;
+          if (typeof candProvRecordId !== 'string' || candProvRecordId.trim() === '') {
+            errors.push(where(`кандидат ${label}: provenance.recordId обязателен — идентификатор строки источника не противоречит собственному происхождению (дисциплина 4.3.2)`));
+          } else if (isNonEmptyString(c.recordId) && candProvRecordId !== c.recordId) {
+            errors.push(where(`кандидат ${label}: recordId (${String(c.recordId)}) обязан совпадать с provenance.recordId (${String(candProvRecordId)}): идентификатор строки источника не должен противоречить собственному происхождению`));
           }
           if (!isNonEmptyString(c.halfLifeRawNotation)) {
             errors.push(where(`кандидат ${label}: исходная нотация периода полураспада обязательна`));

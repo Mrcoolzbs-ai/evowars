@@ -72,20 +72,25 @@ function damaged(mutate: (el: Record<string, unknown>) => void): unknown {
   return el;
 }
 
-/** Валидный кандидат-нуклид для положительных и отрицательных тестов. */
-function makeCandidate(atomicNumber: number): NuclideCandidate {
+/**
+ * Валидный кандидат-нуклид, согласованный с элементом-владельцем
+ * makeElement() (Z=1, H): символ, массовое число, состояние, recordId
+ * и provenance.recordId согласованы (аудит R1 — валидатор сверяет
+ * обозначение нуклида с элементом-владельцем).
+ */
+function makeCandidate(): NuclideCandidate {
   return {
-    atomicNumber,
-    massNumber: 98,
-    nuclideNotation: 'Tc-98',
+    atomicNumber: 1,
+    massNumber: 1,
+    nuclideNotation: 'H-1',
     state: 'ground',
-    recordId: 'test:A=98',
-    halfLife: knownValue(quantity(4.2, 'Ma'), { provenance: PROVENANCE }),
+    recordId: 'test:A=1',
+    halfLife: knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: 'test:A=1' } }),
     halfLifeRawNotation: '4.2(3) My',
     decayMode: 'B-=100',
     dataStatus: 'experimental',
     reason: 'тест: кандидат включён как самый долгоживущий',
-    provenance: PROVENANCE
+    provenance: { ...PROVENANCE, recordId: 'test:A=1' }
   };
 }
 
@@ -110,7 +115,7 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
       status: 'known',
       completeness: 'incomplete',
       completenessNote: 'тест: полнота не доказана',
-      candidates: [makeCandidate(1)],
+      candidates: [makeCandidate()],
       provenance: PROVENANCE
     };
     el.category = { status: 'unknown', category: null, unknownReason: 'тест: категория неизвестна', provenance: PROVENANCE };
@@ -284,39 +289,39 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
   });
 
   it('кандидат: атомный номер не совпадает с элементом-владельцем — ошибка', () => {
-    const cand = makeCandidate(1);
+    const cand = makeCandidate();
     (cand as unknown as Record<string, unknown>).atomicNumber = 2;
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
     expect(bad.some((e) => e.includes('обязан совпадать с элементом-владельцем'))).toBe(true);
   });
 
   it('кандидат: пустой recordId — ошибка (дисциплина 4.3.2)', () => {
-    const cand = makeCandidate(1);
+    const cand = makeCandidate();
     (cand as unknown as Record<string, unknown>).recordId = '';
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
     expect(bad.some((e) => e.includes('recordId источника обязателен'))).toBe(true);
   });
 
   it('кандидат: нецелое массовое число и пустая причина — ошибки', () => {
-    const badMass = makeCandidate(1);
+    const badMass = makeCandidate();
     (badMass as unknown as Record<string, unknown>).massNumber = 98.5;
     const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([badMass]); }));
     expect(res1.some((e) => e.includes('массовое число должно быть целым положительным'))).toBe(true);
-    const badReason = makeCandidate(1);
+    const badReason = makeCandidate();
     (badReason as unknown as Record<string, unknown>).reason = '';
     const res2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([badReason]); }));
     expect(res2.some((e) => e.includes('причина включения в список обязательна'))).toBe(true);
   });
 
   it('кандидат: unknown-период полураспада — ошибка (источник публикует значение)', () => {
-    const cand = makeCandidate(1);
+    const cand = makeCandidate();
     (cand as unknown as Record<string, unknown>).halfLife = unknownValue('тест: значение недоступно');
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
     expect(bad.some((e) => e.includes('период полураспада не может быть unknown'))).toBe(true);
   });
 
   it('кандидат: estimated-период полураспада без метода — ошибка', () => {
-    const cand = makeCandidate(1);
+    const cand = makeCandidate();
     (cand as unknown as Record<string, unknown>).halfLife = {
       status: 'estimated',
       quantity: quantity(4.2, 'Ma'),
@@ -325,6 +330,59 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     };
     const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
     expect(bad.some((e) => e.includes('требует непустой метод оценки'))).toBe(true);
+  });
+
+  it('кандидат: обозначение не соответствует элементу-владельцу (H с «Tc-98») — ошибка', () => {
+    const cand = makeCandidate();
+    (cand as unknown as Record<string, unknown>).nuclideNotation = 'Tc-98';
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+    expect(bad.some((e) => e.includes('обозначение нуклида обязано начинаться с символа элемента-владельца'))).toBe(true);
+  });
+
+  it('кандидат: массовое число в обозначении не совпадает с записью — ошибка', () => {
+    const cand = makeCandidate();
+    (cand as unknown as Record<string, unknown>).nuclideNotation = 'H-2';
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+    expect(bad.some((e) => e.includes('требует обозначение «H-1»'))).toBe(true);
+  });
+
+  it('кандидат: суффикс состояния в обозначении неверен (ground с m, isomeric без m) — ошибки', () => {
+    const withM = makeCandidate();
+    (withM as unknown as Record<string, unknown>).nuclideNotation = 'H-1m';
+    const badM = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([withM]); }));
+    expect(badM.some((e) => e.includes('основное состояние требует обозначение «H-1» без суффикса изомера'))).toBe(true);
+    const noM = makeCandidate();
+    (noM as unknown as Record<string, unknown>).state = 'isomeric';
+    const badI = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([noM]); }));
+    expect(badI.some((e) => e.includes('изомерное состояние требует обозначение «H-1m»'))).toBe(true);
+  });
+
+  it('кандидат: массовое число меньше атомного номера (A < Z) — ошибка', () => {
+    const cand = makeCandidate();
+    const c = cand as unknown as Record<string, unknown>;
+    c.atomicNumber = 98;
+    c.massNumber = 43;
+    c.nuclideNotation = 'Cf-43';
+    c.recordId = 'test:A=43';
+    c.provenance = { ...PROVENANCE, recordId: 'test:A=43' };
+    const bad = validateChemicalElement(damaged((el) => {
+      el.atomicNumber = 98;
+      el.symbol = 'Cf';
+      el.representativeIsotopeCandidates = candidatesWith([cand]);
+    }));
+    expect(bad.some((e) => e.includes('не может быть меньше атомного номера'))).toBe(true);
+  });
+
+  it('кандидат: recordId не совпадает с provenance.recordId — ошибка', () => {
+    const cand = makeCandidate();
+    (cand as unknown as Record<string, unknown>).recordId = 'test:other-row';
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([cand]); }));
+    expect(bad.some((e) => e.includes('обязан совпадать с provenance.recordId'))).toBe(true);
+  });
+
+  it('кандидат: дубликат записи (массовое число + состояние) — ошибка', () => {
+    const bad = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([makeCandidate(), makeCandidate()]); }));
+    expect(bad.some((e) => e.includes('дубликат записи-кандидата'))).toBe(true);
   });
 
   it('строковые свойства: known без значения и unknown без причины — ошибки', () => {
