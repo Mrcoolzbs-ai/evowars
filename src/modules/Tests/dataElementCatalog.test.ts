@@ -21,7 +21,7 @@ import {
 } from '../Data/elements';
 import { ELEMENTS_WITH_CANDIDATES, isotopeCandidateCoverage } from '../Data/elementIsotopeCandidates';
 import { validateChemicalElement, checkElementCountsReference } from '../Core/elements';
-import type { ChemicalElement, RepresentativeIsotopeCandidates } from '../Core/elements';
+import type { ChemicalElement, NuclideCandidate, RepresentativeIsotopeCandidates } from '../Core/elements';
 import { elementCompositions } from '../Data/elementCompositions';
 import { buildThermodynamicCatalog, THERMODYNAMIC_CATALOG_SPECIES_IDS } from '../Data/thermodynamicCatalog';
 import { toSI } from '../Core/physicalQuantity';
@@ -521,7 +521,11 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
         expect(Number.isInteger(cand.stateIndex) && cand.stateIndex >= 0 && cand.stateIndex <= 9, where).toBe(true);
         expect(['', 'm', 'n', 'p', 'q', 'r', 'x', 'i', 'j'].includes(cand.stateCode), where).toBe(true);
         // согласованность i ↔ s (NUBASE2020: 0↔'', 1↔m, 2↔n, 3↔p, 4↔q, 5↔r, 6↔x, 8↔i, 9↔j)
-        const expectedCode = ['', 'm', 'n', 'p', 'q', 'r', 'x', undefined, 'i', 'j'][cand.stateIndex];
+        // Приведение: типизированный expect vitest требует аргумент toBe
+        // строго типа T (здесь NuclideStateCode); без приведения tsc -b
+        // даёт TS2345: string | undefined не назначаемо в NuclideStateCode
+        // (аудит R2 — фикс CI-сборки).
+        const expectedCode = ['', 'm', 'n', 'p', 'q', 'r', 'x', undefined, 'i', 'j'][cand.stateIndex] as NuclideCandidate['stateCode'];
         expect(cand.stateCode, where).toBe(expectedCode);
         if (cand.state === 'ground') {
           // основное состояние — строка i=0 без суффикса и без s в recordId
