@@ -171,6 +171,9 @@ const UNIT_TABLE: UnitDefinition[] = [
   { id: 'h', name: 'час', dimension: dimension(0, 0, 1), factor: 3600 },
   { id: 'day', name: 'сутки', dimension: dimension(0, 0, 1), factor: 86400 },
   { id: 'yr', name: 'юлианский год', dimension: dimension(0, 0, 1), factor: 3.15576e7, note: 'юлианский год 365.25 сут = 3.15576e7 с; совпадает с Units.YEAR_S этапа 3' },
+  { id: 'ms', name: 'миллисекунда', dimension: dimension(0, 0, 1), factor: 1e-3 },
+  { id: 'ka', name: 'тысяча юлианских лет', dimension: dimension(0, 0, 1), factor: 3.15576e10, note: 'килоаннум NUBASE2020: 1000 юлианских лет = 3.15576e10 с; периоды полураспада (Stage 4.3.3)' },
+  { id: 'Ma', name: 'миллион юлианских лет', dimension: dimension(0, 0, 1), factor: 3.15576e13, note: 'мегааннум NUBASE2020: 1 000 000 юлианских лет = 3.15576e13 с; периоды полураспада (Stage 4.3.3)' },
   // --- температура: только кельвин ---
   { id: 'K', name: 'кельвин', dimension: dimension(0, 0, 0, 1), factor: 1 },
   // --- количество вещества ---
@@ -186,6 +189,7 @@ const UNIT_TABLE: UnitDefinition[] = [
   // --- энергия ---
   { id: 'J', name: 'джоуль', dimension: dimension(1, 2, -2), factor: 1 },
   { id: 'kJ', name: 'килоджоуль', dimension: dimension(1, 2, -2), factor: 1e3 },
+  { id: 'eV', name: 'электронвольт', dimension: dimension(1, 2, -2), factor: 1.602176634e-19, note: '1 eV = 1.602176634e-19 Дж (точно, ревизия SI 2019); первая энергия ионизации NIST (Stage 4.3.3)' },
   // --- мощность ---
   { id: 'W', name: 'ватт', dimension: dimension(1, 2, -3), factor: 1 },
   { id: 'kW', name: 'киловатт', dimension: dimension(1, 2, -3), factor: 1e3 },

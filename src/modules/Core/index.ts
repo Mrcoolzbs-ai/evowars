@@ -12,6 +12,7 @@
 //   physicalQuantity  — величины и размерностный контроль;
 //   scientificValue   — семантика данных и provenance;
 //   species           — каталог химических видов;
+//   elements          — каталог химических элементов периодической таблицы (4.3.3);
 //   thermodynamics    — термодинамические свойства видов (4.3.1);
 //   reservoir         — материальные и энергетические резервуары;
 //   fluxLedger        — потоки и балансы сохранения;
@@ -30,6 +31,7 @@
 export * from './physicalQuantity';
 export * from './scientificValue';
 export * from './species';
+export * from './elements';
 export * from './thermodynamics';
 export * from './reservoir';
 export * from './fluxLedger';
