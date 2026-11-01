@@ -1,3 +1,4 @@
+
 // ============================================
 // SCIENTIFIC SPECIES - Формализованный химический вид
 // ============================================
@@ -159,6 +160,10 @@ export function validateSpecies(species: ScientificSpecies): string[] {
   // Корректирующая ревизия Stage 4.3.2: собственный provenance
   // молярной массы — только при числовой массе и с идентификацией
   // источника; отсутствие поля — норма (обратная совместимость).
+  // Финальная научная корректировка перед 4.3.3: обещанная в
+  // описании поля ссылка на запись источника закреплена валидатором —
+  // recordId обязан быть непустой строкой (null, пустая строка и
+  // отсутствие recordId — диагностические ошибки).
   if (species.molarMassProvenance !== undefined) {
     if (species.molarMassKgMol === null) {
       errors.push('molarMassProvenance допустим только при числовой молярной массе: у неизвестного значения нет числового происхождения (описание неизвестности — в provenance вида)');
@@ -174,6 +179,10 @@ export function validateSpecies(species: ScientificSpecies): string[] {
         (typeof massProvenance.reference === 'string' && massProvenance.reference.trim() !== '');
       if (!identified) {
         errors.push('molarMassProvenance должен идентифицировать источник (sourceName, sourceId, datasetId или reference)');
+      }
+      const recordId = massProvenance.recordId;
+      if (typeof recordId !== 'string' || recordId.trim() === '') {
+        errors.push('molarMassProvenance должен ссылаться на запись источника: recordId — непустая строка (отсутствие поля, null, пустая или пробельная строка — диагностическая ошибка)');
       }
     }
   }

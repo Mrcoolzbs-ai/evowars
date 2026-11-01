@@ -1,3 +1,4 @@
+
 // ============================================
 // THERMODYNAMICS - Термодинамические свойства химических видов
 // ============================================
@@ -60,9 +61,16 @@
 // - ScientificValue / DataProvenance / Uncertainty расширяются,
 //   а не дублируются: ThermoDataProvenance = DataProvenance + origin.
 //
-// Импорт фактических термохимических значений (NIST WebBook SRD 69,
-// сверка с ATcT TN 1.228) — следующий подэтап (4.3.2): идентифика-
+// Фактическое состояние (финальная научная корректировка перед
+// 4.3.3, 2026-11-01): первая партия реальных термохимических
+// значений импортирована в подэтапе 4.3.2 — 20 газовых веществ из
+// NASA Glenn CEA (src/modules/Data/thermodynamicCatalog.ts) с
+// типизированной формой nasa_cea и integralConstants; идентифика-
 // торы записей, версии, даты и неопределённости не выдумываются.
+// Вычислитель NASA-полиномов и процедура подбора коэффициентов НЕ
+// реализованы (будущие подэтапы). Дополнительные источники (NIST
+// WebBook SRD 69, сверка с ATcT TN 1.228) и расширение термодина-
+// мического каталога за пределы первой партии — будущие работы.
 
 import type { DataProvenance, ScientificValue, Uncertainty } from './scientificValue';
 import { validateScientificValueShape, validateUncertainty } from './scientificValue';
