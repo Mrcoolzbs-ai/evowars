@@ -130,6 +130,18 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(validateChemicalElement(makeElement())).toEqual([]);
   });
 
+  it('not_verifiable — валидный статус полноты кандидатов (аудит R2)', () => {
+    const el = makeElement();
+    el.representativeIsotopeCandidates = {
+      status: 'known',
+      completeness: 'not_verifiable',
+      completenessNote: 'тест: нижние пределы T1/2 без верхней границы — полнота не доказуема',
+      candidates: [makeCandidate()],
+      provenance: PROVENANCE
+    };
+    expect(validateChemicalElement(el)).toEqual([]);
+  });
+
   it('корректная запись с кандидатами и unknown-свойствами проходит валидацию', () => {
     const el = makeElement();
     el.representativeIsotopeCandidates = {

@@ -341,13 +341,16 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(ic.isomericStates).toBe(3);
     expect(ic.uniqueNuclides).toBe(43);
     expect(ic.experimental).toBe(44);
-    expect(ic.completeElements).toBe(14);
+    expect(ic.completeElements).toBe(8);
+    expect(ic.notVerifiableElements).toBe(6);
+    expect(ic.incompleteElements).toBe(20);
     expect(ic.incompleteElements).toBe(20);
     expect(cov.candidateElements).toBe(ic.elements);
     expect(cov.candidateRecords).toBe(ic.candidateRecords);
     expect(cov.candidateUniqueNuclides).toBe(ic.uniqueNuclides);
     expect(cov.candidateIsomericStates).toBe(ic.isomericStates);
     expect(cov.candidateCompleteElements).toBe(ic.completeElements);
+    expect(cov.candidateNotVerifiableElements).toBe(ic.notVerifiableElements);
     expect(cov.candidateIncompleteElements).toBe(ic.incompleteElements);
     // изомерные состояния: Hs-277m, Mt-276m, Lv-293m (Md-258 — основное состояние, i=0)
     const isomers = allElements()
@@ -412,7 +415,7 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
 
   it('Pm: единственный кандидат Pm-145, 17.7(4) y (год NUBASE2020), с recordId NUBASE2020', () => {
     const c = expectKnownCandidates(buildElement(61));
-    expect(c.completeness).toBe('complete');
+    expect(c.completeness).toBe('not_verifiable');
     const cands = c.candidates ?? [];
     expect(cands).toHaveLength(1);
     const pm = cands[0];
@@ -423,6 +426,8 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(pm.halfLife.quantity.unit).toBe('y');
     expect(pm.halfLifeRawNotation).toBe('17.7(4) y');
     expect(pm.recordId).toBe('nubase2020:Z=61 Pm A=145 i=0');
+    expect(c.completenessNote ?? '').toContain('141Pmn');
+    expect(c.completenessNote ?? '').toContain('>700 ms');
   });
 
   it('Po: единственный кандидат Po-209, 124(3) y (год NUBASE2020)', () => {
@@ -541,6 +546,9 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
         }
         // recordId кандидата, provenance.recordId и recordId периода полураспада — одна строка источника
         expect(cand.provenance.recordId, where).toBe(cand.recordId);
+        if (cand.halfLife.status !== 'known') {
+          throw new Error(cand.nuclideNotation + ': период полураспада кандидата должен быть known');
+        }
         expect(cand.halfLife.provenance?.recordId, where).toBe(cand.recordId);
       }
     }
@@ -603,17 +611,46 @@ describe('Stage 4.3.3 (данные): репрезентативные изот�
     expect(isomer.massNumber).toBe(293);
   });
 
-  it('полнота: complete у 14 элементов (Z=43,61,84–89,93–98), incomplete у 20 (Z=99–118)', () => {
+  it('полнота: complete у 8 (Z=43,85,87,88,93,94,95,98), not_verifiable у 6 (Z=61,84,86,89,96,97), incomplete у 20 (Z=99–118)', () => {
     const els = allElements();
     const known = els.filter((e) => e.representativeIsotopeCandidates.status === 'known');
     const completeZ = known
       .filter((e) => e.representativeIsotopeCandidates.completeness === 'complete')
       .map((e) => e.atomicNumber);
+    const notVerifiableZ = known
+      .filter((e) => e.representativeIsotopeCandidates.completeness === 'not_verifiable')
+      .map((e) => e.atomicNumber);
     const incompleteZ = known
       .filter((e) => e.representativeIsotopeCandidates.completeness === 'incomplete')
       .map((e) => e.atomicNumber);
-    expect(completeZ).toEqual([43, 61, 84, 85, 86, 87, 88, 89, 93, 94, 95, 96, 97, 98]);
+    expect(completeZ).toEqual([43, 85, 87, 88, 93, 94, 95, 98]);
+    expect(notVerifiableZ).toEqual([61, 84, 86, 89, 96, 97]);
     expect(incompleteZ).toEqual(Array.from({ length: 20 }, (_, i) => 99 + i));
+  });
+
+  it('not_verifiable (аудит R2): полнота не доказуема из-за нижних пределов T1/2 без верхней границы', () => {
+    const anchors: Array<[number, string, string]> = [
+      [61, '141Pmn', '>2 µs'],
+      [84, '203Pon', '>200 ns'],
+      [86, '205Rnm', '>10 s'],
+      [89, '234Acm', '>93 s'],
+      [96, '244Cmn', '>500 ns'],
+      [97, '248Bk', '>9 y']
+    ];
+    for (const [z, state, limit] of anchors) {
+      const c = expectKnownCandidates(buildElement(z));
+      expect(c.completeness, 'Z=' + z).toBe('not_verifiable');
+      expect(c.completenessNote ?? '', 'Z=' + z).toContain('НЕ ДОКАЗУЕМА');
+      expect(c.completenessNote ?? '', 'Z=' + z).toContain(state);
+      expect(c.completenessNote ?? '', 'Z=' + z).toContain(limit);
+      expect(c.completenessNote ?? '', 'Z=' + z).toContain('нижн');
+    }
+    // complete-элементы: примечание фиксирует повторное ранжирование и счётчики наблюдавшихся строк
+    const tc = expectKnownCandidates(buildElement(43));
+    expect(tc.completenessNote ?? '').toContain('67 экспериментально наблюдавшихся строк');
+    expect(tc.completenessNote ?? '').toContain('2 кандидата после отбора');
+    const at = expectKnownCandidates(buildElement(85));
+    expect(at.completenessNote ?? '').toContain('1 кандидат после отбора');
   });
 
   it('оценённые записи NUBASE (#) не включены: Rf — только 267Rf, оценки упомянуты в completenessNote', () => {

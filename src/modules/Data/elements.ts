@@ -1118,6 +1118,7 @@ export interface ElementCatalogCoverage {
   candidateUniqueNuclides: number;
   candidateIsomericStates: number;
   candidateCompleteElements: number;
+  candidateNotVerifiableElements: number;
   candidateIncompleteElements: number;
   numericKnown: number;
   numericUnknown: number;
@@ -1141,6 +1142,7 @@ export function elementCatalogCoverage(): ElementCatalogCoverage {
   let candidateUniqueNuclides = 0;
   let candidateIsomericStates = 0;
   let candidateCompleteElements = 0;
+  let candidateNotVerifiableElements = 0;
   let candidateIncompleteElements = 0;
   let numericKnown = 0;
   let numericUnknown = 0;
@@ -1187,6 +1189,8 @@ export function elementCatalogCoverage(): ElementCatalogCoverage {
       candidateUniqueNuclides += pairs.size;
       if (candidates.completeness === 'complete') {
         candidateCompleteElements += 1;
+      } else if (candidates.completeness === 'not_verifiable') {
+        candidateNotVerifiableElements += 1;
       } else {
         candidateIncompleteElements += 1;
       }
@@ -1231,9 +1235,11 @@ export function elementCatalogCoverage(): ElementCatalogCoverage {
     candidateUniqueNuclides,
     candidateIsomericStates,
     candidateCompleteElements,
+    candidateNotVerifiableElements,
     candidateIncompleteElements,
     numericKnown,
     numericUnknown,
     stringUnknown
   };
 }
+
