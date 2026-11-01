@@ -12,6 +12,12 @@
 //   величины, битые сегменты и provenance);
 // - per-value provenance отдельных Cp-точек (ThermoDataProvenance).
 //
+// Корректирующая ревизия Stage 4.3.2: математическая форма
+// коэффициентов сегментов типизирована полем form
+// (nasa7_classic | nasa_cea); фикстуры-сегменты получили явную
+// форму nasa7_classic; тесты разделения форм — в отдельном
+// describe ниже (C2 корректирующего прохода).
+//
 // Заключительная проверка валидатора 4.3.1:
 // - повреждённая bounded-неопределённость (без direction) у
 //   known/estimated-значений отклоняется;
@@ -97,6 +103,7 @@ function unknownThermo(): ThermodynamicProperties {
 
 function nasa7Segment(minK: number, maxK: number): Nasa7Segment {
   return {
+    form: 'nasa7_classic',
     quantity: 'Cp_over_R',
     rangeK: { min: quantity(minK, 'K'), max: quantity(maxK, 'K') },
     coefficients: [3.5, 1.2e-3, -5e-7, 2e-10, -4e-14, -1000, 3.2],
@@ -109,6 +116,7 @@ function nasa7Segment(minK: number, maxK: number): Nasa7Segment {
 
 function nasa7FittedSegment(): Nasa7Segment {
   return {
+    form: 'nasa7_classic',
     quantity: 'Cp_over_R',
     rangeK: { min: quantity(200, 'K'), max: quantity(1000, 'K') },
     coefficients: [3.4, 1.3e-3, -4.8e-7, 1.9e-10, -3.9e-14, -990, 3.1],

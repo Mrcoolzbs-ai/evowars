@@ -31,6 +31,9 @@
 // Stage 4.3.1: опциональное поле thermodynamics — термодинамические
 // свойства записи (вид + фаза): ΔfH°, ΔfG°, S°, Cp-таблицы и NASA-7
 // с собственным происхождением каждого значения (см. thermodynamics.ts).
+// Stage 4.3.2 (корректирующая): опциональное поле molarMassProvenance —
+// собственное происхождение молярной массы, отдельно от происхождения
+// формулы/состава (значение может прийти из другого источника).
 
 import type { DataProvenance, DataStatus } from './scientificValue';
 import type { ThermodynamicProperties } from './thermodynamics';
@@ -79,6 +82,15 @@ export interface ScientificSpecies {
   molarMassKgMol: number | null;
   /** Статус значения молярной массы (как научного значения). */
   molarMassStatus: DataStatus;
+  /**
+   * Собственное происхождение молярной массы (корректирующая ревизия
+   * Stage 4.3.2): значение может происходить из другого источника,
+   * чем формула/состав вида (например, из записи NASA CEA), и тогда
+   * обязано явно ссылаться на свою запись источника (recordId).
+   * Отсутствие поля — обратная совместимость: легаси-виды и виды
+   * без отдельного происхождения массы покрываются provenance вида.
+   */
+  molarMassProvenance?: DataProvenance;
   /** Дополнительные идентификаторы (CAS, InChIKey и т.п.). */
   aliases?: string[];
   /** Происхождение данных вида. */
@@ -142,6 +154,27 @@ export function validateSpecies(species: ScientificSpecies): string[] {
     const m = species.molarMassKgMol;
     if (!Number.isFinite(m) || m <= 0) {
       errors.push(`молярная масса должна быть конечным положительным числом, получено ${m}`);
+    }
+  }
+  // Корректирующая ревизия Stage 4.3.2: собственный provenance
+  // молярной массы — только при числовой массе и с идентификацией
+  // источника; отсутствие поля — норма (обратная совместимость).
+  if (species.molarMassProvenance !== undefined) {
+    if (species.molarMassKgMol === null) {
+      errors.push('molarMassProvenance допустим только при числовой молярной массе: у неизвестного значения нет числового происхождения (описание неизвестности — в provenance вида)');
+    }
+    if (typeof species.molarMassProvenance !== 'object' || species.molarMassProvenance === null) {
+      errors.push('molarMassProvenance должен быть объектом DataProvenance');
+    } else {
+      const massProvenance = species.molarMassProvenance as Record<string, unknown>;
+      const identified =
+        (typeof massProvenance.sourceName === 'string' && massProvenance.sourceName.trim() !== '') ||
+        (typeof massProvenance.sourceId === 'string' && massProvenance.sourceId.trim() !== '') ||
+        (typeof massProvenance.datasetId === 'string' && massProvenance.datasetId.trim() !== '') ||
+        (typeof massProvenance.reference === 'string' && massProvenance.reference.trim() !== '');
+      if (!identified) {
+        errors.push('molarMassProvenance должен идентифицировать источник (sourceName, sourceId, datasetId или reference)');
+      }
     }
   }
   if (species.thermodynamics !== undefined) {

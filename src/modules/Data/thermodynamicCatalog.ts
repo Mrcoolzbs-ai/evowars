@@ -16,9 +16,14 @@
 //
 // Импортированы 20 газовых веществ (phase: gas, запись каталога =
 // вид + фаза):
-// - 12 видов легаси-каталога газов: определения переиспользованы
-//   через buildSpeciesCatalogFromLegacy(gases, elementCompositions);
-//   в каталожный слой добавлен ТОЛЬКО блок thermodynamics;
+// - 12 видов легаси-каталога газов: идентичность (id, формула, имя,
+//   элементный состав, заряд, фаза) переиспользована через
+//   buildSpeciesCatalogFromLegacy(gases, elementCompositions);
+//   в каталожный слой добавлены блок thermodynamics и молярная масса
+//   из записи NASA CEA с собственным molarMassProvenance
+//   (корректирующая ревизия Stage 4.3.2: ранее переиспользовалась
+//   округлённая масса легаси-каталога: ne 20.18 -> 20.1797,
+//   o2 32.00 -> 31.9988 г/моль);
 // - 8 новых видов (so2, h2s, no, n2o, c2h2, c2h4, c3h8, ch3oh):
 //   явные определения ScientificSpecies с элементным составом,
 //   молярной массой и происхождением из записи базы.
@@ -52,10 +57,14 @@
 //   Cp(T)/R = a1*T^-2 + a2*T^-1 + a3 + a4*T + a5*T^2 + a6*T^3 + a7*T^4,
 // за коэффициентами следуют две интегральные константы записи
 // (a8: H/R и a9: S/R в нотации NASA CEA). Это форма NASA Glenn CEA,
-// а НЕ CHEMKIN-форма (5 коэффициентов Cp + 2 константы): массив
-// coefficients каждого сегмента хранит [a1..a7] в порядке записи,
-// а интегральные константы a8/a9 сохранены в provenance.rawInput
-// сегмента (enthalpyConstantOverR, entropyConstantOverR).
+// а НЕ классическая NASA-7/CHEMKIN-форма (5 коэффициентов Cp +
+// 2 константы). Корректирующая ревизия Stage 4.3.2 кодирует форму
+// типизированным полем form сегмента (nasa_cea; классическая форма
+// - nasa7_classic): массив coefficients хранит [a1..a7] в порядке
+// записи, а интегральные константы a8/a9 - в типизированном поле
+// integralConstants сегмента (enthalpyConstantOverR,
+// entropyConstantOverR); форма НЕ определяется по note или
+// provenance.rawInput.
 // Вычислитель NASA-7 (будущий подэтап) обязан учитывать члены T^-2
 // и T^-1 - иначе значения будут неверны для большинства сегментов.
 //
@@ -71,10 +80,11 @@ import { knownValue, unknownValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 import type {
   Nasa7Polynomial,
-  Nasa7Segment,
+  NasaCeaSegment,
   ThermodynamicProperties,
   ThermoDataProvenance
 } from '../Core/thermodynamics';
+import type { DataProvenance } from '../Core/scientificValue';
 import gases from './gases';
 import elementCompositions from './elementCompositions';
 
@@ -773,22 +783,21 @@ const NASA7_PUBLICATION_METHOD =
  * у источника нет.
  */
 export function buildNasaCeaThermodynamics(record: NasaCeaGasRecordData): ThermodynamicProperties {
-  const segments: Nasa7Segment[] = record.segments.map((seg): Nasa7Segment => ({
+  const segments: NasaCeaSegment[] = record.segments.map((seg): NasaCeaSegment => ({
+    form: 'nasa_cea',
     quantity: 'Cp_over_R',
     rangeK: { min: quantity(seg.rangeMinK, 'K'), max: quantity(seg.rangeMaxK, 'K') },
     coefficients: [...seg.coefficients],
+    integralConstants: {
+      enthalpyConstantOverR: seg.enthalpyConstantOverR,
+      entropyConstantOverR: seg.entropyConstantOverR
+    },
     derivation: {
       kind: 'published',
       provenance: {
         ...recordProvenance(record),
         origin: 'numerical_approximation',
-        method: NASA7_PUBLICATION_METHOD,
-        rawInput: {
-          sourceCode: record.sourceCode,
-          exponents: 'T^-2, T^-1, T^0, T^1, T^2, T^3, T^4',
-          enthalpyConstantOverR: seg.enthalpyConstantOverR,
-          entropyConstantOverR: seg.entropyConstantOverR
-        }
+        method: NASA7_PUBLICATION_METHOD
       }
     }
   }));
@@ -796,7 +805,7 @@ export function buildNasaCeaThermodynamics(record: NasaCeaGasRecordData): Thermo
   const nasa7: Nasa7Polynomial = {
     segments,
     note:
-    'форма NASA Glenn CEA: семь коэффициентов Cp(T)/R при степенях T от -2 до +4 (строка диапазона записи: 7 -2.0 -1.0 0.0 1.0 2.0 3.0 4.0); интегральные константы записи a8 (H/R) и a9 (S/R) сохранены в provenance.rawInput каждого сегмента; это НЕ CHEMKIN-форма (5 коэффициентов Cp + 2 константы) - будущий вычислитель обязан учитывать члены T^-2 и T^-1'
+    'форма NASA Glenn CEA (form: nasa_cea, корректирующая ревизия Stage 4.3.2): семь коэффициентов Cp(T)/R при степенях T от -2 до +4 (строка диапазона записи: 7 -2.0 -1.0 0.0 1.0 2.0 3.0 4.0); интегральные константы записи a8 (H/R) и a9 (S/R) - в типизированном поле integralConstants каждого сегмента; это НЕ классическая NASA-7/CHEMKIN-форма (form: nasa7_classic, 5 коэффициентов Cp + константы a5/a6 в массиве coefficients) - будущий вычислитель обязан учитывать члены T^-2 и T^-1'
   };
 
   return {
@@ -846,6 +855,32 @@ export function buildNasaCeaThermodynamics(record: NasaCeaGasRecordData): Thermo
 }
 
 // ============================================
+// 4a. ПРОИСХОЖДЕНИЕ МОЛЯРНОЙ МАССЫ (КОРРЕКТИРУЮЩАЯ РЕВИЗИЯ 4.3.2)
+// ============================================
+
+/**
+ * Происхождение молярной массы из записи NASA CEA: значение -
+ * числовое поле строки источника записи (г/моль), переведённое в
+ * кг/моль точной степенью 10; привязка к recordId обязательна.
+ * Отдельно от provenance вида (формула/состав): масса может
+ * происходить из другого источника.
+ */
+function nasaCeaMolarMassProvenance(record: NasaCeaGasRecordData): DataProvenance {
+  return {
+    sourceName: NASA_CEA_THERMO_SOURCE.sourceName,
+    sourceId: NASA_CEA_THERMO_SOURCE.sourceId,
+    datasetId: NASA_CEA_THERMO_SOURCE.datasetId,
+    datasetVersion: NASA_CEA_THERMO_SOURCE.datasetVersion,
+    recordId: record.recordId,
+    reference: NASA_CEA_THERMO_SOURCE.reference + '; код записи NASA CEA: ' + record.sourceCode,
+    retrievedAt: NASA_CEA_THERMO_SOURCE.retrievedAt,
+    license: NASA_CEA_THERMO_SOURCE.license,
+    note:
+      'молярная масса - числовое поле строки источника записи NASA CEA thermo.inp (г/моль), переведена в кг/моль точной степенью 10 (x1e-3); исходная точность записи сохранена'
+  };
+}
+
+// ============================================
 // 5. СБОРКА КАТАЛОГА
 // ============================================
 
@@ -854,10 +889,11 @@ export function buildNasaCeaThermodynamics(record: NasaCeaGasRecordData): Thermo
  * (Stage 4.3.2). Единственный способ получить каталог первой
  * партии; детерминирован: без состояния и случайности.
  *
- * - 12 легаси-видов: определения (id, формула, имя, элементный
- *   состав, заряд, фаза, молярная масса и её статус, provenance
- *   вида) переиспользуются из buildSpeciesCatalogFromLegacy -
- *   значения не дублируются; добавляется только thermodynamics;
+ * - 12 легаси-видов: идентичность (id, формула, имя, элементный
+ *   состав, заряд, фаза, provenance вида) переиспользуется из
+ *   buildSpeciesCatalogFromLegacy; добавляются thermodynamics и
+ *   молярная масса из записи NASA CEA с собственным
+ *   molarMassProvenance (корректирующая ревизия Stage 4.3.2);
  * - 8 новых видов: явные определения из записи базы.
  *
  * Каталог валидирует каждую запись при регистрации
@@ -875,7 +911,19 @@ export function buildThermodynamicCatalog(): SpeciesCatalog {
         'легаси-вид «' + id + '» не найден в каталоге газов: термодинамический слой 4.3.2 не может его переиспользовать'
       );
     }
-    catalog.register({ ...base, thermodynamics: buildNasaCeaThermodynamics(NASA_CEA_THERMO_DATA[id]) });
+    const record = NASA_CEA_THERMO_DATA[id];
+    // Корректирующая ревизия Stage 4.3.2: идентичность вида
+    // (id, формула, состав, заряд, фаза) - из легаси-каталога;
+    // молярная масса - из записи NASA CEA с собственным provenance
+    // (легаси-масса округлена и уступает записи источника:
+    // ne 20.18 -> 20.1797, o2 32.00 -> 31.9988 г/моль).
+    catalog.register({
+      ...base,
+      molarMassKgMol: record.molarMassKgMol,
+      molarMassStatus: 'known',
+      molarMassProvenance: nasaCeaMolarMassProvenance(record),
+      thermodynamics: buildNasaCeaThermodynamics(record)
+    });
   }
 
   for (const definition of NEW_GAS_SPECIES) {
@@ -889,6 +937,7 @@ export function buildThermodynamicCatalog(): SpeciesCatalog {
       phase: 'gas',
       molarMassKgMol: record.molarMassKgMol,
       molarMassStatus: 'known',
+      molarMassProvenance: nasaCeaMolarMassProvenance(record),
       dataStatus: 'known',
       provenance: {
         sourceName: NASA_CEA_THERMO_SOURCE.sourceName,

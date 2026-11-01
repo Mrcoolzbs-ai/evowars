@@ -28,6 +28,13 @@
 //   fitted-полином без исходных таблиц структурно некорректен;
 // - вычислитель NASA-7 и процедура подбора коэффициентов в этом
 //   подэтапе НЕ реализуются: только модель данных и валидация;
+// - математическая форма коэффициентов типизирована явным полем
+//   form (корректирующая ревизия Stage 4.3.2): nasa7_classic
+//   (классическая NASA-7/CHEMKIN: a0–a4 при T⁰…T⁴ + интегральные
+//   константы a5/a6 в массиве coefficients) и nasa_cea (NASA Glenn
+//   CEA: a1–a7 при T⁻²…T⁴ + отдельные константы a8/a9); форма НЕ
+//   выводится из note или provenance.rawInput; NASA-9 — другая
+//   параметризация и не смешивается ни с одной из форм;
 // - универсальные физические ограничения не вводятся там, где они
 //   не доказаны для всех классов веществ; исключения — строгие
 //   знаки термодинамической температуры и давления (положительны);
@@ -194,41 +201,125 @@ export interface Nasa7ApproximationError {
 }
 
 /**
- * Сегмент NASA-7: полином Cp°(T)/R = a0 + a1·T + a2·T² + a3·T³ +
- * a4·T⁴ в заданном диапазоне температур. Семь коэффициентов
- * (a0…a6) — стандартная форма; a5, a6 относятся к интегральным
- * выражениям энтальпии и энтропии, которые задают форму, но в этом
- * подэтапе не вычисляются.
+ * Математическая форма коэффициентов полинома Cp°/R
+ * (корректирующая ревизия Stage 4.3.2). Обе формы — семикоэффициентные
+ * аппроксимации NASA, но их базисы НЕ взаимозаменяемы: коэффициенты
+ * одной формы нельзя интерпретировать в базисе другой. Форма задаётся
+ * ЯВНЫМ типизированным полем form и НЕ выводится из note или
+ * provenance.rawInput. NASA-9 — другая параметризация (9 коэффициентов,
+ * другие диапазоны) и не смешивается ни с одной из этих форм.
+ */
+export type NasaPolynomialForm =
+  | 'nasa7_classic' // классическая NASA-7 (CHEMKIN-форма): Cp при T⁰…T⁴ + интегральные константы a5/a6 в coefficients
+  | 'nasa_cea';     // NASA Glenn CEA (thermo.inp): Cp при T⁻²…T⁴ + отдельные константы a8/a9
+
+/** Runtime-реестр допустимых форм полинома (NASA-9 в него не входит). */
+export const NASA_POLYNOMIAL_FORMS: readonly NasaPolynomialForm[] = ['nasa7_classic', 'nasa_cea'];
+
+/**
+ * Базис формы: степени T при коэффициентах Cp°/R в порядке массива
+ * coefficients. Для валидатора и будущего вычислителя — единственная
+ * правда о математическом смысле массива коэффициентов.
+ */
+export const NASA_POLYNOMIAL_EXPONENTS: Readonly<Record<NasaPolynomialForm, readonly number[]>> = {
+  nasa7_classic: [0, 1, 2, 3, 4],      // a0–a4 относятся к Cp; a5, a6 — интегральные константы
+  nasa_cea: [-2, -1, 0, 1, 2, 3, 4]   // все семь коэффициентов относятся к Cp
+};
+
+/**
+ * Сегмент классической NASA-7 (CHEMKIN-форма): полином
+ * Cp°(T)/R = a0 + a1·T + a2·T² + a3·T³ + a4·T⁴ в заданном диапазоне
+ * температур. Семь коэффициентов (a0…a6): a0–a4 — Cp при степенях
+ * T⁰…T⁴; a5, a6 — интегральные константы энтальпии и энтропии,
+ * которые задают форму, но в этом подэтапе не вычисляются.
+ * Интегральные константы записи NASA CEA (a8/a9) в этой форме НЕ
+ * хранятся: для них обязана использоваться форма nasa_cea.
  */
 export interface Nasa7Segment {
+  /** Типизированная математическая форма коэффициентов сегмента. */
+  form: 'nasa7_classic';
   /** Что задают коэффициенты сегмента: Cp°(T)/R (безразмерное). */
   quantity: 'Cp_over_R';
   /** Диапазон применимости сегмента (размерность кельвина), min < max. */
   rangeK: { min: PhysicalQuantity; max: PhysicalQuantity };
-  /** Ровно семь конечных коэффициентов a0…a6. */
+  /** Ровно семь конечных коэффициентов a0…a6 (Cp при T⁰…T⁴ + интегральные константы a5/a6). */
   coefficients: number[];
   /** Происхождение коэффициентов. */
-  derivation: {
-    kind: Nasa7DerivationKind;
-    /** Происхождение исходных данных (обязательно, с origin). */
-    provenance: ThermoDataProvenance;
-    /** Метод аппроксимации; обязателен для fitted. */
-    method?: string;
-    /** Контрольные точки; обязательны для fitted. */
-    checkPoints?: Nasa7CheckPoint[];
-    /** Численная ошибка; обязательна для fitted. */
-    approximationError?: Nasa7ApproximationError;
-  };
+  derivation: NasaSegmentDerivation;
 }
 
+/**
+ * Интегральные константы записи NASA Glenn CEA (thermo.inp):
+ * a8 — энтальпийная постоянная интегрирования (H°/R), a9 —
+ * энтропийная постоянная интегрирования (S°/R). Отдельная структура:
+ * в форме nasa_cea все семь коэффициентов массива coefficients
+ * относятся к Cp°/R, и константы не «прячутся» в его хвост.
+ */
+export interface NasaCeaIntegralConstants {
+  /** Константа a8 записи: энтальпийная постоянная интегрирования (H°/R). */
+  enthalpyConstantOverR: number;
+  /** Константа a9 записи: энтропийная постоянная интегрирования (S°/R). */
+  entropyConstantOverR: number;
+}
+
+/**
+ * Сегмент формы NASA Glenn CEA (thermo.inp): семь коэффициентов
+ * Cp°(T)/R = a1·T⁻² + a2·T⁻¹ + a3 + a4·T + a5·T² + a6·T³ + a7·T⁴
+ * при степенях T от -2 до +4 (строка диапазона записи:
+ * «7 -2.0 -1.0 0.0 1.0 2.0 3.0 4.0») плюс две интегральные константы
+ * записи a8/a9 в отдельной типизированной структуре. Будущий
+ * вычислитель обязан учитывать члены T⁻² и T⁻¹.
+ */
+export interface NasaCeaSegment {
+  /** Типизированная математическая форма коэффициентов сегмента. */
+  form: 'nasa_cea';
+  /** Что задают коэффициенты сегмента: Cp°(T)/R (безразмерное). */
+  quantity: 'Cp_over_R';
+  /** Диапазон применимости сегмента (размерность кельвина), min < max. */
+  rangeK: { min: PhysicalQuantity; max: PhysicalQuantity };
+  /** Ровно семь конечных коэффициентов Cp при T⁻²…T⁴ (a1…a7 записи). */
+  coefficients: number[];
+  /** Интегральные константы записи (a8, a9) — обязательны для этой формы. */
+  integralConstants: NasaCeaIntegralConstants;
+  /** Происхождение коэффициентов. */
+  derivation: NasaSegmentDerivation;
+}
+
+/** Происхождение коэффициентов сегмента (общее для обеих форм). */
+export interface NasaSegmentDerivation {
+  kind: Nasa7DerivationKind;
+  /** Происхождение исходных данных (обязательно, с origin). */
+  provenance: ThermoDataProvenance;
+  /** Метод аппроксимации; обязателен для fitted. */
+  method?: string;
+  /** Контрольные точки; обязательны для fitted. */
+  checkPoints?: Nasa7CheckPoint[];
+  /** Численная ошибка; обязательна для fitted. */
+  approximationError?: Nasa7ApproximationError;
+}
+
+/**
+ * Сегмент NASA-полинома: классическая или CEA-форма, различаются
+ * типизированным полем form (не note и не provenance.rawInput).
+ */
+export type NasaPolynomialSegment = Nasa7Segment | NasaCeaSegment;
 /**
  * NASA-7 параметризация Cp°(T): сегменты упорядочены по возрастанию
  * температуры, без пересечений (общая граница-стык допустима).
  * Полином — производная аппроксимация: для fitted-сегментов
  * исходные табличные данные обязаны храниться рядом.
  */
+/**
+ * NASA-7 параметризация Cp°(T): сегменты упорядочены по возрастанию
+ * температуры, без пересечений (общая граница-стык допустима).
+ * Все сегменты одной параметризации обязаны иметь ОДНУ
+ * математическую форму form (nasa7_classic или nasa_cea) —
+ * смешение форм отклоняется валидатором. Полином — производная
+ * аппроксимация: для fitted-сегментов исходные табличные данные
+ * обязаны храниться рядом.
+ */
 export interface Nasa7Polynomial {
-  segments: Nasa7Segment[];
+  segments: NasaPolynomialSegment[];
   note?: string;
 }
 
@@ -620,6 +711,7 @@ function nasa7Issues(
   }
   let prev: { min: number; max: number } | null = null;
   let anyFitted = false;
+  let polyForm: string | null = null;
   for (const [index, segment] of poly.segments.entries()) {
     const segPath = `${path} сегмент ${index}`;
     if (!isNonNullObject(segment)) {
@@ -629,10 +721,43 @@ function nasa7Issues(
     if (segment.quantity !== 'Cp_over_R') {
       errors.push(`${segPath}: коэффициенты должны объявляться как задающие Cp°(T)/R (quantity: 'Cp_over_R')`);
     }
+    // Корректирующая ревизия Stage 4.3.2: математическая форма
+    // коэффициентов — типизированное поле form; она НЕ выводится из
+    // note или provenance.rawInput и проверяется по реестру форм.
+    const form: unknown = segment.form;
+    if (typeof form !== 'string') {
+      errors.push(`${segPath}: требуется типизированная математическая форма полинома (form: ${NASA_POLYNOMIAL_FORMS.join(' | ')}); форма не выводится из note или provenance.rawInput`);
+    } else if (!(NASA_POLYNOMIAL_FORMS as readonly string[]).includes(form)) {
+      errors.push(`${segPath}: неизвестная форма полинома «${form}» (допустимы: ${NASA_POLYNOMIAL_FORMS.join(', ')}; NASA-9 — другая параметризация и не смешивается ни с одной из форм)`);
+    } else if (polyForm === null) {
+      polyForm = form;
+    } else if (polyForm !== form) {
+      errors.push(`${segPath}: все сегменты полинома обязаны иметь одну математическую форму; сегмент ${index} — «${form}», предыдущие — «${polyForm}»`);
+    }
     if (!Array.isArray(segment.coefficients) || segment.coefficients.length !== 7) {
-      errors.push(`${segPath}: требуется ровно семь коэффициентов a0…a6, получено ${Array.isArray(segment.coefficients) ? segment.coefficients.length : 'не массив'}`);
+      errors.push(`${segPath}: требуется ровно семь коэффициентов (nasa7_classic: a0–a4 Cp при T⁰…T⁴ + интегральные константы a5/a6; nasa_cea: a1–a7 Cp при T⁻²…T⁴), получено ${Array.isArray(segment.coefficients) ? segment.coefficients.length : 'не массив'}`);
     } else if (!(segment.coefficients as unknown[]).every((c) => Number.isFinite(c))) {
       errors.push(`${segPath}: все коэффициенты должны быть конечными числами`);
+    }
+    // Соответствие структуры форме: классическая форма не принимает
+    // интегральные константы записи CEA, форма nasa_cea их требует.
+    const integral: unknown = (segment as unknown as Record<string, unknown>).integralConstants;
+    if (form === 'nasa7_classic' && integral !== undefined) {
+      errors.push(`${segPath}: форма nasa7_classic не принимает integralConstants: её интегральные константы — a5/a6 в массиве coefficients; константы записи CEA (a8/a9) требуют форму nasa_cea`);
+    }
+    if (form === 'nasa_cea') {
+      if (!isNonNullObject(integral)) {
+        errors.push(`${segPath}: форма nasa_cea требует интегральные константы записи (integralConstants: enthalpyConstantOverR, entropyConstantOverR)`);
+      } else {
+        const enthalpyConstant = (integral as Record<string, unknown>).enthalpyConstantOverR;
+        const entropyConstant = (integral as Record<string, unknown>).entropyConstantOverR;
+        if (!Number.isFinite(enthalpyConstant)) {
+          errors.push(`${segPath}: integralConstants.enthalpyConstantOverR (константа a8 записи) должен быть конечным числом, получено ${String(enthalpyConstant)}`);
+        }
+        if (!Number.isFinite(entropyConstant)) {
+          errors.push(`${segPath}: integralConstants.entropyConstantOverR (константа a9 записи) должен быть конечным числом, получено ${String(entropyConstant)}`);
+        }
+      }
     }
     const rangeRec: unknown = segment.rangeK;
     let rangeBounds: { min: number; max: number } | null = null;
