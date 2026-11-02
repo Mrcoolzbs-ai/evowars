@@ -442,8 +442,9 @@ describe('Stage 4.3.4: детерминированность и отсутст�
 
   it('повторные вызовы дают идентичные результаты', () => {
     const thermo = catalog.get('n2')!.thermodynamics!;
-    const first = nasaStandardGibbsEnergy(thermo, T1000).value;
-    const second = nasaStandardGibbsEnergy(thermo, T1000).value;
+    const nasa7 = requireNasa7(thermo, 'test');
+    const first = nasaStandardGibbsEnergy(nasa7, T1000).value;
+    const second = nasaStandardGibbsEnergy(nasa7, T1000).value;
     expect(second).toBe(first);
   });
 
