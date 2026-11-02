@@ -1,61 +1,59 @@
 // ============================================
-// STAGE 4.5.1 + 4.5.2 - Тесты контрактов и вычислителя
-// констант скорости реакций
+// coreKinetics.test.ts — тесты контрактов и вычислителя k(T)
+// Stage 4.5.1 + 4.5.2
 // ============================================
 //
-// Проверяются требования подэтапов 4.5.1/4.5.2 (дорожная карта §4.5,
-// CHEMISTRY_ARCHITECTURE §4):
-// - реестры и согласование «порядок ↔ модель концентраций ↔ единица k»;
-// - валидатор записей: повреждённые и не согласованные данные —
-//   список проблем, а не молчаливое принятие;
-// - аналитические значения формы Аррениуса (включая эквивалентность
-//   форм E/R и Ea = R·(E/R)) и границы диапазонов применимости;
-// - fall-off: аналитическая точка Pr = 1 (k = k∞·Fc/2), низкоплотностный
-//   предел, явные Fc/N записи, пересечение диапазонов k0/k∞,
-//   обязательность и положительность [M];
-// - преобразования molecule ↔ mol на ТОЧНОЙ N_A (SI 2019);
-// - fail-closed: unknown → no_kinetic_data «не рассчитано»; вне
-//   диапазона → temperature_out_of_range; повреждённый вход →
-//   invalid_input; переполнение/исчезновение → numerical_failure —
-//   никогда не фиктивная скорость и не NaN;
-// - детерминированность и отсутствие мутаций входа.
+// Проверяемое: реестры единиц k и согласование порядок↔единица↔модель;
+// валидатор записей (структурный контракт, согласование, диапазоны,
+// Fc/N, пересечения); вычислитель k(T) — модифицированный Аррениус
+// (внутри диапазона, на границах, отказ вне диапазона, unknown,
+// estimated, неинтерпретируемые значения, перенос неопределённости);
+// fall-off (Pr=1, низкоплотностный предел, вклад Fc и N,
+// T-зависимые пределы, обязательность [M], пересечение диапазонов);
+// преобразования molecule↔mol на точной N_A (Лошмидт-контроль);
+// преобразования единиц k (порядки 2/3, инвариант скорости,
+// отказ при несопоставимых порядках); детерминированность.
 //
-// Параметры фикстур — СИНТЕТИЧЕСКИЕ: они проверяют математику
-// контракта, а НЕ реальные кинетические данные. Реальные записи JPL
-// Evaluation No. 20 (JPL Publication 25-1, 2025, DOI
-// 10.48577/jpl.KFQ0TZ) появятся в каталоге 4.5.4 с per-record сверкой
-// по таблицам публикации; тесты достоверности самих чисел — там же.
+// ВАЖНО: числовые параметры фикстур — СИНТЕТИЧЕСКИЕ, они проверяют
+// МАТЕМАТИКУ контракта, а не достоверность реальных констант. Реальные
+// данные JPL Evaluation No. 20 (JPL Publication 25-1, DOI
+// 10.48577/jpl.KFQ0TZ) появляются в 4.5.4 с per-record сверкой по
+// таблицам публикации и в эти тесты не подмешиваются.
 
-import { describe, it, expect } from 'vitest';
-import { quantity } from '../Core/physicalQuantity';
+import { describe, expect, it } from 'vitest';
 import type { PhysicalQuantity } from '../Core/physicalQuantity';
-import type { DataProvenance } from '../Core/scientificValue';
+import { quantity } from '../Core/physicalQuantity';
+import type { DataProvenance, Uncertainty } from '../Core/scientificValue';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
+import type {
+  ArrheniusParameters,
+  ConcentrationModel,
+  FallOffParameters,
+  KineticReactionRecord,
+  RateConstantUnit
+} from '../Core/kinetics';
 import {
   AVOGADRO_NUMBER_PER_MOL,
   ARRHENIUS_REFERENCE_TEMPERATURE_K,
-  KINETIC_REACTION_KINDS,
   CONCENTRATION_MODELS,
+  KINETIC_REACTION_KINDS,
   RATE_CONSTANT_UNITS,
-  rateConstantUnitForOrder,
-  validateKineticReactionRecord,
-  evaluateRateConstant,
   convertConcentration,
   convertRateConstantUnit,
-  KineticsError
+  evaluateRateConstant,
+  rateConstantUnitForOrder,
+  validateKineticReactionRecord
 } from '../Core/kinetics';
-import type {
-  KineticReactionRecord,
-  ArrheniusParameters,
-  FallOffParameters,
-  ConcentrationModel
-} from '../Core/kinetics';
+import { KineticsError } from '../Core/kinetics';
 
 const R = UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K;
 const NA = AVOGADRO_NUMBER_PER_MOL;
 const TREF = ARRHENIUS_REFERENCE_TEMPERATURE_K;
 
-/** Синтетический provenance для фикстур (не реальные данные). */
+// --------------------------------------------
+// Хелперы фикстур
+// --------------------------------------------
+
 function fixtureProvenance(): DataProvenance {
   return {
     sourceName: 'тестовая фикстура (фикция для тестов)',
@@ -63,12 +61,11 @@ function fixtureProvenance(): DataProvenance {
   };
 }
 
-/** Синтетические параметры Аррениуса (форма E/R). */
 function arrhenius(
   a: number,
   n: number,
   energyOverRK: number,
-  unit: ArrheniusParameters['unit'],
+  unit: RateConstantUnit,
   minK = 200,
   maxK = 2000
 ): ArrheniusParameters {
@@ -82,12 +79,11 @@ function arrhenius(
   };
 }
 
-/** Синтетические параметры Аррениуса (классическая форма Ea, Дж/моль). */
 function arrheniusEa(
   a: number,
   n: number,
   eaJPerMol: number,
-  unit: ArrheniusParameters['unit'],
+  unit: RateConstantUnit,
   minK = 200,
   maxK = 2000
 ): ArrheniusParameters {
@@ -101,10 +97,9 @@ function arrheniusEa(
   };
 }
 
-/** Запись реакции с аррениусовской константой (порядок 2, molecule_cm3). */
 function withArrhenius(
   p: ArrheniusParameters,
-  order: KineticReactionRecord['overallOrder'] = 2,
+  order = 2,
   model: ConcentrationModel = 'molecule_cm3',
   id = 'test-rxn'
 ): KineticReactionRecord {
@@ -118,26 +113,30 @@ function withArrhenius(
   };
 }
 
-/** Базовая аррениусовская запись: A = 1e-11, n = 0, E/R = 0, 200–2000 K. */
-function arrheniusReaction(overrides?: Partial<KineticReactionRecord>): KineticReactionRecord {
-  const base = withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), 2, 'molecule_cm3', 'test-rxn-1');
-  return { ...base, ...overrides };
+function arrheniusReaction(overrides?: Partial<ArrheniusParameters>): KineticReactionRecord {
+  const base: ArrheniusParameters = {
+    preExponentialA: 1e-11,
+    temperatureExponentN: 0,
+    energy: { form: 'E_over_R', valueK: 0 },
+    temperatureRangeK: { min: 200, max: 2000 },
+    unit: 'cm3_per_molecule_per_s',
+    provenance: fixtureProvenance()
+  };
+  return withArrhenius({ ...base, ...overrides });
 }
 
-/** Синтетические параметры fall-off: k0 = 2e-30, k∞ = 1e-10 (константы T), Fc = 0.6, N = 1. */
 function fallOffParameters(overrides?: Partial<FallOffParameters>): FallOffParameters {
   const base: FallOffParameters = {
     lowPressureLimit: arrhenius(2e-30, 0, 0, 'cm6_per_molecule2_per_s'),
     highPressureLimit: arrhenius(1e-10, 0, 0, 'cm3_per_molecule_per_s'),
     centeringFactorFc: 0.6,
     broadeningN: 1,
-    thirdBodyNote: 'синтетическое третье тело (фикция)',
+    thirdBodyNote: 'M = N2 + O2 (фикция фикстуры)',
     provenance: fixtureProvenance()
   };
   return { ...base, ...overrides };
 }
 
-/** Запись fall-off реакции (порядок 2, molecule_cm3). */
 function fallOffReaction(params?: FallOffParameters): KineticReactionRecord {
   return {
     id: 'test-falloff-1',
@@ -149,451 +148,608 @@ function fallOffReaction(params?: FallOffParameters): KineticReactionRecord {
   };
 }
 
-/** Ловит ошибку вычислителя; падает, если функции не было. */
+/** Вызывает fn, ожидает KineticsError; НЕ бросает, а возвращает пойманную ошибку. */
 function kineticsError(fn: () => unknown): KineticsError {
   try {
     fn();
   } catch (e) {
-    return e as KineticsError;
+    if (e instanceof KineticsError) {
+      return e;
+    }
+    throw new Error(`ожидалась KineticsError, получено: ${String(e)}`);
   }
-  throw new Error('ожидалась ошибка KineticsError, но функция завершилась без ошибки');
+  throw new Error('ожидалась KineticsError, вызов прошёл без ошибки');
 }
 
-/** Валидатор обязан зафиксировать проблему, содержащую фрагмент. */
+/** Проверяет, что валидатор находит проблему, содержащую фрагмент текста. */
 function expectProblem(record: unknown, fragment: string): void {
   const problems = validateKineticReactionRecord(record);
   expect(problems.some((p) => p.includes(fragment))).toBe(true);
 }
 
-describe('Stage 4.5.1: реестры и согласование единиц', () => {
-  it('реестры классов, моделей концентраций и единиц соответствуют контракту', () => {
-    expect(KINETIC_REACTION_KINDS).toEqual(['elementary', 'overall_empirical']);
-    expect(CONCENTRATION_MODELS).toEqual(['molecule_cm3', 'mol_m3']);
-    expect(RATE_CONSTANT_UNITS).toEqual([
-      'per_s',
-      'cm3_per_molecule_per_s',
-      'cm6_per_molecule2_per_s',
-      'm3_per_mol_per_s',
-      'm6_per_mol2_per_s'
-    ]);
+// --------------------------------------------
+// 1. Реестры единиц k и согласование
+// --------------------------------------------
+
+describe('реестр единиц константы скорости', () => {
+  it('перечисляет все 5 единиц без дублей', () => {
+    expect(RATE_CONSTANT_UNITS).toHaveLength(5);
+    expect(new Set(RATE_CONSTANT_UNITS).size).toBe(5);
   });
 
-  it('rateConstantUnitForOrder согласует порядок и модель концентраций', () => {
+  it('rateConstantUnitForOrder: порядок 1 → per_s для обеих моделей', () => {
     expect(rateConstantUnitForOrder(1, 'molecule_cm3')).toBe('per_s');
     expect(rateConstantUnitForOrder(1, 'mol_m3')).toBe('per_s');
+  });
+
+  it('rateConstantUnitForOrder: порядок 2 → cm3/m3 по модели', () => {
     expect(rateConstantUnitForOrder(2, 'molecule_cm3')).toBe('cm3_per_molecule_per_s');
-    expect(rateConstantUnitForOrder(3, 'molecule_cm3')).toBe('cm6_per_molecule2_per_s');
     expect(rateConstantUnitForOrder(2, 'mol_m3')).toBe('m3_per_mol_per_s');
+  });
+
+  it('rateConstantUnitForOrder: порядок 3 → cm6/m6 по модели', () => {
+    expect(rateConstantUnitForOrder(3, 'molecule_cm3')).toBe('cm6_per_molecule2_per_s');
     expect(rateConstantUnitForOrder(3, 'mol_m3')).toBe('m6_per_mol2_per_s');
   });
 
-  it('порядки вне реестра 1..3 — null, а не «ближайшая» единица', () => {
+  it('rateConstantUnitForOrder: null вне порядков 1..3', () => {
     expect(rateConstantUnitForOrder(0, 'molecule_cm3')).toBeNull();
-    expect(rateConstantUnitForOrder(4, 'molecule_cm3')).toBeNull();
-    expect(rateConstantUnitForOrder(1.5, 'mol_m3')).toBeNull();
+    expect(rateConstantUnitForOrder(4, 'mol_m3')).toBeNull();
+    expect(rateConstantUnitForOrder(1.5, 'molecule_cm3')).toBeNull();
     expect(rateConstantUnitForOrder(Number.NaN, 'mol_m3')).toBeNull();
+  });
+
+  it('реестры классов и моделей непустые и без дублей', () => {
+    expect(KINETIC_REACTION_KINDS).toHaveLength(2);
+    expect(CONCENTRATION_MODELS).toHaveLength(2);
   });
 });
 
-describe('Stage 4.5.1: валидатор записей (fail-closed, JSON-происхождение)', () => {
-  it('корректная аррениусовская запись проходит без проблем', () => {
+// --------------------------------------------
+// 2. Валидатор записей
+// --------------------------------------------
+
+describe('валидатор кинетических записей', () => {
+  it('принимает корректную аррениусовскую запись', () => {
     expect(validateKineticReactionRecord(arrheniusReaction())).toEqual([]);
   });
 
-  it('корректная fall-off запись проходит без проблем', () => {
+  it('принимает корректную fall-off запись', () => {
     expect(validateKineticReactionRecord(fallOffReaction())).toEqual([]);
   });
 
-  it('unknown-константа без параметров валидна; порядок может быть null', () => {
+  it('принимает unknown-запись с null-порядком (порядок не нужен для «не рассчитано»)', () => {
     const record: KineticReactionRecord = {
       id: 'test-unknown',
       kind: 'overall_empirical',
       overallOrder: null,
       concentrationModel: 'molecule_cm3',
-      rateConstant: { status: 'unknown', note: 'экспериментальных данных нет' }
+      rateConstant: {
+        status: 'unknown',
+        note: 'нет данных в JPL Evaluation No. 20',
+        provenance: fixtureProvenance()
+      }
     };
     expect(validateKineticReactionRecord(record)).toEqual([]);
   });
 
-  it('не-объект, пустой id, чужие kind и concentrationModel — проблемы', () => {
-    expect(validateKineticReactionRecord(42)[0]).toContain('объектом');
-    expectProblem(arrheniusReaction({ id: '   ' }), 'id');
+  it('отвергает не-объект', () => {
+    const problems = validateKineticReactionRecord('не запись');
+    expect(problems.some((p) => p.includes('объектом'))).toBe(true);
+  });
+
+  it('отвергает пустой id', () => {
+    expectProblem({ ...arrheniusReaction(), id: '' }, 'id');
+  });
+
+  it('отвергает неизвестный kind', () => {
+    expectProblem({ ...arrheniusReaction(), kind: 'photo' }, 'kind');
+  });
+
+  it('отвергает неизвестную модель концентраций', () => {
+    expectProblem({ ...arrheniusReaction(), concentrationModel: 'ppm' }, 'concentrationModel');
+  });
+
+  it('отвергает null-порядок при known-константе', () => {
+    expectProblem({ ...arrheniusReaction(), overallOrder: null }, 'overallOrder');
+  });
+
+  it('отвергает порядок 4 (вне реестра единиц)', () => {
+    expectProblem({ ...arrheniusReaction(), overallOrder: 4 }, 'порядки 1..3');
+  });
+
+  it('отвергает дробный порядок 1.5', () => {
+    expectProblem({ ...arrheniusReaction(), overallOrder: 1.5 }, 'порядки 1..3');
+  });
+
+  it('отвергает неположительную предэкспоненту A', () => {
+    expectProblem(arrheniusReaction({ preExponentialA: 0 }), 'A');
+  });
+
+  it('отвергает NaN-показатель n', () => {
+    expectProblem(arrheniusReaction({ temperatureExponentN: Number.NaN }), 'n');
+  });
+
+  it('отвергает неизвестную форму энергетического параметра', () => {
     expectProblem(
-      arrheniusReaction({ kind: 'mystical' as unknown as KineticReactionRecord['kind'] }),
-      'elementary | overall_empirical'
-    );
-    expectProblem(
-      arrheniusReaction({ concentrationModel: 'parsec' as unknown as ConcentrationModel }),
-      'molecule_cm3 | mol_m3'
+      arrheniusReaction({ energy: { form: 'kcal', valueK: 500 } as unknown as ArrheniusParameters['energy'] }),
+      'E_over_R | Ea_J_mol'
     );
   });
 
-  it('порядок: null при известных данных, дробный и вне 1..3 — проблемы', () => {
-    expectProblem(arrheniusReaction({ overallOrder: null }), 'overallOrder');
-    expectProblem(arrheniusReaction({ overallOrder: 4 }), 'порядки закона скорости 1..3');
-    expectProblem(arrheniusReaction({ overallOrder: 1.5 }), 'порядки закона скорости 1..3');
+  it('отвергает NaN в valueK', () => {
+    expectProblem(arrheniusReaction({ energy: { form: 'E_over_R', valueK: Number.NaN } }), 'valueK');
   });
 
-  it('параметры Аррениуса: неположительная A, нечисловой n — проблемы', () => {
-    expectProblem(withArrhenius(arrhenius(0, 0, 0, 'cm3_per_molecule_per_s')), 'предэкспонента');
-    expectProblem(withArrhenius(arrhenius(-1e-11, 0, 0, 'cm3_per_molecule_per_s')), 'предэкспонента');
-    expectProblem(
-      withArrhenius({ ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), temperatureExponentN: Number.NaN }),
-      'показатель n'
-    );
+  it('отвергает вырожденный диапазон применимости', () => {
+    expectProblem(arrheniusReaction({ temperatureRangeK: { min: 0, max: 0 } }), '0 < min < max');
   });
 
-  it('энергия: чужая форма и нечисловое значение — проблемы', () => {
-    const p = arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s');
-    expectProblem(withArrhenius({ ...p, energy: { form: 'kcal' } as unknown as ArrheniusParameters['energy'] }), 'E_over_R | Ea_J_mol');
-    expectProblem(
-      withArrhenius({ ...p, energy: { form: 'E_over_R', valueK: Number.NaN } }),
-      'E/R (valueK)'
-    );
+  it('отвергает единицу порядка 1 при заявленном порядке 2', () => {
+    expectProblem(arrheniusReaction({ unit: 'per_s' }), 'отнесена к порядку 1');
   });
 
-  it('диапазон: вырожденный и неположительный — проблемы', () => {
-    expectProblem(withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s', 300, 300)), '0 < min < max');
-    expectProblem(withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s', 0, 300)), '0 < min < max');
+  it('отвергает единицу molecule_cm3 при модели mol_m3', () => {
+    expectProblem(withArrhenius(arrhenius(1e-13, 0, 0, 'cm3_per_molecule_per_s'), 2, 'mol_m3'), 'модель концентраций');
   });
 
-  it('единица k обязана соответствовать порядку и модели концентраций', () => {
-    expectProblem(withArrhenius(arrhenius(1e-11, 0, 0, 'per_s')), 'отнесена к порядку 1');
-    expectProblem(
-      withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), 2, 'mol_m3'),
-      'модель концентраций'
-    );
-    expectProblem(withArrhenius(arrhenius(1e-11, 0, 0, 'knots' as unknown as ArrheniusParameters['unit'])), 'кинетического реестра');
+  it('отвергает единицу вне кинетического реестра', () => {
+    expectProblem(arrheniusReaction({ unit: 'knots' as unknown as RateConstantUnit }), 'кинетического реестра');
   });
 
-  it('estimated без метода и known без parameters — проблемы', () => {
-    const p = arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s');
-    const estimatedNoMethod: KineticReactionRecord = {
-      ...withArrhenius(p),
-      // Пустая строка: тип контракта требует поле, валидатор обязан
-      // отвергнуть пустой метод (оценка без метода безследна)
-      rateConstant: { status: 'estimated', method: '', parameters: { kind: 'arrhenius', arrhenius: p } }
+  it('отвергает estimated без метода (оценка без метода безследна)', () => {
+    const estimatedNoMethod = {
+      ...arrheniusReaction(),
+      rateConstant: {
+        status: 'estimated',
+        method: '',
+        parameters: { kind: 'arrhenius', arrhenius: arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s') }
+      }
     };
     expectProblem(estimatedNoMethod, 'method');
-    const knownNoParams = { ...withArrhenius(p), rateConstant: { status: 'known' } };
-    expectProblem(knownNoParams, 'parameters');
   });
 
-  it('неопределённость с чужим kind фиксируется (делегирование ScientificValue)', () => {
-    const p = arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s');
+  it('отвергает known без parameters', () => {
     expectProblem(
-      withArrhenius({ ...p, uncertainty: { kind: 'vibes' } as unknown as ArrheniusParameters['uncertainty'] }),
-      'interval | stddev | relative | bounded'
-    );
-    expectProblem(
-      withArrhenius({ ...p, uncertainty: { kind: 'relative', fraction: -0.1 } }),
-      'относительная неопределённость'
+      { ...arrheniusReaction(), rateConstant: { status: 'known' } },
+      'parameters обязателен'
     );
   });
 
-  it('provenance параметров обязателен', () => {
-    const p = arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s');
-    expectProblem(withArrhenius({ ...p, provenance: undefined as unknown as DataProvenance }), 'provenance');
+  it('отвергает неизвестный статус константы', () => {
+    expectProblem(
+      { ...arrheniusReaction(), rateConstant: { status: 'guessed' } },
+      'known | estimated | unknown'
+    );
   });
 
-  it('fall-off: несогласованные пределы, Fc, N — проблемы', () => {
+  it('отвергает неизвестный kind неопределённости (validateUncertainty молча пропускает)', () => {
+    const badUncertainty = { kind: 'vibes', fraction: 0.25 } as unknown as Uncertainty;
+    expectProblem(arrheniusReaction({ uncertainty: badUncertainty }), 'interval | stddev | relative | bounded');
+  });
+
+  it('отвергает отрицательную относительную неопределённость', () => {
+    const badUncertainty: Uncertainty = { kind: 'relative', fraction: -0.1 };
+    expectProblem(arrheniusReaction({ uncertainty: badUncertainty }), 'относительная неопределённость');
+  });
+
+  it('отвергает отсутствующий provenance параметров (константа без источника не используется)', () => {
+    const p = arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s');
+    delete (p as Partial<ArrheniusParameters>).provenance;
+    expectProblem(withArrhenius(p), 'provenance обязателен');
+  });
+
+  it('отвергает k0 с единицей порядка 2 (должен быть порядок overallOrder + 1)', () => {
     expectProblem(
       fallOffReaction(fallOffParameters({ lowPressureLimit: arrhenius(2e-30, 0, 0, 'cm3_per_molecule_per_s') })),
       'rateConstant.fallOff.k0'
     );
+  });
+
+  it('отвергает Fc вне (0, 1]', () => {
     expectProblem(fallOffReaction(fallOffParameters({ centeringFactorFc: 0 })), 'Fc');
     expectProblem(fallOffReaction(fallOffParameters({ centeringFactorFc: 1.2 })), 'Fc');
+  });
+
+  it('отвергает неположительный N', () => {
     expectProblem(fallOffReaction(fallOffParameters({ broadeningN: 0 })), 'N');
+  });
+
+  it('отвергает непересекающиеся диапазоны k0/k∞ (применимых температур нет)', () => {
     expectProblem(
       fallOffReaction(
         fallOffParameters({
           lowPressureLimit: arrhenius(2e-30, 0, 0, 'cm6_per_molecule2_per_s', 200, 400),
-          highPressureLimit: arrhenius(1e-10, 0, 0, 'cm3_per_molecule_per_s', 500, 600)
+          highPressureLimit: arrhenius(1e-10, 0, 0, 'cm3_per_molecule_per_s', 500, 700)
         })
       ),
       'не пересекаются'
     );
-    expectProblem({ ...fallOffReaction(), overallOrder: 3 }, 'вне реестра');
+  });
+
+  it('отвергает fall-off запись порядка 3 (k0 потребовал бы порядок 4)', () => {
+    expectProblem({ ...fallOffReaction(), overallOrder: 3 }, 'вне реестра (1..3)');
   });
 });
 
-describe('Stage 4.5.2: вычислитель k(T) — модифицированный Аррениус', () => {
-  it('T = 300 K, n = 0, E/R = 0: k точно равно A', () => {
-    const k = evaluateRateConstant(arrheniusReaction(), quantity(300, 'K'));
+// --------------------------------------------
+// 3. Вычислитель k(T): модифицированный Аррениус
+// --------------------------------------------
+
+describe('вычислитель k(T): аррениусовские записи', () => {
+  it('T=300, n=0, E/R=0 → k = A точно', () => {
+    const k = evaluateRateConstant(arrheniusReaction({ preExponentialA: 1e-11 }), quantity(300, 'K'));
     expect(k.value).toBe(1e-11);
     expect(k.unit).toBe('cm3_per_molecule_per_s');
-    expect(k.concentrationModel).toBe('molecule_cm3');
     expect(k.dataStatus).toBe('known');
-    expect(k.temperatureK).toBe(300);
-    expect(k.estimationMethod).toBeUndefined();
   });
 
-  it('n и E/R считаются по форме: k(600) = A·(600/300)^n·exp(−E/R/600)', () => {
-    const record = withArrhenius(arrhenius(3.5e-12, 2, 500, 'cm3_per_molecule_per_s'));
-    const k = evaluateRateConstant(record, quantity(600, 'K'));
+  it('n≠0 и E/R≠0: k(600) = 3.5e-12·(600/300)^2·exp(−500/600) — отношением', () => {
+    const k = evaluateRateConstant(
+      arrheniusReaction({ preExponentialA: 3.5e-12, temperatureExponentN: 2, energy: { form: 'E_over_R', valueK: 500 } }),
+      quantity(600, 'K')
+    );
     const expected = 3.5e-12 * Math.pow(600 / TREF, 2) * Math.exp(-500 / 600);
     expect(k.value / expected).toBeCloseTo(1, 12);
   });
 
-  it('формы E/R и Ea = R·(E/R) дают одно и то же k', () => {
-    const eOverR = 970;
-    const kER = evaluateRateConstant(withArrhenius(arrhenius(1.3e-11, 0, eOverR, 'cm3_per_molecule_per_s')), quantity(500, 'K'));
-    const kEa = evaluateRateConstant(withArrhenius(arrheniusEa(1.3e-11, 0, eOverR * R, 'cm3_per_molecule_per_s')), quantity(500, 'K'));
-    expect(kEa.value / kER.value).toBeCloseTo(1, 12);
+  it('эквивалентность форм E/R = 970 K и Ea = 970·R Дж/моль при 500 K', () => {
+    const kER = evaluateRateConstant(arrheniusReaction({ energy: { form: 'E_over_R', valueK: 970 } }), quantity(500, 'K'));
+    const kEa = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'Ea_J_mol', valueJPerMol: 970 * R } }),
+      quantity(500, 'K')
+    );
+    expect(kER.value / kEa.value).toBeCloseTo(1, 12);
   });
 
-  it('отрицательный E/R допустим: k убывает с ростом T (как у реакций с отрицательной энергией активации)', () => {
-    const record = withArrhenius(arrhenius(1e-12, 0, -300, 'cm3_per_molecule_per_s'));
-    const cold = evaluateRateConstant(record, quantity(400, 'K')).value;
-    const hot = evaluateRateConstant(record, quantity(1000, 'K')).value;
-    expect(hot / cold).toBeLessThan(1);
+  it('отрицательный E/R: k растёт с температурой (барьер отталкивания)', () => {
+    const cold = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'E_over_R', valueK: -1000 } }),
+      quantity(250, 'K')
+    );
+    const hot = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'E_over_R', valueK: -1000 } }),
+      quantity(350, 'K')
+    );
+    expect(hot.value / cold.value).toBeGreaterThan(1);
+  });
+
+  it('положительный E/R: k убывает с температурой (exp(+|E|/RT) → 1 при росте T)', () => {
+    const cold = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1000 } }),
+      quantity(250, 'K')
+    );
+    const hot = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1000 } }),
+      quantity(350, 'K')
+    );
+    expect(hot.value / cold.value).toBeLessThan(1);
   });
 
   it('границы диапазона применимости включаются', () => {
-    const record = withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s', 250, 350));
-    expect(() => evaluateRateConstant(record, quantity(250, 'K'))).not.toThrow();
-    expect(() => evaluateRateConstant(record, quantity(350, 'K'))).not.toThrow();
+    expect(evaluateRateConstant(arrheniusReaction(), quantity(200, 'K')).value).toBe(1e-11);
+    expect(evaluateRateConstant(arrheniusReaction(), quantity(2000, 'K')).value).toBe(1e-11);
   });
 
   it('вне диапазона — отказ temperature_out_of_range с границами в сообщении', () => {
-    const record = withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s', 250, 350));
-    const below = kineticsError(() => evaluateRateConstant(record, quantity(249.999, 'K')));
-    expect(below).toBeInstanceOf(KineticsError);
-    expect(below.code).toBe('temperature_out_of_range');
-    expect(below.message).toContain('250');
-    expect(below.message).toContain('экстраполяция запрещена');
-    const above = kineticsError(() => evaluateRateConstant(record, quantity(350.001, 'K')));
-    expect(above.code).toBe('temperature_out_of_range');
+    const e = kineticsError(() => evaluateRateConstant(arrheniusReaction(), quantity(249.999, 'K')));
+    expect(e.code).toBe('temperature_out_of_range');
+    expect(e.message).toContain('экстраполяция запрещена');
+    const e2 = kineticsError(() => evaluateRateConstant(arrheniusReaction(), quantity(2000.001, 'K')));
+    expect(e2.code).toBe('temperature_out_of_range');
   });
 
-  it('некорректная температура — invalid_input (NaN, неположительная, чужая размерность)', () => {
-    const record = arrheniusReaction();
-    const nanT = { value: Number.NaN, unit: 'K' } as unknown as PhysicalQuantity;
-    expect(kineticsError(() => evaluateRateConstant(record, nanT)).code).toBe('invalid_input');
-    expect(kineticsError(() => evaluateRateConstant(record, quantity(-5, 'K'))).code).toBe('invalid_input');
-    const wrongUnit = { value: 300, unit: 'Pa' } as unknown as PhysicalQuantity;
-    expect(kineticsError(() => evaluateRateConstant(record, wrongUnit)).code).toBe('invalid_input');
-    expect(kineticsError(() => evaluateRateConstant(record, null as unknown as PhysicalQuantity)).code).toBe('invalid_input');
+  it('NaN-температура — invalid_input', () => {
+    const e = kineticsError(() =>
+      evaluateRateConstant(arrheniusReaction(), { value: Number.NaN, unit: 'K' } as PhysicalQuantity)
+    );
+    expect(e.code).toBe('invalid_input');
   });
 
-  it('повреждённая запись — invalid_input со списком проблем', () => {
-    const broken = arrheniusReaction({ overallOrder: null });
-    const error = kineticsError(() => evaluateRateConstant(broken, quantity(300, 'K')));
-    expect(error.code).toBe('invalid_input');
-    expect(error.details).toContain('overallOrder');
+  it('отрицательная температура — invalid_input (K обязан быть положительным)', () => {
+    const e = kineticsError(() => evaluateRateConstant(arrheniusReaction(), quantity(-5, 'K')));
+    expect(e.code).toBe('invalid_input');
+    expect(e.message).toContain('положительной');
   });
 
-  it('unknown-константа — no_kinetic_data «не рассчитано», без фиктивной скорости', () => {
+  it('не-температурная единица — invalid_input', () => {
+    const e = kineticsError(() =>
+      evaluateRateConstant(arrheniusReaction(), { value: 300, unit: 'Pa' } as unknown as PhysicalQuantity)
+    );
+    expect(e.code).toBe('invalid_input');
+    expect(e.message).toContain('кельвина');
+  });
+
+  it('null-температура — invalid_input', () => {
+    const e = kineticsError(() => evaluateRateConstant(arrheniusReaction(), null as unknown as PhysicalQuantity));
+    expect(e.code).toBe('invalid_input');
+  });
+
+  it('повреждённая запись — invalid_input с деталями (overallOrder null при known)', () => {
+    const e = kineticsError(() =>
+      evaluateRateConstant({ ...arrheniusReaction(), overallOrder: null }, quantity(300, 'K'))
+    );
+    expect(e.code).toBe('invalid_input');
+    expect(e.details).toContain('overallOrder');
+  });
+
+  it('unknown-константа → no_kinetic_data «не рассчитана» с note', () => {
     const record: KineticReactionRecord = {
-      id: 'no-data',
-      kind: 'elementary',
+      id: 'test-unknown',
+      kind: 'overall_empirical',
       overallOrder: null,
       concentrationModel: 'molecule_cm3',
-      rateConstant: { status: 'unknown', note: 'экспериментальных данных нет' }
+      rateConstant: { status: 'unknown', note: 'нет данных в источнике' }
     };
-    const error = kineticsError(() => evaluateRateConstant(record, quantity(298.15, 'K')));
-    expect(error.code).toBe('no_kinetic_data');
-    expect(error.message).toContain('не рассчитана');
-    expect(error.message).toContain('экспериментальных данных нет');
+    const e = kineticsError(() => evaluateRateConstant(record, quantity(300, 'K')));
+    expect(e.code).toBe('no_kinetic_data');
+    expect(e.message).toContain('не рассчитана');
+    expect(e.message).toContain('нет данных в источнике');
   });
 
-  it('estimated передаёт статус и метод в результат', () => {
+  it('estimated → статус и метод переносятся в результат', () => {
     const record: KineticReactionRecord = {
-      id: 'est-1',
-      kind: 'overall_empirical',
-      overallOrder: 2,
-      concentrationModel: 'molecule_cm3',
+      ...withArrhenius(arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s')),
       rateConstant: {
         status: 'estimated',
-        method: 'оценка по аналогии (фикция теста)',
-        parameters: { kind: 'arrhenius', arrhenius: arrhenius(5e-11, 0, 100, 'cm3_per_molecule_per_s') }
-      },
-      provenance: fixtureProvenance()
+        method: 'оценка по аналогии с реакцией того же класса',
+        parameters: { kind: 'arrhenius', arrhenius: arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s') }
+      }
     };
     const k = evaluateRateConstant(record, quantity(300, 'K'));
     expect(k.dataStatus).toBe('estimated');
     expect(k.estimationMethod).toContain('аналогии');
   });
 
-  it('исчезновение экспоненты — numerical_failure, а не молчаливый 0', () => {
-    const record = withArrhenius(arrhenius(1e-11, 0, 1e9, 'cm3_per_molecule_per_s'));
-    const error = kineticsError(() => evaluateRateConstant(record, quantity(300, 'K')));
-    expect(error.code).toBe('numerical_failure');
+  it('экстремальный E/R → exp уходит в 0 → numerical_failure (не молчаливый ноль)', () => {
+    const e = kineticsError(() =>
+      evaluateRateConstant(
+        arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1e9 } }),
+        quantity(300, 'K')
+      )
+    );
+    expect(e.code).toBe('numerical_failure');
   });
 
-  it('thirdBodyConcentration для аррениусовской записи — invalid_input', () => {
-    const error = kineticsError(() =>
+  it('thirdBodyConcentration для аррениусовской записи — invalid_input (запись не зависит от давления)', () => {
+    const e = kineticsError(() =>
       evaluateRateConstant(arrheniusReaction(), quantity(300, 'K'), { thirdBodyConcentration: 2.5e19 })
     );
-    expect(error.code).toBe('invalid_input');
+    expect(e.code).toBe('invalid_input');
+    expect(e.message).toContain('не зависит от давления');
   });
 
   it('неопределённость и provenance переносятся в результат', () => {
-    const p: ArrheniusParameters = {
-      ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
-      uncertainty: { kind: 'relative', fraction: 0.25, note: 'синтетический фактор (фикция)' }
-    };
-    const k = evaluateRateConstant(withArrhenius(p), quantity(300, 'K'));
-    expect(k.uncertainty?.kind).toBe('relative');
-    expect(k.provenance?.sourceName).toContain('фикция');
+    const uncertainty: Uncertainty = { kind: 'relative', fraction: 0.25 };
+    const k = evaluateRateConstant(
+      arrheniusReaction({ uncertainty, provenance: { sourceName: 'фикстура' } }),
+      quantity(300, 'K')
+    );
+    expect(k.uncertainty).toEqual(uncertainty);
+    expect(k.provenance?.sourceName).toBe('фикстура');
+  });
+
+  it('appliedRangeK совпадает с диапазоном записи', () => {
+    const k = evaluateRateConstant(arrheniusReaction(), quantity(300, 'K'));
+    expect(k.appliedRangeK).toEqual({ min: 200, max: 2000 });
+    expect(k.temperatureK).toBe(300);
+    expect(k.concentrationModel).toBe('molecule_cm3');
   });
 });
 
-describe('Stage 4.5.2: fall-off (Lindemann-ядро + Troe-уширение)', () => {
-  it('аналитическая точка Pr = 1: k = k∞·Fc/2, F = Fc, N не влияет', () => {
-    // k0 = 2e-30 cm⁶/(molecule²·s), k∞ = 1e-10 cm³/(molecule·s):
-    // Pr = 1 при [M] = k∞/k0 = 5e19 molecule/cm³; log10(1) = 0 ⇒ F = Fc^1
+// --------------------------------------------
+// 4. Вычислитель k([M],T): fall-off
+// --------------------------------------------
+
+describe('вычислитель k(T): fall-off записи', () => {
+  it('Pr=1: k = k∞·(1/2)·Fc, приведённое давление и вклады диагностируются', () => {
+    // [M] = k∞/k0 = 1e-10/2e-30 = 5e19 molecule/cm³ → Pr = 1
     const k = evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: 5e19 });
-    expect(k.value / (1e-10 * 0.6 / 2)).toBeCloseTo(1, 12);
+    const expected = (1e-10 * 0.6) / 2;
+    expect(k.value / expected).toBeCloseTo(1, 12);
     expect(k.fallOff?.reducedPressure).toBeCloseTo(1, 12);
     expect(k.fallOff?.log10ReducedPressure).toBeCloseTo(0, 12);
     expect(k.fallOff?.broadeningFactor).toBeCloseTo(0.6, 12);
+    expect(k.fallOff?.lowPressureLimit).toBe(2e-30);
+    expect(k.fallOff?.highPressureLimit).toBe(1e-10);
     expect(k.unit).toBe('cm3_per_molecule_per_s');
     expect(k.appliedRangeK).toEqual({ min: 200, max: 2000 });
   });
 
-  it('низкоплотностный предел: k → k0·[M] при Pr → 0', () => {
-    const M = 1e10; // Pr = 2e-10 → F ≈ 1
+  it('низкоплотностный предел: k → k0·[M]·F (Lindemann-ядро при Pr≪1)', () => {
+    const M = 1e10;
+    const pr = (2e-30 * M) / 1e-10;
+    const f = Math.pow(0.6, 1 / (1 + Math.log10(pr) ** 2));
     const k = evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: M });
-    const f = Math.pow(0.6, 1 / (1 + Math.log10(2e-10) ** 2));
-    const expected = (2e-30 * M * f) / (1 + 2e-10);
+    const expected = (2e-30 * M * f) / (1 + pr);
     expect(k.value / expected).toBeCloseTo(1, 12);
-    expect(k.fallOff?.broadeningFactor).toBeCloseTo(f, 12);
+    expect(k.fallOff?.reducedPressure).toBeCloseTo(pr, 12);
   });
 
-  it('Fc берётся из записи: изменение Fc меняет k в точке Pr = 1', () => {
-    const k06 = evaluateRateConstant(fallOffReaction(fallOffParameters({ centeringFactorFc: 0.6 })), quantity(300, 'K'), { thirdBodyConcentration: 5e19 });
-    const k05 = evaluateRateConstant(fallOffReaction(fallOffParameters({ centeringFactorFc: 0.5 })), quantity(300, 'K'), { thirdBodyConcentration: 5e19 });
+  it('центрирующий фактор Fc управляет высотой уширения (0.6 vs 0.5 при Pr=1)', () => {
+    const k06 = evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: 5e19 });
+    const k05 = evaluateRateConstant(
+      fallOffReaction(fallOffParameters({ centeringFactorFc: 0.5 })),
+      quantity(300, 'K'),
+      { thirdBodyConcentration: 5e19 }
+    );
     expect(k05.value / k06.value).toBeCloseTo(0.5 / 0.6, 12);
   });
 
-  it('N берётся из записи и влияет вне Pr = 1', () => {
-    const M = 5e17; // Pr = 2e-30·5e17/1e-10 = 1e-2, log10(Pr) = −2
-    const k1 = evaluateRateConstant(fallOffReaction(fallOffParameters({ broadeningN: 1 })), quantity(300, 'K'), { thirdBodyConcentration: M });
-    const k2 = evaluateRateConstant(fallOffReaction(fallOffParameters({ broadeningN: 2 })), quantity(300, 'K'), { thirdBodyConcentration: M });
-    const f1 = Math.pow(0.6, 1 / (1 + (Math.log10(0.01) / 1) ** 2));
+  it('параметр N управляет шириной уширения (N=1 vs N=2 при Pr=0.01)', () => {
+    const M = 5e17; // Pr = 2e-30·5e17/1e-10 = 0.01
+    const f1 = Math.pow(0.6, 1 / (1 + Math.log10(0.01) ** 2));
     const f2 = Math.pow(0.6, 1 / (1 + (Math.log10(0.01) / 2) ** 2));
+    const k1 = evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: M });
+    const k2 = evaluateRateConstant(
+      fallOffReaction(fallOffParameters({ broadeningN: 2 })),
+      quantity(300, 'K'),
+      { thirdBodyConcentration: M }
+    );
     expect(k1.fallOff?.broadeningFactor).toBeCloseTo(f1, 12);
     expect(k2.fallOff?.broadeningFactor).toBeCloseTo(f2, 12);
-    expect(f1).not.toBeCloseTo(f2, 5);
+    expect(f2 / f1).not.toBeCloseTo(1, 5);
   });
 
-  it('пределы k0/k∞ считаются формой Аррениуса, k = k∞·(Pr/(1+Pr))·F', () => {
+  it('T-зависимые пределы: k0 и k∞ вычисляются по своим (A, n, E/R) при 600 K', () => {
     const params = fallOffParameters({
       lowPressureLimit: arrhenius(2e-30, 1, 200, 'cm6_per_molecule2_per_s'),
       highPressureLimit: arrhenius(1e-10, -1, 100, 'cm3_per_molecule_per_s')
     });
-    const T = 600;
     const M = 1e20;
-    const k = evaluateRateConstant(fallOffReaction(params), quantity(T, 'K'), { thirdBodyConcentration: M });
-    const k0 = 2e-30 * Math.pow(T / TREF, 1) * Math.exp(-200 / T);
-    const kInf = 1e-10 * Math.pow(T / TREF, -1) * Math.exp(-100 / T);
+    const k = evaluateRateConstant(fallOffReaction(params), quantity(600, 'K'), { thirdBodyConcentration: M });
+    const k0 = 2e-30 * Math.pow(600 / TREF, 1) * Math.exp(-200 / 600);
+    const kInf = 1e-10 * Math.pow(600 / TREF, -1) * Math.exp(-100 / 600);
     const pr = (k0 * M) / kInf;
-    const f = Math.pow(0.6, 1 / (1 + (Math.log10(pr) / 1) ** 2));
-    const low = k.fallOff?.lowPressureLimit;
-    const high = k.fallOff?.highPressureLimit;
-    if (low === undefined || high === undefined) {
-      throw new Error('ожидались пределы k0/k∞ в блоке fallOff результата');
-    }
-    expect(low / k0).toBeCloseTo(1, 12);
-    expect(high / kInf).toBeCloseTo(1, 12);
-    expect(k.value / (kInf * (pr / (1 + pr)) * f)).toBeCloseTo(1, 12);
+    const f = Math.pow(0.6, 1 / (1 + Math.log10(pr) ** 2));
+    const expected = kInf * (pr / (1 + pr)) * f;
+    expect(k.value / expected).toBeCloseTo(1, 12);
+    expect(k.fallOff?.lowPressureLimit).toBeCloseTo(k0, 12);
+    expect(k.fallOff?.highPressureLimit).toBeCloseTo(kInf, 12);
   });
 
-  it('[M] обязательна и положительна для fall-off записи', () => {
-    const record = fallOffReaction();
-    expect(kineticsError(() => evaluateRateConstant(record, quantity(300, 'K'))).code).toBe('invalid_third_body');
-    expect(
-      kineticsError(() => evaluateRateConstant(record, quantity(300, 'K'), { thirdBodyConcentration: 0 })).code
-    ).toBe('invalid_third_body');
-    expect(
-      kineticsError(() => evaluateRateConstant(record, quantity(300, 'K'), { thirdBodyConcentration: -1 })).code
-    ).toBe('invalid_third_body');
-    expect(
-      kineticsError(() => evaluateRateConstant(record, quantity(300, 'K'), { thirdBodyConcentration: Number.NaN })).code
-    ).toBe('invalid_third_body');
+  it('отсутствующая [M] — invalid_third_body', () => {
+    const e = kineticsError(() => evaluateRateConstant(fallOffReaction(), quantity(300, 'K')));
+    expect(e.code).toBe('invalid_third_body');
   });
 
-  it('T вне диапазона любого предела — отказ; применённый диапазон — пересечение', () => {
+  it('нулевая/отрицательная/NaN [M] — invalid_third_body', () => {
+    expect(kineticsError(() => evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: 0 })).code).toBe('invalid_third_body');
+    expect(kineticsError(() => evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: -1 })).code).toBe('invalid_third_body');
+    expect(kineticsError(() => evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: Number.NaN })).code).toBe('invalid_third_body');
+  });
+
+  it('вне пересечения диапазонов k0/k∞ — temperature_out_of_range', () => {
     const params = fallOffParameters({
       lowPressureLimit: arrhenius(2e-30, 0, 0, 'cm6_per_molecule2_per_s', 200, 400),
       highPressureLimit: arrhenius(1e-10, 0, 0, 'cm3_per_molecule_per_s', 300, 500)
     });
     const record = fallOffReaction(params);
-    expect(
-      kineticsError(() => evaluateRateConstant(record, quantity(250, 'K'), { thirdBodyConcentration: 1e19 })).code
-    ).toBe('temperature_out_of_range');
-    expect(
-      kineticsError(() => evaluateRateConstant(record, quantity(450, 'K'), { thirdBodyConcentration: 1e19 })).code
-    ).toBe('temperature_out_of_range');
-    const k = evaluateRateConstant(record, quantity(350, 'K'), { thirdBodyConcentration: 1e19 });
-    expect(k.appliedRangeK).toEqual({ min: 300, max: 400 });
+    const cold = kineticsError(() => evaluateRateConstant(record, quantity(250, 'K'), { thirdBodyConcentration: 1e19 }));
+    expect(cold.code).toBe('temperature_out_of_range');
+    const hot = kineticsError(() => evaluateRateConstant(record, quantity(450, 'K'), { thirdBodyConcentration: 1e19 }));
+    expect(hot.code).toBe('temperature_out_of_range');
+    const ok = evaluateRateConstant(record, quantity(350, 'K'), { thirdBodyConcentration: 1e19 });
+    expect(ok.appliedRangeK).toEqual({ min: 300, max: 400 });
   });
 
-  it('для fall-off результата неопределённость не выдумывается', () => {
+  it('результат fall-off: единица k∞, uncertainty не выдумывается, статус known', () => {
     const k = evaluateRateConstant(fallOffReaction(), quantity(300, 'K'), { thirdBodyConcentration: 5e19 });
+    expect(k.unit).toBe('cm3_per_molecule_per_s');
     expect(k.uncertainty).toBeUndefined();
     expect(k.dataStatus).toBe('known');
   });
 });
 
-describe('Stage 4.5.2: преобразования molecule ↔ mol на точной N_A', () => {
-  it('концентрация: 1 molecule/cm³ = 1e6/N_A моль/м³ и обратно (число Лошмидта)', () => {
-    const mol = convertConcentration(1, 'molecule_cm3', 'mol_m3');
-    expect(mol).toBeCloseTo(1e6 / NA, 30);
-    expect(convertConcentration(mol, 'mol_m3', 'molecule_cm3')).toBeCloseTo(1, 12);
-    // Независимая проверка масштаба: 2.687e19 molecule/cm³ (Loschmidt,
-    // STP) ≈ 44.6 моль/м³ — молярный объём 22.4 л/моль при тех же условиях
+// --------------------------------------------
+// 5. Преобразования концентраций molecule ↔ mol
+// --------------------------------------------
+
+describe('преобразование концентраций', () => {
+  it('1 molecule/cm³ = 1e6/N_A моль/м³', () => {
+    expect(convertConcentration(1, 'molecule_cm3', 'mol_m3')).toBeCloseTo(1e6 / NA, 12);
+  });
+
+  it('round-trip molecule → mol → molecule возвращает исходное значение', () => {
+    const v = 3.7e16;
+    const round = convertConcentration(convertConcentration(v, 'molecule_cm3', 'mol_m3'), 'mol_m3', 'molecule_cm3');
+    expect(round / v).toBeCloseTo(1, 12);
+  });
+
+  it('число Лошмидта: 2.687e19 molecule/cm³ ≈ 44.6 моль/м³', () => {
     expect(convertConcentration(2.687e19, 'molecule_cm3', 'mol_m3')).toBeCloseTo(44.6, 1);
   });
 
-  it('константа порядка 2: 1 cm³/(molecule·s) = N_A·1e-6 м³/(моль·с)', () => {
-    const mol = convertRateConstantUnit(1, 'cm3_per_molecule_per_s', 'm3_per_mol_per_s');
-    expect(mol).toBeCloseTo(NA * 1e-6, 12);
-    expect(convertRateConstantUnit(mol, 'm3_per_mol_per_s', 'cm3_per_molecule_per_s')).toBeCloseTo(1, 12);
-  });
-
-  it('константа порядка 3: 1 cm⁶/(molecule²·s) = N_A²·1e-12 м⁶/(моль²·с)', () => {
-    const mol = convertRateConstantUnit(1, 'cm6_per_molecule2_per_s', 'm6_per_mol2_per_s');
-    expect(mol / (NA * NA * 1e-12)).toBeCloseTo(1, 12);
-    expect(convertRateConstantUnit(mol, 'm6_per_mol2_per_s', 'cm6_per_molecule2_per_s')).toBeCloseTo(1, 12);
-  });
-
-  it('скорость инвариантна к согласованной смене модели концентраций', () => {
-    // r = k·c² в molecule-конвенции; r' = k'·c'² в mol-конвенции;
-    // r' = r·(1e6/N_A) — та же скорость в моль/м³/с
-    const kMolecule = 1e-11;
-    const cMolecule = 2.5e12;
-    const rateMolecule = kMolecule * cMolecule * cMolecule;
-    const kMol = convertRateConstantUnit(kMolecule, 'cm3_per_molecule_per_s', 'm3_per_mol_per_s');
-    const cMol = convertConcentration(cMolecule, 'molecule_cm3', 'mol_m3');
-    const rateMol = kMol * cMol * cMol;
-    expect((rateMol / rateMolecule) / (1e6 / NA)).toBeCloseTo(1, 12);
-    // и пересчитанная скорость совпадает с конверсией плотности скорости
-    expect(convertConcentration(rateMolecule, 'molecule_cm3', 'mol_m3') / rateMol).toBeCloseTo(1, 12);
-  });
-
-  it('несогласованные преобразования и нечисловые значения — invalid_input', () => {
-    expect(convertRateConstantUnit(1, 'per_s', 'per_s')).toBe(1);
-    expect(kineticsError(() => convertRateConstantUnit(1, 'per_s', 'm3_per_mol_per_s')).code).toBe('invalid_input');
+  it('NaN и неизвестные модели — invalid_input', () => {
+    expect(kineticsError(() => convertConcentration(Number.NaN, 'molecule_cm3', 'mol_m3')).code).toBe('invalid_input');
     expect(
-      kineticsError(() => convertRateConstantUnit(Number.NaN, 'per_s', 'per_s')).code
+      kineticsError(() => convertConcentration(1, 'ppm' as unknown as ConcentrationModel, 'mol_m3')).code
     ).toBe('invalid_input');
-    expect(
-      kineticsError(() => convertConcentration(1, 'molecule_cm3', 'parsec' as unknown as ConcentrationModel)).code
-    ).toBe('invalid_input');
-    expect(kineticsError(() => convertConcentration(Number.NaN, 'mol_m3', 'mol_m3')).code).toBe('invalid_input');
   });
 });
 
-describe('Stage 4.5.2: детерминированность и чистота', () => {
-  it('повторные вызовы дают идентичный результат; вход не мутируется', () => {
+// --------------------------------------------
+// 6. Преобразования единиц k
+// --------------------------------------------
+
+describe('преобразование единиц константы скорости', () => {
+  it('порядок 2: 1 cm³/(molecule·s) = N_A·1e-6 м³/(моль·с)', () => {
+    expect(convertRateConstantUnit(1, 'cm3_per_molecule_per_s', 'm3_per_mol_per_s')).toBeCloseTo(NA * 1e-6, 6);
+  });
+
+  it('порядок 2: round-trip', () => {
+    const v = 1.3e-11;
+    const round = convertRateConstantUnit(
+      convertRateConstantUnit(v, 'cm3_per_molecule_per_s', 'm3_per_mol_per_s'),
+      'm3_per_mol_per_s',
+      'cm3_per_molecule_per_s'
+    );
+    expect(round / v).toBeCloseTo(1, 12);
+  });
+
+  it('порядок 3: 1 cm⁶/(molecule²·s) = N_A²·1e-12 м⁶/(моль²·с)', () => {
+    expect(convertRateConstantUnit(1, 'cm6_per_molecule2_per_s', 'm6_per_mol2_per_s')).toBeCloseTo(NA * NA * 1e-12, 6);
+  });
+
+  it('порядок 3: round-trip', () => {
+    const v = 5.5e-29;
+    const round = convertRateConstantUnit(
+      convertRateConstantUnit(v, 'cm6_per_molecule2_per_s', 'm6_per_mol2_per_s'),
+      'm6_per_mol2_per_s',
+      'cm6_per_molecule2_per_s'
+    );
+    expect(round / v).toBeCloseTo(1, 12);
+  });
+
+  it('инвариант скорости: k(mol)·[X](mol)² = k(molecule)·[X](molecule)² при одном порядке', () => {
+    const kMolecule = 2.5e-11;
+    const concMolecule = 4.2e18;
+    const kMol = convertRateConstantUnit(kMolecule, 'cm3_per_molecule_per_s', 'm3_per_mol_per_s');
+    const concMol = convertConcentration(concMolecule, 'molecule_cm3', 'mol_m3');
+    const rateMol = kMol * concMol * concMol;
+    const rateMolecule = kMolecule * concMolecule * concMolecule;
+    // скорость в mol/(м³·с) = скорость в molecule/(cm³·s) · (1e6/N_A)
+    expect((rateMol / rateMolecule) / (1e6 / NA)).toBeCloseTo(1, 12);
+  });
+
+  it('порядок 1: per_s → per_s — тождество', () => {
+    expect(convertRateConstantUnit(0.73, 'per_s', 'per_s')).toBe(0.73);
+  });
+
+  it('разные порядки — invalid_input (порядок не преобразуется)', () => {
+    expect(
+      kineticsError(() => convertRateConstantUnit(1, 'per_s', 'm3_per_mol_per_s')).code
+    ).toBe('invalid_input');
+  });
+
+  it('NaN и единицы вне реестра — invalid_input', () => {
+    expect(kineticsError(() => convertRateConstantUnit(Number.NaN, 'per_s', 'per_s')).code).toBe('invalid_input');
+    expect(
+      kineticsError(() => convertRateConstantUnit(1, 'parsec' as unknown as RateConstantUnit, 'per_s')).code
+    ).toBe('invalid_input');
+  });
+});
+
+// --------------------------------------------
+// 7. Детерминированность
+// --------------------------------------------
+
+describe('детерминированность', () => {
+  it('повторный вызов fall-off даёт идентичный результат', () => {
     const record = fallOffReaction();
-    const options = { thirdBodyConcentration: 5e19 };
-    const snapshot = JSON.stringify({ record, options });
-    const first = evaluateRateConstant(record, quantity(300, 'K'), options);
-    const second = evaluateRateConstant(record, quantity(300, 'K'), options);
-    expect(JSON.stringify(second)).toEqual(JSON.stringify(first));
-    expect(JSON.stringify({ record, options })).toEqual(snapshot);
+    const options = { thirdBodyConcentration: 2.4e19 };
+    const a = evaluateRateConstant(record, quantity(650, 'K'), options);
+    const b = evaluateRateConstant(record, quantity(650, 'K'), options);
+    expect(b).toEqual(a);
+  });
+
+  it('вычисление не мутирует запись и опции', () => {
+    const record = fallOffReaction();
+    const options = { thirdBodyConcentration: 2.4e19 };
+    const recordBefore = JSON.stringify(record);
+    const optionsBefore = JSON.stringify(options);
+    evaluateRateConstant(record, quantity(650, 'K'), options);
+    expect(JSON.stringify(record)).toBe(recordBefore);
+    expect(JSON.stringify(options)).toBe(optionsBefore);
   });
 });

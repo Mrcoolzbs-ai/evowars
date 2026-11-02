@@ -496,7 +496,13 @@ export function validateKineticReactionRecord(record: unknown): string[] {
         'rateConstant.arrhenius'
       );
     } else if (params.kind === 'fall_off') {
-      validateFallOffParameters(params.fallOff, typeof order === 'number' ? order : null, model, errors, 'rateConstant.fallOff');
+      validateFallOffParameters(
+        params.fallOff,
+        typeof order === 'number' ? order : null,
+        model,
+        errors,
+        'rateConstant.fallOff'
+      );
     } else {
       errors.push(`kind параметризации должен быть arrhenius | fall_off, получено «${String(params.kind)}»`);
     }
@@ -652,7 +658,8 @@ export function evaluateRateConstant(
     throw new KineticsError({
       code: 'no_kinetic_data',
       operation: op,
-      message: `скорость реакции «${record.id}» не рассчитана: данных нет` +
+      message:
+        `скорость реакции «${record.id}» не рассчитана: данных нет` +
         (rate.note !== undefined ? ` (${rate.note})` : '')
     });
   }
@@ -666,7 +673,8 @@ export function evaluateRateConstant(
       throw new KineticsError({
         code: 'invalid_input',
         operation: op,
-        message: 'аррениусовская запись не зависит от давления: thirdBodyConcentration не применима ' +
+        message:
+          'аррениусовская запись не зависит от давления: thirdBodyConcentration не применима ' +
           '(давление-зависимость выражается параметризацией fall_off)'
       });
     }
@@ -703,7 +711,8 @@ export function evaluateRateConstant(
     throw new KineticsError({
       code: 'invalid_third_body',
       operation: op,
-      message: `для fall-off записи «${record.id}» обязательна концентрация третьего тела [M] в единицах ` +
+      message:
+        `для fall-off записи «${record.id}» обязательна концентрация третьего тела [M] в единицах ` +
         (record.concentrationModel === 'molecule_cm3' ? 'molecule/cm³' : 'моль/м³')
     });
   }
@@ -726,7 +735,8 @@ export function evaluateRateConstant(
     throw new KineticsError({
       code: 'temperature_out_of_range',
       operation: op,
-      message: `температура ${T} K вне диапазона применимости fall-off записи «${record.id}» ` +
+      message:
+        `температура ${T} K вне диапазона применимости fall-off записи «${record.id}» ` +
         `(k0: [${lo.temperatureRangeK.min}, ${lo.temperatureRangeK.max}] K, k∞: [${hi.temperatureRangeK.min}, ${hi.temperatureRangeK.max}] K): экстраполяция запрещена`
     });
   }
