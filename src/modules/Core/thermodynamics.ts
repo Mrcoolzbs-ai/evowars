@@ -135,6 +135,16 @@ export interface ThermoReferenceState {
   temperature?: PhysicalQuantity;
   /** Давление (размерность паскаля), если применимо и указано источником. */
   pressure?: PhysicalQuantity;
+  /**
+   * Давление стандартного состояния p° (размерность паскаля), если
+   * конвенция набора данных его задаёт. Для NASA CEA это 1 бар -
+   * стандартное состояние идеального газа по TP-2002-211556
+   * (Standard States); конвенция НАБОРА данных, а не построчное
+   * поле thermo.inp. Отличается от pressure: pressure - условия
+   * reference state записи, standardStatePressure - конвенция,
+   * к которой приведены S°/G° коэффициентов.
+   */
+  standardStatePressure?: PhysicalQuantity;
   /** Фаза, к которой относятся данные; совпадает с фазой записи (вид + фаза). */
   phase: SpeciesPhase;
   /** Описание стандартного состояния и конвенции источника; непусто. */
@@ -624,6 +634,19 @@ function referenceStateIssues(
     const ok = checkQuantityShape(`${path}: давление`, ref.pressure, PRESSURE_DIMENSION, errors);
     if (ok && !(ref.pressure.value > 0)) {
       errors.push(`${path}: давление должно быть положительным, получено ${ref.pressure.value}`);
+    }
+  }
+  if (ref.standardStatePressure !== undefined) {
+    const ok = checkQuantityShape(
+      `${path}: давление стандартного состояния`,
+      ref.standardStatePressure,
+      PRESSURE_DIMENSION,
+      errors
+    );
+    if (ok && !(ref.standardStatePressure.value > 0)) {
+      errors.push(
+        `${path}: давление стандартного состояния должно быть положительным, получено ${ref.standardStatePressure.value}`
+      );
     }
   }
   return errors;
