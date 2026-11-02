@@ -255,11 +255,11 @@ describe('валидатор кинетических записей', () => {
   });
 
   it('отвергает порядок 4 (вне реестра единиц)', () => {
-    expectProblem({ ...arrheniusReaction(), overallOrder: 4 }, 'порядки 1..3');
+    expectProblem({ ...arrheniusReaction(), overallOrder: 4 }, 'закона скорости 1..3');
   });
 
   it('отвергает дробный порядок 1.5', () => {
-    expectProblem({ ...arrheniusReaction(), overallOrder: 1.5 }, 'порядки 1..3');
+    expectProblem({ ...arrheniusReaction(), overallOrder: 1.5 }, 'закона скорости 1..3');
   });
 
   it('отвергает неположительную предэкспоненту A', () => {
@@ -290,7 +290,7 @@ describe('валидатор кинетических записей', () => {
   });
 
   it('отвергает единицу molecule_cm3 при модели mol_m3', () => {
-    expectProblem(withArrhenius(arrhenius(1e-13, 0, 0, 'cm3_per_molecule_per_s'), 2, 'mol_m3'), 'модель концентраций');
+    expectProblem(withArrhenius(arrhenius(1e-13, 0, 0, 'cm3_per_molecule_per_s'), 2, 'mol_m3'), 'модели концентраций');
   });
 
   it('отвергает единицу вне кинетического реестра', () => {
@@ -402,28 +402,28 @@ describe('вычислитель k(T): аррениусовские записи
     expect(kER.value / kEa.value).toBeCloseTo(1, 12);
   });
 
-  it('отрицательный E/R: k растёт с температурой (барьер отталкивания)', () => {
+  it('отрицательный E/R: k убывает с ростом температуры (exp(+|E|/RT) убывает при росте T)', () => {
     const cold = evaluateRateConstant(
       arrheniusReaction({ energy: { form: 'E_over_R', valueK: -1000 } }),
       quantity(250, 'K')
     );
     const hot = evaluateRateConstant(
       arrheniusReaction({ energy: { form: 'E_over_R', valueK: -1000 } }),
-      quantity(350, 'K')
-    );
-    expect(hot.value / cold.value).toBeGreaterThan(1);
-  });
-
-  it('положительный E/R: k убывает с температурой (exp(+|E|/RT) → 1 при росте T)', () => {
-    const cold = evaluateRateConstant(
-      arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1000 } }),
-      quantity(250, 'K')
-    );
-    const hot = evaluateRateConstant(
-      arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1000 } }),
       quantity(350, 'K')
     );
     expect(hot.value / cold.value).toBeLessThan(1);
+  });
+
+  it('положительный E/R: k растёт с температурой (барьер активации: exp(−E/RT) → 1 при росте T)', () => {
+    const cold = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1000 } }),
+      quantity(250, 'K')
+    );
+    const hot = evaluateRateConstant(
+      arrheniusReaction({ energy: { form: 'E_over_R', valueK: 1000 } }),
+      quantity(350, 'K')
+    );
+    expect(hot.value / cold.value).toBeGreaterThan(1);
   });
 
   it('границы диапазона применимости включаются', () => {
@@ -432,7 +432,7 @@ describe('вычислитель k(T): аррениусовские записи
   });
 
   it('вне диапазона — отказ temperature_out_of_range с границами в сообщении', () => {
-    const e = kineticsError(() => evaluateRateConstant(arrheniusReaction(), quantity(249.999, 'K')));
+    const e = kineticsError(() => evaluateRateConstant(arrheniusReaction(), quantity(199.999, 'K')));
     expect(e.code).toBe('temperature_out_of_range');
     expect(e.message).toContain('экстраполяция запрещена');
     const e2 = kineticsError(() => evaluateRateConstant(arrheniusReaction(), quantity(2000.001, 'K')));
