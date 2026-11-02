@@ -490,8 +490,13 @@ describe('Stage 4.5.2: fall-off (Lindemann-ядро + Troe-уширение)', (
     const kInf = 1e-10 * Math.pow(T / TREF, -1) * Math.exp(-100 / T);
     const pr = (k0 * M) / kInf;
     const f = Math.pow(0.6, 1 / (1 + (Math.log10(pr) / 1) ** 2));
-    expect(k.fallOff?.lowPressureLimit / k0).toBeCloseTo(1, 12);
-    expect(k.fallOff?.highPressureLimit / kInf).toBeCloseTo(1, 12);
+    const low = k.fallOff?.lowPressureLimit;
+    const high = k.fallOff?.highPressureLimit;
+    if (low === undefined || high === undefined) {
+      throw new Error('ожидались пределы k0/k∞ в блоке fallOff результата');
+    }
+    expect(low / k0).toBeCloseTo(1, 12);
+    expect(high / kInf).toBeCloseTo(1, 12);
     expect(k.value / (kInf * (pr / (1 + pr)) * f)).toBeCloseTo(1, 12);
   });
 
