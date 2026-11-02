@@ -296,6 +296,74 @@ export const NUBASE_STATE_CLASSIFICATIONS: readonly NubaseStateClassificationKin
 ];
 
 /**
+ * Поля строки состояния NUBASE2020, извлекаемые из её идентификатора
+ * (аудит R4, C5b).
+ */
+export interface NubaseSourceRowIdFields {
+  /** Атомный номер Z, закодированный в идентификаторе. */
+  atomicNumber: number;
+  /** Массовое число A, закодированное в идентификаторе. */
+  massNumber: number;
+  /** Индекс состояния i, закодированный в идентификаторе. */
+  stateIndex: number;
+  /** Буквенный код состояния s, закодированный в идентификаторе. */
+  stateCode: NuclideStateCode;
+}
+
+// Фактическая форма идентификатора строки источника в утилите аудита
+// (Data/nubaseAudit.ts, парсер NUBASE2020):
+// 'nubase2020:Z=043,A=092,i=3,s=p' — Z и A с ведущими нулями, поле
+// s присутствует всегда (у основного состояния — пусто).
+const NUBASE_SOURCE_ROW_ID_AUDIT_PATTERN =
+  /^nubase2020:Z=(\d{1,3}),A=(\d{1,3}),i=(\d),s=([mnpqrxij]?)$/;
+// Фактическая форма идентификатора записи каталога кандидатов
+// (Data/elementIsotopeCandidates.ts):
+// 'nubase2020:Z=84 Po A=209 i=1 s=m' — Z и A без выравнивания,
+// символ элемента между Z и A, часть « s=» у основного состояния
+// опущена.
+const NUBASE_SOURCE_ROW_ID_CATALOG_PATTERN =
+  /^nubase2020:Z=(\d{1,3}) [A-Z][a-z]? A=(\d{1,3}) i=(\d)(?: s=([mnpqrxij]))?$/;
+
+/**
+ * Разбор идентификатора строки состояния NUBASE2020 (аудит R4, C5b).
+ * Распознаёт ОБЕ фактические формы проекта — идентификатор строки
+ * источника утилиты аудита и идентификатор записи каталога
+ * elementIsotopeCandidates (проверка сверена с фактическими
+ * форматами обоих модулей, а не выдумана): возвращает встроенные
+ * (Z, A, i, s) либо null, если идентификатор не является строкой
+ * NUBASE2020 ни в одной из этих форм. Рассогласованные комбинации
+ * (например, i=1 при s=p или несуществующий индекс) не распознаются.
+ */
+export function parseNubaseSourceRowRecordId(recordId: string): NubaseSourceRowIdFields | null {
+  if (typeof recordId !== 'string') {
+    return null;
+  }
+  let match = NUBASE_SOURCE_ROW_ID_AUDIT_PATTERN.exec(recordId);
+  if (match === null) {
+    match = NUBASE_SOURCE_ROW_ID_CATALOG_PATTERN.exec(recordId);
+  }
+  if (match === null) {
+    return null;
+  }
+  const atomicNumber = Number(match[1]);
+  const massNumber = Number(match[2]);
+  const stateIndex = Number(match[3]);
+  // в форме каталога часть « s=» у основного состояния опущена
+  const stateCode = (match[4] === undefined ? '' : match[4]) as NuclideStateCode;
+  if (
+    !Number.isInteger(atomicNumber) ||
+    atomicNumber < 1 ||
+    atomicNumber > ELEMENT_COUNT ||
+    !Number.isInteger(massNumber) ||
+    massNumber < 1 ||
+    NUBASE_STATE_CODE_BY_INDEX[stateIndex] !== stateCode
+  ) {
+    return null;
+  }
+  return { atomicNumber, massNumber, stateIndex, stateCode };
+}
+
+/**
  * Ссылка на КОНКРЕТНУЮ строку состояния NUBASE2020 нуклида (Z, A)
  * (аудит R4, C5). Пара (i, s) идентифицирует строку только ВНУТРИ
  * нуклида: без атомного номера, массового числа и recordId нельзя
@@ -311,7 +379,12 @@ export interface NubaseStateRowRef {
   stateIndex: number;
   /** Буквенный код состояния s NUBASE2020 (согласован с i). */
   stateCode: NuclideStateCode;
-  /** Идентификатор конкретной строки источника (непустой). */
+  /**
+   * Идентификатор конкретной строки источника: непустой и машинно
+   * распознаваемый как идентификатор строки NUBASE2020 (одна из
+   * фактических форм проекта), согласованный с заявленными полями
+   * (Z, A, i, s) — сверяется isNubaseStateRowRef (аудит R4, C5b).
+   */
   recordId: string;
 }
 
@@ -334,7 +407,12 @@ export type StateClassificationBasisRule = 'format' | 'context-more-than-two-iso
  * (Z, A, i, s, recordId), а не только пара (i, s): валидатор
  * проверяет принадлежность тому же (Z, A), собственный непустой
  * уникальный recordId, отсутствие самоссылки и предшествование
- * строке кандидата в цепочке изомеров.
+ * строке кандидата в цепочке изомеров. Аудит R4, C5b: recordId
+ * каждой sibling-ссылки машинно распознаётся как идентификатор
+ * строки NUBASE2020 и сверяется с заявленными полями строки —
+ * непустой recordId сам по себе не доказывает, что ссылка
+ * относится к заявленной строке (подмена идентификатора между
+ * строками группы опровергается, а не доверяется).
  */
 export interface StateClassificationBasis {
   rule: StateClassificationBasisRule;
@@ -380,14 +458,25 @@ export interface NubaseStateClassification {
  * строки, дубликаты recordId и дублирование строк источника не могут
  * искусственно сформировать цепочку изомеров — в этих случаях
  * классификация indeterminate, тип состояния не угадывается.
+ *
+ * Аудит R4, C5b: идентичность классифицируемой строки доказывается
+ * РОВНО ОДНИМ совпадением со строкой группы по ВСЕМ полям
+ * ОДНОВРЕМЕННО (recordId, Z, A, i, s): раздельные совпадения
+ * recordId и пары (i, s) недостаточны — химерная ссылка (recordId
+ * одной строки при паре (i, s) другой) проходит раздельные
+ * проверки, но не соответствует ни одной реальной строке группы и
+ * классифицируется как indeterminate. RecordId каждой строки
+ * машинно распознаётся как идентификатор строки NUBASE2020 и
+ * сверяется с заявленными полями самой строки.
  */
 /**
- * Валидность ссылки на строку состояния NUBASE2020 (аудит R4, C5):
- * целые атомный номер (1…118) и массовое число (>= 1), согласованная
- * пара (i, s) и непустой recordId. Ссылка без этих полей не
- * идентифицирует конкретную строку источника.
+ * Валидность ФОРМЫ ссылки на строку состояния NUBASE2020 (аудит R4,
+ * C5): целые атомный номер (1…118) и массовое число (>= 1),
+ * согласованная пара (i, s) и непустой recordId. Форма без
+ * машинно распознаваемого recordId не идентифицирует конкретную
+ * строку источника — см. isNubaseStateRowRef (аудит R4, C5b).
  */
-function isNubaseStateRowRef(value: unknown): value is NubaseStateRowRef {
+function isNubaseStateRowRefShape(value: unknown): value is NubaseStateRowRef {
   if (!isNonNullObject(value)) {
     return false;
   }
@@ -405,6 +494,31 @@ function isNubaseStateRowRef(value: unknown): value is NubaseStateRowRef {
     NUBASE_STATE_CODE_BY_INDEX[v.stateIndex as number] === v.stateCode &&
     typeof v.recordId === 'string' &&
     v.recordId.trim() !== ''
+  );
+}
+
+/**
+ * Валидность ссылки на строку состояния NUBASE2020 (аудит R4, C5b):
+ * форма + recordId, машинно распознаваемый как идентификатор строки
+ * NUBASE2020 (одна из фактических форм проекта) и СОГЛАСОВАННЫЙ с
+ * заявленными полями (Z, A, i, s). Непустой recordId сам по себе не
+ * доказывает, что ссылка относится к заявленной строке: подмена
+ * идентификатора между sibling-строками и химерные ссылки (recordId
+ * одной строки при паре (i, s) другой) опровергаются машинной
+ * сверкой, а не доверием к непустой строке.
+ */
+function isNubaseStateRowRef(value: unknown): value is NubaseStateRowRef {
+  if (!isNubaseStateRowRefShape(value)) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  const idFields = parseNubaseSourceRowRecordId(v.recordId as string);
+  return (
+    idFields !== null &&
+    idFields.atomicNumber === v.atomicNumber &&
+    idFields.massNumber === v.massNumber &&
+    idFields.stateIndex === v.stateIndex &&
+    idFields.stateCode === v.stateCode
   );
 }
 
@@ -430,16 +544,21 @@ export function classifyNubaseState(
   }
   // Уникальность строк группы (аудит R4, C5): в реальной группе
   // NUBASE2020 каждая пара (Z, A, i, s) и каждый recordId представлены
-  // РОВНО один раз (парсер отклоняет дубликаты); классифицируемая строка
-  // присутствует в своей группе РОВНО один раз (по recordId и по паре
-  // (i, s)). Дублирование строк источника (повтор recordId ИЛИ пары
-  // (i, s)) не может искусственно сформировать цепочку изомеров: группа
-  // с дубликатами не соответствует реальному нуклиду, тип состояния
-  // не угадывается.
+  // РОВНО один раз (парсер отклоняет дубликаты). Дублирование строк
+  // источника (повтор recordId ИЛИ пары (i, s)) не может искусственно
+  // сформировать цепочку изомеров: группа с дубликатами не
+  // соответствует реальному нуклиду, тип состояния не угадывается.
+  //
+  // Аудит R4, C5b: идентичность классифицируемой строки доказывается
+  // РОВНО ОДНИМ совпадением со строкой группы по ВСЕМ полям
+  // ОДНОВРЕМЕННО (recordId, Z, A, i, s). Раздельные совпадения не
+  // достаточны: химерная ссылка (recordId одной строки при паре
+  // (i, s) другой) проходит раздельные проверки «строка с таким ID
+  // есть» и «строка с такой парой есть», но не соответствует НИ
+  // ОДНОЙ реальной строке группы — indeterminate.
   const recordIds = new Set<string>();
   const statePairs = new Set<string>();
-  let rowSeenByRecord = 0;
-  let rowSeenByPair = 0;
+  let rowMatchesExactly = 0;
   for (const g of groupRows) {
     if (recordIds.has(g.recordId)) {
       return { classification: 'indeterminate' };
@@ -450,14 +569,17 @@ export function classifyNubaseState(
       return { classification: 'indeterminate' };
     }
     statePairs.add(pairKey);
-    if (g.recordId === row.recordId) {
-      rowSeenByRecord += 1;
-    }
-    if (g.stateIndex === row.stateIndex && g.stateCode === row.stateCode) {
-      rowSeenByPair += 1;
+    if (
+      g.recordId === row.recordId &&
+      g.atomicNumber === row.atomicNumber &&
+      g.massNumber === row.massNumber &&
+      g.stateIndex === row.stateIndex &&
+      g.stateCode === row.stateCode
+    ) {
+      rowMatchesExactly += 1;
     }
   }
-  if (rowSeenByRecord !== 1 || rowSeenByPair !== 1) {
+  if (rowMatchesExactly !== 1) {
     return { classification: 'indeterminate' };
   }
   const i = row.stateIndex;
@@ -556,7 +678,12 @@ export interface NuclideCandidate {
    */
   classificationBasis?: StateClassificationBasis;
   stateNote?: string;
-  /** Идентификатор строки источника. */
+  /**
+   * Идентификатор строки источника (идентификатор записи каталога;
+   * дисциплина 4.3.2 — непустой и совпадающий с provenance.recordId).
+   * Аудит R4, C5b: если идентификатор машинно распознаётся как строка
+   * NUBASE2020, его поля сверяются с заявленными (Z, A, i, s) записи.
+   */
   recordId: string;
   /** Период полураспада (known/estimated, единица времени, 1 сигма). */
   halfLife: ScientificValue;
@@ -1034,8 +1161,22 @@ export function validateChemicalElement(element: unknown): string[] {
                   const siblingRecordIds = new Set<string>();
                   const siblingPairs = new Set<string>();
                   for (const sib of siblings) {
-                    if (!isNubaseStateRowRef(sib)) {
+                    if (!isNubaseStateRowRefShape(sib)) {
                       errors.push(where(`кандидат ${label}: каждая sibling-строка основания классификации обязана быть ссылкой на конкретную строку NUBASE2020: целые атомный номер (1…118) и массовое число, согласованная пара (i, s) и непустой recordId (аудит R4)`));
+                      continue;
+                    }
+                    // Аудит R4, C5b: непустой recordId сам по себе не
+                    // доказывает, что ссылка относится к заявленной строке.
+                    // Идентификатор машинно распознаётся как строка
+                    // NUBASE2020 (одна из фактических форм проекта — форма
+                    // утилиты аудита nubase2020:Z=…,A=…,i=…,s=… либо форма
+                    // каталога nubase2020:Z=… <символ> A=… i=… [s=…]) и
+                    // сверяется с заявленными полями sibling-строки:
+                    // подмена идентификатора между строками группы
+                    // (recordId строки n у sibling-строки (1, m))
+                    // опровергается, а не доверяется.
+                    if (!isNubaseStateRowRef(sib)) {
+                      errors.push(where(`кандидат ${label}: recordId sibling-строки (${String(sib.recordId)}) не распознан как идентификатор строки NUBASE2020 (фактические формы проекта: nubase2020:Z=…,A=…,i=…,s=… либо nubase2020:Z=… <символ> A=… i=… [s=…]) либо не согласован с заявленными полями строки (Z=${String(sib.atomicNumber)}, A=${String(sib.massNumber)}, i=${String(sib.stateIndex)}, s=${String(sib.stateCode) === '' ? '(пусто)' : String(sib.stateCode)}): непустой recordId сам по себе не доказывает, что ссылка относится к заявленной строке (аудит R4, C5b)`));
                       continue;
                     }
                     if (
@@ -1071,11 +1212,15 @@ export function validateChemicalElement(element: unknown): string[] {
                     { stateIndex: 5, stateCode: 'r' }
                   ].slice(0, (c.stateIndex as number) - 1);
                   for (const req of requiredChain) {
+                    // Аудит R4, C5b: цепочку доказывают только ПОЛНОСТЬЮ
+                    // валидные sibling-ссылки (форма + машинно
+                    // согласованный recordId); невалидная ссылка не
+                    // учитывается как доказательство контекста.
                     const present = (siblings as unknown[]).some(
                       (sib) =>
-                        isNonNullObject(sib) &&
-                        (sib as Record<string, unknown>).stateIndex === req.stateIndex &&
-                        (sib as Record<string, unknown>).stateCode === req.stateCode
+                        isNubaseStateRowRef(sib) &&
+                        (sib as NubaseStateRowRef).stateIndex === req.stateIndex &&
+                        (sib as NubaseStateRowRef).stateCode === req.stateCode
                     );
                     if (!present) {
                       errors.push(where(`кандидат ${label}: classificationBasis не доказывает контекст: для строки s=${String(c.stateCode)} требуются sibling-строки (включая i=${String(req.stateIndex)}, s=${req.stateCode}) того же (Z, A)`));
@@ -1134,6 +1279,33 @@ export function validateChemicalElement(element: unknown): string[] {
             errors.push(where(`кандидат ${label}: provenance.recordId обязателен — идентификатор строки источника не противоречит собственному происхождению (дисциплина 4.3.2)`));
           } else if (isNonEmptyString(c.recordId) && candProvRecordId !== c.recordId) {
             errors.push(where(`кандидат ${label}: recordId (${String(c.recordId)}) обязан совпадать с provenance.recordId (${String(candProvRecordId)}): идентификатор строки источника не должен противоречить собственному происхождению`));
+          }
+          // Аудит R4, C5b: recordId кандидата, машинно распознаваемый
+          // как идентификатор строки NUBASE2020 (одна из фактических
+          // форм проекта — форма утилиты аудита либо форма каталога),
+          // сверяется с заявленными полями записи: идентификатор,
+          // противоречащий заявленной строке, не доказывает
+          // происхождение записи. Идентификатор каталога, НЕ
+          // распознаваемый как строка NUBASE2020, машинной сверке не
+          // подлежит (идентификатор каталога ≠ идентификатор строки
+          // источника) — дисциплина provenance выше сохраняется.
+          if (
+            isNonEmptyString(c.recordId) &&
+            stateIndexOk &&
+            stateCodeOk &&
+            typeof c.atomicNumber === 'number' && Number.isInteger(c.atomicNumber) &&
+            typeof c.massNumber === 'number' && Number.isInteger(c.massNumber)
+          ) {
+            const candIdFields = parseNubaseSourceRowRecordId(c.recordId);
+            if (
+              candIdFields !== null &&
+              (candIdFields.atomicNumber !== c.atomicNumber ||
+                candIdFields.massNumber !== c.massNumber ||
+                candIdFields.stateIndex !== c.stateIndex ||
+                candIdFields.stateCode !== c.stateCode)
+            ) {
+              errors.push(where(`кандидат ${label}: recordId (${String(c.recordId)}) распознан как идентификатор строки NUBASE2020 (Z=${candIdFields.atomicNumber}, A=${candIdFields.massNumber}, i=${candIdFields.stateIndex}, s=${candIdFields.stateCode === '' ? '(пусто)' : candIdFields.stateCode}), но не согласован с заявленными полями записи (Z=${String(c.atomicNumber)}, A=${String(c.massNumber)}, i=${String(c.stateIndex)}, s=${String(c.stateCode) === '' ? '(пусто)' : String(c.stateCode)}): идентификатор, противоречащий заявленной строке источника, не доказывает происхождение записи (аудит R4, C5b)`));
+            }
           }
           if (!isNonEmptyString(c.halfLifeRawNotation)) {
             errors.push(where(`кандидат ${label}: исходная нотация периода полураспада обязательна`));

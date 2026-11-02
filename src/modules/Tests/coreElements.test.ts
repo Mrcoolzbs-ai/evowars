@@ -23,7 +23,8 @@ import {
   ELEMENT_BLOCKS,
   ELEMENT_CATEGORIES,
   classifyNubaseState,
-  NUBASE_STATE_CODE_BY_INDEX
+  NUBASE_STATE_CODE_BY_INDEX,
+  parseNubaseSourceRowRecordId
 } from '../Core/elements';
 import type {
   ChemicalElement,
@@ -117,7 +118,10 @@ function makeStateCandidate(
   stateCode: string,
   classificationBasis?: StateClassificationBasis
 ): NuclideCandidate {
-  const recordId = 'test:A=1 i=' + stateIndex + ' s=' + stateCode;
+  // Аудит R4, C5b: recordId фикстуры обязан быть машинно-распознаваемым
+  // идентификатором строки NUBASE2020 (audit-форма), согласованным с
+  // заявленными полями (Z=1, A=1, i=stateIndex, s=stateCode).
+  const recordId = 'nubase2020:Z=001,A=001,i=' + stateIndex + ',s=' + stateCode;
   return {
     ...makeCandidate(),
     state: 'isomeric',
@@ -146,7 +150,7 @@ function contextBasis(refs: ReadonlyArray<[number, string]>): StateClassificatio
       massNumber: 1,
       stateIndex: i,
       stateCode: s as NuclideCandidate['stateCode'],
-      recordId: 'test:A=1 i=' + i + ' s=' + s
+      recordId: 'nubase2020:Z=001,A=001,i=' + i + ',s=' + s
     }))
   };
 }
@@ -660,16 +664,19 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     const res4 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([mCtx]); }));
     expect(res4.some((e) => e.includes('classificationBasis допускается только с правилом format'))).toBe(true);
     // рассогласованная sibling-строка (2, m) в основании — ошибки
+    // (аудит R4, C5b: пары (2, m) не существует в NUBASE2020 — i=2
+    // соответствует s=n, поэтому и идентификатор такой строки
+    // машинно не распознаётся)
     const pBadSibling = makeStateCandidate(3, 'p', {
       rule: 'context-more-than-two-isomers',
       siblingStates: [
-        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'test:A=1 i=1 s=m' },
-        { atomicNumber: 1, massNumber: 1, stateIndex: 2, stateCode: 'm', recordId: 'test:A=1 i=2 s=m' }
+        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'nubase2020:Z=001,A=001,i=1,s=m' },
+        { atomicNumber: 1, massNumber: 1, stateIndex: 2, stateCode: 'm', recordId: 'nubase2020:Z=001,A=001,i=2,s=m' }
       ]
     });
     const res5 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([pBadSibling]); }));
-    // (2, m) — рассогласованная пара: НЕ валидная строка источника (аудит R4)
-    expect(res5.some((e) => e.includes('обязана быть ссылкой на конкретную строку NUBASE2020'))).toBe(true);
+    // (2, m) — рассогласованная пара: НЕ валидная строка источника (аудит R4, C5b)
+    expect(res5.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
     expect(res5.some((e) => e.includes('требуются sibling-строки'))).toBe(true);
   });
 
@@ -678,8 +685,8 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     const foreignSibling = makeStateCandidate(3, 'p', {
       rule: 'context-more-than-two-isomers',
       siblingStates: [
-        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'test:A=1 i=1 s=m' },
-        { atomicNumber: 2, massNumber: 4, stateIndex: 2, stateCode: 'n', recordId: 'test:A=4 i=2 s=n' }
+        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'nubase2020:Z=001,A=001,i=1,s=m' },
+        { atomicNumber: 2, massNumber: 4, stateIndex: 2, stateCode: 'n', recordId: 'nubase2020:Z=002,A=004,i=2,s=n' }
       ]
     });
     const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([foreignSibling]); }));
@@ -689,22 +696,26 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     const res2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([dupSibling]); }));
     expect(res2.some((e) => e.includes('дубли sibling-строк запрещены'))).toBe(true);
     // дубликат пары (i, s) с ДРУГИМ recordId — тоже дубликат строки источника:
-    // в NUBASE2020 каждая пара (i, s) нуклида представлена ровно один раз
+    // в NUBASE2020 каждая пара (i, s) нуклида представлена ровно один раз;
+    // идентификаторы в двух фактических формах проекта (audit и каталог)
+    // обозначают ОДНУ И ТУ ЖЕ строку (Z=1, A=1, i=1, s=m)
     const dupPairSibling = makeStateCandidate(3, 'p', {
       rule: 'context-more-than-two-isomers',
       siblingStates: [
-        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'test:A=1 i=1 s=m' },
-        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'test:A=1 i=1 s=m:dup' }
+        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'nubase2020:Z=001,A=001,i=1,s=m' },
+        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'nubase2020:Z=1 H A=1 i=1 s=m' }
       ]
     });
     const res2b = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([dupPairSibling]); }));
     expect(res2b.some((e) => e.includes('пара (i=1, s=m) того же (Z, A) повторяется'))).toBe(true);
     // самоссылка: sibling с recordId самого кандидата — не предшествующая строка
+    // (аудит R4, C5b: идентификатор строго согласован с полями, поэтому
+    // распознаётся, но совпадает с recordId самого кандидата)
     const selfSibling = makeStateCandidate(3, 'p', {
       rule: 'context-more-than-two-isomers',
       siblingStates: [
-        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'test:A=1 i=1 s=m' },
-        { atomicNumber: 1, massNumber: 1, stateIndex: 2, stateCode: 'n', recordId: 'test:A=1 i=3 s=p' }
+        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'nubase2020:Z=001,A=001,i=1,s=m' },
+        { atomicNumber: 1, massNumber: 1, stateIndex: 3, stateCode: 'p', recordId: 'nubase2020:Z=001,A=001,i=3,s=p' }
       ]
     });
     const res3 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([selfSibling]); }));
@@ -726,6 +737,60 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     const okSibling = makeStateCandidate(3, 'p', contextBasis([[1, 'm'], [2, 'n']]));
     const res6 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([okSibling]); }));
     expect(res6).toEqual([]);
+  });
+
+  it('валидатор (R4, C5b): подмена recordId между sibling-строками опровергается машинной сверкой', () => {
+    // sibling-строка с заявленной парой (2, n), но recordId строки (1, m):
+    // непустой recordId сам по себе не доказывает, что ссылка относится
+    // к заявленной строке — идентификатор сверяется с полями
+    const swappedSibling = makeStateCandidate(3, 'p', {
+      rule: 'context-more-than-two-isomers',
+      siblingStates: [
+        { atomicNumber: 1, massNumber: 1, stateIndex: 1, stateCode: 'm', recordId: 'nubase2020:Z=001,A=001,i=1,s=m' },
+        { atomicNumber: 1, massNumber: 1, stateIndex: 2, stateCode: 'n', recordId: 'nubase2020:Z=001,A=001,i=1,s=m' }
+      ]
+    });
+    const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([swappedSibling]); }));
+    // рассогласованный идентификатор опровергается, а не доверяется
+    expect(res.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
+    expect(res.some((e) => e.includes('либо не согласован с заявленными полями строки (Z=1, A=1, i=2, s=n)'))).toBe(true);
+    // невалидная ссылка не доказывает цепочку: валидной строки (2, n) нет
+    expect(res.some((e) => e.includes('требуются sibling-строки (включая i=2, s=n)'))).toBe(true);
+    // дубликатов НЕ возникает: рассогласованная ссылка отсекается до проверок дублей
+    expect(res.some((e) => e.includes('дубли sibling-строк запрещены'))).toBe(false);
+    // позитив: то же основание с корректным recordId строки (2, n) — валидно
+    const okSibling = makeStateCandidate(3, 'p', contextBasis([[1, 'm'], [2, 'n']]));
+    const resOk = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([okSibling]); }));
+    expect(resOk).toEqual([]);
+  });
+
+  it('валидатор (R4, C5b): несогласованный recordId самого кандидата опровергается', () => {
+    // ground-кандидат с recordId строки изомера (i=1, s=m): идентификатор
+    // машинно распознаётся, но противоречит заявленным полям записи —
+    // происхождение записи не доказано
+    const bad = makeCandidate();
+    const wrongId = 'nubase2020:Z=1 H A=1 i=1 s=m';
+    bad.recordId = wrongId;
+    bad.provenance = { ...PROVENANCE, recordId: wrongId };
+    bad.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: wrongId } });
+    const res = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([bad]); }));
+    expect(res.some((e) => e.includes('распознан как идентификатор строки NUBASE2020 (Z=1, A=1, i=1, s=m), но не согласован с заявленными полями записи (Z=1, A=1, i=0, s=(пусто))'))).toBe(true);
+    // позитив: согласованный идентификатор в форме каталога — валидно
+    const okCatalog = makeCandidate();
+    const catalogId = 'nubase2020:Z=1 H A=1 i=0';
+    okCatalog.recordId = catalogId;
+    okCatalog.provenance = { ...PROVENANCE, recordId: catalogId };
+    okCatalog.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: catalogId } });
+    const resOkCatalog = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([okCatalog]); }));
+    expect(resOkCatalog).toEqual([]);
+    // позитив: согласованный идентификатор в форме утилиты аудита — валидно
+    const okAudit = makeCandidate();
+    const auditId = 'nubase2020:Z=001,A=001,i=0,s=';
+    okAudit.recordId = auditId;
+    okAudit.provenance = { ...PROVENANCE, recordId: auditId };
+    okAudit.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: auditId } });
+    const resOkAudit = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([okAudit]); }));
+    expect(resOkAudit).toEqual([]);
   });
 
   it('classifyNubaseState: контрольные примеры 92Tc p и 205Po p/q — дополнительные изомеры при контексте', () => {
@@ -859,8 +924,58 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     // дубликаты не формируют цепочку искусственно: повтор строки (2, n)
     // не заменяет отсутствующую (1, m) и не доказывает контекст — группа
     // с дубликатом строки не соответствует реальному нуклиду, тип не угадывается
-    const nDup = { ...n, recordId: 'nubase2020:Z=043,A=092,i=2,s=n:dup' };
+    // (аудит R4, C5b: обе записи — машинно распознаваемые строки NUBASE2020
+    // в разных фактических формах проекта, но ОДНОЙ И ТОЙ ЖЕ строки (2, n))
+    const nDup = { ...n, recordId: 'nubase2020:Z=43 Tc A=92 i=2 s=n' };
     expect(classifyNubaseState(p, [n, nDup, p]).classification).toBe('indeterminate');
+  });
+
+  it('parseNubaseSourceRowRecordId (R4, C5b): обе фактические формы проекта распознаются, рассогласованные — нет', () => {
+    // форма утилиты аудита (Data/nubaseAudit.ts): Z и A с ведущими нулями, s= всегда
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=043,A=092,i=3,s=p')).toEqual({ atomicNumber: 43, massNumber: 92, stateIndex: 3, stateCode: 'p' });
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=001,A=001,i=0,s=')).toEqual({ atomicNumber: 1, massNumber: 1, stateIndex: 0, stateCode: '' });
+    // форма каталога (Data/elementIsotopeCandidates.ts): символ элемента между Z и A, « s=» опущена у основного состояния
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=84 Po A=209 i=1 s=m')).toEqual({ atomicNumber: 84, massNumber: 209, stateIndex: 1, stateCode: 'm' });
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=61 Pm A=145 i=0')).toEqual({ atomicNumber: 61, massNumber: 145, stateIndex: 0, stateCode: '' });
+    // негативы: чужие префиксы, суффиксы и рассогласованные комбинации не распознаются
+    expect(parseNubaseSourceRowRecordId('test:A=1')).toBeNull();
+    expect(parseNubaseSourceRowRecordId('other:row')).toBeNull();
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=043,A=092,i=2,s=n:dup')).toBeNull();
+    // i=1 ↔ s=p — рассогласованная пара: такой строки NUBASE2020 нет
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=043,A=092,i=1,s=p')).toBeNull();
+    // Z вне 1…118, A=0 и несуществующий индекс i — не строки источника
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=119,A=292,i=1,s=m')).toBeNull();
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=001,A=000,i=1,s=m')).toBeNull();
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=043,A=092,i=7,s=x')).toBeNull();
+    expect(parseNubaseSourceRowRecordId('')).toBeNull();
+  });
+
+  it('classifyNubaseState (R4, C5b): химерная строка (recordId одной записи при паре другой) — indeterminate', () => {
+    // группа 92Tc: реальные m, n, p с тремя РАЗНЫМИ recordId
+    const m = { atomicNumber: 43, massNumber: 92, stateIndex: 1, stateCode: 'm' as const, recordId: 'nubase2020:Z=043,A=092,i=1,s=m' };
+    const n = { atomicNumber: 43, massNumber: 92, stateIndex: 2, stateCode: 'n' as const, recordId: 'nubase2020:Z=043,A=092,i=2,s=n' };
+    const p = { atomicNumber: 43, massNumber: 92, stateIndex: 3, stateCode: 'p' as const, recordId: 'nubase2020:Z=043,A=092,i=3,s=p' };
+    // реальная строка p классифицируется как раньше: изомер с основанием [m, n]
+    const realP = classifyNubaseState(p, [m, n, p]);
+    expect(realP.classification).toBe('isomer');
+    expect(realP.basis?.siblingStates).toEqual([m, n]);
+    // химера: пара (i=3, s=p) при recordId строки m — раздельные совпадения
+    // («ID такой строки есть», «пара (3, p) есть») не доказывают
+    // идентичность: РОВНОГО совпадения по всем полям нет — indeterminate
+    const chimera = { ...p, recordId: m.recordId };
+    expect(classifyNubaseState(chimera, [m, n, p]).classification).toBe('indeterminate');
+    // обратная химера: recordId строки p при паре (i=1, s=m)
+    const chimeraReverse = { ...m, recordId: p.recordId };
+    expect(classifyNubaseState(chimeraReverse, [m, n, p]).classification).toBe('indeterminate');
+    // согласованное с полями перекодирование в другую форму проекта
+    // (каталог при audit-группе): идентификатор корректен, но НЕ совпадает
+    // дословно ни с одной строкой группы — идентичность не доказана
+    const foreignFormOfP = { ...p, recordId: 'nubase2020:Z=43 Tc A=92 i=3 s=p' };
+    expect(classifyNubaseState(foreignFormOfP, [m, n, p]).classification).toBe('indeterminate');
+    // recordId, кодирующий ЧУЖОЙ нуклид (Z=44) при заявленных полях 92Tc,
+    // опровергается сверкой с полями строки
+    const foreignNuclide = { ...p, recordId: 'nubase2020:Z=044,A=092,i=3,s=p' };
+    expect(classifyNubaseState(foreignNuclide, [m, n, p]).classification).toBe('indeterminate');
   });
 
   it('интервальный атомный вес с неположительными границами — ошибка', () => {
