@@ -22,7 +22,12 @@
 // - корректирующая ревизия Stage 4.4.3 (C1, аудит): полнота
 //   элементных ограничений - элемент видов без явного итога,
 //   явные нулевые итоги и исключение видов из активной задачи,
-//   нулевые итоги видов-кандидатов каталогного адаптера.
+//   нулевые итоги видов-кандидатов каталогного адаптера;
+// - корректирующая ревизия Stage 4.4.3 (C2, аудит): критерий
+//   совместности зависимых строк балансов согласован с
+//   tolerance решателя, перед converged пересчитываются все
+//   исходные строки элементов и заряда (включая исключённые
+//   при редукции).
 
 import { describe, it, expect } from 'vitest';
 import { quantity } from '../Core/physicalQuantity';
@@ -522,5 +527,72 @@ describe('Stage 4.4.3 (C1): полнота элементных ограниче
     expect(r.status).toBe('converged');
     expect(r.assumptions).not.toContain('zero_element_total_species_excluded');
     expect(r.message).not.toContain('исключены');
+  });
+});
+
+describe('Stage 4.4.3 (C2): совместность зависимых строк и финальная проверка балансов', () => {
+  it('несовместная зависимая строка (расхождение 5e-9) - infeasible, а не converged', () => {
+    // Критерий совместности согласован с tolerance (по умолчанию
+    // 1e-13): расхождение итогов 5e-9 на три порядка больше
+    // критерия Stage 4.4 (1e-12); фиксированные 1e-8 маскировали
+    // бы его и выдавали converged с невязкой B = -5e-9 моль.
+    const error = expectEquilibriumError(() => solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('AB', { A: 1, B: 1 }, 0)],
+      elementTotals: { A: 1, B: 1 + 5e-9 },
+      chargeTotal: 0
+    }), 'infeasible');
+    expect(error.message).toContain('несовместны');
+  });
+
+  it('точные зависимые строки с совместными итогами решаются; все исходные невязки в критерии', () => {
+    const r = solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('AB', { A: 1, B: 1 }, 0)],
+      elementTotals: { A: 1, B: 1 },
+      chargeTotal: 0
+    });
+    expect(r.status).toBe('converged');
+    expect(r.moleFractions.AB).toBeCloseTo(1, 12);
+    expect(r.totalMoles).toBeCloseTo(1, 12);
+    // Обе исходные строки, включая исключённую при редукции,
+    // удовлетворяют объявленному критерию tolerance·max(1, |итог|).
+    expect(Math.abs(r.elementResiduals.A)).toBeLessThanOrEqual(1e-13);
+    expect(Math.abs(r.elementResiduals.B)).toBeLessThanOrEqual(1e-13);
+  });
+
+  it('заряд: несовместная зависимая строка баланса заряда (5e-9) - infeasible', () => {
+    // Строка заряда = строка Na - строка Cl (линейно зависима);
+    // итог 5e-9 при элементных итогах 1/1 несовместен с
+    // критерием tolerance·max(1, |итог|) = 1e-13.
+    expectEquilibriumError(() => solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('na+', { Na: 1 }, 0, 1), sp('cl-', { Cl: 1 }, 0, -1)],
+      elementTotals: { Na: 1, Cl: 1 },
+      chargeTotal: 5e-9
+    }), 'infeasible');
+  });
+
+  it('после converged все исходные elementResiduals и chargeResidual в объявленном критерии', () => {
+    const r = solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('na+', { Na: 1 }, 0, 1), sp('cl-', { Cl: 1 }, 0, -1), sp('ar', { Ar: 1 }, 0)],
+      elementTotals: { Na: 1, Cl: 1, Ar: 2 },
+      chargeTotal: 0
+    });
+    expect(r.status).toBe('converged');
+    expect(r.totalMoles).toBeCloseTo(4, 12);
+    for (const name of ['Na', 'Cl', 'Ar']) {
+      expect(Math.abs(r.elementResiduals[name])).toBeLessThanOrEqual(1e-13);
+    }
+    expect(Math.abs(r.chargeResidual)).toBeLessThanOrEqual(1e-13);
   });
 });
