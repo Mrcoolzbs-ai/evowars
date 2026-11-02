@@ -596,3 +596,65 @@ describe('Stage 4.4.3 (C2): совместность зависимых стро
     expect(Math.abs(r.chargeResidual)).toBeLessThanOrEqual(1e-13);
   });
 });
+
+describe('Stage 4.4.3 (C4): согласованность стандартного состояния данных', () => {
+  const catalog = buildThermodynamicCatalog();
+
+  it('каталог NASA CEA заявляет конвенцию p° = 1 бар', () => {
+    const referenceState = catalog.get('n2')!.thermodynamics!.referenceState!;
+    expect(referenceState.standardStatePressure?.value).toBe(1);
+    expect(referenceState.standardStatePressure?.unit).toBe('bar');
+    expect(referenceState.standardState).toContain('1 бар');
+    expect(referenceState.standardState).toContain('TP-2002-211556');
+    // pressure записи не заполняется: thermo.inp не задаёт p° построчно.
+    expect(referenceState.pressure).toBeUndefined();
+  });
+
+  it('адаптер принимает p° задачи, совпадающий с конвенцией данных', () => {
+    const problem = buildEquilibriumProblemFromCatalog(catalog, {
+      speciesIds: ['n2', 'h2'],
+      amounts: { n2: 1 },
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR
+    });
+    const r = solveEquilibrium(problem);
+    expect(r.status).toBe('converged');
+  });
+
+  it('адаптер отвергает p° задачи 1 atm (101325 Па) для данных NASA CEA', () => {
+    // 1 atm и 1 бар не взаимозаменяемы (S° отличается на
+    // R·ln(101325/100000) ~ 0.11 Дж/(моль·К)); пересчёт g°
+    // не реализован - несовместимое p° это invalid_input.
+    const error = expectEquilibriumError(() => buildEquilibriumProblemFromCatalog(catalog, {
+      speciesIds: ['n2'],
+      amounts: { n2: 1 },
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: quantity(101325, 'Pa')
+    }), 'invalid_input');
+    expect(error.message).toContain('101325');
+    expect(error.message).toContain('100000');
+  });
+
+  it('вид без заявленного p° данных - invalid_input (fail-closed)', () => {
+    const fakeCatalog = {
+      get: () => ({
+        phase: 'gas',
+        elements: { N: 2 },
+        charge: 0,
+        thermodynamics: {
+          referenceState: { phase: 'gas', standardState: 'конвенция не заявлена' }
+        }
+      })
+    };
+    const error = expectEquilibriumError(() => buildEquilibriumProblemFromCatalog(fakeCatalog, {
+      speciesIds: ['n2'],
+      amounts: { n2: 1 },
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR
+    }), 'invalid_input');
+    expect(error.message).toContain('не заявлено');
+  });
+});
