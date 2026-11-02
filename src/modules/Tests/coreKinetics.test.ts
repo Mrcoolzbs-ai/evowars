@@ -396,7 +396,7 @@ describe('вычислитель k(T): аррениусовские записи
   it('эквивалентность форм E/R = 970 K и Ea = 970·R Дж/моль при 500 K', () => {
     const kER = evaluateRateConstant(arrheniusReaction({ energy: { form: 'E_over_R', valueK: 970 } }), quantity(500, 'K'));
     const kEa = evaluateRateConstant(
-      arrheniusReaction({ energy: { form: 'Ea_J_mol', valueJPerMol: 970 * R } }),
+      withArrhenius(arrheniusEa(1e-11, 0, 970 * R, 'cm3_per_molecule_per_s'), 2, 'molecule_cm3', 'test-rxn-ea'),
       quantity(500, 'K')
     );
     expect(kER.value / kEa.value).toBeCloseTo(1, 12);
