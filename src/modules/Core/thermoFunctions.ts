@@ -36,8 +36,7 @@
 //   каталога (S° при 1 бар) зафиксирована кросс-чеком S°(298.15)
 //   против справочных значений (см. тесты);
 // - вход проверяется на каждом вызове: температура — конечная
-//   положител
-ьная величина размерности кельвина; сегмент —
+//   положительная величина размерности кельвина; сегмент —
 //   известная форма, семь конечных коэффициентов, у nasa_cea
 //   конечные интегральные константы; повреждённые данные —
 //   ошибка invalid_input, а не NaN в ответе;
@@ -79,8 +78,7 @@ export type ThermoFunctionsErrorCode =
   | 'no_thermodynamic_data'; // у вида нет NASA-7 параметризации/блока термодинамики
 
 /** Ошибка вычислителя термодинамических функций. */
-export class ThermoFunctionsError extends Error 
-{
+export class ThermoFunctionsError extends Error {
   readonly code: ThermoFunctionsErrorCode;
   readonly operation: string;
   readonly expected?: string;
@@ -137,8 +135,7 @@ function temperatureInKelvin(temperature: PhysicalQuantity, operation: string): 
     throw new ThermoFunctionsError({
       code: 'invalid_input',
       operation,
-      message: `температура должна иметь размерность кельвина, получена единица «${String(q.unit)}»`
-,
+      message: `температура должна иметь размерность кельвина, получена единица «${String(q.unit)}»`,
       expected: 'K'
     });
   }
@@ -192,8 +189,7 @@ function validateSegment(segment: NasaPolynomialSegment, operation: string): voi
     }
   }
   if (segment.form === 'nasa_cea') {
-    const ic = (segment as { integralConstants?: unknown }).integ
-ralConstants;
+    const ic = (segment as { integralConstants?: unknown }).integralConstants;
     if (ic === null || typeof ic !== 'object') {
       throw new ThermoFunctionsError({
         code: 'invalid_input',
@@ -266,8 +262,7 @@ function segmentRangeKelvin(segment: NasaPolynomialSegment, operation: string): 
       code: 'invalid_input',
       operation,
       message: `границы диапазона сегмента обязаны быть величинами температурной размерности, получено «${String((min as PhysicalQuantity).unit)}»/«${String((max as PhysicalQuantity).unit)}»`,
-      expect
-ed: 'K'
+      expected: 'K'
     });
   }
   if (!Number.isFinite(minK) || !Number.isFinite(maxK) || !(minK < maxK)) {
@@ -319,8 +314,7 @@ export function nasaSegmentCpOverR(segment: NasaPolynomialSegment, temperatureK:
 }
 
 /** H°(T)/R сегмента (безразмерное). */
-export 
-function nasaSegmentEnthalpyOverR(segment: NasaPolynomialSegment, temperatureK: number): number {
+export function nasaSegmentEnthalpyOverR(segment: NasaPolynomialSegment, temperatureK: number): number {
   const op = 'nasaSegmentEnthalpyOverR';
   validateSegment(segment, op);
   if (typeof temperatureK !== 'number' || !Number.isFinite(temperatureK) || temperatureK <= 0) {
@@ -363,8 +357,7 @@ export function nasaSegmentEntropyOverR(segment: NasaPolynomialSegment, temperat
     const ic = (segment as { integralConstants: { entropyConstantOverR: number } }).integralConstants;
     return (
       -a[0] / (2 * T * T) - a[1] / T + a[2] * Math.log(T) + a[3] * T +
-      (a[4] * T * T) / 2 + (a[5] * Math.pow(T, 3)) / 3 + (a[6] * Math.pow(T, 4
-)) / 4 +
+      (a[4] * T * T) / 2 + (a[5] * Math.pow(T, 3)) / 3 + (a[6] * Math.pow(T, 4)) / 4 +
       ic.entropyConstantOverR
     );
   }
@@ -412,8 +405,7 @@ export function nasaSegmentGibbsEnergy(segment: NasaPolynomialSegment, temperatu
 // ============================================
 
 /**
- * Первый по порядку сег
-мент параметризации, чей диапазон содержит
+ * Первый по порядку сегмент параметризации, чей диапазон содержит
  * температуру (границы включаются; на общем стыке — сегмент с
  * меньшими температурами). null, если температура вне всех
  * диапазонов. Детерминирован: порядок сегментов фиксирован
@@ -463,8 +455,7 @@ function withSegment<T>(
     throw new ThermoFunctionsError({
       code: 'temperature_out_of_range',
       operation,
-      message: `температура ${temperatureK} K вне диапазона применимости всех сегментов (${ranges}): экстраполяция 
-запрещена`
+      message: `температура ${temperatureK} K вне диапазона применимости всех сегментов (${ranges}): экстраполяция запрещена`
     });
   }
   const temperatureK = temperatureInKelvin(temperature, operation);
@@ -513,8 +504,7 @@ export function nasaStandardGibbsEnergy(nasa7: Nasa7Polynomial, temperature: Phy
  * данных, а не нули).
  */
 export function requireNasa7(thermo: ThermodynamicProperties, operation: string): Nasa7Polynomial {
-  if (thermo === null || typeof t
-hermo !== 'object') {
+  if (thermo === null || typeof thermo !== 'object') {
     throw new ThermoFunctionsError({
       code: 'no_thermodynamic_data',
       operation,
@@ -558,8 +548,7 @@ export function speciesCp(thermo: ThermodynamicProperties, temperature: Physical
 
 /** H°(T) записи вида (из NASA-7), Дж/моль. */
 export function speciesStandardEnthalpy(thermo: ThermodynamicProperties, temperature: PhysicalQuantity): PhysicalQuantity {
-  co
-nst nasa7 = requireNasa7(thermo, 'speciesStandardEnthalpy');
+  const nasa7 = requireNasa7(thermo, 'speciesStandardEnthalpy');
   return nasaStandardEnthalpy(nasa7, temperature);
 }
 
