@@ -330,10 +330,13 @@ const PROVENANCE_STRING_FIELDS: readonly string[] = [
  * - идентификационные поля при наличии — непустые строки: пустая
  *   строка не принимается и не считается источником;
  * - каждое необязательное поле DataProvenance при наличии имеет
- *   правильный тип (строковые поля — string);
+ *   правильный тип (строковые поля — string; null — ошибка типа,
+ *   а не «отсутствие»: пропускается только undefined);
  * - rawInput — объект с разрешёнными скалярными значениями
- *   (number | string | boolean | null), а не массив и не
- *   примитив; числа конечны (NaN/Infinity не несут данных).
+ *   (number | string | boolean | null), а не массив, не примитив
+ *   и не сам null: null допустим внутри значений rawInput, но не
+ *   для самого свойства rawInput; числа конечны (NaN/Infinity
+ *   не несут данных).
  * Диагностики добавляются в errors; исключений не бросает.
  */
 function provenanceIssues(path: string, provenance: unknown, errors: string[]): void {
@@ -344,7 +347,7 @@ function provenanceIssues(path: string, provenance: unknown, errors: string[]): 
   const p = provenance;
   for (const field of PROVENANCE_STRING_FIELDS) {
     const value = p[field];
-    if (value === undefined || value === null) continue;
+    if (value === undefined) continue;
     if (typeof value !== 'string') {
       errors.push(`${path}: provenance.${field} должен быть строкой, получено ${typeof value}`);
     } else if (
@@ -360,7 +363,7 @@ function provenanceIssues(path: string, provenance: unknown, errors: string[]): 
     );
   }
   const raw = p.rawInput;
-  if (raw !== undefined && raw !== null) {
+  if (raw !== undefined) {
     if (!isRecord(raw)) {
       errors.push(
         `${path}: provenance.rawInput должен быть объектом с разрешёнными скалярными значениями (number | string | boolean | null), а не массивом/примитивом`

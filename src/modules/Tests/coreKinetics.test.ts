@@ -447,6 +447,51 @@ describe('provenance кинетических записей: строгая run
     expect(validateKineticReactionRecord(arrheniusReaction())).toEqual([]);
     expect(validateKineticReactionRecord(fallOffReaction())).toEqual([]);
   });
+
+  // Nullable-поля: null — не «отсутствие», а ошибка типа;
+  // пропускается только undefined (корректирующая ревизия аудита)
+  it('note: null при корректном reference отклоняется как ошибка типа', () => {
+    expectProblem(
+      withArrhenius({
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', note: null } as unknown as DataProvenance
+      }),
+      'note должен быть строкой'
+    );
+  });
+
+  it('sourceName: null при корректном reference отклоняется как ошибка типа', () => {
+    expectProblem(
+      withArrhenius({
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', sourceName: null } as unknown as DataProvenance
+      }),
+      'sourceName должен быть строкой'
+    );
+  });
+
+  it('rawInput: null отклоняется (null допустим только внутри значений, не для самого свойства)', () => {
+    expectProblem(
+      withArrhenius({
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', rawInput: null } as unknown as DataProvenance
+      }),
+      'rawInput должен быть объектом'
+    );
+  });
+
+  it('rawInput: { value: null } принимается (nullable-значения внутри допустимы)', () => {
+    const record = withArrhenius(
+      {
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', rawInput: { value: null } }
+      },
+      2,
+      'molecule_cm3',
+      'test-rxn-nullable-raw'
+    );
+    expect(validateKineticReactionRecord(record)).toEqual([]);
+  });
 });
 
 // --------------------------------------------
