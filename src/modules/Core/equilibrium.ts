@@ -234,6 +234,25 @@ function validateElements(
   }
 }
 
+/**
+ * Сужение unknown к записи состава вида каталога: запись -
+ * объект, но не массив. Значения проверяет validateElements.
+ */
+function asElementRecord(
+  value: unknown,
+  operation: string,
+  what: string
+): Readonly<Record<string, number>> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new EquilibriumError({
+      code: 'invalid_input',
+      operation,
+      message: `${what} должна быть записью «элемент → число атомов»`
+    });
+  }
+  return value as Readonly<Record<string, number>>;
+}
+
 /** Разобранные и проверенные параметры задачи. */
 interface ValidatedProblem {
   temperatureK: number;
@@ -989,8 +1008,8 @@ export function buildEquilibriumProblemFromCatalog(
       missing.push(id);
       continue;
     }
-    validateElements(record.elements, op, `состав вида «${id}» каталога`);
-    const elements = record.elements as Readonly<Record<string, number>>;
+    const elements = asElementRecord(record.elements, op, `состав вида «${id}» каталога`);
+    validateElements(elements, op, `состав вида «${id}» каталога`);
     if (typeof record.charge !== 'number' || !Number.isInteger(record.charge)) {
       throw new EquilibriumError({
         code: 'invalid_input',
@@ -1106,8 +1125,8 @@ export function elementTotalsFromCatalogAmounts(
       missing.push(id);
       continue;
     }
-    validateElements(record.elements, op, `состав вида «${id}» каталога`);
-    const elements = record.elements as Readonly<Record<string, number>>;
+    const elements = asElementRecord(record.elements, op, `состав вида «${id}» каталога`);
+    validateElements(elements, op, `состав вида «${id}» каталога`);
     if (typeof record.charge !== 'number' || !Number.isInteger(record.charge)) {
       throw new EquilibriumError({
         code: 'invalid_input',
