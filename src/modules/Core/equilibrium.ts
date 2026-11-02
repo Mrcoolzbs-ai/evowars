@@ -21,9 +21,11 @@
 // - идеальный газ; давление стандартного состояния p° - явный
 //   аргумент задачи (конвенция данных каталога NASA CEA: S° при
 //   1 бар, см. thermoFunctions);
-// - линейно-зависимые строки балансов редуцируются; зависимая
-//   строка с несовместным итогом - ошибка infeasible, а не
-//   молчаливое решение вырожденной системы;
+// - линейно-зависимые строки балансов редуцируются; критерий
+//   совместности зависимой строки согласован с допуском решателя
+//   (|расхождение| ≤ tolerance·max(1, |итог|), а не фиксированные
+//   1e-8); зависимая строка с несовместным итогом - ошибка
+//   infeasible, а не молчаливое решение вырожденной системы;
 // - контролируемое множество элементов - объединение итогов
 //   elementTotals и составов всех выбранных видов: элемент,
 //   входящий в виды, обязан иметь явный итог (отсутствующий
@@ -39,7 +41,11 @@
 //   попыток); вне диапазона экспонента переполняется или вырождает
 //   якобиан - честный статус numerical_failure, а не NaN;
 // - сходимость: относительная невязка балансов и |Σx_i − 1| меньше
-//   tolerance (по умолчанию 1e-13); несходимость - честный статус
+//   tolerance (по умолчанию 1e-13); перед статусом converged
+//   пересчитываются ВСЕ исходные строки элементов и заряда
+//   (включая исключённые при редукции) - converged допустим
+//   только при |невязка| ≤ tolerance·max(1, |итог|) для каждого
+//   исходного ограничения; несходимость - честный статус
 //   (max_iterations / line_search_stalled), не ложное converged.
 //
 // Не-цели Stage 4.4.1: это не шаг эволюции; интеграции в
@@ -447,10 +453,14 @@ interface ReducedRow {
 
 /**
  * Редукция строк балансов: линейно-независимый поднабор с проверкой
- * совместности итогов. Зависимая строка с несовместным итогом -
- * ошибка infeasible: вырожденная система не решается молча.
+ * совместности итогов. Критерий совместности зависимой строки
+ * согласован с допуском решателя: |расхождение итогов| должно быть
+ * ≤ tolerance·max(1, |итог|); фиксированный 1e-8 маскировал бы
+ * несовместность, превышающую точность решения. Зависимая строка с
+ * несовместным итогом - ошибка infeasible: вырожденная система не
+ * решается молча.
  */
-function reduceRows(rows: readonly BalanceRow[]): ReducedRow[] {
+function reduceRows(rows: readonly BalanceRow[], tolerance: number): ReducedRow[] {
   const reduced: ReducedRow[] = [];
   const pivots: number[] = [];
   const inconsistent: string[] = [];
@@ -474,7 +484,7 @@ function reduceRows(rows: readonly BalanceRow[]): ReducedRow[] {
       }
     }
     if (maxAbs < ROW_RANK_EPSILON) {
-      if (Math.abs(bv) > 1e-8 * Math.max(1, Math.abs(row.total))) {
+      if (Math.abs(bv) > tolerance * Math.max(1, Math.abs(row.total))) {
         inconsistent.push(row.name);
       }
       continue;
@@ -698,7 +708,9 @@ function failedResult(
 ): EquilibriumResult {
   const elementResiduals: Record<string, number> = {};
   for (const name of Object.keys(elementTotals)) {
-    elementResiduals[name] = -elementTotals[name];
+    // 0 - total, а не унарный минус: для нулевого итога невязка
+    // должна быть +0, а не -0 (Object.is различает их).
+    elementResiduals[name] = 0 - elementTotals[name];
   }
   return {
     status,
@@ -708,7 +720,7 @@ function failedResult(
     moleFractions: {},
     speciesMoles: {},
     elementResiduals,
-    chargeResidual: -chargeTotal,
+    chargeResidual: 0 - chargeTotal,
     gibbsEnergy: null,
     assumptions: ['ideal_gas', 'element_potentials_rand', 'explicit_standard_state_pressure'],
     message
@@ -800,7 +812,7 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     validated.elementTotals,
     validated.chargeTotal
   );
-  const reduced = reduceRows(rows);
+  const reduced = reduceRows(rows, tolerance);
   const species = activeSpecies;
   const speciesCount = species.length;
   const rowCount = reduced.length;
@@ -968,9 +980,37 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     }
     elementResiduals[name] = sum - (validated.elementTotals[name] ?? 0);
   }
-  let chargeResidual = -validated.chargeTotal;
+  let chargeResidual = 0 - validated.chargeTotal;
   for (const s of validated.species) {
     chargeResidual += s.charge * speciesMoles[s.id];
+  }
+  // C2 (Stage 4.4.3): финальная проверка ВСЕХ исходных ограничений
+  // перед converged - включая строки, исключённые при редукции.
+  // Сходимость редуцированной системы не гарантирует исходные
+  // строки; критерий относительный с явным масштабным полом:
+  // |невязка| ≤ tolerance·max(1, |итог|). Слабая абсолютная
+  // проверка не выдаётся за относительную.
+  for (const name of Object.keys(elementResiduals)) {
+    const residual = elementResiduals[name] ?? 0;
+    const total = validated.elementTotals[name] ?? 0;
+    if (Math.abs(residual) > tolerance * Math.max(1, Math.abs(total))) {
+      return failedResult(
+        validated.elementTotals,
+        validated.chargeTotal,
+        'numerical_failure',
+        iterations,
+        `невязка баланса элемента «${name}» (${residual} моль) превышает критерий tolerance·max(1, |итог|) = ${tolerance}·max(1, ${total}) исходных ограничений`
+      );
+    }
+  }
+  if (Math.abs(chargeResidual) > tolerance * Math.max(1, Math.abs(validated.chargeTotal))) {
+    return failedResult(
+      validated.elementTotals,
+      validated.chargeTotal,
+      'numerical_failure',
+      iterations,
+      `невязка баланса заряда (${chargeResidual}) превышает критерий tolerance·max(1, |итог|) = ${tolerance}·max(1, ${validated.chargeTotal}) исходных ограничений`
+    );
   }
   let gibbsSum = 0;
   for (let i = 0; i < speciesCount; i++) {
