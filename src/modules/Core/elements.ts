@@ -498,6 +498,25 @@ function isNubaseStateRowRefShape(value: unknown): value is NubaseStateRowRef {
 }
 
 /**
+ * Согласованность recordId ссылки на строку состояния NUBASE2020
+ * (аудит R4, C5b): идентификатор, машинно распознаваемый как строка
+ * NUBASE2020 (одна из фактических форм проекта), сверен с заявленными
+ * полями (Z, A, i, s). НЕ сужает тип: булева проверка над уже
+ * проверенной по форме ссылкой (isNubaseStateRowRefShape) — в ветке
+ * отрицания поля ссылки остаются доступными для диагностики.
+ */
+function nubaseStateRowRefIdConsistent(ref: NubaseStateRowRef): boolean {
+  const idFields = parseNubaseSourceRowRecordId(ref.recordId);
+  return (
+    idFields !== null &&
+    idFields.atomicNumber === ref.atomicNumber &&
+    idFields.massNumber === ref.massNumber &&
+    idFields.stateIndex === ref.stateIndex &&
+    idFields.stateCode === ref.stateCode
+  );
+}
+
+/**
  * Валидность ссылки на строку состояния NUBASE2020 (аудит R4, C5b):
  * форма + recordId, машинно распознаваемый как идентификатор строки
  * NUBASE2020 (одна из фактических форм проекта) и СОГЛАСОВАННЫЙ с
@@ -508,18 +527,7 @@ function isNubaseStateRowRefShape(value: unknown): value is NubaseStateRowRef {
  * сверкой, а не доверием к непустой строке.
  */
 function isNubaseStateRowRef(value: unknown): value is NubaseStateRowRef {
-  if (!isNubaseStateRowRefShape(value)) {
-    return false;
-  }
-  const v = value as Record<string, unknown>;
-  const idFields = parseNubaseSourceRowRecordId(v.recordId as string);
-  return (
-    idFields !== null &&
-    idFields.atomicNumber === v.atomicNumber &&
-    idFields.massNumber === v.massNumber &&
-    idFields.stateIndex === v.stateIndex &&
-    idFields.stateCode === v.stateCode
-  );
+  return isNubaseStateRowRefShape(value) && nubaseStateRowRefIdConsistent(value);
 }
 
 export function classifyNubaseState(
@@ -1174,8 +1182,10 @@ export function validateChemicalElement(element: unknown): string[] {
                     // сверяется с заявленными полями sibling-строки:
                     // подмена идентификатора между строками группы
                     // (recordId строки n у sibling-строки (1, m))
-                    // опровергается, а не доверяется.
-                    if (!isNubaseStateRowRef(sib)) {
+                    // опровергается, а не доверяется. Проверка согласованности —
+                    // булева (не сужающая тип): в ветке ошибки поля sibling-
+                    // строки остаются доступными для диагностики.
+                    if (!nubaseStateRowRefIdConsistent(sib)) {
                       errors.push(where(`кандидат ${label}: recordId sibling-строки (${String(sib.recordId)}) не распознан как идентификатор строки NUBASE2020 (фактические формы проекта: nubase2020:Z=…,A=…,i=…,s=… либо nubase2020:Z=… <символ> A=… i=… [s=…]) либо не согласован с заявленными полями строки (Z=${String(sib.atomicNumber)}, A=${String(sib.massNumber)}, i=${String(sib.stateIndex)}, s=${String(sib.stateCode) === '' ? '(пусто)' : String(sib.stateCode)}): непустой recordId сам по себе не доказывает, что ссылка относится к заявленной строке (аудит R4, C5b)`));
                       continue;
                     }
@@ -1219,8 +1229,8 @@ export function validateChemicalElement(element: unknown): string[] {
                     const present = (siblings as unknown[]).some(
                       (sib) =>
                         isNubaseStateRowRef(sib) &&
-                        (sib as NubaseStateRowRef).stateIndex === req.stateIndex &&
-                        (sib as NubaseStateRowRef).stateCode === req.stateCode
+                        sib.stateIndex === req.stateIndex &&
+                        sib.stateCode === req.stateCode
                     );
                     if (!present) {
                       errors.push(where(`кандидат ${label}: classificationBasis не доказывает контекст: для строки s=${String(c.stateCode)} требуются sibling-строки (включая i=${String(req.stateIndex)}, s=${req.stateCode}) того же (Z, A)`));
