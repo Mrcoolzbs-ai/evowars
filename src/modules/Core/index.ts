@@ -33,6 +33,7 @@ export * from './scientificValue';
 export * from './species';
 export * from './elements';
 export * from './thermodynamics';
+export * from './thermoFunctions';
 export * from './reservoir';
 export * from './fluxLedger';
 export * from './reactionLedger';
