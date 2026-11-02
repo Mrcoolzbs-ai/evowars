@@ -34,6 +34,7 @@ export * from './species';
 export * from './elements';
 export * from './thermodynamics';
 export * from './thermoFunctions';
+export * from './equilibrium';
 export * from './reservoir';
 export * from './fluxLedger';
 export * from './reactionLedger';
