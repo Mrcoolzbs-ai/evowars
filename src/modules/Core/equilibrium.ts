@@ -21,6 +21,12 @@
 // - идеальный газ; давление стандартного состояния p° - явный
 //   аргумент задачи (конвенция данных каталога NASA CEA: S° при
 //   1 бар, см. thermoFunctions);
+// - адаптер каталога (ревизия Stage 4.4.3/C4) проверяет
+//   согласованность p° задачи с конвенцией p° данных каждого
+//   вида (для NASA CEA - идеальный газ при 1 бар, TP-2002-211556):
+//   несовместимое p° - invalid_input, пересчёт g° не реализован;
+//   низкоуровневый solveEquilibrium остаётся универсальным -
+//   согласованность g° и p° там на вызывающей стороне;
 // - линейно-зависимые строки балансов редуцируются; критерий
 //   совместности зависимой строки согласован с допуском решателя
 //   (|расхождение| ≤ tolerance·max(1, |итог|), а не фиксированные
@@ -1172,6 +1178,16 @@ export function buildEquilibriumProblemFromCatalog(
       amounts[key] = value;
     }
   }
+  // C4 (Stage 4.4.3): p° задачи в паскалях - для проверки
+  // согласованности с конвенцией p° данных каждого вида.
+  const taskStandardState = requireQuantity(
+    config.standardStatePressure,
+    PRESSURE_DIMENSION,
+    'Pa',
+    op,
+    'давление стандартного состояния задачи'
+  );
+  const taskStandardStatePa = taskStandardState.value;
   const species: EquilibriumSpecies[] = [];
   const missing: string[] = [];
   for (const id of config.speciesIds) {
@@ -1191,6 +1207,38 @@ export function buildEquilibriumProblemFromCatalog(
     }
     const charge = record.charge;
     const thermodynamics = record.thermodynamics as ThermodynamicProperties;
+    // C4 (Stage 4.4.3): согласованность p° задачи с конвенцией p°
+    // данных вида. Коэффициенты NASA CEA отнесены к стандартному
+    // состоянию идеального газа при p° = 1 бар - конвенция НАБОРА
+    // данных (TP-2002-211556, Standard States), а не построчная.
+    // Молчаливо принять другое p° нельзя: g°/(R·T) вида привязана
+    // к p° данных (S°/R сдвигается на ln(p°_данных/p°_задачи)),
+    // а пересчёт g° на другое p° не реализован - несовместимое
+    // p° это invalid_input, а не тихий неверный результат.
+    const declaredPressure = thermodynamics.referenceState?.standardStatePressure;
+    if (declaredPressure === undefined || declaredPressure === null) {
+      throw new EquilibriumError({
+        code: 'invalid_input',
+        operation: op,
+        message: `у вида «${id}» не заявлено давление стандартного состояния данных`,
+        details: 'конвенция p° набора данных обязательна: без неё g°/(R·T) вида не привязана к p° задачи (Stage 4.4.3/C4)'
+      });
+    }
+    const declared = requireQuantity(
+      declaredPressure,
+      PRESSURE_DIMENSION,
+      'Pa',
+      op,
+      `давление стандартного состояния данных вида «${id}»`
+    );
+    if (Math.abs(declared.value - taskStandardStatePa) > 1e-6 * Math.max(1, Math.abs(declared.value))) {
+      throw new EquilibriumError({
+        code: 'invalid_input',
+        operation: op,
+        message: `давление стандартного состояния задачи (${taskStandardStatePa} Pa) не совпадает с конвенцией p° данных вида «${id}» (${declared.value} Pa)`,
+        details: 'коэффициенты отнесены к p° данных NASA CEA (идеальный газ, 1 бар); пересчёт g° на другое p° не реализован - задайте p° задачи равным конвенции данных'
+      });
+    }
     let gStandardOverRT: number;
     try {
       gStandardOverRT = speciesStandardGibbsEnergyOverRT(thermodynamics, config.temperature);
