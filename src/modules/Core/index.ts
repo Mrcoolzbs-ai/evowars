@@ -26,6 +26,7 @@
 //   thermalState      — температурная иерархия и происхождение (4.2.2);
 //   worldState        — каноническое состояние мира;
 //   solverBackend     — контракты численных решателей;
+//   odeSolver         — плотный ODE-решатель Radau IIA (4.5.3);
 //   migrations        — версии схем, датасетов и миграции сохранений;
 //   adapters          — мосты к существующим модулям (этап 1–3).
 
@@ -48,6 +49,7 @@ export * from './invariantAuditor';
 export * from './thermalState';
 export * from './worldState';
 export * from './solverBackend';
+export * from './odeSolver';
 export * from './migrations';
 export * from './adapters';
 

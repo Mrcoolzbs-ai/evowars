@@ -110,6 +110,149 @@ export interface SolverBackend {
 }
 
 // ============================================
+// 2b. СПЕЦИАЛИЗИРОВАННЫЙ ODE-КОНТРАКТ (Stage 4.5.3)
+// ============================================
+//
+// ODE — первый класс задач с РЕАЛЬНЫМ специализированным
+// контрактом (реализация: odeSolver.ts, Radau IIA, 3 стадии,
+// порядок 5, L-stable). Общий solve() для ODE не подходит:
+// интегрирование требует своей задачи (t0/tEnd/y0/rhs), своих
+// опций (rtol, atol скаляр ИЛИ массив, tEval, шаги) и своего
+// результата (численное решение, контрольные точки,
+// статистика шагов).
+//
+// Инвариант контракта: 'solved' возвращается ТОЛЬКО вместе с
+// реальным численным решением; ошибки решателя — исключения со
+// стабильными кодами (OdeSolverError в odeSolver.ts), но
+// никогда «solved без решения».
+
+/** Правая часть ODE: y' = f(t, y). */
+export type OdeRhs = (t: number, y: readonly number[]) => number[];
+
+/** Якобиан df/dy: матрица n×n. */
+export type OdeJacobian = (t: number, y: readonly number[]) => number[][];
+
+/**
+ * Линейный инвариант Σ coefficients_i · y_i = expected.
+ * Проверяется на y0 и после принятых шагов; вектор состояния
+ * НИКОГДА не корректируется молча.
+ */
+export interface LinearInvariant {
+  coefficients: readonly number[];
+  expected: number;
+}
+
+/** Задача Коши для ODE. */
+export interface OdeSolverProblem {
+  kind: 'ode';
+  stateDimension: number;
+  t0: number;
+  tEnd: number;
+  y0: readonly number[];
+  rhs: OdeRhs;
+  /**
+   * Аналитический якобиан. Отсутствует → решатель использует
+   * численный (конечные разности), это честно отражено в его
+   * статистике jacobianEvaluations.
+   */
+  jacobian?: OdeJacobian;
+  /** Индексы компонент, обязанных оставаться неотрицательными. */
+  nonNegativeIndices?: readonly number[];
+  linearInvariants?: readonly LinearInvariant[];
+  description?: string;
+}
+
+export interface OdeSolverOptions {
+  /** Относительный допуск (взвешенная RMS-норма ошибки шага). */
+  rtol?: number;
+  /**
+   * Абсолютный допуск: скаляр ИЛИ массив по компонентам.
+   * Массив нужен задачам типа Robertson, где масштабы компонент
+   * различаются на ~10 порядков.
+   */
+  atol?: number | readonly number[];
+  /**
+   * Контрольные времена: строго возрастают, лежат в [t0, tEnd].
+   * Шаг обрезается до ближайшей точки, t в результате равно
+   * РОВНО заданному времени (никакой интерполяционной подмены).
+   */
+  tEval?: readonly number[];
+  initialStep?: number;
+  maxStep?: number;
+  /** Минимальный шаг; при невозможности дальнейшего уменьшения — ошибка (fail-closed). */
+  minStep?: number;
+  maxSteps?: number;
+  maxNewtonIterations?: number;
+}
+
+/** Контрольная точка решения в момент времени t. */
+export interface OdeSolutionPoint {
+  t: number;
+  y: number[];
+}
+
+export interface OdeSolverStats {
+  attemptedSteps: number;
+  acceptedSteps: number;
+  rejectedSteps: number;
+  newtonFailures: number;
+  rhsEvaluations: number;
+  jacobianEvaluations: number;
+  luFactorizations: number;
+  maxNewtonIterationsUsed: number;
+  maxAcceptedStepSize: number;
+  minAcceptedStepSize: number;
+}
+
+export interface OdeSolverDiagnostics {
+  backendId: string;
+  method: string;
+  message: string;
+  /**
+   * Число компонент, ушедших в небольшой минус в пределах
+   * допуска: сохранены КАК ЕСТЬ, без молчаливого clipping.
+   */
+  minorNegativeCount: number;
+  /** Количество проверок линейных инвариантов после принятых шагов. */
+  invariantChecks: number;
+}
+
+/**
+ * Результат solveOde: 'solved' ТОЛЬКО с численным решением.
+ * Ошибки решателя — исключения (OdeSolverError) со стабильными
+ * кодами; статус без решения не возвращается.
+ */
+export interface OdeSolverResult {
+  status: 'solved';
+  method: string;
+  t0: number;
+  tEnd: number;
+  /** Фактическое конечное время (ровно tEnd при нормальном завершении). */
+  t: number;
+  /** Конечное состояние. */
+  y: number[];
+  /** Контрольные точки tEval (плюс конечная, если не была запрошена). */
+  points: OdeSolutionPoint[];
+  stats: OdeSolverStats;
+  diagnostics: OdeSolverDiagnostics;
+}
+
+/**
+ * Специализированный ODE-backend: общий контракт расширен
+ * методом solveOde. solve() при этом осмысленно НЕ выполняет
+ * интегрирования (возвращает 'error' с диагностикой): ODE-задачи
+ * принимаются ТОЛЬКО через solveOde.
+ */
+export interface OdeSolverBackend extends SolverBackend {
+  solveOde(problem: OdeSolverProblem, options?: OdeSolverOptions): OdeSolverResult;
+}
+
+/** Type guard: backend реализует специализированный ODE-контракт. */
+export function isOdeSolverBackend(backend: SolverBackend): backend is OdeSolverBackend {
+  return typeof (backend as { solveOde?: unknown }).solveOde === 'function';
+}
+
+// ============================================
 // 3. ВАЛИДАЦИЯ КОНТРАКТА
 // ============================================
 
@@ -120,7 +263,9 @@ export interface BackendContractIssue {
     | 'empty_problem_kinds'
     | 'unknown_problem_kind'
     | 'unsupported_kind_claim'
-    | 'invalid_max_dimension';
+    | 'invalid_max_dimension'
+    | 'ode_capabilities_invalid'
+    | 'ode_solution_invalid';
   message: string;
 }
 
@@ -132,6 +277,10 @@ export interface BackendContractIssue {
  *   действительно возвращает not_implemented (проверяется
  *   вызовом на пробной задаче);
  * - отрицательная размерность или отрицательные допуски — ошибки.
+ * - для ODE-backend'ов (isOdeSolverBackend): обязательность
+ *   'ode' в problemKinds, непустые implementedMethods,
+ *   согласованность stiff → implicit, и РЕАЛЬНАЯ проверка
+ *   решения контрольной задачи y' = -y через solveOde.
  */
 export function validateBackendContract(backend: SolverBackend): BackendContractIssue[] {
   const issues: BackendContractIssue[] = [];
@@ -164,6 +313,53 @@ export function validateBackendContract(backend: SolverBackend): BackendContract
       issues.push({
         code: 'unsupported_kind_claim',
         message: `backend «${backend.id}» заявляет методы (${caps.implementedMethods.join(', ')}) для класса «${kind}», но solve() возвращает not_implemented: ложное заявление о реализованном методе`
+      });
+    }
+  }
+  if (isOdeSolverBackend(backend)) {
+    if (!caps.problemKinds.includes('ode')) {
+      issues.push({
+        code: 'ode_capabilities_invalid',
+        message: `ODE-backend «${backend.id}» обязан заявлять класс задач 'ode' в problemKinds`
+      });
+    }
+    if (caps.implementedMethods.length === 0) {
+      issues.push({
+        code: 'ode_capabilities_invalid',
+        message: `ODE-backend «${backend.id}» обязан заявлять хотя бы один реализованный метод`
+      });
+    }
+    if (caps.stiff && !caps.implicit) {
+      issues.push({
+        code: 'ode_capabilities_invalid',
+        message: `backend «${backend.id}» заявляет stiff без implicit: неявность — необходимое условие L-устойчивых методов`
+      });
+    }
+    // Реальная проверка ODE-решения: y' = -y, y(0) = 1, y(1) = e^-1.
+    // «solved без решения» здесь невозможно: контракт требует
+    // численное значение в пределах допуска.
+    try {
+      const odeProblem: OdeSolverProblem = {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1,
+        y0: [1],
+        rhs: (_t, y) => [-y[0]],
+        description: "контрактная проверка ODE: y' = -y"
+      };
+      const result = backend.solveOde(odeProblem, { rtol: 1e-8, atol: 1e-12 });
+      const expected = Math.exp(-1);
+      if (Math.abs(result.y[0] - expected) > 1e-6) {
+        issues.push({
+          code: 'ode_solution_invalid',
+          message: `solveOde backend'а «${backend.id}» вернул неверное решение контрольной задачи y' = -y: y(1) = ${result.y[0]}, ожидалось ~${expected}`
+        });
+      }
+    } catch {
+      issues.push({
+        code: 'ode_solution_invalid',
+        message: `solveOde backend'а «${backend.id}» не смог решить минимальную контрольную задачу y' = -y на [0, 1]`
       });
     }
   }
