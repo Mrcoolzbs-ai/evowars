@@ -18,7 +18,11 @@
 // - редукция строк балансов (independentRowIndices);
 // - адаптер каталога: сборка задачи, species_data_missing
 //   всем списком отсутствующих видов;
-// - детерминизм: повторный прогон идентичен.
+// - детерминизм: повторный прогон идентичен;
+// - корректирующая ревизия Stage 4.4.3 (C1, аудит): полнота
+//   элементных ограничений - элемент видов без явного итога,
+//   явные нулевые итоги и исключение видов из активной задачи,
+//   нулевые итоги видов-кандидатов каталогного адаптера.
 
 import { describe, it, expect } from 'vitest';
 import { quantity } from '../Core/physicalQuantity';
@@ -430,5 +434,93 @@ describe('Stage 4.4.1: адаптер каталога видов', () => {
       () => elementTotalsFromCatalogAmounts(catalog, { unobtainium: 1 }),
       'species_data_missing'
     );
+  });
+});
+
+describe('Stage 4.4.3 (C1): полнота элементных ограничений', () => {
+  const catalog = buildThermodynamicCatalog();
+
+  it('элемент видов без явного итога - invalid_input, а не «не контролируем»', () => {
+    const error = expectEquilibriumError(() => solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('A', { A: 1 }, 0), sp('AB', { A: 1, B: 1 }, 0)],
+      elementTotals: { A: 1 },
+      chargeTotal: 0
+    }), 'invalid_input');
+    expect(error.message).toContain('B');
+  });
+
+  it('явный B: 0 - B-содержащий вид исключен, его количество - ровно ноль', () => {
+    const r = solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('A', { A: 1 }, 0), sp('AB', { A: 1, B: 1 }, 0)],
+      elementTotals: { A: 1, B: 0 },
+      chargeTotal: 0
+    });
+    expect(r.status).toBe('converged');
+    expect(r.moleFractions.A).toBeCloseTo(1, 12);
+    // строго ноль, а не следовой экспоненциальный хвост
+    expect(r.moleFractions.AB).toBe(0);
+    expect(r.speciesMoles.AB).toBe(0);
+    expect(r.elementResiduals.B).toBe(0);
+    expect(r.assumptions).toContain('zero_element_total_species_excluded');
+    expect(r.message).toContain('AB');
+  });
+
+  it('каталожный адаптер: кандидаты без начального количества дают явные нулевые итоги', () => {
+    const problem = buildEquilibriumProblemFromCatalog(catalog, {
+      speciesIds: ['n2', 'nh3'],
+      amounts: { n2: 1 },
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR
+    });
+    expect(problem.elementTotals).toEqual({ N: 2, H: 0 });
+    const r = solveEquilibrium(problem);
+    expect(r.status).toBe('converged');
+    expect(r.moleFractions.n2).toBeCloseTo(1, 12);
+    // NH3 не может образоваться из ничего: H отсутствует в запасе
+    expect(r.moleFractions.nh3).toBe(0);
+    expect(r.speciesMoles.nh3).toBe(0);
+    expect(r.elementResiduals.H).toBe(0);
+  });
+
+  it('адаптер + elementTotals без H при H-содержащем виде - invalid_input', () => {
+    expectEquilibriumError(() => solveEquilibrium(buildEquilibriumProblemFromCatalog(catalog, {
+      speciesIds: ['n2', 'nh3'],
+      elementTotals: { N: 2 },
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR
+    })), 'invalid_input');
+  });
+
+  it('все виды исключены нулевыми итогами, но итог ненулевой - infeasible', () => {
+    expectEquilibriumError(() => solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('AB', { A: 1, B: 1 }, 0)],
+      elementTotals: { A: 1, B: 0 },
+      chargeTotal: 0
+    }), 'infeasible');
+  });
+
+  it('позитивная смесь: все виды совместимы с итогами - converged без исключений', () => {
+    const r = solveEquilibrium({
+      temperature: T1000,
+      pressure: P1BAR,
+      standardStatePressure: P1BAR,
+      species: [sp('ab', { A: 1, B: 1 }, 0), sp('a2', { A: 2 }, 5), sp('b2', { B: 2 }, 5)],
+      elementTotals: { A: 1, B: 1 },
+      chargeTotal: 0
+    });
+    expect(r.status).toBe('converged');
+    expect(r.assumptions).not.toContain('zero_element_total_species_excluded');
+    expect(r.message).not.toContain('исключены');
   });
 });
