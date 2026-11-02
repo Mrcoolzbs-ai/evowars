@@ -24,6 +24,16 @@
 // - линейно-зависимые строки балансов редуцируются; зависимая
 //   строка с несовместным итогом - ошибка infeasible, а не
 //   молчаливое решение вырожденной системы;
+// - контролируемое множество элементов - объединение итогов
+//   elementTotals и составов всех выбранных видов: элемент,
+//   входящий в виды, обязан иметь явный итог (отсутствующий
+//   итог не может молча означать «не контролируем» - иначе
+//   решатель способен создать элемент из ничего); при явном
+//   нулевом итоге содержащие элемент виды безопасно исключаются
+//   из активной задачи, их количества в результате - ровно
+//   ноль: экспоненциальная параметризация не притворяется, что
+//   представляет строго нулевое количество при конечных
+//   потенциалах;
 // - инициализация pi: наименьшие квадраты по независимым строкам
 //   с демпфированием в диапазон экспоненты [−650, 650] (до 40
 //   попыток); вне диапазона экспонента переполняется или вырождает
@@ -522,9 +532,31 @@ function elementCount(record: Readonly<Record<string, number>>, name: string): n
   return 0;
 }
 
+/** Собственный ключ записи (без унаследованных свойств прототипа). */
+function hasOwnKey(record: Readonly<Record<string, number>>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
 /**
- * Строки балансов задачи: по одному элементу с ненулевым итогом
- * и одна строка заряда, если есть заряженные виды. Итог из
+ * Элементы, физически входящие в состав хотя бы одного вида
+ * (положительное число атомов): контролируемое множество элементов
+ * задачи обязано включать их всех (Stage 4.4.3, C1).
+ */
+function speciesElements(species: readonly EquilibriumSpecies[]): Set<string> {
+  const result = new Set<string>();
+  for (const s of species) {
+    for (const name of Object.keys(s.elements)) {
+      if (elementCount(s.elements, name) > 0) {
+        result.add(name);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Строки балансов активной задачи: по одному элементу с ненулевым
+ * итогом и одна строка заряда, если есть заряженные виды. Итог из
  * elementTotals без видов - ошибка infeasible.
  */
 function buildBalanceRows(
@@ -654,19 +686,19 @@ function initialPotentials(
 
 /**
  * Результат-отказ: нулевые моли, невязки от нулевого состава
- * (минус итоги строк), G = null. Состав честно не сообщается.
+ * (минус итоги всех контролируемых элементов и заряда), G = null.
+ * Состав честно не сообщается.
  */
 function failedResult(
-  rows: readonly BalanceRow[],
+  elementTotals: Readonly<Record<string, number>>,
+  chargeTotal: number,
   status: EquilibriumStatus,
   iterations: number,
   message: string
 ): EquilibriumResult {
   const elementResiduals: Record<string, number> = {};
-  let chargeResidual = 0;
-  for (const row of rows) {
-    if (row.name === 'charge') chargeResidual = -row.total;
-    else elementResiduals[row.name] = -row.total;
+  for (const name of Object.keys(elementTotals)) {
+    elementResiduals[name] = -elementTotals[name];
   }
   return {
     status,
@@ -676,7 +708,7 @@ function failedResult(
     moleFractions: {},
     speciesMoles: {},
     elementResiduals,
-    chargeResidual,
+    chargeResidual: -chargeTotal,
     gibbsEnergy: null,
     assumptions: ['ideal_gas', 'element_potentials_rand', 'explicit_standard_state_pressure'],
     message
@@ -693,13 +725,83 @@ function failedResult(
 export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult {
   const validated = validateProblem(problem);
   const { maxIterations, tolerance } = parseOptions(problem);
+  // C1 (Stage 4.4.3): полнота элементных ограничений. Контролируемое
+  // множество элементов - объединение итогов elementTotals и
+  // элементов всех выбранных видов. Элемент, входящий в виды, без
+  // явного итога - invalid_input: отсутствующий итог не может молча
+  // означать «не контролируем», иначе решатель способен выдать
+  // converged с элементом, образованным из ничего.
+  for (const name of speciesElements(validated.species)) {
+    if (!hasOwnKey(validated.elementTotals, name)) {
+      throw new EquilibriumError({
+        code: 'invalid_input',
+        operation: 'solveEquilibrium',
+        message: `элемент «${name}» входит в состав выбранных видов, но его итог не задан в elementTotals`,
+        details: 'отсутствующий итог не может молча означать «не контролируем»; нулевому запасу соответствует явный итог 0'
+      });
+    }
+  }
+  // C1: явный нулевой итог элемента. Виды, содержащие такой элемент,
+  // физически не могут присутствовать, а параметризация
+  // x_i = exp(...) не представляет строго ноль при конечных
+  // потенциалах: такие виды безопасно исключаются из активной
+  // задачи, а их количества в результате - ровно ноль (семантика
+  // результатов исключённых видов определена явно).
+  const zeroElements = new Set<string>();
+  for (const name of Object.keys(validated.elementTotals)) {
+    if ((validated.elementTotals[name] ?? 0) === 0) {
+      zeroElements.add(name);
+    }
+  }
+  const activeSpecies: EquilibriumSpecies[] = [];
+  const excludedSpecies: EquilibriumSpecies[] = [];
+  for (const s of validated.species) {
+    let excluded = false;
+    for (const name of Object.keys(s.elements)) {
+      if (zeroElements.has(name) && elementCount(s.elements, name) > 0) {
+        excluded = true;
+        break;
+      }
+    }
+    if (excluded) {
+      excludedSpecies.push(s);
+    } else {
+      activeSpecies.push(s);
+    }
+  }
+  if (activeSpecies.length === 0) {
+    // Все виды исключены нулевыми итогами: ненулевые итоги или
+    // заряд несовместимы с пустой смесью - честный отказ.
+    for (const name of Object.keys(validated.elementTotals)) {
+      if ((validated.elementTotals[name] ?? 0) !== 0) {
+        throw new EquilibriumError({
+          code: 'infeasible',
+          operation: 'solveEquilibrium',
+          message: 'все виды исключены нулевыми итогами элементов, но итог элемента ненулевой',
+          details: `итог «${name}» = ${validated.elementTotals[name]} моль не может быть удовлетворён`
+        });
+      }
+    }
+    if (validated.chargeTotal !== 0) {
+      throw new EquilibriumError({
+        code: 'infeasible',
+        operation: 'solveEquilibrium',
+        message: 'все виды исключены нулевыми итогами элементов, но итоговый заряд ненулевой'
+      });
+    }
+    throw new EquilibriumError({
+      code: 'invalid_input',
+      operation: 'solveEquilibrium',
+      message: 'задача без ограничений: итоги элементов и заряда нулевые'
+    });
+  }
   const rows = buildBalanceRows(
-    validated.species,
+    activeSpecies,
     validated.elementTotals,
     validated.chargeTotal
   );
   const reduced = reduceRows(rows);
-  const species = validated.species;
+  const species = activeSpecies;
   const speciesCount = species.length;
   const rowCount = reduced.length;
   const gOverRT = species.map((s) => s.gStandardOverRT);
@@ -707,7 +809,8 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
   const pi = initialPotentials(reduced, gOverRT, logPressureRatio);
   if (pi === null) {
     return failedResult(
-      rows,
+      validated.elementTotals,
+      validated.chargeTotal,
       'numerical_failure',
       0,
       'инициализация не удержала аргументы экспонент в допустимом диапазоне'
@@ -764,7 +867,8 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
   while (!(state.maxRelative < tolerance)) {
     if (iterations >= maxIterations) {
       return failedResult(
-        rows,
+        validated.elementTotals,
+        validated.chargeTotal,
         'max_iterations',
         iterations,
         `достигнут предел итераций Ньютона (${maxIterations}), относительная невязка ${state.maxRelative}`
@@ -800,7 +904,7 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     jacobian.push(lastRow);
     const step = solveLinearSystem(jacobian, state.equations.map((v) => -v));
     if (step === null) {
-      return failedResult(rows, 'numerical_failure', iterations, 'система Ньютона вырождена');
+      return failedResult(validated.elementTotals, validated.chargeTotal, 'numerical_failure', iterations, 'система Ньютона вырождена');
     }
 
     let accepted = false;
@@ -824,7 +928,8 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     }
     if (!accepted) {
       return failedResult(
-        rows,
+        validated.elementTotals,
+        validated.chargeTotal,
         'line_search_stalled',
         iterations,
         'линейный поиск не уменьшил норму невязки'
@@ -833,25 +938,39 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     iterations++;
   }
 
+  // Состав: активные виды - из решения; исключённые (нулевые итоги
+  // элементов) - ровно ноль: строгий ноль, а не следовой
+  // экспоненциальный хвост (семантика исключённых видов явная).
+  const activeIndex = new Map<string, number>();
+  for (let i = 0; i < speciesCount; i++) {
+    activeIndex.set(species[i].id, i);
+  }
   const moleFractions: Record<string, number> = {};
   const speciesMoles: Record<string, number> = {};
-  for (let i = 0; i < speciesCount; i++) {
-    moleFractions[species[i].id] = state.fractions[i];
-    speciesMoles[species[i].id] = state.fractions[i] * totalMoles;
-  }
-  const elementResiduals: Record<string, number> = {};
-  let chargeResidual = 0;
-  for (const row of rows) {
-    let s = 0;
-    for (let i = 0; i < speciesCount; i++) {
-      s += row.coefficients[i] * speciesMoles[species[i].id];
-    }
-    const residual = s - row.total;
-    if (row.name === 'charge') {
-      chargeResidual = residual;
+  for (const s of validated.species) {
+    const i = activeIndex.get(s.id);
+    if (i === undefined) {
+      moleFractions[s.id] = 0;
+      speciesMoles[s.id] = 0;
     } else {
-      elementResiduals[row.name] = residual;
+      moleFractions[s.id] = state.fractions[i];
+      speciesMoles[s.id] = state.fractions[i] * totalMoles;
     }
+  }
+  // Невязки всех контролируемых элементов (включая нулевые итоги)
+  // и заряда - по всем исходным видам; исключённые виды вносят
+  // ровно ноль и не нарушают строк своих нулевых элементов.
+  const elementResiduals: Record<string, number> = {};
+  for (const name of Object.keys(validated.elementTotals)) {
+    let sum = 0;
+    for (const s of validated.species) {
+      sum += elementCount(s.elements, name) * speciesMoles[s.id];
+    }
+    elementResiduals[name] = sum - (validated.elementTotals[name] ?? 0);
+  }
+  let chargeResidual = -validated.chargeTotal;
+  for (const s of validated.species) {
+    chargeResidual += s.charge * speciesMoles[s.id];
   }
   let gibbsSum = 0;
   for (let i = 0; i < speciesCount; i++) {
@@ -863,6 +982,19 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
   const gibbsValue =
     UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * validated.temperatureK * totalMoles * gibbsSum;
   const gibbsEnergy = Number.isFinite(gibbsValue) ? quantity(gibbsValue, 'J') : null;
+  const assumptions = excludedSpecies.length > 0
+    ? [
+        'ideal_gas',
+        'element_potentials_rand',
+        'explicit_standard_state_pressure',
+        'zero_element_total_species_excluded'
+      ]
+    : ['ideal_gas', 'element_potentials_rand', 'explicit_standard_state_pressure'];
+  const message =
+    `равновесие достигнуто за ${iterations} итераций, относительная невязка ${state.maxRelative}` +
+    (excludedSpecies.length > 0
+      ? `; исключены виды с нулевыми итогами элементов: ${excludedSpecies.map((s) => s.id).join(', ')} (их количества - ровно ноль)`
+      : '');
   return {
     status: 'converged',
     model: 'ideal_gas',
@@ -873,8 +1005,8 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     elementResiduals,
     chargeResidual,
     gibbsEnergy,
-    assumptions: ['ideal_gas', 'element_potentials_rand', 'explicit_standard_state_pressure'],
-    message: `равновесие достигнуто за ${iterations} итераций, относительная невязка ${state.maxRelative}`
+    assumptions,
+    message
   };
 }
 
@@ -1054,11 +1186,14 @@ export function buildEquilibriumProblemFromCatalog(
   const elementTotals: Record<string, number> = {};
   let chargeTotal = 0;
   if (hasAmounts) {
+    // C1 (Stage 4.4.3): кандидаты speciesIds без начального
+    // количества вносят нулевые итоги своих элементов: элемент
+    // вида-кандидата не может остаться без явного итога, иначе
+    // решатель способен создать его из ничего. Нулевой запас -
+    // явный ноль (соответствующие виды исключаются из активной
+    // задачи решателем).
     for (const s of species) {
-      const amount = amounts[s.id];
-      if (amount === undefined) {
-        continue;
-      }
+      const amount = amounts[s.id] ?? 0;
       for (const element of Object.keys(s.elements)) {
         elementTotals[element] = (elementTotals[element] ?? 0) + amount * s.elements[element];
       }
@@ -1096,6 +1231,13 @@ export function buildEquilibriumProblemFromCatalog(
  * Итоги элементов и заряда из начальных количеств видов каталога:
  * точные суммы amount·(состав вида) и amount·charge. Отсутствующие
  * в каталоге виды - ошибка species_data_missing со всем списком.
+ *
+ * Итоги строятся только по видам с положительными количествами:
+ * если вызывающая сторона выбирает дополнительные виды-кандидаты,
+ * она обязана сама добавить явные нулевые итоги их элементов
+ * (или использовать buildEquilibriumProblemFromCatalog, который
+ * делает это автоматически) - элемент вида-кандидата без итога
+ * решатель не контролирует молча (Stage 4.4.3, C1).
  */
 export function elementTotalsFromCatalogAmounts(
   catalog: EquilibriumCatalogLike,
