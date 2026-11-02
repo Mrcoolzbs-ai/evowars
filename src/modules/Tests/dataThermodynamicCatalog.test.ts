@@ -277,6 +277,13 @@ describe('Stage 4.3.2: термодинамический каталог пер�
       expect(referenceState!.temperature?.unit).toBe('K');
       expect(referenceState!.pressure).toBeUndefined();
       expect(referenceState!.standardState.length).toBeGreaterThan(0);
+      // Ревизия Stage 4.4.3 (C4): конвенция НАБОРА данных NASA CEA
+      // (TP-2002-211556, Standard States) - идеальный газ при
+      // p° = 1 бар; не построчные данные thermo.inp.
+      expect(referenceState!.standardStatePressure?.value).toBe(1);
+      expect(referenceState!.standardStatePressure?.unit).toBe('bar');
+      expect(referenceState!.standardState).toContain('1 бар');
+      expect(referenceState!.standardState).toContain('TP-2002-211556');
     }
   });
 
