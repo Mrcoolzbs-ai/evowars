@@ -97,6 +97,40 @@ export const ELEMENT_CATEGORIES: readonly ElementCategory[] = [
 ];
 
 /**
+ * Канонические символы элементов 1…118 (идентификация IUPAC,
+ * таблица от 4 мая 2022) — реестр самого ядра для МАШИННОЙ сверки
+ * идентификаторов, кодирующих символ элемента. Каталогная форма
+ * идентификатора строки NUBASE2020 (Data/elementIsotopeCandidates.ts)
+ * содержит символ элемента между Z и A: символ обязан СООТВЕТСТВОВАТЬ
+ * атомному номеру, а не только выдерживать формат «[A-Z][a-z]?» —
+ * «nubase2020:Z=84 He A=209 …» не является строкой NUBASE2020, хотя
+ * запись символа формально корректна (аудит R4, C5c). Каталог
+ * Data/elements.ts строится независимо; расхождение реестров
+ * опровергается CI-тестами данных: валидатор машинно сверяет recordId
+ * всех записей-кандидатов каталога (44 записи).
+ */
+export const ELEMENT_SYMBOL_BY_ATOMIC_NUMBER: Readonly<Record<number, string>> = {
+  1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O',
+  9: 'F', 10: 'Ne', 11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P',
+  16: 'S', 17: 'Cl', 18: 'Ar', 19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti',
+  23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni', 29: 'Cu',
+  30: 'Zn', 31: 'Ga', 32: 'Ge', 33: 'As', 34: 'Se', 35: 'Br', 36: 'Kr',
+  37: 'Rb', 38: 'Sr', 39: 'Y', 40: 'Zr', 41: 'Nb', 42: 'Mo', 43: 'Tc',
+  44: 'Ru', 45: 'Rh', 46: 'Pd', 47: 'Ag', 48: 'Cd', 49: 'In', 50: 'Sn',
+  51: 'Sb', 52: 'Te', 53: 'I', 54: 'Xe', 55: 'Cs', 56: 'Ba', 57: 'La',
+  58: 'Ce', 59: 'Pr', 60: 'Nd', 61: 'Pm', 62: 'Sm', 63: 'Eu', 64: 'Gd',
+  65: 'Tb', 66: 'Dy', 67: 'Ho', 68: 'Er', 69: 'Tm', 70: 'Yb', 71: 'Lu',
+  72: 'Hf', 73: 'Ta', 74: 'W', 75: 'Re', 76: 'Os', 77: 'Ir', 78: 'Pt',
+  79: 'Au', 80: 'Hg', 81: 'Tl', 82: 'Pb', 83: 'Bi', 84: 'Po', 85: 'At',
+  86: 'Rn', 87: 'Fr', 88: 'Ra', 89: 'Ac', 90: 'Th', 91: 'Pa', 92: 'U',
+  93: 'Np', 94: 'Pu', 95: 'Am', 96: 'Cm', 97: 'Bk', 98: 'Cf', 99: 'Es',
+  100: 'Fm', 101: 'Md', 102: 'No', 103: 'Lr', 104: 'Rf', 105: 'Db',
+  106: 'Sg', 107: 'Bh', 108: 'Hs', 109: 'Mt', 110: 'Ds', 111: 'Rg',
+  112: 'Cn', 113: 'Nh', 114: 'Fl', 115: 'Mc', 116: 'Lv', 117: 'Ts',
+  118: 'Og'
+};
+
+/**
  * Положение элемента в периодической таблице (IUPAC, выпуск
  * 4 мая 2022). group = null — позиция группы не назначена
  * (f-строки макета: в таблице IUPAC место группы 3 для лантаноидов
@@ -319,43 +353,61 @@ const NUBASE_SOURCE_ROW_ID_AUDIT_PATTERN =
 // Фактическая форма идентификатора записи каталога кандидатов
 // (Data/elementIsotopeCandidates.ts):
 // 'nubase2020:Z=84 Po A=209 i=1 s=m' — Z и A без выравнивания,
-// символ элемента между Z и A, часть « s=» у основного состояния
-// опущена.
+// символ элемента между Z и A (захватывается и сверяется с Z по
+// канонической таблице — аудит R4, C5c), часть « s=» у основного
+// состояния опущена.
 const NUBASE_SOURCE_ROW_ID_CATALOG_PATTERN =
-  /^nubase2020:Z=(\d{1,3}) [A-Z][a-z]? A=(\d{1,3}) i=(\d)(?: s=([mnpqrxij]))?$/;
+  /^nubase2020:Z=(\d{1,3}) ([A-Z][a-z]?) A=(\d{1,3}) i=(\d)(?: s=([mnpqrxij]))?$/;
 
 /**
- * Разбор идентификатора строки состояния NUBASE2020 (аудит R4, C5b).
- * Распознаёт ОБЕ фактические формы проекта — идентификатор строки
- * источника утилиты аудита и идентификатор записи каталога
- * elementIsotopeCandidates (проверка сверена с фактическими
- * форматами обоих модулей, а не выдумана): возвращает встроенные
- * (Z, A, i, s) либо null, если идентификатор не является строкой
- * NUBASE2020 ни в одной из этих форм. Рассогласованные комбинации
- * (например, i=1 при s=p или несуществующий индекс) не распознаются.
+ * Разбор идентификатора строки состояния NUBASE2020 (аудит R4, C5b;
+ * расширение C5c). Распознаёт ОБЕ фактические формы проекта —
+ * идентификатор строки источника утилиты аудита и идентификатор
+ * записи каталога elementIsotopeCandidates (проверка сверена с
+ * фактическими форматами обоих модулей, а не выдумана): возвращает
+ * встроенные (Z, A, i, s) либо null, если идентификатор не является
+ * строкой NUBASE2020 ни в одной из этих форм. Рассогласованные
+ * комбинации (например, i=1 при s=p или несуществующий индекс) не
+ * распознаются. Аудит R4, C5c: (1) символ элемента в каталогной форме
+ * сверяется с атомным номером Z по канонической таблице — выдержанный
+ * формат «[A-Z][a-z]?» сам по себе не доказывает соответствия
+ * («Z=84 He A=209» не строка NUBASE2020); (2) массовое число
+ * физического нуклида не может быть меньше атомного номера: A >= Z,
+ * идентификаторы с A < Z не распознаются.
  */
 export function parseNubaseSourceRowRecordId(recordId: string): NubaseSourceRowIdFields | null {
   if (typeof recordId !== 'string') {
     return null;
   }
   let match = NUBASE_SOURCE_ROW_ID_AUDIT_PATTERN.exec(recordId);
+  let catalogForm = false;
   if (match === null) {
     match = NUBASE_SOURCE_ROW_ID_CATALOG_PATTERN.exec(recordId);
+    catalogForm = match !== null;
   }
   if (match === null) {
     return null;
   }
+  // Аудит R4, C5c: символ элемента каталогной формы сверяется с Z по
+  // канонической таблице символов — а не только по формату записи.
+  if (catalogForm && ELEMENT_SYMBOL_BY_ATOMIC_NUMBER[Number(match[1])] !== match[2]) {
+    return null;
+  }
   const atomicNumber = Number(match[1]);
-  const massNumber = Number(match[2]);
-  const stateIndex = Number(match[3]);
+  // в каталогной форме между Z и A стоит символ (группа 2), поэтому
+  // номера групп A, i, s в двух формах различаются
+  const massNumber = Number(catalogForm ? match[3] : match[2]);
+  const stateIndex = Number(catalogForm ? match[4] : match[3]);
+  const stateCodeGroup = catalogForm ? match[5] : match[4];
   // в форме каталога часть « s=» у основного состояния опущена
-  const stateCode = (match[4] === undefined ? '' : match[4]) as NuclideStateCode;
+  const stateCode = (stateCodeGroup === undefined ? '' : stateCodeGroup) as NuclideStateCode;
   if (
     !Number.isInteger(atomicNumber) ||
     atomicNumber < 1 ||
     atomicNumber > ELEMENT_COUNT ||
     !Number.isInteger(massNumber) ||
-    massNumber < 1 ||
+    // аудит R4, C5c: у физического нуклида A >= Z (включает A >= 1)
+    massNumber < atomicNumber ||
     NUBASE_STATE_CODE_BY_INDEX[stateIndex] !== stateCode
   ) {
     return null;
@@ -373,7 +425,11 @@ export function parseNubaseSourceRowRecordId(recordId: string): NubaseSourceRowI
 export interface NubaseStateRowRef {
   /** Атомный номер Z нуклида-владельца строки (целое, 1…118). */
   atomicNumber: number;
-  /** Массовое число A нуклида-владельца строки (целое, >= 1). */
+  /**
+   * Массовое число A нуклида-владельца строки (целое, >= Z: у
+   * физического нуклида массовое число не меньше атомного номера —
+   * аудит R4, C5c).
+   */
   massNumber: number;
   /** Индекс состояния i NUBASE2020. */
   stateIndex: number;
@@ -471,10 +527,12 @@ export interface NubaseStateClassification {
  */
 /**
  * Валидность ФОРМЫ ссылки на строку состояния NUBASE2020 (аудит R4,
- * C5): целые атомный номер (1…118) и массовое число (>= 1),
- * согласованная пара (i, s) и непустой recordId. Форма без
- * машинно распознаваемого recordId не идентифицирует конкретную
- * строку источника — см. isNubaseStateRowRef (аудит R4, C5b).
+ * C5): целые атомный номер (1…118) и массовое число (A >= Z — у
+ * физического нуклида массовое число не меньше атомного номера,
+ * аудит R4, C5c), согласованная пара (i, s) и непустой recordId.
+ * Форма без машинно распознаваемого recordId не идентифицирует
+ * конкретную строку источника — см. isNubaseStateRowRef (аудит
+ * R4, C5b).
  */
 function isNubaseStateRowRefShape(value: unknown): value is NubaseStateRowRef {
   if (!isNonNullObject(value)) {
@@ -488,7 +546,9 @@ function isNubaseStateRowRefShape(value: unknown): value is NubaseStateRowRef {
     v.atomicNumber <= 118 &&
     typeof v.massNumber === 'number' &&
     Number.isInteger(v.massNumber) &&
-    v.massNumber >= 1 &&
+    // аудит R4, C5c: A >= Z (Z уже проверен как целое 1…118,
+    // поэтому A >= Z включает A >= 1)
+    v.massNumber >= v.atomicNumber &&
     typeof v.stateIndex === 'number' &&
     Number.isInteger(v.stateIndex) &&
     NUBASE_STATE_CODE_BY_INDEX[v.stateIndex as number] === v.stateCode &&
@@ -691,6 +751,12 @@ export interface NuclideCandidate {
    * дисциплина 4.3.2 — непустой и совпадающий с provenance.recordId).
    * Аудит R4, C5b: если идентификатор машинно распознаётся как строка
    * NUBASE2020, его поля сверяются с заявленными (Z, A, i, s) записи.
+   * Аудит R4, C5c: если запись заявляет источник NUBASE2020 —
+   * префиксом 'nubase2020:' в recordId либо provenance
+   * (sourceId='nubase' или datasetId='nubase2020') — идентификатор
+   * ОБЯЗАН машинно распознаваться как строка NUBASE2020; посторонние
+   * источники с собственными идентификаторами машинной сверке строк
+   * NUBASE2020 не подлежат.
    */
   recordId: string;
   /** Период полураспада (known/estimated, единица времени, 1 сигма). */
@@ -1295,10 +1361,21 @@ export function validateChemicalElement(element: unknown): string[] {
           // форм проекта — форма утилиты аудита либо форма каталога),
           // сверяется с заявленными полями записи: идентификатор,
           // противоречащий заявленной строке, не доказывает
-          // происхождение записи. Идентификатор каталога, НЕ
-          // распознаваемый как строка NUBASE2020, машинной сверке не
-          // подлежит (идентификатор каталога ≠ идентификатор строки
-          // источника) — дисциплина provenance выше сохраняется.
+          // происхождение записи.
+          //
+          // Аудит R4, C5c: нераспознанный идентификатор не пропускается
+          // молча, когда запись САМА заявляет источник NUBASE2020:
+          // - recordId использует префикс 'nubase2020:', но не
+          //   распознаётся (повреждённый формат, рассогласованная пара
+          //   i↔s, несоответствующий Z символ, A < Z) — ошибка;
+          // - provenance явно указывает sourceId='nubase' или
+          //   datasetId='nubase2020' (фактические значения
+          //   NUBASE2020_PROVENANCE каталога), а recordId не
+          //   распознаётся как строка источника — ошибка.
+          // Синтетические и посторонние источники с собственными
+          // идентификаторами (например тестовые 'test:…')
+          // совместимость сохраняют: к ним машинная сверка строк
+          // NUBASE2020 не применяется.
           if (
             isNonEmptyString(c.recordId) &&
             stateIndexOk &&
@@ -1315,6 +1392,20 @@ export function validateChemicalElement(element: unknown): string[] {
                 candIdFields.stateCode !== c.stateCode)
             ) {
               errors.push(where(`кандидат ${label}: recordId (${String(c.recordId)}) распознан как идентификатор строки NUBASE2020 (Z=${candIdFields.atomicNumber}, A=${candIdFields.massNumber}, i=${candIdFields.stateIndex}, s=${candIdFields.stateCode === '' ? '(пусто)' : candIdFields.stateCode}), но не согласован с заявленными полями записи (Z=${String(c.atomicNumber)}, A=${String(c.massNumber)}, i=${String(c.stateIndex)}, s=${String(c.stateCode) === '' ? '(пусто)' : String(c.stateCode)}): идентификатор, противоречащий заявленной строке источника, не доказывает происхождение записи (аудит R4, C5b)`));
+            }
+            if (candIdFields === null) {
+              // запись заявляет источник NUBASE2020 — префиксом
+              // recordId либо явными полями provenance; типы значений
+              // provenance проверяются до использования
+              const provSourceId = candProv?.sourceId;
+              const provDatasetId = candProv?.datasetId;
+              const claimsNubaseSource =
+                c.recordId.startsWith('nubase2020:') ||
+                (typeof provSourceId === 'string' && provSourceId.trim() === 'nubase') ||
+                (typeof provDatasetId === 'string' && provDatasetId.trim() === 'nubase2020');
+              if (claimsNubaseSource) {
+                errors.push(where(`кандидат ${label}: recordId (${String(c.recordId)}) не распознан как идентификатор строки NUBASE2020 (фактические формы проекта: nubase2020:Z=…,A=…,i=…,s=… либо nubase2020:Z=… <символ> A=… i=… [s=…]; допустимы только согласованные комбинации Z↔символ, A>=Z, i↔s), хотя запись заявляет источник NUBASE2020 (префикс recordId / provenance sourceId=nubase, datasetId=nubase2020): повреждённый или рассогласованный идентификатор не доказывает происхождение записи — заявленный источник обязан идентифицироваться распознаваемой строкой источника (аудит R4, C5c)`));
+              }
             }
           }
           if (!isNonEmptyString(c.halfLifeRawNotation)) {

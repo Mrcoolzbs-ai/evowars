@@ -794,6 +794,67 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(resOkAudit).toEqual([]);
   });
 
+  it('валидатор (R4, C5c): заявленный источник NUBASE2020 требует распознаваемый recordId', () => {
+    // (1) recordId использует префикс NUBASE2020, но пара i↔s
+    // невозможна (i=1 соответствует s=m, а не s=p): парсер возвращает
+    // null — раньше такая запись пропускалась молча
+    const impossiblePair = makeCandidate();
+    const impossiblePairId = 'nubase2020:Z=1 H A=1 i=1 s=p';
+    impossiblePair.recordId = impossiblePairId;
+    impossiblePair.provenance = { ...PROVENANCE, recordId: impossiblePairId };
+    impossiblePair.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: impossiblePairId } });
+    const res1 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([impossiblePair]); }));
+    expect(res1.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
+    expect(res1.some((e) => e.includes('заявляет источник NUBASE2020'))).toBe(true);
+    // (2) символ в префиксном recordId не соответствует Z (He при Z=1)
+    const wrongSymbol = makeCandidate();
+    const wrongSymbolId = 'nubase2020:Z=1 He A=1 i=0';
+    wrongSymbol.recordId = wrongSymbolId;
+    wrongSymbol.provenance = { ...PROVENANCE, recordId: wrongSymbolId };
+    wrongSymbol.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: wrongSymbolId } });
+    const res2 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([wrongSymbol]); }));
+    expect(res2.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
+    // (3) повреждённая структура recordId (без префикса) при
+    // provenance datasetId='nubase2020' — заявленный источник обязан
+    // идентифицироваться распознаваемой строкой источника
+    const damagedStructure = makeCandidate();
+    const damagedId = 'nubase:Z=1,H=1,i=0';
+    damagedStructure.recordId = damagedId;
+    damagedStructure.provenance = { ...PROVENANCE, datasetId: 'nubase2020', recordId: damagedId };
+    damagedStructure.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: damagedId } });
+    const res3 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([damagedStructure]); }));
+    expect(res3.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
+    expect(res3.some((e) => e.includes('datasetId=nubase2020'))).toBe(true);
+    // (4) то же при provenance sourceId='nubase'
+    const sourceIdClaim = makeCandidate();
+    const sourceIdClaimId = 'test:nubase-row-damaged';
+    sourceIdClaim.recordId = sourceIdClaimId;
+    sourceIdClaim.provenance = { ...PROVENANCE, sourceId: 'nubase', recordId: sourceIdClaimId };
+    sourceIdClaim.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: sourceIdClaimId } });
+    const res4 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([sourceIdClaim]); }));
+    expect(res4.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
+    // (5) позитив: provenance NUBASE2020 + корректный каталогный ID — валидно
+    const okNubase = makeCandidate();
+    const okNubaseId = 'nubase2020:Z=1 H A=1 i=0';
+    okNubase.recordId = okNubaseId;
+    okNubase.provenance = { ...PROVENANCE, sourceId: 'nubase', datasetId: 'nubase2020', recordId: okNubaseId };
+    okNubase.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { ...PROVENANCE, recordId: okNubaseId } });
+    const resOk = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([okNubase]); }));
+    expect(resOk).toEqual([]);
+    // (6) совместимость посторонних источников: синтетический
+    // идентификатор с собственным источником и обычные тестовые
+    // идентификаторы без NUBASE-заявлений проходят как раньше
+    const synthetic = makeCandidate();
+    const syntheticId = 'synthetic:lab-row-7';
+    synthetic.recordId = syntheticId;
+    synthetic.provenance = { sourceName: 'синтетический источник', sourceId: 'synthetic-lab', recordId: syntheticId };
+    synthetic.halfLife = knownValue(quantity(4.2, 'Ma'), { provenance: { sourceName: 'синтетический источник', sourceId: 'synthetic-lab', recordId: syntheticId } });
+    const resSynthetic = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([synthetic]); }));
+    expect(resSynthetic).toEqual([]);
+    const resTest = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([makeCandidate()]); }));
+    expect(resTest).toEqual([]);
+  });
+
   it('classifyNubaseState: контрольные примеры 92Tc p и 205Po p/q — дополнительные изомеры при контексте', () => {
     // Группа 92Tc NUBASE2020: ground (i=0), m (i=1), n (i=2), p (i=3).
     // Аудит R4, C5: строки группы — КОНКРЕТНЫЕ строки источника
@@ -949,6 +1010,21 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     expect(parseNubaseSourceRowRecordId('nubase2020:Z=001,A=000,i=1,s=m')).toBeNull();
     expect(parseNubaseSourceRowRecordId('nubase2020:Z=043,A=092,i=7,s=x')).toBeNull();
     expect(parseNubaseSourceRowRecordId('')).toBeNull();
+  });
+
+  it('parseNubaseSourceRowRecordId (R4, C5c): символ каталогной формы сверяется с Z; A < Z не распознаётся', () => {
+    // корректный символ: Z=84 — полоний Po (контрольная строка каталога)
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=84 Po A=209 i=1 s=m')).toEqual({ atomicNumber: 84, massNumber: 209, stateIndex: 1, stateCode: 'm' });
+    // основное состояние каталогной формы без « s=» — тоже распознаётся
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=84 Po A=209 i=0')).toEqual({ atomicNumber: 84, massNumber: 209, stateIndex: 0, stateCode: '' });
+    // символ формально корректен ([A-Z][a-z]?), но относится к ДРУГОМУ
+    // элементу: He — это Z=2, а не Z=84 — не строка NUBASE2020
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=84 He A=209 i=1 s=m')).toBeNull();
+    // несоответствие и у однобуквенного символа: Z=2 — He, а не H
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=2 H A=4 i=0')).toBeNull();
+    // физически невозможное массовое число A=12 < Z=84 — обе формы
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=84 Po A=12 i=1 s=m')).toBeNull();
+    expect(parseNubaseSourceRowRecordId('nubase2020:Z=084,A=012,i=1,s=m')).toBeNull();
   });
 
   it('classifyNubaseState (R4, C5b): химерная строка (recordId одной записи при паре другой) — indeterminate', () => {
