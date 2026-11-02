@@ -664,9 +664,9 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
     const res4 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([mCtx]); }));
     expect(res4.some((e) => e.includes('classificationBasis допускается только с правилом format'))).toBe(true);
     // рассогласованная sibling-строка (2, m) в основании — ошибки
-    // (аудит R4, C5b: пары (2, m) не существует в NUBASE2020 — i=2
-    // соответствует s=n, поэтому и идентификатор такой строки
-    // машинно не распознаётся)
+    // (пары (2, m) не существует в NUBASE2020 — i=2 соответствует
+    // s=n; рассогласованная пара не проходит уже проверку ФОРМЫ
+    // ссылки, до сверки recordId дело не доходит)
     const pBadSibling = makeStateCandidate(3, 'p', {
       rule: 'context-more-than-two-isomers',
       siblingStates: [
@@ -675,8 +675,9 @@ describe('Stage 4.3.3 (модель): валидатор записи ChemicalEl
       ]
     });
     const res5 = validateChemicalElement(damaged((el) => { el.representativeIsotopeCandidates = candidatesWith([pBadSibling]); }));
-    // (2, m) — рассогласованная пара: НЕ валидная строка источника (аудит R4, C5b)
-    expect(res5.some((e) => e.includes('не распознан как идентификатор строки NUBASE2020'))).toBe(true);
+    // (2, m) — несуществующая пара NUBASE2020: не проходит даже проверку
+    // ФОРМЫ ссылки (согласованность i↔s — часть формы, аудит R4)
+    expect(res5.some((e) => e.includes('обязана быть ссылкой на конкретную строку NUBASE2020'))).toBe(true);
     expect(res5.some((e) => e.includes('требуются sibling-строки'))).toBe(true);
   });
 
