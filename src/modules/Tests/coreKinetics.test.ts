@@ -373,6 +373,83 @@ describe('валидатор кинетических записей', () => {
 });
 
 // --------------------------------------------
+// 2a. Строгая runtime-валидация provenance
+// (корректирующая ревизия Stage 4.5.1 по аудиту)
+// --------------------------------------------
+
+describe('provenance кинетических записей: строгая runtime-валидация', () => {
+  it('пустой provenance {} у параметров отклоняется: источник не идентифицирован', () => {
+    expectProblem(
+      withArrhenius({ ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), provenance: {} as DataProvenance }),
+      'не идентифицирует источник'
+    );
+  });
+
+  it('sourceName: "" не считается источником', () => {
+    expectProblem(
+      withArrhenius({ ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), provenance: { sourceName: '' } as DataProvenance }),
+      'не идентифицирует источник'
+    );
+  });
+
+  it('sourceName из одних пробелов не считается источником (пустая строка не принимается)', () => {
+    expectProblem(
+      withArrhenius({ ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), provenance: { sourceName: '   ' } as DataProvenance }),
+      'пустая строка не идентифицирует'
+    );
+  });
+
+  it('datasetId: 123 (не строка) отклоняется', () => {
+    expectProblem(
+      withArrhenius({
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', datasetId: 123 } as unknown as DataProvenance
+      }),
+      'datasetId должен быть строкой'
+    );
+  });
+
+  it('некорректный rawInput (массив) отклоняется', () => {
+    expectProblem(
+      withArrhenius({
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', rawInput: [1, 2] } as unknown as DataProvenance
+      }),
+      'rawInput должен быть объектом'
+    );
+  });
+
+  it('некорректный rawInput (вложенный объект в значении) отклоняется', () => {
+    expectProblem(
+      withArrhenius({
+        ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'),
+        provenance: { reference: 'тестовая фикстура', rawInput: { nested: { a: 1 } } } as unknown as DataProvenance
+      }),
+      'должен быть скаляром'
+    );
+  });
+
+  it('корректный provenance с непустым reference проходит', () => {
+    const record = withArrhenius(
+      { ...arrhenius(1e-11, 0, 0, 'cm3_per_molecule_per_s'), provenance: { reference: 'JPL Publication 25-1 (тестовая фикстура)' } },
+      2,
+      'molecule_cm3',
+      'test-rxn-reference'
+    );
+    expect(validateKineticReactionRecord(record)).toEqual([]);
+  });
+
+  it('строгая проверка применяется и к provenance самой записи (record-level)', () => {
+    expectProblem({ ...arrheniusReaction(), provenance: {} as DataProvenance }, 'не идентифицирует источник');
+  });
+
+  it('обычные корректные kinetic records продолжают проходить', () => {
+    expect(validateKineticReactionRecord(arrheniusReaction())).toEqual([]);
+    expect(validateKineticReactionRecord(fallOffReaction())).toEqual([]);
+  });
+});
+
+// --------------------------------------------
 // 3. Вычислитель k(T): модифицированный Аррениус
 // --------------------------------------------
 

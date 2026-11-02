@@ -58,6 +58,14 @@
 //   эффективной fall-off константы в этом подэтапе не моделируется:
 //   в результате неопределённость честно не заполняется (не
 //   выдумывается ни правило, ни число);
+// - provenance кинетической записи строго валидируется
+//   runtime-проверкой (архитектурный образец — термодинамика):
+//   источник идентифицируется минимум одним непустым полем
+//   (sourceName | sourceId | datasetId | reference); пустые строки
+//   идентификации не принимаются; каждое необязательное поле при
+//   наличии обязано иметь правильный тип; rawInput — объект
+//   разрешённых скалярных значений (не массив); отсутствие
+//   источника не подменяется фиктивной строкой;
 // - обратные реакции (термодинамическое согласование через K(T)),
 //   фотохимические J-потоки и поверхностные реакции — по мере данных
 //   в других подэтапах; solveEquilibrium из кинетики не вызывается
@@ -283,8 +291,94 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isProvenanceLike(value: unknown): boolean {
-  return isRecord(value);
+/**
+ * Идентификация источника provenance: минимум один непустой
+ * идентификатор (sourceName | sourceId | datasetId | reference).
+ * Архитектурный образец — hasSourceIdentification() в
+ * thermodynamics.ts: пустая строка (и строка из пробелов)
+ * источник НЕ идентифицирует.
+ */
+function hasSourceIdentification(p: Record<string, unknown>): boolean {
+  return (
+    (typeof p.sourceName === 'string' && p.sourceName.trim() !== '') ||
+    (typeof p.sourceId === 'string' && p.sourceId.trim() !== '') ||
+    (typeof p.datasetId === 'string' && p.datasetId.trim() !== '') ||
+    (typeof p.reference === 'string' && p.reference.trim() !== '')
+  );
+}
+
+/** Поля DataProvenance, идентифицирующие источник (обязателен минимум один непустой). */
+const PROVENANCE_IDENTIFICATION_FIELDS: readonly string[] = ['sourceName', 'sourceId', 'datasetId', 'reference'];
+
+/** Все необязательные строковые поля DataProvenance (тип проверяется при наличии). */
+const PROVENANCE_STRING_FIELDS: readonly string[] = [
+  'sourceName', 'sourceId', 'datasetId', 'datasetVersion', 'recordId',
+  'reference', 'retrievedAt', 'method', 'applicability', 'limitations',
+  'conditions', 'modelVersion', 'license', 'note'
+];
+
+/**
+ * Строгая runtime-валидация provenance кинетической записи
+ * (корректирующая ревизия Stage 4.5.1 по независимому аудиту;
+ * ранее достаточно было «быть объектом» — пустой {} и поля с
+ * неправильными типами проходили валидацию). Проверяет:
+ * - объект (не массив, не null);
+ * - идентификацию источника: минимум один непустой sourceName |
+ *   sourceId | datasetId | reference; отсутствие источника НЕ
+ *   подменяется фиктивной строкой (константа без источника
+ *   не используется);
+ * - идентификационные поля при наличии — непустые строки: пустая
+ *   строка не принимается и не считается источником;
+ * - каждое необязательное поле DataProvenance при наличии имеет
+ *   правильный тип (строковые поля — string);
+ * - rawInput — объект с разрешёнными скалярными значениями
+ *   (number | string | boolean | null), а не массив и не
+ *   примитив; числа конечны (NaN/Infinity не несут данных).
+ * Диагностики добавляются в errors; исключений не бросает.
+ */
+function provenanceIssues(path: string, provenance: unknown, errors: string[]): void {
+  if (!isRecord(provenance)) {
+    errors.push(`${path}: provenance должен быть объектом`);
+    return;
+  }
+  const p = provenance;
+  for (const field of PROVENANCE_STRING_FIELDS) {
+    const value = p[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string') {
+      errors.push(`${path}: provenance.${field} должен быть строкой, получено ${typeof value}`);
+    } else if (
+      (PROVENANCE_IDENTIFICATION_FIELDS as readonly string[]).includes(field) &&
+      value.trim() === ''
+    ) {
+      errors.push(`${path}: provenance.${field} — пустая строка не идентифицирует источник`);
+    }
+  }
+  if (!hasSourceIdentification(p)) {
+    errors.push(
+      `${path}: provenance не идентифицирует источник (нужен непустой sourceName, sourceId, datasetId или reference); отсутствие источника не подменяется фиктивной строкой`
+    );
+  }
+  const raw = p.rawInput;
+  if (raw !== undefined && raw !== null) {
+    if (!isRecord(raw)) {
+      errors.push(
+        `${path}: provenance.rawInput должен быть объектом с разрешёнными скалярными значениями (number | string | boolean | null), а не массивом/примитивом`
+      );
+    } else {
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value === 'number') {
+          if (!Number.isFinite(value)) {
+            errors.push(`${path}: provenance.rawInput.${key} должен быть конечным числом, получено ${String(value)}`);
+          }
+        } else if (typeof value !== 'string' && typeof value !== 'boolean' && value !== null) {
+          errors.push(
+            `${path}: provenance.rawInput.${key} должен быть скаляром (number | string | boolean | null), получено ${typeof value}`
+          );
+        }
+      }
+    }
+  }
 }
 
 const UNCERTAINTY_KINDS: readonly string[] = ['interval', 'stddev', 'relative', 'bounded'];
@@ -368,8 +462,10 @@ function validateArrheniusParameters(
       }
     }
   }
-  if (!isProvenanceLike(p.provenance)) {
+  if (p.provenance === undefined || p.provenance === null) {
     errors.push(`${label}: provenance обязателен (константа без источника не используется)`);
+  } else {
+    provenanceIssues(`${label}.provenance`, p.provenance, errors);
   }
 }
 
@@ -403,8 +499,10 @@ function validateFallOffParameters(
   if (value.thirdBodyNote !== undefined && typeof value.thirdBodyNote !== 'string') {
     errors.push(`${label}: thirdBodyNote должен быть строкой`);
   }
-  if (!isProvenanceLike(value.provenance)) {
+  if (value.provenance === undefined || value.provenance === null) {
     errors.push(`${label}: provenance обязателен`);
+  } else {
+    provenanceIssues(`${label}.provenance`, value.provenance, errors);
   }
   const lo = value.lowPressureLimit;
   const hi = value.highPressureLimit;
@@ -509,8 +607,8 @@ export function validateKineticReactionRecord(record: unknown): string[] {
   } else {
     errors.push(`статус константы скорости должен быть known | estimated | unknown, получено «${String(rcStatus)}»`);
   }
-  if (record.provenance !== undefined && !isProvenanceLike(record.provenance)) {
-    errors.push('provenance записи должен быть объектом');
+  if (record.provenance !== undefined) {
+    provenanceIssues('provenance записи', record.provenance, errors);
   }
   if (record.reaction !== undefined && typeof record.reaction !== 'string') {
     errors.push('reaction должен быть строкой');

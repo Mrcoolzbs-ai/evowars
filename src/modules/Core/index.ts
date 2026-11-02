@@ -14,6 +14,7 @@
 //   species           — каталог химических видов;
 //   elements          — каталог химических элементов периодической таблицы (4.3.3);
 //   thermodynamics    — термодинамические свойства видов (4.3.1);
+//   kinetics          — контракты кинетических записей и вычислитель k(T) (4.5.1–4.5.2);
 //   reservoir         — материальные и энергетические резервуары;
 //   fluxLedger        — потоки и балансы сохранения;
 //   reactionLedger    — журнал реакционных транзакций и стехиометрический аудит (4.2.3.2);
@@ -35,6 +36,7 @@ export * from './elements';
 export * from './thermodynamics';
 export * from './thermoFunctions';
 export * from './equilibrium';
+export * from './kinetics';
 export * from './reservoir';
 export * from './fluxLedger';
 export * from './reactionLedger';
