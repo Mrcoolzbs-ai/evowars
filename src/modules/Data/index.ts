@@ -149,14 +149,17 @@ export type {
   NubaseAuditReport
 } from './nubaseAudit';
 
-// Stage 4.5.4 (ревизия 4.5.4.1): каталог кинетических записей (JPL/KIDA) —
+// Stage 4.5.4 (ревизия 4.5.4.2): каталог кинетических записей (JPL/KIDA) —
 // реакционные идентичности экспорта KIDA three-body
 // (kida_reac_tb_2015-03-19_1.csv из копии SophiaAtmo/PATMO@d78ec8e2,
 // директория data/kida/, обращение 2026-11-03); параметры закона НЕ
 // промоутированы (все константы unknown — вычислитель 4.5.2 отказывает);
-// дословные числовые параметры и исходные строки CSV НЕ воспроизводятся
-// (лицензия unverified — KIDA Legal Notices); блокирующие вопросы —
-// KINETIC_CATALOG_BLOCKING_QUESTIONS, источники — DATA_PROVENANCE.md §2.28.
+// дословные числовые параметры, исходные строки CSV и метаданные
+// курирования (networkMultiplicity, recommendation) НЕ воспроизводятся
+// (лицензия unverified — KIDA Legal Notices; решение 4.5.4.2 НЕ объявляет
+// оставшиеся поля автоматически лицензионно очищенными); блокирующие
+// вопросы — KINETIC_CATALOG_BLOCKING_QUESTIONS, источники —
+// DATA_PROVENANCE.md §2.28.
 import {
   KIDA_DATABASE_SOURCE,
   KIDA_TB_EXPORT_SOURCE,
@@ -187,3 +190,4 @@ export type {
   KidaTbRecordIdentity,
   KineticsCatalog
 } from './kineticsCatalog';
+

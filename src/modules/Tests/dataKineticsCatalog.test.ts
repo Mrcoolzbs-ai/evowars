@@ -1,11 +1,14 @@
 /**
- * Stage 4.5.4 (ревизия 4.5.4.1) — тесты каталога кинетических записей KIDA/JPL.
+ * Stage 4.5.4 (ревизия 4.5.4.2) — тесты каталога кинетических записей KIDA/JPL.
  *
  * Группы: базовый набор (идентичности, unknown-константы); fail-closed интеграция
- * с вычислителем 4.5.2 и блокирующие вопросы 4.5.4.1; ЛИЦЕНЗИОННАЯ БЕЗОПАСНОСТЬ —
- * дословные данные экспорта KIDA не воспроизводятся в репозитории; строгая сборка
- * каталога на SYNTHETIC-фикстурах; ошибки схемы/единиц/диапазонов валидатора 4.5.1.
- * Параметры JPL/KIDA НЕ промоутированы: все записи unknown — fail-closed.
+ * с вычислителем 4.5.2 и блокирующие вопросы; ЛИЦЕНЗИОННАЯ БЕЗОПАСНОСТЬ —
+ * структурные проверки без воспроизведения дословных данных экспорта KIDA
+ * (ревизия 4.5.4.2: дословные числовые литералы из теста УДАЛЕНЫ; проверяются
+ * разрешённые ключи rawInput, допустимые числовые значения и запрет ключей
+ * параметров закона скорости и метаданных курирования); строгая сборка
+ * каталога на SYNTHETIC-фикстурах; ошибки схемы/единиц/диапазонов валидатора
+ * 4.5.1. Параметры JPL/KIDA НЕ промоутированы: все записи unknown — fail-closed.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -32,6 +35,8 @@ const EXPECTED_IDS: readonly string[] = [
   'kida-tb-2015-03-19-89',
   'kida-tb-2015-03-19-106'
 ];
+
+const KIDA_REACTION_NUMBERS: readonly number[] = [1, 70, 72, 89, 106];
 
 function kineticsError(fn: () => unknown): KineticsError {
   try {
@@ -144,7 +149,7 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
     expect(kidaTbRecordId(1)).toBe('kida-tb-2015-03-19-1');
     expect(kidaTbRecordId(106)).toBe('kida-tb-2015-03-19-106');
     const numbers = KIDA_TB_RECORD_IDENTITIES.map((i) => i.kidaReactionNumber);
-    expect(numbers).toEqual([1, 70, 72, 89, 106]);
+    expect(numbers).toEqual([...KIDA_REACTION_NUMBERS]);
   });
 
   it('константы всех записей — unknown без параметров (параметры не промоутированы)', () => {
@@ -220,7 +225,7 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
   });
 });
 
-describe('Stage 4.5.4: fail-closed интеграция и блокирующие вопросы 4.5.4.1', () => {
+describe('Stage 4.5.4: fail-closed интеграция и блокирующие вопросы 4.5.4.1/4.5.4.2', () => {
   it('evaluateRateConstant отклоняет каждую запись каталога (no_kinetic_data)', () => {
     for (const record of KINETIC_CATALOG_DATA) {
       const error = kineticsError(() => evaluateRateConstant(record, quantity(300, 'K')));
@@ -234,12 +239,17 @@ describe('Stage 4.5.4: fail-closed интеграция и блокирующи�
       KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('НЕ представима точно в контракте 4.5.2'))
     ).toBe(true);
     expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('cm6.molecule-2.s-1'))).toBe(true);
-    expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('JPL Evaluation No. 20'))).toBe(true);
+    expect(
+      KINETIC_CATALOG_BLOCKING_QUESTIONS.some(
+        (q) => q.includes('JPL Evaluation No. 20') && q.includes('публично предлагается')
+      )
+    ).toBe(true);
     expect(
       KINETIC_CATALOG_BLOCKING_QUESTIONS.some(
         (q) => q.includes('Legal Notices') && q.includes('распространение')
       )
     ).toBe(true);
+    expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('networkMultiplicity'))).toBe(true);
   });
 
   it('дескрипторы источников проверяемы: URL, цитирование, дата, честные статусы', () => {
@@ -254,38 +264,22 @@ describe('Stage 4.5.4: fail-closed интеграция и блокирующи�
     expect(KIDA_TB_EXPORT_SOURCE.url).toContain('data/kida/');
     expect(KIDA_TB_EXPORT_SOURCE.note ?? '').toContain('#MODIFIED');
     expect(KIDA_DATABASE_SOURCE.note ?? '').toContain('изображениями');
-    expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('НЕ импортирован');
+    expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('публично предлагается');
+    expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('НЕ импортированы');
     expect(JPL_EVALUATION_SOURCE.citation).toContain('10.48577/jpl.KFQ0TZ');
     expect(JPL_EVALUATION_SOURCE.citation).toContain('Burkholder');
   });
 });
 
-describe('Stage 4.5.4: лицензионная безопасность (дословные данные не воспроизводятся)', () => {
-  it('сериализованный каталог не содержит дословных строк и числовых блоков экспорта', () => {
-    const serialized = JSON.stringify(KINETIC_CATALOG_DATA) + JSON.stringify(KIDA_TB_RECORD_IDENTITIES);
-    for (const fragment of [
-      'rawLine',
-      '9.140e-33', '4.330e-32', '6.780e-31', '1.000e-31', '4.400e-32',
-      '4.900e-11', '7.500e-11', '1.000e-10',
-      '1.000e+99', 'logn'
-    ]) {
-      expect(serialized.includes(fragment), `фрагмент ${fragment}`).toBe(false);
-    }
-    for (const key of [
-      'k0Alpha', 'k0Beta', 'k0Gamma', 'k0UncertaintyFactor',
-      'kInfAlpha', 'kInfBeta', 'kInfGamma',
-      'fcA', 'fcB', 'fcC', 'fcD', 'fcUncertaintyFactor',
-      'formulaCode', 'uncertaintyFactor', 'temperatureDependenceUncertainty',
-      'tMinK', 'tMaxK', 'pMin', 'pMax', 'globalFormulaCode'
-    ]) {
-      expect(serialized.includes(`"${key}"`), `ключ ${key}`).toBe(false);
-    }
-  });
-
-  it('rawInput каждой записи содержит только идентификационные ключи', () => {
+describe('Stage 4.5.4: лицензионная безопасность (структурные проверки без воспроизведения данных)', () => {
+  it('rawInput каждой записи содержит только разрешённые идентификационные ключи', () => {
     const allowedKeys = [
-      'kidaReactionNumber', 'networkMultiplicity', 'recommendation',
-      'reactant1', 'reactant2', 'reactant3', 'product1', 'product2'
+      'kidaReactionNumber',
+      'reactant1',
+      'reactant2',
+      'reactant3',
+      'product1',
+      'product2'
     ];
     for (const record of KINETIC_CATALOG_DATA) {
       const rawInput = rateProvenanceOf(record).rawInput;
@@ -293,19 +287,72 @@ describe('Stage 4.5.4: лицензионная безопасность (дос
     }
   });
 
-  it('числовые значения rawInput — только идентификаторы и метаданные курирования', () => {
-    const numericKeys = ['kidaReactionNumber', 'networkMultiplicity', 'recommendation'];
-    for (const record of KINETIC_CATALOG_DATA) {
-      const rawInput = rateProvenanceOf(record).rawInput ?? {};
-      for (const [key, value] of Object.entries(rawInput)) {
-        if (typeof value === 'number') {
-          expect(numericKeys.includes(key), `ключ ${key}`).toBe(true);
-          expect(Number.isInteger(value)).toBe(true);
-          expect(value).toBeGreaterThanOrEqual(0);
-        } else {
-          expect(typeof value === 'string').toBe(true);
+  it('числовые значения сериализованного каталога — только целочисленные номера реакций KIDA', () => {
+    const numericLeaves: { path: string; value: number }[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (typeof node === 'number') {
+        numericLeaves.push({ path, value: node });
+        return;
+      }
+      if (Array.isArray(node)) {
+        node.forEach((item, i) => walk(item, `${path}[${i}]`));
+        return;
+      }
+      if (node !== null && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) {
+          walk(value, `${path}.${key}`);
         }
       }
+    };
+    walk(KINETIC_CATALOG_DATA, 'catalog');
+    walk(KIDA_TB_RECORD_IDENTITIES, 'identities');
+    expect(numericLeaves.length).toBeGreaterThan(0);
+    for (const leaf of numericLeaves) {
+      expect(Number.isInteger(leaf.value), `путь ${leaf.path}`).toBe(true);
+      expect(Number.isFinite(leaf.value), `путь ${leaf.path}`).toBe(true);
+      expect(
+        KIDA_REACTION_NUMBERS.includes(leaf.value),
+        `путь ${leaf.path} (${leaf.value}) — допустимы только номера реакций KIDA`
+      ).toBe(true);
+    }
+  });
+
+  it('сериализованный каталог не содержит ключей параметров закона скорости и метаданных курирования', () => {
+    const serialized = JSON.stringify(KINETIC_CATALOG_DATA) + JSON.stringify(KIDA_TB_RECORD_IDENTITIES);
+    const forbiddenKeys = [
+      'k0Alpha',
+      'k0Beta',
+      'k0Gamma',
+      'k0UncertaintyFactor',
+      'kInfAlpha',
+      'kInfBeta',
+      'kInfGamma',
+      'kInfUncertaintyFactor',
+      'fcA',
+      'fcB',
+      'fcC',
+      'fcD',
+      'fcUncertaintyFactor',
+      'formulaCode',
+      'globalFormulaCode',
+      'uncertaintyFactor',
+      'temperatureDependenceUncertainty',
+      'tMinK',
+      'tMaxK',
+      'pMin',
+      'pMax',
+      'rawLine',
+      'preExponentialA',
+      'temperatureExponentN',
+      'lowPressureLimit',
+      'highPressureLimit',
+      'centeringFactorFc',
+      'broadeningN',
+      'networkMultiplicity',
+      'recommendation'
+    ];
+    for (const key of forbiddenKeys) {
+      expect(serialized.includes(`"${key}"`), `ключ ${key}`).toBe(false);
     }
   });
 });
