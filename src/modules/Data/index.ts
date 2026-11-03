@@ -148,3 +148,43 @@ export type {
   NubaseAuditRunMetadata,
   NubaseAuditReport
 } from './nubaseAudit';
+
+// Stage 4.5.4: каталог кинетических параметров реакций (JPL/KIDA) —
+// реакционные идентичности из дословного экспорта KIDA three-body
+// (kida_reac_tb_2015-03-19_1.csv, PATMO@d78ec8e2, 2026-11-03);
+// параметры закона НЕ промоутированы (константы в статусе unknown),
+// исходные блоки k0/k∞/Fc сохранены в provenance.rawInput без
+// переинтерпретации; блокирующие вопросы — в атрибуции
+// dataProvenance.md и KINETIC_CATALOG_BLOCKING_QUESTIONS.
+import {
+  KIDA_DATABASE_SOURCE,
+  KIDA_TB_EXPORT_SOURCE,
+  JPL_EVALUATION_SOURCE,
+  KIDA_TB_RAW_RECORDS,
+  KINETIC_CATALOG_DATA,
+  KINETIC_CATALOG_BLOCKING_QUESTIONS,
+  kidaTbRecordId,
+  buildKidaTbReactionRecord,
+  buildKineticsCatalog,
+  KineticsCatalogError
+} from './kineticsCatalog';
+
+export {
+  KIDA_DATABASE_SOURCE,
+  KIDA_TB_EXPORT_SOURCE,
+  JPL_EVALUATION_SOURCE,
+  KIDA_TB_RAW_RECORDS,
+  KINETIC_CATALOG_DATA,
+  KINETIC_CATALOG_BLOCKING_QUESTIONS,
+  kidaTbRecordId,
+  buildKidaTbReactionRecord,
+  buildKineticsCatalog,
+  KineticsCatalogError
+};
+export type {
+  KineticsDataSourceDescriptor,
+  KidaTbRawRecord,
+  KidaTbParameterBlock,
+  KidaTbFcBlock,
+  KineticsCatalog
+} from './kineticsCatalog';
