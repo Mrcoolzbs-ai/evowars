@@ -207,6 +207,15 @@ export interface OdeSolverStats {
   acceptedSteps: number;
   rejectedSteps: number;
   newtonFailures: number;
+  /**
+   * Вызовы rhs, идущие в счёт траектории интегрирования:
+   * выбор начального шага и стадийные значения метода.
+   * НЕ включает вызовы rhs, используемые ТОЛЬКО для
+   * конечных разностей численного якобиана (n+1 вызов на
+   * каждую оценку якобиана при отсутствии problem.jacobian):
+   * счётчик отражает стоимость интегрирования траектории, а не
+   * полную стоимость оценки якобиана.
+   */
   rhsEvaluations: number;
   jacobianEvaluations: number;
   luFactorizations: number;

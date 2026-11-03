@@ -28,6 +28,12 @@
 // через spy rhs (различает новый d2 и старое norm(f1)),
 // регрессия minorNegativeCount: кандидат с малым минусом,
 // отклонённый линейным инвариантом, не попадает в счётчик.
+// Этап 4 корректирующей ревизии: minStep проверяется против
+// эффективного максимума шага min(maxStep, tEnd − t0); ошибки
+// rhs в конечных разностях численного якобиана диагностируются
+// честно (rhs_* вместо jacobian_*), вызовы конечных разностей
+// не учитываются в rhsEvaluations (задокументировано в
+// OdeSolverStats).
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -1427,6 +1433,103 @@ describe('Корректирующая ревизия 4.5.3 (этап 3): точ
     expect(result.y[0]).toBe(1);
     expect(result.y[1]).toBe(1);
     expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+  });
+});
+
+describe('Корректирующая ревизия 4.5.3 (этап 4): minStep против эффективного максимума шага и диагностика rhs в численном якобиане', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('minStep больше эффективного максимума шага min(maxStep, span) — invalid_input', () => {
+    // Аудиторский пример: maxStep = 10 больше длины интервала (1),
+    // поэтому старая проверка minStep > maxStep не срабатывала:
+    // minStep = 2, maxStep = 10 на [0, 1]. Шаг длиннее tEnd − t0
+    // невозможен — противоречие, а не разрешимая конфигурация.
+    let caught: unknown;
+    try {
+      backend.solveOde(decayProblem, { minStep: 2, maxStep: 10 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(OdeSolverError);
+    expect((caught as OdeSolverError).code).toBe('invalid_input');
+    expect((caught as OdeSolverError).details).toMatchObject({
+      minStep: 2,
+      maxStep: 10,
+      effectiveMaxStep: 1,
+      span: 1
+    });
+    // minStep ≤ эффективного максимума при maxStep > span — валидно:
+    // проверка не перезажает допустимые конфигурации.
+    const ok = backend.solveOde(decayProblem, { minStep: 0.25, maxStep: 10 });
+    expect(ok.status).toBe('solved');
+    expect(Math.abs(ok.y[0] - Math.exp(-1))).toBeLessThan(1e-6);
+  });
+
+  it('rhs бросает исключение на возмущённом состоянии конечных разностей → rhs_callback_error', () => {
+    let baseCalls = 0;
+    let perturbedCalls = 0;
+    const problem = {
+      ...decayProblem,
+      rhs: (_t: number, y: readonly number[]): number[] => {
+        // базовое состояние y0 = [1] валидно; возмущённое
+        // (y[0] + sqrt(eps)·max(|y[0]|, 1e-8)) — бросает:
+        // старый код превратил бы это в jacobian_callback_error
+        if (y[0] === 1) {
+          baseCalls++;
+          return [-y[0]];
+        }
+        perturbedCalls++;
+        throw new Error('rhs взорвался на возмущённом состоянии');
+      }
+    };
+    expectOdeError(
+      () => backend.solveOde(problem, { initialStep: 0.1 }),
+      'rhs_callback_error'
+    );
+    // ошибка пришла именно из конечных разностей: базовых вызовов
+    // ровно два (выбор начального шага + f0 численного якобиана),
+    // возмущённых — один
+    expect(baseCalls).toBe(2);
+    expect(perturbedCalls).toBe(1);
+  });
+
+  it('rhs возвращает неверную размерность на возмущённом состоянии → rhs_dimension_mismatch', () => {
+    const problem = {
+      ...decayProblem,
+      rhs: (_t: number, y: readonly number[]): number[] =>
+        y[0] === 1 ? [-y[0]] : [0, 0] // длина 2 вместо 1
+    };
+    expectOdeError(
+      () => backend.solveOde(problem, { initialStep: 0.1 }),
+      'rhs_dimension_mismatch'
+    );
+  });
+
+  it('rhs возвращает NaN на возмущённом состоянии → rhs_non_finite', () => {
+    const problem = {
+      ...decayProblem,
+      rhs: (_t: number, y: readonly number[]): number[] =>
+        y[0] === 1 ? [-y[0]] : [NaN]
+    };
+    expectOdeError(
+      () => backend.solveOde(problem, { initialStep: 0.1 }),
+      'rhs_non_finite'
+    );
+  });
+
+  it('аналитический якобиан по-прежнему → jacobian_callback_error (регрессия passthrough)', () => {
+    // пропуск ошибок rhs_* не должен съедать диагностику
+    // пользовательского аналитического якобиана
+    expectOdeError(
+      () =>
+        backend.solveOde({
+          ...decayProblem,
+          jacobian: () => {
+            throw new Error('boom');
+          }
+        }),
+      'jacobian_callback_error'
+    );
   });
 });
 

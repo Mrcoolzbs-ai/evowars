@@ -117,6 +117,23 @@
 //     (fail-closed страховка от не-конечных норм), h0 ≤ span
 //     ДО пробного вызова rhs, итог h = min(100·h0, h1, maxStep,
 //     span), ветка малых d1/d2 — без изменений.
+//
+// Этап 4 корректирующей ревизии (03.11.2026, по независимому
+// аудиту принятого HEAD):
+// 11. minStep проверяется против ЭФФЕКТИВНОГО максимума шага
+//     min(maxStep, tEnd − t0): maxStep, превышающий длину
+//     интервала, больше не маскирует противоречие
+//     minStep > длины интервала (шаг длиннее интервала
+//     невозможен) — invalid_input.
+// 12. Численный якобиан вызывает rhs через ту же валидацию,
+//     что и интегратор: исключение — rhs_callback_error,
+//     неверная размерность — rhs_dimension_mismatch, NaN/
+//     Infinity — rhs_non_finite (НЕ jacobian_callback_error:
+//     источник ошибки — rhs, а не якобиан; пользовательский
+//     аналитический якобиан по-прежнему даёт
+//     jacobian_callback_error). Вызовы rhs, идущие только на
+//     конечные разности, не увеличивают rhsEvaluations —
+//     конвенция счётчика задокументирована в OdeSolverStats.
 
 import type {
   OdeSolverBackend,
@@ -317,6 +334,11 @@ export function luSolve(F: LuDecomposition, b: readonly number[]): number[] {
  * Численный якобиан конечными разностями вперёд: по столбцам,
  * шаг delta_j = sqrt(eps)·max(|y_j|, 1e-8). Используется, когда
  * problem.jacobian не задан. Стоимость: n+1 вызовов rhs.
+ * Передаваемый rhs обязан быть валидирующей обёрткой
+ * (callRhsForFiniteDifferences): результаты возмущённых вызовов
+ * проверяются на размерность и конечность, ошибки rhs получают
+ * коды rhs_* (а не jacobian_*); вызовы конечных разностей НЕ
+ * учитываются в rhsEvaluations.
  */
 export function createNumericalJacobian(rhs: OdeRhs, stateDimension: number): OdeJacobian {
   const n = stateDimension;
@@ -415,6 +437,14 @@ function resolveOptions(problem: OdeSolverProblem, options: OdeSolverOptions | u
   }
   if (opts.minStep !== undefined && opts.minStep > maxStep) {
     throw new OdeSolverError('invalid_input', `minStep (${opts.minStep}) больше maxStep (${maxStep}): противоречивые лимиты шага`);
+  }
+  // Эффективный максимум шага ограничен длиной интервала:
+  // maxStep, превышающий tEnd − t0, не должен маскировать
+  // противоречие minStep > длины интервала — шаг длиннее
+  // интервала интегрирования невозможен (этап 4 ревизии).
+  const effectiveMaxStep = Math.min(maxStep, span);
+  if (opts.minStep !== undefined && opts.minStep > effectiveMaxStep) {
+    throw new OdeSolverError('invalid_input', `minStep (${opts.minStep}) больше эффективного максимума шага (${effectiveMaxStep} = min(maxStep ${maxStep}, длина интервала ${span})): шаг не может быть одновременно не меньше minStep и уложиться в интервал`, { minStep: opts.minStep, maxStep, effectiveMaxStep, span });
   }
   // Лимиты — только КОНЕЧНЫЕ ЦЕЛЫЕ ≥ 1: NaN/Infinity/ноль/
   // отрицательные/дробные значения — некорректный вход, а не
@@ -547,11 +577,52 @@ function callRhs(problem: OdeSolverProblem, t: number, y: number[], ctx: RunCont
   return r;
 }
 
+/**
+ * Валидация rhs для вызовов конечных разностей численного
+ * якобиана: та же диагностика, что и callRhs — исключение
+ * rhs_callback_error, неверная размерность
+ * rhs_dimension_mismatch, NaN/Infinity rhs_non_finite, — но
+ * вызов НЕ увеличивает rhsEvaluations (конвенция счётчика:
+ * вызовы, идущие только на конечные разности якобиана, в нём
+ * не учитываются; см. JSDoc OdeSolverStats). Метка источника
+ * finite_differences позволяет callJacobian пропустить эти
+ * ошибки без превращения в jacobian_callback_error (этап 4
+ * ревизии): источник ошибки — rhs, а не якобиан.
+ */
+function callRhsForFiniteDifferences(problem: OdeSolverProblem, t: number, y: readonly number[]): number[] {
+  let r: number[];
+  try {
+    r = problem.rhs(t, y);
+  } catch {
+    throw new OdeSolverError('rhs_callback_error', `rhs-обратный вызов бросил исключение в конечных разностях численного якобиана при t = ${t}`, { t, source: 'finite_differences' });
+  }
+  const n = y.length;
+  if (!Array.isArray(r) || r.length !== n) {
+    throw new OdeSolverError('rhs_dimension_mismatch', `rhs вернул ${Array.isArray(r) ? `массив длины ${r.length}` : 'не массив'} вместо ${n} компонент в конечных разностях численного якобиана при t = ${t}`, { t, source: 'finite_differences' });
+  }
+  for (const v of r) {
+    if (!Number.isFinite(v)) {
+      throw new OdeSolverError('rhs_non_finite', `rhs вернул не-конечное значение в конечных разностях численного якобиана при t = ${t}`, { t, source: 'finite_differences' });
+    }
+  }
+  return r;
+}
+
 function callJacobian(jacobian: OdeJacobian, t: number, y: number[], ctx: RunContext): number[][] {
   let J: number[][];
   try {
     J = jacobian(t, y);
-  } catch {
+  } catch (e) {
+    // Ошибки RHS внутри конечных разностей численного якобиана
+    // сохраняют свои диагностические коды (rhs_callback_error /
+    // rhs_dimension_mismatch / rhs_non_finite) и метку источника
+    // finite_differences: источник ошибки — rhs-обратный вызов,
+    // а не якобиан (этап 4 ревизии). Все остальные исключения
+    // (в т.ч. пользовательский аналитический якобиан) —
+    // jacobian_callback_error.
+    if (e instanceof OdeSolverError && (e.code === 'rhs_callback_error' || e.code === 'rhs_dimension_mismatch' || e.code === 'rhs_non_finite') && e.details?.source === 'finite_differences') {
+      throw e;
+    }
     throw new OdeSolverError('jacobian_callback_error', `якобиан-обратный вызов бросил исключение при t = ${t}`, { t });
   }
   ctx.stats.jacobianEvaluations++;
@@ -767,7 +838,13 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     minAcceptedStepSize: Infinity
   };
   const ctx: RunContext = { stats, rtol: opts.rtol, atol: opts.atol };
-  const jacobian: OdeJacobian = problem.jacobian ?? createNumericalJacobian((t, y) => problem.rhs(t, y), n);
+  // Численный якобиан вызывает rhs через ту же валидацию, что и
+  // интегратор (размерность, конечность, стабильные коды ошибок):
+  // ошибки rhs в конечных разностях НЕ маскируются под
+  // jacobian_callback_error. Вызовы конечных разностей не
+  // увеличивают rhsEvaluations (конвенция счётчика — см. JSDoc
+  // OdeSolverStats).
+  const jacobian: OdeJacobian = problem.jacobian ?? createNumericalJacobian((t, y) => callRhsForFiniteDifferences(problem, t, y), n);
   const nonNegativeIndices = problem.nonNegativeIndices ?? [];
   const linearInvariants = problem.linearInvariants ?? [];
   const newtonTol = Math.max((10 * EPS) / opts.rtol, Math.min(0.03, Math.sqrt(opts.rtol)));
