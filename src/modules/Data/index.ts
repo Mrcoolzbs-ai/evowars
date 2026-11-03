@@ -149,18 +149,19 @@ export type {
   NubaseAuditReport
 } from './nubaseAudit';
 
-// Stage 4.5.4: каталог кинетических параметров реакций (JPL/KIDA) —
-// реакционные идентичности из дословного экспорта KIDA three-body
-// (kida_reac_tb_2015-03-19_1.csv, PATMO@d78ec8e2, 2026-11-03);
-// параметры закона НЕ промоутированы (константы в статусе unknown),
-// исходные блоки k0/k∞/Fc сохранены в provenance.rawInput без
-// переинтерпретации; блокирующие вопросы — в атрибуции
-// dataProvenance.md и KINETIC_CATALOG_BLOCKING_QUESTIONS.
+// Stage 4.5.4 (ревизия 4.5.4.1): каталог кинетических записей (JPL/KIDA) —
+// реакционные идентичности экспорта KIDA three-body
+// (kida_reac_tb_2015-03-19_1.csv из копии SophiaAtmo/PATMO@d78ec8e2,
+// директория data/kida/, обращение 2026-11-03); параметры закона НЕ
+// промоутированы (все константы unknown — вычислитель 4.5.2 отказывает);
+// дословные числовые параметры и исходные строки CSV НЕ воспроизводятся
+// (лицензия unverified — KIDA Legal Notices); блокирующие вопросы —
+// KINETIC_CATALOG_BLOCKING_QUESTIONS, источники — DATA_PROVENANCE.md §2.28.
 import {
   KIDA_DATABASE_SOURCE,
   KIDA_TB_EXPORT_SOURCE,
   JPL_EVALUATION_SOURCE,
-  KIDA_TB_RAW_RECORDS,
+  KIDA_TB_RECORD_IDENTITIES,
   KINETIC_CATALOG_DATA,
   KINETIC_CATALOG_BLOCKING_QUESTIONS,
   kidaTbRecordId,
@@ -173,7 +174,7 @@ export {
   KIDA_DATABASE_SOURCE,
   KIDA_TB_EXPORT_SOURCE,
   JPL_EVALUATION_SOURCE,
-  KIDA_TB_RAW_RECORDS,
+  KIDA_TB_RECORD_IDENTITIES,
   KINETIC_CATALOG_DATA,
   KINETIC_CATALOG_BLOCKING_QUESTIONS,
   kidaTbRecordId,
@@ -183,8 +184,6 @@ export {
 };
 export type {
   KineticsDataSourceDescriptor,
-  KidaTbRawRecord,
-  KidaTbParameterBlock,
-  KidaTbFcBlock,
+  KidaTbRecordIdentity,
   KineticsCatalog
 } from './kineticsCatalog';
