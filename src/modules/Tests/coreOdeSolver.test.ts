@@ -9,6 +9,14 @@
 // неотрицательность без молчаливого clipping, линейные
 // инварианты, диагностические коды ошибок и честность
 // capabilities (фейковые ODE-бэкенды ловятся валидатором).
+//
+// Корректирующая ревизия 4.5.3 (по независимому аудиту):
+// начальный шаг (Hairer/SciPy select_initial_step, без
+// нулевых шагов при y0 = 0), численная устойчивость
+// (NaN/Infinity не проходят в solved), строгие лимиты,
+// неотрицательность y0, масштабируемый допуск инвариантов
+// (atol/rtol/|expected|, опции absTolerance/relTolerance),
+// статистика attemptedSteps = acceptedSteps + rejectedSteps.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -117,7 +125,7 @@ describe('Stage 4.5.3 Radau IIA: таблица Бутчера и констан
     expect(RADAU_IIA_MAX_STATE_DIMENSION).toBe(64);
   });
 
-  it('набор диагностических кодов ошибок полный (13 кодов)', () => {
+  it('набор диагностических кодов ошибок полный (14 кодов)', () => {
     expect([...ODE_ERROR_CODES]).toEqual([
       'invalid_input',
       't_eval_invalid',
@@ -131,7 +139,8 @@ describe('Stage 4.5.3 Radau IIA: таблица Бутчера и констан
       'max_steps_exceeded',
       'min_step_violated',
       'nonneg_violation',
-      'invariant_violation'
+      'invariant_violation',
+      'numerical_failure'
     ]);
   });
 
@@ -505,7 +514,10 @@ describe('Stage 4.5.3 Radau IIA: эталон Robertson', () => {
     // инвариант проверялся после каждого принятого шага
     expect(result.diagnostics.invariantChecks).toBeGreaterThan(0);
     expect(result.stats.acceptedSteps).toBeGreaterThan(0);
-    expect(result.stats.attemptedSteps).toBeGreaterThanOrEqual(result.stats.acceptedSteps);
+    // честная статистика: каждая попытка шага заканчивается
+    // принятием либо отказом; отказы Ньютона учтены в rejectedSteps
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+    expect(result.stats.rejectedSteps).toBeGreaterThanOrEqual(result.stats.newtonFailures);
     expect(result.stats.maxNewtonIterationsUsed).toBeLessThanOrEqual(10);
   });
 });
@@ -774,5 +786,329 @@ describe('Stage 4.5.3 Radau IIA: линейные инварианты', () => {
     expect(result.diagnostics.invariantChecks).toBeGreaterThan(0);
     // x(t) − y(t) = 0 сохраняется
     expect(Math.abs(result.y[0] - result.y[1])).toBeLessThan(1e-9);
+  });
+});
+
+// ============================================
+// КОРРЕКТИРУЮЩАЯ РЕВИЗИЯ 4.5.3 (по независимому аудиту)
+// ============================================
+
+describe('Корректирующая ревизия 4.5.3: выбор начального шага', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('y\' = 1 при y0 = [0]: нет нулевых шагов, y(1) = 1 точно', () => {
+    // Вырожденный случай select_initial_step: d0 = 0 не должен
+    // давать нулевой шаг (зацикливание) — fallback строго
+    // положителен, линейная задача интегрируется точно.
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1,
+        y0: [0],
+        rhs: () => [1]
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.t).toBe(1);
+    expect(result.y[0]).toBe(1);
+    expect(result.stats.acceptedSteps).toBeGreaterThan(0);
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+  });
+
+  it('все компоненты y0 нулевые: решение строится точно', () => {
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 3,
+        t0: 0,
+        tEnd: 1,
+        y0: [0, 0, 0],
+        rhs: () => [1, -2, 0.5]
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.y[0]).toBe(1);
+    expect(result.y[1]).toBe(-2);
+    expect(result.y[2]).toBe(0.5);
+  });
+
+  it('первый шаг ограничен maxStep: maxAcceptedStepSize ≤ maxStep', () => {
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1,
+        y0: [0],
+        rhs: () => [1]
+      },
+      { rtol: 1e-6, atol: 1e-12, maxStep: 0.01 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.stats.maxAcceptedStepSize).toBeLessThanOrEqual(0.01);
+    expect(result.stats.acceptedSteps).toBeGreaterThanOrEqual(100);
+    // финальный шаг до tEnd дробный: допускаем ошибку округления double
+    expect(result.y[0]).toBeCloseTo(1, 12);
+  });
+});
+
+describe('Корректирующая ревизия 4.5.3: защита от NaN/Infinity', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('переполняющая rhs (1e308) → numerical_failure, а не «solved» с Inf', () => {
+    expectOdeError(
+      () =>
+        backend.solveOde({
+          kind: 'ode',
+          stateDimension: 1,
+          t0: 0,
+          tEnd: 1,
+          y0: [1],
+          rhs: () => [1e308]
+        }),
+      'numerical_failure'
+    );
+  });
+
+  it('взрывная задача y\' = y² не возвращается как solved', () => {
+    // Решение уходит в бесконечность при t = 1: интегратор обязан
+    // бросить ошибку (любой численный код), а не вернуть «solved»
+    // с NaN/Infinity в векторе состояния.
+    let caught: unknown;
+    try {
+      backend.solveOde({
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 2,
+        y0: [1],
+        rhs: (_t: number, y: readonly number[]): number[] => [y[0] * y[0]]
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(OdeSolverError);
+  });
+
+  it('luFactor отвергает не-конечные входы (null)', () => {
+    expect(luFactor([[NaN, 1], [1, 1]])).toBeNull();
+    expect(luFactor([[Infinity, 1], [1, 1]])).toBeNull();
+  });
+
+  it('luSolve с не-конечной правой частью → numerical_failure', () => {
+    const F = luFactor([
+      [4, 1],
+      [1, 3]
+    ]);
+    expectOdeError(() => luSolve(F!, [NaN, 1]), 'numerical_failure');
+    expectOdeError(() => luSolve(F!, [1, Infinity]), 'numerical_failure');
+  });
+});
+
+describe('Корректирующая ревизия 4.5.3: строгая валидация лимитов', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('maxSteps: только конечные целые ≥ 1 (иначе invalid_input)', () => {
+    expectOdeError(() => backend.solveOde(decayProblem, { maxSteps: 2.5 }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxSteps: 0 }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxSteps: -5 }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxSteps: NaN }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxSteps: Infinity }), 'invalid_input');
+  });
+
+  it('maxNewtonIterations: только конечные целые ≥ 1 (иначе invalid_input)', () => {
+    expectOdeError(() => backend.solveOde(decayProblem, { maxNewtonIterations: 1.5 }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxNewtonIterations: 0 }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxNewtonIterations: NaN }), 'invalid_input');
+    expectOdeError(() => backend.solveOde(decayProblem, { maxNewtonIterations: Infinity }), 'invalid_input');
+  });
+
+  it('minStep > maxStep — противоречивые лимиты шага (invalid_input)', () => {
+    expectOdeError(
+      () => backend.solveOde(decayProblem, { minStep: 0.5, maxStep: 0.1 }),
+      'invalid_input'
+    );
+  });
+
+  it('minStep больше интервала (maxStep по умолчанию = span) — тоже противоречие', () => {
+    expectOdeError(() => backend.solveOde(decayProblem, { minStep: 5 }), 'invalid_input');
+  });
+});
+
+describe('Корректирующая ревизия 4.5.3: неотрицательность начального состояния', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('существенно отрицательный y0 → nonneg_violation с диагностикой (без clipping)', () => {
+    let caught: unknown;
+    try {
+      backend.solveOde({
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1,
+        y0: [-1],
+        rhs: () => [0],
+        nonNegativeIndices: [0]
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(OdeSolverError);
+    const err = caught as OdeSolverError;
+    expect(err.code).toBe('nonneg_violation');
+    expect(err.details?.index).toBe(0);
+    expect(err.details?.value).toBe(-1);
+    // допуск = atol + rtol·|v| = 1e-12 + 1e-6·1
+    expect(err.details?.tolerance).toBeCloseTo(1.000001e-6, 12);
+  });
+
+  it('небольшой минус y0 в пределах допуска сохраняется без исправления', () => {
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1,
+        y0: [-1e-13],
+        rhs: () => [0],
+        nonNegativeIndices: [0]
+      },
+      { atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    // сохранён КАК ЕСТЬ, без молчаливого clipping
+    expect(result.y[0]).toBe(-1e-13);
+  });
+});
+
+describe('Корректирующая ревизия 4.5.3: масштабирование допуска инвариантов', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('нарушение при малых концентрациях (~1e-18) видно (старый допуск max(1, ·) его не видел бы)', () => {
+    // Инвариант y1 − y2 = 0 при y ~ 1e-20: дрейф 1e-18 за единицу
+    // времени. Допуск масштабируется по данным (Σ|c_i|·atol_i +
+    // rtol·Σ|c_i·y_i| ~ 2e-26), а не по max(1, ·) = 1e-6.
+    expectOdeError(
+      () =>
+        backend.solveOde(
+          {
+            kind: 'ode',
+            stateDimension: 2,
+            t0: 0,
+            tEnd: 1,
+            y0: [1e-20, 1e-20],
+            rhs: () => [0, 1e-18],
+            linearInvariants: [{ coefficients: [1, -1], expected: 0 }]
+          },
+          { rtol: 1e-6, atol: 1e-30, minStep: 1e-6 }
+        ),
+      'invariant_violation'
+    );
+  });
+
+  it('сохраняющийся инвариант при малых концентрациях решается (допуск масштабируется по данным)', () => {
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 2,
+        t0: 0,
+        tEnd: 1,
+        y0: [1e-20, 1e-20],
+        rhs: (_t: number, y: readonly number[]): number[] => [-y[0], -y[1]],
+        linearInvariants: [{ coefficients: [1, -1], expected: 0 }]
+      },
+      { rtol: 1e-6, atol: 1e-30 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.diagnostics.invariantChecks).toBeGreaterThan(0);
+    // обе компоненты интегрируются идентично: дрейф нулевой
+    expect(Math.abs(result.y[0] - result.y[1])).toBeLessThanOrEqual(1e-36);
+  });
+
+  it('relTolerance на инварианте расширяет допуск по масштабу данных', () => {
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 2,
+        t0: 0,
+        tEnd: 1,
+        y0: [1, 1],
+        rhs: () => [-1, 0],
+        linearInvariants: [{ coefficients: [1, -1], expected: 0, relTolerance: 1 }]
+      },
+      { rtol: 1e-6 }
+    );
+    expect(result.status).toBe('solved');
+    // дрейф x − y от 0 до −1 допускается relTolerance = 1
+    expect(result.y[0] - result.y[1]).toBeLessThanOrEqual(0);
+  });
+
+  it('некорректные absTolerance/relTolerance инварианта → invalid_input', () => {
+    const base = {
+      kind: 'ode' as const,
+      stateDimension: 2,
+      t0: 0,
+      tEnd: 1,
+      y0: [1, 1],
+      rhs: () => [0, 0]
+    };
+    expectOdeError(
+      () =>
+        backend.solveOde({
+          ...base,
+          linearInvariants: [{ coefficients: [1, -1], expected: 0, absTolerance: NaN }]
+        }),
+      'invalid_input'
+    );
+    expectOdeError(
+      () =>
+        backend.solveOde({
+          ...base,
+          linearInvariants: [{ coefficients: [1, -1], expected: 0, absTolerance: -1 }]
+        }),
+      'invalid_input'
+    );
+    expectOdeError(
+      () =>
+        backend.solveOde({
+          ...base,
+          linearInvariants: [{ coefficients: [1, -1], expected: 0, relTolerance: -0.5 }]
+        }),
+      'invalid_input'
+    );
+  });
+});
+
+describe('Корректирующая ревизия 4.5.3: честная статистика шагов', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('Robertson: attemptedSteps === acceptedSteps + rejectedSteps, rejectedSteps ≥ newtonFailures', () => {
+    const result = backend.solveOde(robertsonProblem, {
+      rtol: 1e-8,
+      atol: [1e-14, 1e-22, 1e-14],
+      tEval: [0.4, 4, 400, 4e4, 4e8, 1e11]
+    });
+    expect(result.status).toBe('solved');
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+    expect(result.stats.rejectedSteps).toBeGreaterThanOrEqual(result.stats.newtonFailures);
+  });
+
+  it('отказы Ньютона учитываются и в rejectedSteps (сценарий с newtonFailures > 0)', () => {
+    // Robertson с завышенным initialStep: первые попытки Ньютона
+    // расходятся, шаг уменьшается — интегрирование завершается,
+    // и каждый отказ Ньютона учтён и в newtonFailures, и в
+    // rejectedSteps.
+    const result = backend.solveOde(
+      { ...robertsonProblem, tEnd: 1e3 },
+      { rtol: 1e-8, atol: [1e-14, 1e-22, 1e-14], initialStep: 1e3 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.stats.newtonFailures).toBeGreaterThan(0);
+    expect(result.stats.rejectedSteps).toBeGreaterThanOrEqual(result.stats.newtonFailures);
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
   });
 });

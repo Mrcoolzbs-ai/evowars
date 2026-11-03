@@ -57,6 +57,38 @@
 // принципиально НЕ выполняет интегрирования: он возвращает
 // status 'error' с диагностикой «используйте solveOde». Статус
 // 'solved' никогда не возвращается без численного решения.
+//
+// ============================================
+// КОРРЕКТИРУЮЩАЯ РЕВИЗИЯ STAGE 4.5.3 (02.11.2026,
+// по независимому аудиту; метод не менялся)
+// ============================================
+// Закрыто 6 дефектов, найденных независимым аудитом:
+// 1. Начальный шаг: алгоритм Hairer/SciPy select_initial_step
+//    с гарантированно положительным fallback — вырожденный
+//    случай (y0 = 0 при y' = 1) больше не даёт нулевых шагов;
+//    шаг ограничен maxStep с первого шага; неконечный выбор —
+//    numerical_failure.
+// 2. Численная устойчивость: взвешенная RMS-норма устойчива к
+//    переполнению (нормировка на максимум до возведения в
+//    квадрат), не-конечная ошибка шага НЕ проходит как «малая»,
+//    «solved» с NaN/Infinity невозможен (финальная проверка
+//    конечности), luFactor/luSolve отвергают не-конечные
+//    данные; новый код ошибки numerical_failure.
+// 3. Строгие лимиты: maxSteps/maxNewtonIterations — только
+//    конечные целые ≥ 1 (дробные/нулевые/NaN/∞ — invalid_input
+//    без молчаливого округления); minStep > maxStep —
+//    противоречие (invalid_input).
+// 4. Неотрицательность проверяется и на y0: существенный минус
+//    начального состояния — nonneg_violation с диагностикой,
+//    молчаливое исправление (clipping) невозможно.
+// 5. Допуск линейных инвариантов покомпонентный и масштабируется
+//    по данным: Σ|c_i|·atol_i + relTolerance·
+//    max(|expected|, Σ|c_i·y_i|); опции absTolerance/relTolerance
+//    на инварианте; фиксированный max(1, ·) убран — нарушения
+//    видны при концентрациях ~1e-20.
+// 6. Честная статистика: каждый отказ Ньютона учитывается и в
+//    rejectedSteps; для завершившегося интегрирования
+//    attemptedSteps === acceptedSteps + rejectedSteps.
 
 import type {
   OdeSolverBackend,
@@ -64,7 +96,8 @@ import type {
   OdeSolverOptions,
   OdeSolverResult,
   OdeJacobian,
-  OdeRhs
+  OdeRhs,
+  LinearInvariant
 } from './solverBackend';
 
 // ============================================
@@ -128,7 +161,8 @@ export const ODE_ERROR_CODES = [
   'max_steps_exceeded',
   'min_step_violated',
   'nonneg_violation',
-  'invariant_violation'
+  'invariant_violation',
+  'numerical_failure'
 ] as const;
 
 export type OdeErrorCode = (typeof ODE_ERROR_CODES)[number];
@@ -172,6 +206,15 @@ interface LuDecomposition {
  */
 export function luFactor(matrix: readonly (readonly number[])[]): LuDecomposition | null {
   const n = matrix.length;
+  // Fail-closed: не-конечные входы не попадают в факторизацию —
+  // NaN «заражает» весь результат и проходит проверки
+  // сингулярности (любое сравнение с NaN ложно).
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const v = matrix[i][j];
+      if (!Number.isFinite(v)) return null;
+    }
+  }
   const lu = matrix.map((row) => row.slice());
   const piv = new Array<number>(n).fill(0);
   const columnNorms: number[] = new Array<number>(n).fill(0);
@@ -210,6 +253,14 @@ export function luFactor(matrix: readonly (readonly number[])[]): LuDecompositio
  */
 export function luSolve(F: LuDecomposition, b: readonly number[]): number[] {
   const n = F.lu.length;
+  // Fail-closed: не-конечная правая часть — численная неудача,
+  // а не «решение», содержащее NaN.
+  for (let k = 0; k < n; k++) {
+    const x0 = b[k];
+    if (!Number.isFinite(x0)) {
+      throw new OdeSolverError('numerical_failure', `luSolve: правая часть содержит нечисловую компоненту b[${k}] = ${x0}`, { index: k, value: x0 });
+    }
+  }
   const x = b.slice();
   for (let k = 0; k < n; k++) {
     const p = F.piv[k];
@@ -221,6 +272,11 @@ export function luSolve(F: LuDecomposition, b: readonly number[]): number[] {
   for (let k = n - 1; k >= 0; k--) {
     for (let j = k + 1; j < n; j++) x[k] -= F.lu[k][j] * x[j];
     x[k] /= F.lu[k][k];
+  }
+  for (let k = 0; k < n; k++) {
+    if (!Number.isFinite(x[k])) {
+      throw new OdeSolverError('numerical_failure', `luSolve: результат содержит нечисловую компоненту x[${k}] = ${x[k]}`, { index: k, value: x[k] });
+    }
   }
   return x;
 }
@@ -329,8 +385,21 @@ function resolveOptions(problem: OdeSolverProblem, options: OdeSolverOptions | u
   if (opts.initialStep !== undefined && (!Number.isFinite(opts.initialStep) || opts.initialStep <= 0)) {
     throw new OdeSolverError('invalid_input', `initialStep должен быть конечным положительным числом, получено ${opts.initialStep}`);
   }
-  const maxSteps = Math.max(1, Math.floor(opts.maxSteps ?? 100000));
-  const maxNewtonIterations = Math.max(1, Math.floor(opts.maxNewtonIterations ?? 10));
+  if (opts.minStep !== undefined && opts.minStep > maxStep) {
+    throw new OdeSolverError('invalid_input', `minStep (${opts.minStep}) больше maxStep (${maxStep}): противоречивые лимиты шага`);
+  }
+  // Лимиты — только КОНЕЧНЫЕ ЦЕЛЫЕ ≥ 1: NaN/Infinity/ноль/
+  // отрицательные/дробные значения — некорректный вход, а не
+  // молчаливое округление (fail-closed, без «магических»
+  // исправлений пользовательских ошибок).
+  const rawMaxSteps = opts.maxSteps ?? 100000;
+  if (!Number.isInteger(rawMaxSteps) || rawMaxSteps < 1) {
+    throw new OdeSolverError('invalid_input', `maxSteps должен быть конечным целым числом ≥ 1, получено ${rawMaxSteps}`);
+  }
+  const rawMaxNewton = opts.maxNewtonIterations ?? 10;
+  if (!Number.isInteger(rawMaxNewton) || rawMaxNewton < 1) {
+    throw new OdeSolverError('invalid_input', `maxNewtonIterations должен быть конечным целым числом ≥ 1, получено ${rawMaxNewton}`);
+  }
   return {
     rtol,
     atol: resolveAtol(opts.atol, n),
@@ -338,8 +407,8 @@ function resolveOptions(problem: OdeSolverProblem, options: OdeSolverOptions | u
     initialStep: opts.initialStep,
     maxStep,
     minStep: opts.minStep,
-    maxSteps,
-    maxNewtonIterations
+    maxSteps: rawMaxSteps,
+    maxNewtonIterations: rawMaxNewton
   };
 }
 
@@ -398,6 +467,12 @@ function validateProblem(problem: OdeSolverProblem): void {
       }
       if (!Number.isFinite(inv.expected)) {
         throw new OdeSolverError('invalid_input', `ожидаемое значение инварианта должно быть конечным, получено ${inv.expected}`);
+      }
+      if (inv.absTolerance !== undefined && (!Number.isFinite(inv.absTolerance) || inv.absTolerance < 0)) {
+        throw new OdeSolverError('invalid_input', `absTolerance инварианта должен быть конечным неотрицательным числом, получено ${inv.absTolerance}`);
+      }
+      if (inv.relTolerance !== undefined && (!Number.isFinite(inv.relTolerance) || inv.relTolerance < 0)) {
+        throw new OdeSolverError('invalid_input', `relTolerance инварианта должен быть конечным неотрицательным числом, получено ${inv.relTolerance}`);
       }
     }
   }
@@ -527,6 +602,14 @@ function radauStep(
     const scaleMax: number[] = y.map((v) => Math.abs(v));
     for (let j = 0; j < 3; j++) {
       const yj = y.map((v, idx) => v + Z[j][idx]);
+      // Стадийные значения обязаны быть конечными до вызова rhs:
+      // не-конечная стадия — отказ шага (уменьшение h), а не
+      // «решение» с NaN, ушедшее в обратный вызов.
+      let yjFinite = true;
+      for (let a = 0; a < n; a++) {
+        if (!Number.isFinite(yj[a])) { yjFinite = false; break; }
+      }
+      if (!yjFinite) return { ok: false };
       fstage.push(callRhs(problem, t + NODES[j] * h, yj, ctx));
       for (let a = 0; a < n; a++) scaleMax[a] = Math.max(scaleMax[a], Math.abs(yj[a]));
     }
@@ -540,15 +623,30 @@ function radauStep(
         rhsBig[i * n + a] = -(Z[i][a] - h * s);
       }
     }
-    const d = luSolve(F, rhsBig);
+    let d: number[];
+    try {
+      d = luSolve(F, rhsBig);
+    } catch (e) {
+      // Численная неудача внутри линейной алгебры — отказ шага
+      // с уменьшением h (никаких «решений», содержащих NaN).
+      if (e instanceof OdeSolverError && e.code === 'numerical_failure') return { ok: false };
+      throw e;
+    }
     for (let i = 0; i < 3; i++) {
       for (let a = 0; a < n; a++) Z[i][a] += d[i * n + a];
     }
     const dW = weightedRmsNorm(d, [...scale, ...scale, ...scale]);
+    // Не-конечная норма поправки Ньютона — отказ шага, а не
+    // ложная сходимость (сравнения с NaN всегда ложны).
+    if (!Number.isFinite(dW)) return { ok: false };
     let rate: number | null = null;
     if (prevD !== null) rate = dW / prevD;
     if (dW === 0 || (rate !== null && rate < 1 && (rate / (1 - rate)) * dW < newtonTol)) {
-      return { ok: true, y1: y.map((v, a) => v + Z[2][a]), Z };
+      const y1 = y.map((v, a) => v + Z[2][a]);
+      for (let a = 0; a < n; a++) {
+        if (!Number.isFinite(y1[a])) return { ok: false };
+      }
+      return { ok: true, y1, Z };
     }
     if (rate !== null && (rate >= 1 || (Math.pow(rate, maxNewtonIterations - k) / (1 - rate)) * dW > newtonTol)) {
       return { ok: false };
@@ -558,14 +656,47 @@ function radauStep(
   return { ok: false };
 }
 
-/** Взвешенная RMS-норма: sqrt(mean((v_i/s_i)^2)). */
+/**
+ * Взвешенная RMS-норма: sqrt(mean((v_i/s_i)^2)). Устойчива к
+ * переполнению: нормировка на максимум модуля ДО возведения в
+ * квадрат (|v_i/mx| ≤ 1, поэтому квадраты не переполняются).
+ * Не-конечные элементы дают не-конечную норму (NaN/Infinity),
+ * которую вызывающий код обязан проверить, а не
+ * интерпретировать как «малую ошибку».
+ */
 function weightedRmsNorm(v: readonly number[], scale: readonly number[]): number {
+  let mx = 0;
+  for (const x of v) mx = Math.max(mx, Math.abs(x));
+  if (!Number.isFinite(mx)) return mx;
+  if (mx === 0) return 0;
   let sum = 0;
   for (let i = 0; i < v.length; i++) {
-    const q = v[i] / scale[i];
+    const si = Math.abs(scale[i]);
+    if (!Number.isFinite(si) || si === 0) return Infinity;
+    const q = (v[i] / mx) / si;
     sum += q * q;
   }
-  return Math.sqrt(sum / v.length);
+  const rms = Math.sqrt(sum / v.length) * mx;
+  return Number.isFinite(rms) ? rms : Infinity;
+}
+
+/**
+ * Допуск проверки линейного инварианта: покомпонентный шумовый
+ * пол Σ|c_i|·atol_i плюс относительная часть
+ * relTolerance·max(|expected|, Σ|c_i·y_i|). Допуск масштабируется
+ * по данным задачи, а не по max(1, ·): относительные нарушения
+ * видны при любых масштабах, включая малые концентрации ~1e-20.
+ * Не-конечный допуск — численная неудача (fail-closed).
+ */
+function invariantTolerance(inv: LinearInvariant, y: readonly number[], opts: ResolvedOptions): number {
+  const sumAbs = inv.coefficients.reduce((s, c, i) => s + Math.abs(c) * opts.atol[i], 0);
+  const absTol = inv.absTolerance ?? sumAbs;
+  const scale = Math.max(Math.abs(inv.expected), inv.coefficients.reduce((s, c, i) => s + Math.abs(c * y[i]), 0));
+  const tol = absTol + (inv.relTolerance ?? opts.rtol) * scale;
+  if (!Number.isFinite(tol)) {
+    throw new OdeSolverError('numerical_failure', `допуск линейного инварианта не конечен: масштаб компонент за пределами double`, { expected: inv.expected, sumAbs });
+  }
+  return tol;
 }
 
 // ============================================
@@ -590,6 +721,11 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
       `размерность состояния ${n} превышает максимум плотного решателя (${RADAU_IIA_MAX_STATE_DIMENSION}); разреженные якобианы не поддерживаются`
     );
   }
+  // Статистика честная: attemptedSteps === acceptedSteps +
+  // rejectedSteps для любого ЗАВЕРШИВШЕГОСЯ интегрирования —
+  // каждая попытка шага заканчивается либо принятием, либо
+  // отказом (newtonFailures ≤ rejectedSteps). Прерванное
+  // интегрирование этим инвариантом не гарантируется.
   const stats = {
     attemptedSteps: 0,
     acceptedSteps: 0,
@@ -609,24 +745,68 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
   const newtonTol = Math.max((10 * EPS) / opts.rtol, Math.min(0.03, Math.sqrt(opts.rtol)));
 
   // Инварианты обязаны выполняться на y0 (без коррекции вектора).
+  // Допуск покомпонентный и масштабируется по данным (см.
+  // invariantTolerance): нарушения видны при малых концентрациях.
   for (const inv of linearInvariants) {
     const value = inv.coefficients.reduce((s, c, i) => s + c * problem.y0[i], 0);
-    const scale = Math.max(1, Math.abs(inv.expected), inv.coefficients.reduce((s, c, i) => s + Math.abs(c * problem.y0[i]), 0));
-    if (Math.abs(value - inv.expected) > 1e-6 * scale) {
-      throw new OdeSolverError('invariant_violation', `линейный инвариант нарушен уже на y0: ${value} ≠ ${inv.expected}`, { value, expected: inv.expected });
+    const tolerance = invariantTolerance(inv, problem.y0, opts);
+    if (Math.abs(value - inv.expected) > tolerance) {
+      throw new OdeSolverError('invariant_violation', `линейный инвариант нарушен уже на y0: ${value} ≠ ${inv.expected} (допуск ${tolerance})`, { value, expected: inv.expected, tolerance });
+    }
+  }
+
+  // Неотрицательность проверяется и на y0: существенно
+  // отрицательная компонента начального состояния — противоречие
+  // в постановке задачи (nonneg_violation), молчаливое
+  // исправление (clipping) невозможно; небольшой минус в
+  // пределах допуска сохраняется как есть.
+  for (const idx of nonNegativeIndices) {
+    const v = problem.y0[idx];
+    if (v < 0) {
+      const tolerance = opts.atol[idx] + opts.rtol * Math.abs(v);
+      if (Math.abs(v) > tolerance) {
+        throw new OdeSolverError('nonneg_violation', `компонента y0[${idx}] = ${v} отрицательна за пределами допуска (${tolerance}) при заявленной неотрицательности; молчаливое исправление невозможно`, { index: idx, value: v, tolerance });
+      }
     }
   }
 
   let t = problem.t0;
   const y = problem.y0.slice();
+  const span = problem.tEnd - problem.t0;
   const scale0 = y.map((v, a) => opts.atol[a] + opts.rtol * Math.abs(v));
   const f0 = callRhs(problem, t, y, ctx);
-  const d0 = weightedRmsNorm(y, scale0);
-  const d1 = weightedRmsNorm(f0, scale0);
-  // Начальный шаг: эвристика 0.01·d0/d1 (Hairer), ограничена maxStep;
-  // при заданном minStep стартовый шаг не опускается ниже него.
-  let h = opts.initialStep ?? (d1 > 0 ? (0.01 * d0) / d1 : 1e-6 * (problem.tEnd - problem.t0));
-  h = Math.min(opts.maxStep, h);
+  // Начальный шаг: алгоритм Hairer (Solving ODEs I, §II.4) в
+  // форме select_initial_step SciPy solve_ivp. Пробный шаг h0
+  // определяется нормами начального состояния и его производной;
+  // при вырожденном отношении (в т.ч. y0 = 0 при y' ≠ 0) — строго
+  // положительный fallback 1e-6·span, поэтому интегратор НИКОГДА
+  // не начинает с нулевого шага. Пробное значение уточняется
+  // вторым вызовом rhs; итог ограничен maxStep и span С ПЕРВОГО
+  // шага. Неконечный/неположительный выбор — numerical_failure.
+  let h: number;
+  if (opts.initialStep !== undefined) {
+    h = opts.initialStep;
+  } else {
+    const d0 = weightedRmsNorm(y, scale0);
+    const d1 = weightedRmsNorm(f0, scale0);
+    const ratio = d1 > 0 ? d0 / d1 : Infinity;
+    let h0 = Number.isFinite(ratio) && ratio >= 1e-5 ? 0.01 * ratio : 1e-6 * span;
+    if (!Number.isFinite(h0) || h0 <= 0) h0 = 1e-6 * span;
+    const yProbe = y.map((v, a) => v + h0 * f0[a]);
+    const f1 = callRhs(problem, t + h0, yProbe, ctx);
+    const d2 = weightedRmsNorm(f1, scale0);
+    const h1 = Math.pow(0.01 / Math.max(d1, d2), 1 / 6);
+    h = Math.min(100 * h0, h1);
+  }
+  if (!Number.isFinite(h) || h <= 0) {
+    const d0v = weightedRmsNorm(y, scale0);
+    const d1v = weightedRmsNorm(f0, scale0);
+    throw new OdeSolverError('numerical_failure', `не удалось выбрать конечный положительный начальный шаг (h = ${h})`, { h, d0: d0v, d1: d1v });
+  }
+  h = Math.min(h, opts.maxStep, span);
+  if (!Number.isFinite(h) || h <= 0) {
+    throw new OdeSolverError('numerical_failure', `начальный шаг выродился после ограничений maxStep/span (h = ${h})`, { h, maxStep: opts.maxStep, span });
+  }
   if (opts.minStep !== undefined) h = Math.max(opts.minStep, h);
 
   const tEval = opts.tEval;
@@ -663,7 +843,11 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
 
     const full = radauStep(t, y, hTry, stagesFull, jacobian, problem, ctx, newtonTol, opts.maxNewtonIterations);
     if (!full.ok) {
+      // Отказ Ньютона — это тоже ЗАВЕРШИВШАЯСЯ попытка шага:
+      // учитывается и в newtonFailures, и в rejectedSteps
+      // (attemptedSteps === acceptedSteps + rejectedSteps).
       stats.newtonFailures++;
+      stats.rejectedSteps++;
       if (hTry * 0.3 < minStepEffective) {
         throw new OdeSolverError('newton_non_convergence', `Ньютон не сошёлся при t = ${t}, h = ${hTry}, уменьшение шага невозможно`, { t, h: hTry });
       }
@@ -673,6 +857,7 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     const half1 = radauStep(t, y, hTry / 2, stagesHalf, jacobian, problem, ctx, newtonTol, opts.maxNewtonIterations);
     if (!half1.ok) {
       stats.newtonFailures++;
+      stats.rejectedSteps++;
       if (hTry * 0.3 < minStepEffective) {
         throw new OdeSolverError('newton_non_convergence', `Ньютон не сошёлся (первый полушаг) при t = ${t}, h = ${hTry}`, { t, h: hTry });
       }
@@ -686,6 +871,7 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     const half2 = radauStep(t + hTry / 2, half1.y1, hTry / 2, stagesHalf2, jacobian, problem, ctx, newtonTol, opts.maxNewtonIterations);
     if (!half2.ok) {
       stats.newtonFailures++;
+      stats.rejectedSteps++;
       if (hTry * 0.3 < minStepEffective) {
         throw new OdeSolverError('newton_non_convergence', `Ньютон не сошёлся (второй полушаг) при t = ${t}, h = ${hTry}`, { t, h: hTry });
       }
@@ -697,9 +883,11 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     const yFull = full.y1;
     const scale = y.map((v, a) => opts.atol[a] + opts.rtol * Math.max(Math.abs(v), Math.abs(yFine[a])));
     const err = weightedRmsNorm(yFine.map((v, a) => (v - yFull[a]) / STEP_DOUBLING_DIVISOR), scale);
-    if (err > 1) {
+    // Не-конечная ошибка (NaN/Infinity) НЕ проходит как «малая»:
+    // шаг отклоняется с уменьшением h (fail-closed).
+    if (!Number.isFinite(err) || err > 1) {
       stats.rejectedSteps++;
-      const nextH = hTry * Math.min(0.8, Math.max(0.1, 0.9 * Math.pow(err, -1 / 6)));
+      const nextH = hTry * (Number.isFinite(err) ? Math.min(0.8, Math.max(0.1, 0.9 * Math.pow(err, -1 / 6))) : 0.3);
       if (nextH < minStepEffective) {
         throw new OdeSolverError('min_step_violated', `локальная ошибка превышает допуск при t = ${t}, h = ${hTry}, err = ${err}, уменьшение шага невозможно`, { t, h: hTry, err });
       }
@@ -731,13 +919,14 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
       continue;
     }
 
-    // Линейные инварианты (без коррекции вектора).
+    // Линейные инварианты (без коррекции вектора); допуск
+    // покомпонентный, масштабируется по данным (invariantTolerance).
     let invariantRejected = false;
     for (const inv of linearInvariants) {
       invariantChecks++;
       const value = inv.coefficients.reduce((s, c, i) => s + c * yFine[i], 0);
-      const scale = Math.max(1, Math.abs(inv.expected), inv.coefficients.reduce((s, c, i) => s + Math.abs(c * yFine[i]), 0));
-      if (Math.abs(value - inv.expected) > 1e-6 * scale) {
+      const tolerance = invariantTolerance(inv, yFine, opts);
+      if (Math.abs(value - inv.expected) > tolerance) {
         invariantRejected = true;
         break;
       }
@@ -757,7 +946,14 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     stats.maxAcceptedStepSize = Math.max(stats.maxAcceptedStepSize, hTry);
     stats.minAcceptedStepSize = Math.min(stats.minAcceptedStepSize, hTry);
     for (let a = 0; a < n; a++) y[a] = yFine[a];
-    t = clippedToTarget ? target : t + hTry;
+    // Строгое продвижение времени: если шаг выродился относительно
+    // масштаба t (t + h === t в арифметике double), интегратор
+    // зациклился бы на одном месте — это численная неудача.
+    const tNew = clippedToTarget ? target : t + hTry;
+    if (!(tNew > t)) {
+      throw new OdeSolverError('numerical_failure', `шаг выродился (h = ${hTry}) при t = ${t}: продвижение времени невозможно`, { t, h: hTry });
+    }
+    t = tNew;
     if (evalIndex < tEval.length && t === tEval[evalIndex]) {
       points.push({ t, y: y.slice() });
       evalIndex++;
@@ -772,6 +968,21 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     points.push({ t, y: y.slice() });
   }
   if (stats.minAcceptedStepSize === Infinity) stats.minAcceptedStepSize = 0;
+
+  // «solved» никогда не возвращается с не-конечным состоянием
+  // или контрольными точками (fail-closed).
+  for (let a = 0; a < n; a++) {
+    if (!Number.isFinite(y[a])) {
+      throw new OdeSolverError('numerical_failure', `конечное состояние содержит не-конечную компоненту y[${a}] = ${y[a]}`, { index: a, value: y[a] });
+    }
+  }
+  for (const p of points) {
+    for (let a = 0; a < n; a++) {
+      if (!Number.isFinite(p.y[a])) {
+        throw new OdeSolverError('numerical_failure', `контрольная точка t = ${p.t} содержит не-конечную компоненту y[${a}]`, { t: p.t, index: a });
+      }
+    }
+  }
 
   const diagnostics = {
     backendId: RADAU_IIA_BACKEND_ID,

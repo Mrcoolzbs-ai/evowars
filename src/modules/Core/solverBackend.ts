@@ -140,6 +140,17 @@ export type OdeJacobian = (t: number, y: readonly number[]) => number[][];
 export interface LinearInvariant {
   coefficients: readonly number[];
   expected: number;
+  /**
+   * Абсолютный допуск проверки инварианта. По умолчанию —
+   * Σ|c_i|·atol_i: шумовой пол покомпонентных atol, накопленный
+   * коэффициентами (масштабируется по данным, а не фиксируется).
+   */
+  absTolerance?: number;
+  /**
+   * Относительный допуск проверки инварианта. По умолчанию — rtol
+   * задачи. Умножается на max(|expected|, Σ|c_i·y_i|).
+   */
+  relTolerance?: number;
 }
 
 /** Задача Коши для ODE. */
