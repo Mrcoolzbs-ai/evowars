@@ -89,6 +89,20 @@
 // 6. Честная статистика: каждый отказ Ньютона учитывается и в
 //    rejectedSteps; для завершившегося интегрирования
 //    attemptedSteps === acceptedSteps + rejectedSteps.
+//
+// Этап 2 корректирующей ревизии (03.11.2026, по независимому
+// аудиту принятого коммита):
+// 7. Пробный шаг select_initial_step ограничен интервалом ДО
+//    вызова rhs (h0 ≤ span): rhs не вызывается вне [t0, tEnd]
+//    (соответствует min(h0, interval_length) SciPy); d2 — норма
+//    ИЗМЕНЕНИЯ производной norm(f1 − f0)/h0 (как в SciPy),
+//    а не норма самой f1; вырожденные нормы (d1 ≤ 1e-15 и
+//    d2 ≤ 1e-15) дают умеренный h1 = max(1e-6, h0·1e-3) вместо
+//    h1 = Infinity — начальный шаг конечен и умерен.
+// 8. Контракт minorNegativeCount: учитываются ТОЛЬКО y0 и
+//    ПРИНЯТЫЕ состояния; малые минусы кандидатов отклонённых
+//    попыток шага в счётчик не попадают — диагностика отражает
+//    реальную траекторию, а не историю проб.
 
 import type {
   OdeSolverBackend,
@@ -755,11 +769,22 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     }
   }
 
+  // Контракт minorNegativeCount: число малых (в пределах допуска
+  // atol_i + rtol·|y_i|) отрицательных компонент, сохранённых КАК
+  // ЕСТЬ без clipping. Учитываются ТОЛЬКО начальное состояние (y0)
+  // и ПРИНЯТЫЕ состояния (по одному на компоненту за принятый
+  // шаг); кандидаты отклонённых попыток шага (превышение локальной
+  // ошибки, несходимость Ньютона, нарушение инварианта или
+  // неотрицательности) в счётчик НЕ попадают: диагностика
+  // отражает реальную траекторию, а не историю проб.
+  let minorNegativeCount = 0;
+
   // Неотрицательность проверяется и на y0: существенно
   // отрицательная компонента начального состояния — противоречие
   // в постановке задачи (nonneg_violation), молчаливое
   // исправление (clipping) невозможно; небольшой минус в
-  // пределах допуска сохраняется как есть.
+  // пределах допуска сохраняется как есть и учитывается в
+  // minorNegativeCount.
   for (const idx of nonNegativeIndices) {
     const v = problem.y0[idx];
     if (v < 0) {
@@ -767,6 +792,9 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
       if (Math.abs(v) > tolerance) {
         throw new OdeSolverError('nonneg_violation', `компонента y0[${idx}] = ${v} отрицательна за пределами допуска (${tolerance}) при заявленной неотрицательности; молчаливое исправление невозможно`, { index: idx, value: v, tolerance });
       }
+      // Малый минус начального состояния (в пределах допуска):
+      // сохраняется без clipping и попадает в диагностику.
+      minorNegativeCount++;
     }
   }
 
@@ -780,8 +808,13 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
   // определяется нормами начального состояния и его производной;
   // при вырожденном отношении (в т.ч. y0 = 0 при y' ≠ 0) — строго
   // положительный fallback 1e-6·span, поэтому интегратор НИКОГДА
-  // не начинает с нулевого шага. Пробное значение уточняется
-  // вторым вызовом rhs; итог ограничен maxStep и span С ПЕРВОГО
+  // не начинает с нулевого шага. До пробного вызова rhs шаг h0
+  // ограничен интервалом (h0 ≤ span): rhs не вызывается вне
+  // [t0, tEnd]. Вторая пробная точка уточняет норму ИЗМЕНЕНИЯ
+  // производной d2 = norm(f1 − f0)/h0 (как в SciPy), а не норму
+  // самой f1; вырожденные d1 и d2 (обе ≤ 1e-15) дают умеренный
+  // h1 = max(1e-6, h0·1e-3) вместо деления на нулевую норму
+  // (h1 = Infinity). Итог ограничен maxStep и span с первого
   // шага. Неконечный/неположительный выбор — numerical_failure.
   let h: number;
   if (opts.initialStep !== undefined) {
@@ -792,11 +825,27 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     const ratio = d1 > 0 ? d0 / d1 : Infinity;
     let h0 = Number.isFinite(ratio) && ratio >= 1e-5 ? 0.01 * ratio : 1e-6 * span;
     if (!Number.isFinite(h0) || h0 <= 0) h0 = 1e-6 * span;
+    // Пробный вызов rhs — строго внутри [t0, tEnd] (соответствует
+    // min(h0, interval_length) SciPy select_initial_step): h0
+    // конечен, строго положителен и не превышает длину интервала.
+    if (h0 > span) h0 = span;
     const yProbe = y.map((v, a) => v + h0 * f0[a]);
     const f1 = callRhs(problem, t + h0, yProbe, ctx);
-    const d2 = weightedRmsNorm(f1, scale0);
-    const h1 = Math.pow(0.01 / Math.max(d1, d2), 1 / 6);
-    h = Math.min(100 * h0, h1);
+    // d2 — норма ИЗМЕНЕНИЯ производной на пробном шаге
+    // (SciPy: norm((f1 − f0)/scale)/h0), а не норма самой f1.
+    // weightedRmsNorm честно возвращает NaN/Infinity —
+    // не-конечные данные дают numerical_failure ниже (fail-closed).
+    const d2 = weightedRmsNorm(f1.map((v, a) => v - f0[a]), scale0) / h0;
+    let h1: number;
+    if (d1 <= 1e-15 && d2 <= 1e-15) {
+      // Вырожденный случай (постоянная/почти нулевая производная
+      // без изменения): деление на нулевую норму не даёт
+      // h1 = Infinity и неоправданно большой начальный шаг.
+      h1 = Math.max(1e-6, h0 * 1e-3);
+    } else {
+      h1 = Math.pow(0.01 / Math.max(d1, d2), 1 / 6);
+    }
+    h = Math.min(100 * h0, h1, opts.maxStep, span);
   }
   if (!Number.isFinite(h) || h <= 0) {
     const d0v = weightedRmsNorm(y, scale0);
@@ -820,7 +869,6 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
   }
   let prevStages: number[][] | null = null;
   let prevStep = 0;
-  let minorNegativeCount = 0;
   let invariantChecks = 0;
 
   const zeroStages = (): number[][] => [0, 1, 2].map(() => y.map(() => 0));
@@ -901,12 +949,14 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
       const v = yFine[idx];
       if (v < 0) {
         const minorTolerance = opts.atol[idx] + opts.rtol * Math.abs(y[idx]);
-        if (Math.abs(v) <= minorTolerance) {
-          minorNegativeCount++;
-        } else {
+        if (Math.abs(v) > minorTolerance) {
           nonnegRejected = true;
           break;
         }
+        // Малый минус КАНДИДАТА здесь НЕ учитывается: шаг ещё не
+        // принят — если он будет отклонён (ошибка, инвариант),
+        // эта проба не должна попасть в minorNegativeCount.
+        // Принятые состояния считаются после принятия шага.
       }
     }
     if (nonnegRejected) {
@@ -946,6 +996,13 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
     stats.maxAcceptedStepSize = Math.max(stats.maxAcceptedStepSize, hTry);
     stats.minAcceptedStepSize = Math.min(stats.minAcceptedStepSize, hTry);
     for (let a = 0; a < n; a++) y[a] = yFine[a];
+    // Малые отрицательные компоненты ПРИНЯТОГО состояния: все
+    // проверки пройдены, значит любой минус — в пределах допуска
+    // (существенный отклонил бы шаг). Кандидаты отклонённых проб
+    // не считаются — диагностика отражает реальную траекторию.
+    for (const idx of nonNegativeIndices) {
+      if (yFine[idx] < 0) minorNegativeCount++;
+    }
     // Строгое продвижение времени: если шаг выродился относительно
     // масштаба t (t + h === t в арифметике double), интегратор
     // зациклился бы на одном месте — это численная неудача.

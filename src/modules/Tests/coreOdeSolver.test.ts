@@ -1112,3 +1112,142 @@ describe('Корректирующая ревизия 4.5.3: честная ст
     expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
   });
 });
+
+describe('Корректирующая ревизия 4.5.3 (этап 2): начальный шаг и honest minorNegativeCount', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('короткий интервал: пробный вызов rhs не выходит за [t0, tEnd]', () => {
+    // tEnd = 1e-6, y0 = [1], y' = 1: эвристика Hairer даёт пробный
+    // шаг h0 = 0.01·d0/d1 = 0.01 >> span — без clamp h0 ≤ span rhs
+    // вызывался бы при t = 0.01, вне [0, 1e-6]. Здесь rhs бросает
+    // исключение при выходе за интервал: интегрирование обязано
+    // завершиться без таких вызовов.
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1e-6,
+        y0: [1],
+        rhs: (t) => {
+          if (t < 0 || t > 1e-6) {
+            throw new Error(`rhs вызван за пределами [0, 1e-6]: t = ${t}`);
+          }
+          return [1];
+        }
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.t).toBe(1e-6);
+    expect(result.y[0]).toBeCloseTo(1.000001, 10);
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+  });
+
+  it('времязависимая производная: d2 = norm(f1 − f0)/h0 ограничивает начальный шаг, точность против аналитики', () => {
+    // y' = 1 + 10·sin(50t), y(0) = 1: аналитика
+    // y = 1 + t + 0.2·(1 − cos(50t)). Производная сильно меняется
+    // уже на пробном шаге: корректный d2 — норма ИЗМЕНЕНИЯ
+    // производной (SciPy), а не норма самой f1.
+    const analytic = (t: number): number => 1 + t + 0.2 * (1 - Math.cos(50 * t));
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 2,
+        y0: [1],
+        rhs: (t) => [1 + 10 * Math.sin(50 * t)]
+      },
+      { rtol: 1e-8, atol: 1e-12, tEval: [0.5, 1, 1.5, 2] }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.points.length).toBe(4);
+    for (const p of result.points) {
+      expect(Math.abs(p.y[0] - analytic(p.t))).toBeLessThan(1e-6);
+    }
+    expect(Math.abs(result.y[0] - analytic(2))).toBeLessThan(1e-6);
+  });
+
+  it('вырожденный случай: f0 ≈ 0 и Δf ≈ 0 — умеренный конечный начальный шаг (не h1 = Infinity)', () => {
+    // y' = [0, 1e-30]: d1 ≈ 3.5e-25 и d2 = 0 — обе нормы вырождены;
+    // ветка малых норм даёт h1 = max(1e-6, h0·1e-3) (SciPy), а не
+    // (0.01/0)^(1/6) = Infinity → начальный шаг умеренно мал
+    // (5e-4 на [0, 0.5]), а не ограничен только span (0.5).
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 2,
+        t0: 0,
+        tEnd: 0.5,
+        y0: [1, 2],
+        rhs: () => [0, 1e-30]
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.y[0]).toBe(1);
+    expect(result.y[1]).toBe(2);
+    expect(result.stats.minAcceptedStepSize).toBeLessThanOrEqual(1e-3);
+    expect(result.stats.minAcceptedStepSize).toBeGreaterThan(0);
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+  });
+
+  it('minorNegativeCount: малый отрицательный y0 учтён ровно один раз, значение сохранено без clipping', () => {
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1,
+        y0: [-1e-13],
+        rhs: () => [1],
+        nonNegativeIndices: [0]
+      },
+      { rtol: 1e-6, atol: 1e-12, tEval: [0, 1] }
+    );
+    expect(result.status).toBe('solved');
+    // y0 сохранён как есть (clipping запрещён)
+    expect(result.points[0].y[0]).toBe(-1e-13);
+    // y0 учтён; принятые состояния уже неотрицательны (rhs = 1
+    // сразу уводит решение в плюс) — счётчик не завышен.
+    expect(result.diagnostics.minorNegativeCount).toBe(1);
+  });
+
+  it('minorNegativeCount: считается по y0 и каждому принятому состоянию (rhs = 0)', () => {
+    // Решение постоянно и чуть отрицательно: каждый принятый шаг
+    // сохраняет малый минус — счётчик = 1 (y0) + acceptedSteps;
+    // отклонённых проб нет (err = 0).
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 0.1,
+        y0: [-1e-13],
+        rhs: () => [0],
+        nonNegativeIndices: [0]
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.y[0]).toBe(-1e-13);
+    expect(result.stats.rejectedSteps).toBe(0);
+    expect(result.diagnostics.minorNegativeCount).toBe(1 + result.stats.acceptedSteps);
+  });
+
+  it('minorNegativeCount: кандидаты отклонённых попыток шага не учитываются', () => {
+    // Robertson с завышенным initialStep: первые попытки Ньютона
+    // расходятся и порождают «мусорные» кандидаты; принятая
+    // траектория неотрицательна (эталон) — счётчик обязан
+    // оставаться нулём, сколько бы отрицательных проб ни было.
+    const result = backend.solveOde(
+      { ...robertsonProblem, tEnd: 1e3 },
+      { rtol: 1e-8, atol: [1e-14, 1e-22, 1e-14], initialStep: 1e3 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.stats.rejectedSteps).toBeGreaterThan(0);
+    expect(result.diagnostics.minorNegativeCount).toBe(0);
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+  });
+});
