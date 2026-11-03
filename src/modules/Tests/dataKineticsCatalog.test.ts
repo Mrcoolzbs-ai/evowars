@@ -194,7 +194,7 @@ describe('Stage 4.5.4: каталог кинетических записей KI
   it('константы всех записей — unknown без параметров (параметры не промоутированы)', () => {
     for (const record of KINETIC_CATALOG_DATA) {
       expect(record.rateConstant.status, `запись ${record.id}`).toBe('unknown');
-      const rate = record.rateConstant as { status: 'unknown'; note?: string };
+      const rate = record.rateConstant as { status: 'unknown'; note?: string; parameters?: unknown };
       expect(rate.parameters, `запись ${record.id}`).toBeUndefined();
       expect(rate.note ?? '').not.toBe('');
     }
