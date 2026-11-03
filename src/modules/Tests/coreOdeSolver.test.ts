@@ -17,6 +17,17 @@
 // неотрицательность y0, масштабируемый допуск инвариантов
 // (atol/rtol/|expected|, опции absTolerance/relTolerance),
 // статистика attemptedSteps = acceptedSteps + rejectedSteps.
+//
+// Этап 2 корректирующей ревизии: clamp h0 ≤ span до пробного
+// вызова rhs, d2 = norm(f1 − f0)/h0 (SciPy), честный
+// minorNegativeCount (только y0 и принятые состояния).
+//
+// Этап 3 корректирующей ревизии: условие h0 ДОСЛОВНО SciPy
+// select_initial_step (d0 < 1e-5 || d1 < 1e-5 → 1e-6, иначе
+// 0.01·d0/d1), начальный шаг проверяется по эталонной формуле
+// через spy rhs (различает новый d2 и старое norm(f1)),
+// регрессия minorNegativeCount: кандидат с малым минусом,
+// отклонённый линейным инвариантом, не попадает в счётчик.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -1144,12 +1155,36 @@ describe('Корректирующая ревизия 4.5.3 (этап 2): нач
     expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
   });
 
-  it('времязависимая производная: d2 = norm(f1 − f0)/h0 ограничивает начальный шаг, точность против аналитики', () => {
+  it('времязависимая производная: d2 = norm(f1 − f0)/h0 задаёт начальный шаг ТОЧНО по формуле; точность против аналитики', () => {
     // y' = 1 + 10·sin(50t), y(0) = 1: аналитика
     // y = 1 + t + 0.2·(1 − cos(50t)). Производная сильно меняется
     // уже на пробном шаге: корректный d2 — норма ИЗМЕНЕНИЯ
-    // производной (SciPy), а не норма самой f1.
+    // производной (SciPy), а не норма самой f1. Итоговой точности
+    // недостаточно для проверки d2 (адаптивный интегратор
+    // достаёт её и с неверным начальным шагом), поэтому spy rhs
+    // фиксирует пробный вызов (t0 + h0) и стадию первой попытки,
+    // а ожидаемые значения считаются по эталонной формуле.
     const analytic = (t: number): number => 1 + t + 0.2 * (1 - Math.cos(50 * t));
+    const rtol = 1e-8;
+    const atol = 1e-12;
+    // Эталонная формула SciPy select_initial_step; при n = 1
+    // weightedRmsNorm(v, scale) = |v|/scale.
+    const scale0 = atol + rtol * 1; // atol + rtol·|y0|
+    const d0 = Math.abs(1) / scale0;
+    const d1 = Math.abs(1) / scale0; // f(0) = 1
+    const h0Exp = 0.01 * (d0 / d1); // d0, d1 ≥ 1e-5 → 0.01·d0/d1 = 0.01
+    const f1Exp = 1 + 10 * Math.sin(50 * h0Exp);
+    const d2 = Math.abs(f1Exp - 1) / scale0 / h0Exp; // norm(f1 − f0)/h0
+    const h1Exp = Math.pow(0.01 / Math.max(d1, d2), 1 / 6);
+    const hExp = Math.min(100 * h0Exp, h1Exp, 2, 2); // maxStep по умолчанию = span
+    // Старое d2 = norm(f1) (без деления на h0) дало бы ДРУГОЙ шаг —
+    // тест обязан различать формулы, а не только итоговую точность:
+    const d2Old = Math.abs(f1Exp) / scale0;
+    const h1Old = Math.pow(0.01 / Math.max(d1, d2Old), 1 / 6);
+    const hOld = Math.min(100 * h0Exp, h1Old, 2, 2);
+    expect(Math.abs(hExp - hOld)).toBeGreaterThan(1e-3);
+
+    const rhsCalls: number[] = [];
     const result = backend.solveOde(
       {
         kind: 'ode',
@@ -1157,9 +1192,12 @@ describe('Корректирующая ревизия 4.5.3 (этап 2): нач
         t0: 0,
         tEnd: 2,
         y0: [1],
-        rhs: (t) => [1 + 10 * Math.sin(50 * t)]
+        rhs: (t: number) => {
+          rhsCalls.push(t);
+          return [1 + 10 * Math.sin(50 * t)];
+        }
       },
-      { rtol: 1e-8, atol: 1e-12, tEval: [0.5, 1, 1.5, 2] }
+      { rtol, atol, tEval: [0.5, 1, 1.5, 2] }
     );
     expect(result.status).toBe('solved');
     expect(result.points.length).toBe(4);
@@ -1167,13 +1205,28 @@ describe('Корректирующая ревизия 4.5.3 (этап 2): нач
       expect(Math.abs(p.y[0] - analytic(p.t))).toBeLessThan(1e-6);
     }
     expect(Math.abs(result.y[0] - analytic(2))).toBeLessThan(1e-6);
+    // Пробный вызов rhs — ровно при t0 + h0 (ветка 0.01·d0/d1):
+    const probeT = rhsCalls.find((v) => v > 0);
+    expect(probeT).toBeCloseTo(h0Exp, 12);
+    // Первая попытка шага: стадия 1 полного шага при t0 + c1·h
+    // (до неё rhs вызывался только при t0 и t0 + h0).
+    const c1 = (4 - Math.sqrt(6)) / 10;
+    const stage1T = rhsCalls.find((v: number) => v > 0 && Math.abs(v - h0Exp) > 1e-12);
+    expect(stage1T).toBeDefined();
+    const hFirst = (stage1T as number) / c1;
+    // Начальный шаг РОВНО по эталонной формуле с d2 = norm(f1 − f0)/h0:
+    expect(hFirst).toBeCloseTo(hExp, 10);
   });
 
-  it('вырожденный случай: f0 ≈ 0 и Δf ≈ 0 — умеренный конечный начальный шаг (не h1 = Infinity)', () => {
-    // y' = [0, 1e-30]: d1 ≈ 3.5e-25 и d2 = 0 — обе нормы вырождены;
-    // ветка малых норм даёт h1 = max(1e-6, h0·1e-3) (SciPy), а не
-    // (0.01/0)^(1/6) = Infinity → начальный шаг умеренно мал
-    // (5e-4 на [0, 0.5]), а не ограничен только span (0.5).
+  it('вырожденный случай: f0 ≈ 0 и Δf ≈ 0 — начальный шаг ТОЧНО по эталонной формуле (не h1 = Infinity)', () => {
+    // y' = [0, 1e-30]: d1 ≈ 3.5e-25 < 1e-5 → h0 = 1e-6 (SciPy;
+    // старая эвристика дала бы 1e-6·span = 5e-7 — пробный вызов
+    // rhs это различает). d2 = 0, обе нормы вырождены (≤ 1e-15) →
+    // h1 = max(1e-6, h0·1e-3) = 1e-6, итог
+    // h = min(100·h0, h1, maxStep, span) = 1e-6 — РОВНО по
+    // эталонной формуле, а не «любой шаг ≤ 1e-3». Ошибка шага
+    // нулевая → первый шаг принят без отказов.
+    const rhsCalls: number[] = [];
     const result = backend.solveOde(
       {
         kind: 'ode',
@@ -1181,14 +1234,22 @@ describe('Корректирующая ревизия 4.5.3 (этап 2): нач
         t0: 0,
         tEnd: 0.5,
         y0: [1, 2],
-        rhs: () => [0, 1e-30]
+        rhs: (t: number) => {
+          rhsCalls.push(t);
+          return [0, 1e-30];
+        }
       },
       { rtol: 1e-6, atol: 1e-12 }
     );
     expect(result.status).toBe('solved');
     expect(result.y[0]).toBe(1);
     expect(result.y[1]).toBe(2);
-    expect(result.stats.minAcceptedStepSize).toBeLessThanOrEqual(1e-3);
+    // Пробный вызов rhs при t0 + h0 = 1e-6 (абсолютный fallback SciPy):
+    const probeT = rhsCalls.find((v) => v > 0);
+    expect(probeT).toBeCloseTo(1e-6, 12);
+    // Первый принятый шаг — ровно 1e-6 = min(100·h0, max(1e-6, h0·1e-3), maxStep, span):
+    expect(result.stats.minAcceptedStepSize).toBe(1e-6);
+    expect(result.stats.rejectedSteps).toBe(0);
     expect(result.stats.minAcceptedStepSize).toBeGreaterThan(0);
     expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
   });
@@ -1251,3 +1312,121 @@ describe('Корректирующая ревизия 4.5.3 (этап 2): нач
     expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
   });
 });
+
+describe('Корректирующая ревизия 4.5.3 (этап 3): точный select_initial_step SciPy и регрессия minorNegativeCount', () => {
+  const backend = createRadauIiaOdeBackend();
+
+  it('h0: d0 < 1e-5 → абсолютный fallback 1e-6 (НЕ 1e-6·span)', () => {
+    // y0 = [0], y' = 1, span = 5: d0 = 0 < 1e-5 → h0 = 1e-6.
+    // Старое условие по отношению d0/d1 = 0 < 1e-5 дало бы
+    // fallback 1e-6·span = 5e-6 — пробный вызов rhs (первый вызов
+    // с t > t0) это различает.
+    const rhsCalls: number[] = [];
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 5,
+        y0: [0],
+        rhs: (t: number) => {
+          rhsCalls.push(t);
+          return [1];
+        }
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.t).toBe(5);
+    expect(result.y[0]).toBeCloseTo(5, 10);
+    const probeT = rhsCalls.find((v) => v > 0);
+    expect(probeT).toBeCloseTo(1e-6, 12);
+  });
+
+  it('h0: d0, d1 ≥ 1e-5 при малом отношении → 0.01·d0/d1 (условие SciPy, а не отношение с fallback)', () => {
+    // y0 = [1], y' = 1e8, span = 1e-3: d0 ≈ 1e6 и d1 ≈ 1e14 — обе
+    // нормы ≥ 1e-5, но их отношение 1e-8 < 1e-5. SciPy использует
+    // ветку 0.01·d0/d1 = 1e-10; старое условие по отношению ушло
+    // бы в fallback 1e-6·span = 1e-9 — пробный вызов rhs различает.
+    const rhsCalls: number[] = [];
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 1,
+        t0: 0,
+        tEnd: 1e-3,
+        y0: [1],
+        rhs: (t: number) => {
+          rhsCalls.push(t);
+          return [1e8];
+        }
+      },
+      { rtol: 1e-6, atol: 1e-12 }
+    );
+    expect(result.status).toBe('solved');
+    // y = 1 + 1e8·1e-3 = 100001 (константа интегрируется точно)
+    expect(Math.abs(result.y[0] - 100001)).toBeLessThan(1e-6);
+    const probeT = rhsCalls.find((v) => v > 0);
+    expect(probeT).toBeCloseTo(1e-10, 12);
+  });
+
+  it('minorNegativeCount: кандидат с малым минусом, отклонённый ИНВАРИАНТОМ (не Ньютоном), не попадает в счётчик', () => {
+    // Регрессия исходного дефекта: инкремент выполнялся в цикле
+    // проверки неотрицательности кандидата ДО принятия шага,
+    // поэтому минус кандидата, позже отклонённого инвариантом,
+    // попадал в диагностику. Полностью детерминированный сценарий:
+    // 1) rhs зависит только от t → якобиан нулевой, стадии решаются
+    //    Ньютоном точно: newtonFailures = 0 (отказ не из-за Ньютона);
+    // 2) initialStep = 1: первая попытка сэмплирует импульсы rhs
+    //    только в моменты t = 0.5 (конец первого полушага) и t = 1
+    //    (конец второго полушага и одновременно стадия-3 полного
+    //    шага). Обе траектории (полный шаг и два полушага)
+    //    накапливают ОДИНАКОВЫЙ вклад импульса (вес A_33 = 1/9 на
+    //    каждый полушаг против A_33 = 1/9 на полный шаг) →
+    //    step-doubling разность на уровне ulp, оценка ошибки
+    //    проходит (отказ не из-за ошибки шага);
+    // 3) кандидат yFine = [−1e-7, 2.1000001]: компонента 0 —
+    //    небольшой минус в пределах допуска (atol + rtol·1 ≈ 1e-6)
+    //    → проверка неотрицательности проходит;
+    // 4) линейный инвариант y0 + y1 = 2 нарушен на 0.1 ≫ допуска
+    //    → попытка отклонена именно инвариантом, h уменьшен до 0.3;
+    // 5) все стадии последующих попыток (h = 0.3, затем рост ×5)
+    //    НЕ попадают в окна импульсов → интегрирование завершается,
+    //    принятые состояния положительны, траектория y = [1, 1];
+    // 6) итог: minorNegativeCount = 0 — отвергнутый кандидат НЕ
+    //    посчитан. Старый код (инкремент до проверок) дал бы 1.
+    const W = 1e-9; // полуширина окна импульса
+    const pulse = (t: number): boolean => Math.abs(t - 0.5) < W || Math.abs(t - 1) < W;
+    const G = -9 * (1 + 1e-7); // вклад: 1 + (1/9)·G = −1e-7 (малый минус кандидата)
+    const K = 0.9; // нарушение инварианта: (1/9)·K = 0.1
+    const result = backend.solveOde(
+      {
+        kind: 'ode',
+        stateDimension: 2,
+        t0: 0,
+        tEnd: 4,
+        y0: [1, 1],
+        rhs: (t: number) => (pulse(t) ? [G, -G + K] : [0, 0]),
+        nonNegativeIndices: [0],
+        linearInvariants: [{ coefficients: [1, 1], expected: 2 }]
+      },
+      { rtol: 1e-6, atol: 1e-12, initialStep: 1 }
+    );
+    expect(result.status).toBe('solved');
+    expect(result.t).toBe(4);
+    // отказ ровно один и именно по инварианту, а не по Ньютону:
+    expect(result.stats.rejectedSteps).toBe(1);
+    expect(result.stats.newtonFailures).toBe(0);
+    // инвариант проверялся и на отклонённой попытке
+    // (1 отклонённая + по одной на каждый принятый шаг):
+    expect(result.diagnostics.invariantChecks).toBe(result.stats.acceptedSteps + 1);
+    // РЕГРЕССИЯ: минус отвергнутого кандидата не в счётчике
+    // (y0 и принятые состояния положительны):
+    expect(result.diagnostics.minorNegativeCount).toBe(0);
+    // после отказа импульсы не сэмплируются: y = [1, 1]
+    expect(result.y[0]).toBe(1);
+    expect(result.y[1]).toBe(1);
+    expect(result.stats.attemptedSteps).toBe(result.stats.acceptedSteps + result.stats.rejectedSteps);
+  });
+});
+

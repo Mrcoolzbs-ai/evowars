@@ -103,6 +103,20 @@
 //    ПРИНЯТЫЕ состояния; малые минусы кандидатов отклонённых
 //    попыток шага в счётчик не попадают — диагностика отражает
 //    реальную траекторию, а не историю проб.
+//
+// Этап 3 корректирующей ревизии (03.11.2026):
+// 9. Условие выбора h0 — ДОСЛОВНО алгоритм SciPy
+//    select_initial_step (scipy/integrate/_ivp/common.py):
+//    при d0 < 1e-5 или d1 < 1e-5 — h0 = 1e-6 (абсолютный
+//    fallback, НЕ 1e-6·span), иначе h0 = 0.01·d0/d1;
+//    отношение-эвристика с масштабированием на длину интервала
+//    удалена. Нормы — взвешенная RMS (rms_norm SciPy), поэтому
+//    h1 совпадает с SciPy и без поправок; собственные адаптации
+//    под единицы времени проекта НЕ вводились.
+// 10. Свойства сохранены: h0 конечен и строго положителен
+//     (fail-closed страховка от не-конечных норм), h0 ≤ span
+//     ДО пробного вызова rhs, итог h = min(100·h0, h1, maxStep,
+//     span), ветка малых d1/d2 — без изменений.
 
 import type {
   OdeSolverBackend,
@@ -804,11 +818,14 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
   const scale0 = y.map((v, a) => opts.atol[a] + opts.rtol * Math.abs(v));
   const f0 = callRhs(problem, t, y, ctx);
   // Начальный шаг: алгоритм Hairer (Solving ODEs I, §II.4) в
-  // форме select_initial_step SciPy solve_ivp. Пробный шаг h0
-  // определяется нормами начального состояния и его производной;
-  // при вырожденном отношении (в т.ч. y0 = 0 при y' ≠ 0) — строго
-  // положительный fallback 1e-6·span, поэтому интегратор НИКОГДА
-  // не начинает с нулевого шага. До пробного вызова rhs шаг h0
+  // форме select_initial_step SciPy solve_ivp — условие выбора
+  // пробного шага ДОСЛОВНО как в SciPy: при вырожденных нормах
+  // (d0 < 1e-5 или d1 < 1e-5, в т.ч. y0 = 0 при y' ≠ 0) —
+  // абсолютный fallback h0 = 1e-6 (НЕ 1e-6·span: единицы времени
+  // задачи произвольны и шаг не масштабируется интервалом),
+  // иначе h0 = 0.01·d0/d1. Интегратор НИКОГДА не начинает с
+  // нулевого шага: неконечный/неположительный выбор —
+  // fail-closed fallback 1e-6. До пробного вызова rhs шаг h0
   // ограничен интервалом (h0 ≤ span): rhs не вызывается вне
   // [t0, tEnd]. Вторая пробная точка уточняет норму ИЗМЕНЕНИЯ
   // производной d2 = norm(f1 − f0)/h0 (как в SciPy), а не норму
@@ -822,9 +839,19 @@ export function solveOdeWithRadauIia(problem: OdeSolverProblem, options?: OdeSol
   } else {
     const d0 = weightedRmsNorm(y, scale0);
     const d1 = weightedRmsNorm(f0, scale0);
-    const ratio = d1 > 0 ? d0 / d1 : Infinity;
-    let h0 = Number.isFinite(ratio) && ratio >= 1e-5 ? 0.01 * ratio : 1e-6 * span;
-    if (!Number.isFinite(h0) || h0 <= 0) h0 = 1e-6 * span;
+    // Условие SciPy select_initial_step (дословно):
+    //   if d0 < 1e-5 or d1 < 1e-5: h0 = 1e-6
+    //   else:                     h0 = 0.01 * d0 / d1
+    let h0: number;
+    if (d0 < 1e-5 || d1 < 1e-5) {
+      h0 = 1e-6;
+    } else {
+      h0 = 0.01 * (d0 / d1);
+    }
+    // Fail-closed страховка конечности/положительности (не-конечные
+    // нормы возможны только при экзотических scale/y; поведение
+    // ниже всё равно fail-closed на численной проверке h).
+    if (!Number.isFinite(h0) || h0 <= 0) h0 = 1e-6;
     // Пробный вызов rhs — строго внутри [t0, tEnd] (соответствует
     // min(h0, interval_length) SciPy select_initial_step): h0
     // конечен, строго положителен и не превышает длину интервала.
@@ -1108,3 +1135,4 @@ export function createRadauIiaOdeBackend(): OdeSolverBackend {
     }
   };
 }
+
