@@ -191,3 +191,61 @@ export type {
   KineticsCatalog
 } from './kineticsCatalog';
 
+
+// Stage 4.4.4.1: каталог чистокомпонентных параметров Peng–Robinson
+// (co2, n2, ch4, h2o, ar): Tc/Pc — справочные значения критических точек
+// фундаментальных EOS из публикаций JPCRD (reported), omega — INFO.acentric
+// fluid-файлов CoolProp (software_dataset, master @ 8eb3b778, обращение
+// 2026-11-04); каждое поле — собственный per-field provenance (антипаттерн
+// общей строки CRITICAL_SOURCE НЕ воспроизводится). h2 исключён (изомерный
+// состав, квантовый компонент); kij НАМЕРЕННО отсутствуют — пара без kij
+// это отказ (fail-closed), НЕ kij = 0; формулы PR/Z/фугитивности —
+// последующие подэтапы (4.4.4.2+). Конфликт CH4-omega (CoolProp 0.01142
+// против Antoine-расчёта ≈ 0.00661, UNRESOLVED_CROSS_CHECK) и расхождение
+// Ar-critical (легаси 150.86 K / 48.98 bar против Tegeler–Span–Wagner
+// 150.687 K / 4.863 MPa) НЕ маскируются; phaseProperties.ts не изменён.
+// Источники и ограничения — DATA_PROVENANCE.md §2.29.
+import {
+  EOS_PURE_COMPONENT_IDS,
+  EOS_PURE_COMPONENT_PARAMETERS,
+  EOS_VALUE_ORIGINS,
+  EOS_EVIDENCE_STATUSES,
+  EOS_CROSS_CHECK_OUTCOMES,
+  EOS_CATALOG_SCOPE_NOTE,
+  EOS_H2_EXCLUSION_NOTE,
+  EOS_NO_BINARY_INTERACTION_NOTE,
+  getEosPureComponentParameters,
+  listEosPureComponentIds,
+  validateEosScalarParameter,
+  validateEosPureComponentRecord,
+  validateEosCatalog,
+  EosParametersError
+} from './eosParameters';
+
+export {
+  EOS_PURE_COMPONENT_IDS,
+  EOS_PURE_COMPONENT_PARAMETERS,
+  EOS_VALUE_ORIGINS,
+  EOS_EVIDENCE_STATUSES,
+  EOS_CROSS_CHECK_OUTCOMES,
+  EOS_CATALOG_SCOPE_NOTE,
+  EOS_H2_EXCLUSION_NOTE,
+  EOS_NO_BINARY_INTERACTION_NOTE,
+  getEosPureComponentParameters,
+  listEosPureComponentIds,
+  validateEosScalarParameter,
+  validateEosPureComponentRecord,
+  validateEosCatalog,
+  EosParametersError
+};
+export type {
+  EosValueOrigin,
+  EosEvidenceStatus,
+  EosParameterProvenance,
+  EosCrossCheckOutcome,
+  EosCrossCheck,
+  EosScalarParameter,
+  EosPureComponentParameters,
+  EosPureComponentGasId,
+  EosParametersErrorCode
+} from './eosParameters';

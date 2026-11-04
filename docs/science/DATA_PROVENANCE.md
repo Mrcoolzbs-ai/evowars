@@ -501,6 +501,27 @@
 > история Git НЕ переписывалась. Stage 4.5.4 остаётся ЧАСТИЧНО РЕАЛИЗОВАННЫМ
 > (нерешённые вопросы KIDA provenance/licensing), 4.5.5 НЕ начат.
 
+> Ревизия Stage 4.4.4.1 (2026-11-04, новый каталог чистокомпонентных
+> параметров Peng–Robinson; сами формулы PR/Z/φ/kij НЕ реализованы —
+> только данные, provenance, валидация, fail-closed lookup и тесты):
+> добавлен `src/modules/Data/eosParameters.ts` (экспорт `Data/index.ts`,
+> тесты `Tests/eosParameters.test.ts`) — ровно пять компонентов (co2, n2,
+> ch4, h2o, ar), per-field provenance каждого поля (Tc/Pc — reported из
+> публикаций JPCRD: 10.1063/1.555991, 10.1063/1.1349047, 10.1063/1.555912,
+> 10.1063/1.1461829, 10.1063/1.556037; ω — software_dataset из INFO.acentric
+> fluid-файлов CoolProp, master @ 8eb3b778, обращение 2026-11-04);
+> зафиксированы и НЕ замаскированы расхождения CH₄-ω (UNRESOLVED_CROSS_CHECK,
+> CoolProp 0.01142 против Antoine-расчёта ≈ 0.00661 по Prydz & Goodwin 1972)
+> и Ar-critical (легаси phaseProperties 150.86 K / 48.98 bar против
+> Tegeler–Span–Wagner 150.687 K / 4.863 MPa; phaseProperties.ts НЕ
+> редактировался); h2 исключён (изомерный состав, квантовый компонент);
+> kij отсутствуют НАМЕРЕННО (fail-closed, kij = 0 не нейтрален); лицензия
+> MIT пакета CoolProp НЕ трактуется как происхождение/условия его данных.
+> phaseProperties.ts, thermodynamics.ts, NASA CEA, кинетика, golden baseline
+> не менялись; история Git НЕ переписывалась. Подробности — §2.29;
+> статус этапа — IMPLEMENTATION_ROADMAP.md §4.4.4.1. Подэтапы
+> 4.4.4.2 (Z, φ) и далее НЕ начаты.
+
 ## 1. Модель происхождения данных (расширение PhysValue)
 
 Каждое научное значение в каталогах обязано иметь:
@@ -1278,6 +1299,100 @@ integralConstants сегмента nasa_cea (не provenance.rawInput, как
   KIDA не устанавливается; (5) экспорт не содержит per-record ссылок на первоисточники;
   неопределённости k0/k∞ в нём единичны (значения не воспроизводятся). Блокирующие вопросы зафиксированы в
   KINETIC_CATALOG_BLOCKING_QUESTIONS (kineticsCatalog.ts, 4 вопроса).
+
+### 2.29 Peng–Robinson — чистокомпонентные параметры (Stage 4.4.4.1)
+
+Каталог `src/modules/Data/eosParameters.ts`: ровно пять компонентов (co2, n2,
+ch4, h2o, ar) — идентификаторы существующей модели (Data/gases.ts), без
+дублирования химических сущностей. Каждое поле (Tc, K; Pc, Pa; ω, безразм.)
+несёт СОБСТВЕННЫЙ provenance-объект (EosParameterProvenance = DataProvenance +
+origin: reported | derived | software_dataset + evidence: VERIFIED |
+PARTIALLY_VERIFIED | UNRESOLVED_CROSS_CHECK | UNRESOLVED); общая
+provenance-строка НЕ используется (антипаттерн phaseProperties.CRITICAL_SOURCE
+не воспроизводится). Runtime-валидация (validateEosCatalog /
+validateEosPureComponentRecord / validateEosScalarParameter) и fail-closed
+lookup getEosPureComponentParameters (unknown_gas / invalid_catalog_record —
+отказ, не значения по умолчанию).
+
+- **Критические Tc/Pc (origin: reported, VERIFIED)** — справочные значения
+  критических точек фундаментальных EOS из публикаций J. Phys. Chem. Ref. Data
+  (AIP Publishing; проверка по открытым NIST reprints, srd.nist.gov/jpcrdreprint;
+  значения цитируются с атрибуцией):
+  - CO₂: Tc = 304.1282 K, Pc = 7.3773 MPa — Span & Wagner 1996, JPCRD 25, 1509,
+    doi:10.1063/1.555991;
+  - N₂: Tc = 126.192 K, Pc = 3.3958 MPa — Span, Lemmon, Jacobsen, Wagner,
+    Yokozeki 2000, JPCRD 29, 1361, doi:10.1063/1.1349047;
+  - CH₄: Tc = 190.564 K, Pc = 4.5992 MPa — Setzmann & Wagner 1991, JPCRD 20,
+    1061, doi:10.1063/1.555912;
+  - H₂O: Tc = 647.096 K, Pc = 22.064 MPa — Wagner & Pruss 2002 (IAPWS-95),
+    JPCRD 31, 387, doi:10.1063/1.1461829;
+  - Ar: Tc = 150.687 K, Pc = 4.863 MPa — Tegeler, Span & Wagner 1999, JPCRD
+    28, 779, doi:10.1063/1.556037.
+  Независимая сверка: STATES.critical fluid-файлов CoolProp (реализации тех же
+  EOS) совпадает с хранимыми значениями дословно (записи crossChecks,
+  outcome: consistent).
+- **Ацентрический фактор ω (origin: software_dataset, PARTIALLY_VERIFIED)**
+  — поле INFO.acentric fluid-файлов CoolProp: репозиторий
+  https://github.com/CoolProp/CoolProp, master @
+  8eb3b778ee672afaf9b8c95a2890be3edaf32937 (коммит после релиза v8.0.0 от
+  2026-06-28); файлы dev/fluids/{CarbonDioxide, Nitrogen, Methane, Water,
+  Argon}.json; обращение 2026-11-04. Значения: CO₂ 0.22394; N₂ 0.0372; CH₄
+  0.01142; H₂O 0.3442920843; Ar −0.00219 (отрицательный ω корректен для
+  аргона). **Статус PARTIALLY_VERIFIED, а не VERIFIED**: per-value
+  библиография значения acentric в fluid-файле НЕ публикуется — совпадение
+  с конкретной первичной публикацией не подтверждено. **Лицензия**: пакет
+  CoolProp — MIT (Copyright (c) 2012-2018 Ian H. Bell and other CoolProp
+  developers); лицензия пакета НЕ трактуется как разрешение или
+  подтверждение происхождения/условий использования конкретных числовых
+  значений его данных; происхождение ω-значений CoolProp отдельно от
+  лицензии пакета остаётся неподтверждённым (атрибуция обязательна).
+- **Расхождение CH₄-ω (UNRESOLVED_CROSS_CHECK, НЕ замаскировано)**:
+  хранимое значение CoolProp 0.01142 против независимого расчёта по
+  определению Питцера ω = −log10(P_sat(0.7·Tc)/Pc) − 1 из Antoine-корреляции
+  Prydz & Goodwin 1972 (phaseProperties.ts: A = 3.9895, B = 443.028,
+  C = −0.49, P в барах, диапазон 90.99–189.99 K; 0.7·Tc = 133.395 K — внутри
+  диапазона): P_sat ≈ 4.5298 бар → ω ≈ 0.00661. Antoine-расчёт НЕ выдаётся за
+  подтверждение 0.01142; значение CoolProp НЕ подменяется расчётным;
+  Antoine-корреляция НЕ менялась. Конфликт виден в evidence (поле ω CH₄ =
+  UNRESOLVED_CROSS_CHECK) и в crossChecks записи.
+- **Расхождение Ar-critical (discrepancy, НЕ замаскировано)**: легаси
+  phaseProperties.ts содержит Tc = 150.86 K, Pc = 48.98 bar (без per-field
+  provenance); проверенная запись Tegeler–Span–Wagner 1999 — 150.687 K /
+  4.863 MPa (расхождение 0.173 K / 35 кПа — вне округления). В 4.4.4.1
+  phaseProperties.ts НЕ редактировался (историческое состояние другого
+  модуля до отдельного решения); источником критической точки для будущего
+  PR назначен EOS-каталог (reference EOS с per-field provenance,
+  независимо подтверждён CoolProp). Легаси-значения остальных четырёх
+  компонентов — округления/компиляции тех же первоисточников (crossChecks:
+  consistent_within_rounding; для N₂ Tc 126.21 K отличается от 126.192 K на
+  0.018 K — зафиксировано в записи).
+- **H₂O — ограничения классического PR**: вода — сильно полярная
+  ассоциированная жидкость с водородными связями; классическое кубическое
+  EOS без специальных модификаций не описывает её фазовое поведение с
+  инженерной точностью. Параметры Tc/Pc/ω НЕ являются разрешением
+  использовать стандартный PR как точную модель водных бинарных смесей:
+  Stage 4.4.4 НЕ поддерживает водные смеси (аудит 4.4.4.0: для H₂O–CO₂
+  классический PR с константным kij недостаточен). Для CO₂ точность
+  смесевых расчётов также не заявляется без верифицированных бинарных
+  данных.
+- **H₂ исключён**: нормальный, пара- и ортоводород имеют разные критические
+  константы; универсального «H₂» без уточнения изомерного состава
+  недостаточно; классический PR требует отдельной оценки применимости к
+  квантовому компоненту (Tr = 0.7 ≈ 23 K — вне области классического
+  определения ω). Параметры H₂ «на будущее» не импортируются (аудит
+  4.4.4.0: PARTIALLY_VERIFIED, вне минимального каталога).
+- **kij отсутствуют НАМЕРЕННО**: бинарные параметры взаимодействия —
+  подгоночные, зависят от T/P/состава и правил смешения; универсальных
+  «константных» значений не существует. Отсутствие kij = отказ для пары
+  (fail-closed), НЕ kij = 0 (kij = 0 не нейтрален) и НЕ молчаливая
+  идеализация. Каталог kij с per-pair provenance — подэтап 4.4.4.3.
+- **Границы 4.4.4.1**: формулы PR (a, b, α), кубическое уравнение Z,
+  коэффициенты фугитивности и фугитивности — 4.4.4.2; правила смешения и
+  kij — 4.4.4.3; flash/VLE/LLE и интеграция с solveEquilibrium — вне
+  подэтапа (равновесный решатель остаётся идеальногазовым).
+- **Связь с существующими данными**: phaseProperties.ts не переиспользован
+  для критических точек (нет per-field provenance, общая строка
+  CRITICAL_SOURCE) и не изменён; thermodynamics.ts не изменён.
 
 ## 3. Сравнительная матрица: своя реализация / внешняя библиотека / внешний сервис
 
