@@ -27,6 +27,7 @@
 //   worldState        — каноническое состояние мира;
 //   solverBackend     — контракты численных решателей;
 //   odeSolver         — плотный ODE-решатель Radau IIA (4.5.3);
+//   pengRobinson      — чистокомпонентный PR: Z, phi, фугитивность (4.4.4.2);
 //   migrations        — версии схем, датасетов и миграции сохранений;
 //   adapters          — мосты к существующим модулям (этап 1–3).
 
@@ -50,6 +51,7 @@ export * from './thermalState';
 export * from './worldState';
 export * from './solverBackend';
 export * from './odeSolver';
+export * from './pengRobinson';
 export * from './migrations';
 export * from './adapters';
 

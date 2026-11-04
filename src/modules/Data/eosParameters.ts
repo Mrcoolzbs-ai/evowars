@@ -55,6 +55,12 @@
 // автоматически происхождение и условия использования конкретных
 // числовых значений его fluid-файлов: это разделено в provenance
 // каждого omega (limitations) и в DATA_PROVENANCE.md §2.29.
+//
+// Stage 4.4.4.2 «Предварительное укрепление каталога»: все структуры
+// каталога объявлены deep-readonly на уровне типов И глубоко заморожены
+// в runtime (deepFreeze): попытка изменить Tc/Pc/omega, provenance,
+// crossChecks или ограничения через lookup невозможна. Значения,
+// источники и статусы доказанности при этом укреплении НЕ изменялись.
 
 import type { DataProvenance, Uncertainty } from '../Core/scientificValue';
 import { validateUncertainty } from '../Core/scientificValue';
@@ -111,11 +117,11 @@ export const EOS_EVIDENCE_STATUSES: readonly EosEvidenceStatus[] = [
  * доказательства (паттерн ThermoDataProvenance из Core/thermodynamics.ts:
  * расширяем, не дублируем систему provenance).
  */
-export interface EosParameterProvenance extends DataProvenance {
+export interface EosParameterProvenance extends Readonly<DataProvenance> {
   /** Тип получения значения — обязателен. */
-  origin: EosValueOrigin;
+  readonly origin: EosValueOrigin;
   /** Статус доказательства значения — обязателен. */
-  evidence: EosEvidenceStatus;
+  readonly evidence: EosEvidenceStatus;
 }
 
 /** Результат сверки значения каталога с независимым источником. */
@@ -132,22 +138,46 @@ export const EOS_CROSS_CHECK_OUTCOMES: readonly EosCrossCheckOutcome[] = [
 ];
 
 /**
+ * Глубокая runtime-заморозка (Stage 4.4.4.2): рекурсивный Object.freeze
+ * по всем вложенным объектам и массивам. Каталог — канонические данные
+ * с per-field provenance; после заморозки lookup не даёт вызывающему
+ * коду возможности изменить канонические значения. Идентичность
+ * объектов сохраняется (freeze мутирует на месте, не копирует).
+ */
+function deepFreeze<T>(value: T): T {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      deepFreeze(item);
+    }
+  } else if (typeof value === 'object' && value !== null) {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      // Строковые дети (limitations, resolution и т.п.) примитивны —
+      // заморозка не требуется; массивы и объекты замораживаем.
+      if (typeof child === 'object' && child !== null) {
+        deepFreeze(child);
+      }
+    }
+  }
+  return Object.freeze(value);
+}
+
+/**
  * Задокументированная сверка параметров каталога с независимым
  * источником (включая обнаруженные расхождения — они НЕ скрываются).
  */
 export interface EosCrossCheck {
   /** Что сверяется (например, 'критическая точка (Tc, pc)'). */
-  subject: string;
+  readonly subject: string;
   /** Значение/источник каталога EOS. */
-  catalogValue: string;
+  readonly catalogValue: string;
   /** Независимый источник сверки. */
-  crossSource: string;
+  readonly crossSource: string;
   /** Значение независимого источника. */
-  crossValue: string;
+  readonly crossValue: string;
   /** Итог сверки. */
-  outcome: EosCrossCheckOutcome;
+  readonly outcome: EosCrossCheckOutcome;
   /** Объяснение и решение: что хранится и почему. */
-  resolution: string;
+  readonly resolution: string;
 }
 
 /**
@@ -157,29 +187,29 @@ export interface EosCrossCheck {
  * НЕ «равна нулю» — конвенция ScientificValue).
  */
 export interface EosScalarParameter {
-  value: number;
+  readonly value: number;
   /** Единица реестра Core/physicalQuantity.ts: 'K' | 'Pa' | '1'. */
-  unit: string;
-  uncertainty?: Uncertainty;
-  provenance: EosParameterProvenance;
+  readonly unit: string;
+  readonly uncertainty?: Readonly<Uncertainty>;
+  readonly provenance: EosParameterProvenance;
 }
 
 /** Запись чистокомпонентных параметров Peng–Robinson. */
 export interface EosPureComponentParameters {
   /** Идентификатор существующего вида модели (Data/gases.ts). */
-  gasId: string;
-  formula: string;
-  name: string;
+  readonly gasId: string;
+  readonly formula: string;
+  readonly name: string;
   /** Критическая температура, K (единица 'K', значение > 0). */
-  criticalTemperatureK: EosScalarParameter;
+  readonly criticalTemperatureK: EosScalarParameter;
   /** Критическое давление, Pa (единица 'Pa', значение > 0). */
-  criticalPressurePa: EosScalarParameter;
+  readonly criticalPressurePa: EosScalarParameter;
   /** Ацентрический фактор, безразмерный (единица '1'; знак любой). */
-  acentricFactor: EosScalarParameter;
+  readonly acentricFactor: EosScalarParameter;
   /** Задокументированные сверки с независимыми источниками. */
-  crossChecks: readonly EosCrossCheck[];
+  readonly crossChecks: readonly EosCrossCheck[];
   /** Ограничения применимости классического PR для вещества. */
-  limitations: readonly string[];
+  readonly limitations: readonly string[];
 }
 
 // ============================================
@@ -655,6 +685,21 @@ export const EOS_PURE_COMPONENT_IDS: readonly EosPureComponentGasId[] = [
   'h2o',
   'ar'
 ];
+
+// ============================================
+// 4a. RUNTIME-ИММУТАБЕЛЬНОСТЬ (Stage 4.4.4.2)
+// ============================================
+
+// Каталог, его записи, скалярные параметры, provenance-объекты, сверки
+// и ограничения глубоко заморожены: канонические данные нельзя
+// изменить через lookup. Значения, источники и статусы НЕ изменялись.
+deepFreeze(EOS_PURE_COMPONENT_PARAMETERS);
+// Реестр идентификаторов также runtime-immutable.
+deepFreeze(EOS_PURE_COMPONENT_IDS);
+// Реестры origin/evidence/outcome — замороженные справочники.
+deepFreeze(EOS_VALUE_ORIGINS);
+deepFreeze(EOS_EVIDENCE_STATUSES);
+deepFreeze(EOS_CROSS_CHECK_OUTCOMES);
 
 // ============================================
 // 5. RUNTIME-ВАЛИДАЦИЯ

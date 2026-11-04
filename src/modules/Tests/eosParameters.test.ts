@@ -45,11 +45,24 @@ import gases from '../Data/gases';
 
 const PLANNED_IDS = ['co2', 'n2', 'ch4', 'h2o', 'ar'] as const;
 
+/**
+ * Mutable-вид deep-readonly структур каталога (Stage 4.4.4.2 сделал все
+ * поля каталога readonly и глубоко заморозил его в runtime). Негативные
+ * тесты валидатора работают с ГЛУБОКИМИ КОПИЯМИ канонических данных,
+ * приведёнными к mutable-виду: канонический каталог не изменяем, а
+ * валидатор принимает unknown и обязан ловить неканонические входы.
+ */
+type DeepMutable<T> = T extends readonly (infer U)[]
+  ? DeepMutable<U>[]
+  : T extends object
+    ? { -readonly [K in keyof T]: DeepMutable<T[K]> }
+    : T;
+
 /** Глубокая копия записи каталога для негативных тестов валидатора. */
-function cloneRecord(id: (typeof PLANNED_IDS)[number]): EosPureComponentParameters {
+function cloneRecord(id: (typeof PLANNED_IDS)[number]): DeepMutable<EosPureComponentParameters> {
   return JSON.parse(
     JSON.stringify(EOS_PURE_COMPONENT_PARAMETERS[id])
-  ) as EosPureComponentParameters;
+  ) as DeepMutable<EosPureComponentParameters>;
 }
 
 /**
@@ -340,7 +353,7 @@ describe('Stage 4.4.4.1: смешение источников и fail-closed pr
       'acentricFactor'
     ] as const) {
       const rec = cloneRecord('n2');
-      (rec[field] as EosScalarParameter).provenance = undefined as never;
+      rec[field].provenance = undefined as never;
       const errors = validateEosPureComponentRecord(rec);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors.some((e) => e.includes('provenance'))).toBe(true);
@@ -525,10 +538,10 @@ describe('Stage 4.4.4.1: зафиксированные расхождения',
 // ----------------------------------------------------------------------------
 
 describe('Stage 4.4.4.1: валидатор скалярного параметра', () => {
-  const validTc = (): EosScalarParameter =>
+  const validTc = (): DeepMutable<EosScalarParameter> =>
     JSON.parse(
       JSON.stringify(EOS_PURE_COMPONENT_PARAMETERS.co2.criticalTemperatureK)
-    ) as EosScalarParameter;
+    ) as DeepMutable<EosScalarParameter>;
 
   it('отклоняет неположительные и нечисловые Tc', () => {
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -745,5 +758,88 @@ describe('Stage 4.4.4.1: детерминизм', () => {
 
   it('listEosPureComponentIds стабилен между вызовами', () => {
     expect(listEosPureComponentIds()).toEqual(listEosPureComponentIds());
+  });
+});
+
+// ----------------------------------------------------------------------------
+// 12. Runtime-иммутабельность каталога (Stage 4.4.4.2)
+// ----------------------------------------------------------------------------
+
+describe('Stage 4.4.4.2: runtime-иммутабельность каталога', () => {
+  it('каталог и все вложенные структуры глубоко заморожены', () => {
+    expect(Object.isFrozen(EOS_PURE_COMPONENT_PARAMETERS)).toBe(true);
+    expect(Object.isFrozen(EOS_PURE_COMPONENT_IDS)).toBe(true);
+    for (const id of EOS_PURE_COMPONENT_IDS) {
+      const rec = EOS_PURE_COMPONENT_PARAMETERS[id];
+      expect(Object.isFrozen(rec)).toBe(true);
+      for (const param of [rec.criticalTemperatureK, rec.criticalPressurePa, rec.acentricFactor]) {
+        expect(Object.isFrozen(param)).toBe(true);
+        expect(Object.isFrozen(param.provenance)).toBe(true);
+      }
+      expect(Object.isFrozen(rec.crossChecks)).toBe(true);
+      for (const cc of rec.crossChecks) {
+        expect(Object.isFrozen(cc)).toBe(true);
+      }
+      expect(Object.isFrozen(rec.limitations)).toBe(true);
+    }
+  });
+
+  it('реестры origin/evidence/outcome заморожены', () => {
+    expect(Object.isFrozen(EOS_VALUE_ORIGINS)).toBe(true);
+    expect(Object.isFrozen(EOS_EVIDENCE_STATUSES)).toBe(true);
+    expect(Object.isFrozen(EOS_CROSS_CHECK_OUTCOMES)).toBe(true);
+  });
+
+  it('попытка изменить Tc/Pc/omega бросает TypeError и не меняет каталог', () => {
+    const co2 = EOS_PURE_COMPONENT_PARAMETERS.co2;
+    const tcBefore = co2.criticalTemperatureK.value;
+    const omegaBefore = co2.acentricFactor.value;
+    // ESM strict mode: присваивание в замороженный объект — TypeError.
+    // Канонические структуры readonly на уровне типов, поэтому для
+    // негативного теста используем mutable-вид (значение НЕ изменится).
+    const mut = co2 as unknown as DeepMutable<EosPureComponentParameters>;
+    expect(() => {
+      mut.criticalTemperatureK.value = 999;
+    }).toThrowError(TypeError);
+    expect(() => {
+      mut.acentricFactor.value = -1;
+    }).toThrowError(TypeError);
+    expect(co2.criticalTemperatureK.value).toBe(tcBefore);
+    expect(co2.acentricFactor.value).toBe(omegaBefore);
+  });
+
+  it('попытка изменить provenance и crossChecks бросает TypeError', () => {
+    const ch4 = EOS_PURE_COMPONENT_PARAMETERS.ch4;
+    const mut = ch4 as unknown as DeepMutable<EosPureComponentParameters>;
+    expect(() => {
+      mut.acentricFactor.provenance.evidence = 'VERIFIED';
+    }).toThrowError(TypeError);
+    expect(ch4.acentricFactor.provenance.evidence).toBe('UNRESOLVED_CROSS_CHECK');
+    // Статус конфликта CH4 НЕ повышается иммутабельностью и не скрывается.
+    expect(() => {
+      mut.crossChecks.push({ subject: '', catalogValue: '', crossSource: '', crossValue: '', outcome: 'consistent', resolution: '' });
+    }).toThrowError(TypeError);
+    // Заморозка массива crossChecks не позволяет изменить и его элементы:
+    const cc = ch4.crossChecks[0];
+    expect(() => {
+      (cc as unknown as { outcome: string }).outcome = 'consistent';
+    }).toThrowError(TypeError);
+  });
+
+  it('lookup не позволяет изменить канонические данные', () => {
+    const ar = getEosPureComponentParameters('ar');
+    const mut = ar as unknown as DeepMutable<EosPureComponentParameters>;
+    expect(() => {
+      mut.criticalPressurePa.value = 1;
+    }).toThrowError(TypeError);
+    // Повторный lookup возвращает исходные (неизменённые) значения.
+    const again = getEosPureComponentParameters('ar');
+    expect(again.criticalPressurePa.value).toBe(4863000);
+    expect(again).toBe(ar);
+  });
+
+  it('замороженный каталог по-прежнему проходит валидацию', () => {
+    // Иммутабельность не ослабляет и не заменяет проверку provenance:
+    expect(validateEosCatalog(EOS_PURE_COMPONENT_PARAMETERS)).toEqual([]);
   });
 });
