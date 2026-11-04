@@ -596,7 +596,7 @@ describe('Stage 4.4.4.1: валидатор скалярного парамет�
       'license'
     ] as const) {
       const p = validTc();
-      (p.provenance as Record<string, unknown>)[key] = '';
+      ((p.provenance as unknown) as Record<string, unknown>)[key] = '';
       expect(
         validateEosScalarParameter(p, 'K', 'criticalTemperatureK', { positive: true }).length
       ).toBeGreaterThan(0);
