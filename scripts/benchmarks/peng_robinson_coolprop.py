@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Stage 4.4.4.2.2 — независимый benchmark чистокомпонентного Peng–Robinson.
+Stage 4.4.4.2.2 / 4.4.4.3 — независимый benchmark Peng–Robinson:
+чистые компоненты (4.4.4.2) и многокомпонентные смеси (4.4.4.3).
 
 Оракулы (оба НЕ зависят от TypeScript-реализации):
 
@@ -45,6 +46,23 @@ Stage 4.4.4.2.2 — независимый benchmark чистокомпонен�
    1e-8*max(1, |z|, B)); обоснованный отказ НЕ превращается в PASS
    молча — статус solver_failure фиксируется в отчёте явно, число
    обоснованных отказов выводится в аннотации.
+
+4. Смесевой оракул (Stage 4.4.4.3, аргумент --mixtures): контрольные
+   точки смесей из TS-дампа сверяются ДВУМЯ независимыми оракулами.
+   CoolProp 8.0.0 backend 'PR' со смесями зарегистрированных флюидов
+   (EVWCO2&EVWN2 и т.д.): КАТАЛОЖНЫЕ kij Stage 4.4.4.3 вводятся в
+   CoolProp через документированный API
+   set_binary_interaction_double(i, j, "kij", value) (документация
+   Cubics: «CoolProp does not come with any values for the kij
+   parameter» — встроенных значений НЕТ, ничего не переопределяется).
+   ЧЕСТНАЯ СЕМАНТИКА: это ВАЛИДАЦИЯ РЕАЛИЗАЦИИ (правил смешения,
+   кубики смеси, phi_i, f_i) при одинаковых kij; это НЕ независимое
+   подтверждение ЗНАЧЕНИЙ kij — те остаются PARTIALLY_VERIFIED по
+   provenance каталога (подгонки Okoro 2024 / Köster 2018). Второй
+   оракул — mpmath (50 знаков): независимая ре-реализация классических
+   правил смешения PR (a_ij = (1-kij)sqrt(a_i a_j), a_mix, b_mix,
+   кубика, ln(phi_i)) с НАШИМИ округлёнными константами; допуск
+   rtol 5e-13. Сравниваются Z, phi_i, f_i каждого компонента.
 
 Числа из TS-дампа — выход СОБСТВЕННОЙ реализации (вход сравнения, НЕ
 эталон). Неудачные точки НЕ скрываются: любая из них делает код
@@ -106,11 +124,29 @@ CATALOG = {
 OMEGA_A_ROUNDED_VALUE = "0.45724"  # textbook-константа нашей TS-реализации
 OMEGA_B_ROUNDED_VALUE = "0.0778"
 
+# ============================================
+# Каталог kij Stage 4.4.4.3 (значения — из src/modules/Data/
+# binaryInteractionParameters.ts; только available-пары).
+# В ОРАКУЛЕ значения НЕ используются как эталон: CoolProp они только
+# ВВОДЯТСЯ (та же цифра, что и в TS-реализации), mpmath получает их
+# из TS-дампа точки. Происхождение — provenance каталога:
+# Okoro et al. 2024, doi:10.1002/ghg.2300 (Таблица 1, Original BIP);
+# Köster, Thol & Vrabec 2018, doi:10.1021/acs.jced.7b00706 (Таблица 4).
+KIJ_CATALOG = {
+    "ar|co2": 0.129219,
+    "ar|n2": -0.0037,
+    "ch4|co2": 0.09897,
+    "co2|n2": -0.017,
+    "h2o|n2": -0.0501,
+}
+
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="CoolProp PR benchmark (Stage 4.4.4.2.2)")
+    parser = argparse.ArgumentParser(description="CoolProp PR benchmark (Stage 4.4.4.2.2 + смеси 4.4.4.3)")
     parser.add_argument("--dump", default="benchmark-artifacts/peng-robinson-ts-dump.json",
                         help="путь к TS-дампу контрольных точек")
+    parser.add_argument("--mixtures", default=None,
+                        help="путь к TS-дампу СМЕСЕВЫХ контрольных точек (Stage 4.4.4.3)")
     parser.add_argument("--report", default="benchmark-artifacts/peng-robinson-coolprop-report.json",
                         help="путь записи JSON-отчёта")
     parser.add_argument("--summary-md", default="benchmark-artifacts/benchmark-summary.md",
@@ -566,15 +602,259 @@ def main() -> int:
         boundary.append(entry)
 
     # ============================================
+    # Смесевой оракул (Stage 4.4.4.3): CoolProp PR с каталожными kij
+    # и независимая mpmath-реализация правил смешения
+    # ============================================
+    # ЧЕСТНАЯ СЕМАНТИКА: CoolProp НЕ содержит собственных значений kij
+    # (документация Cubics: «CoolProp does not come with any values for
+    # the kij parameter»), поэтому каталожные kij Stage 4.4.4.3 ВВОДЯТСЯ
+    # в CoolProp через set_binary_interaction_double(i, j, "kij", v).
+    # Оракул ВАЛИДИРУЕТ РЕАЛИЗАЦИЮ (правила смешения, кубику, phi_i)
+    # при одинаковых kij; он НЕ является независимым подтверждением
+    # ЗНАЧЕНИЙ kij — те остаются PARTIALLY_VERIFIED по provenance
+    # каталога (подгонки Okoro 2024 / Köster 2018).
+    mixtures_data = None
+    if args.mixtures is not None:
+        mixtures_path = Path(args.mixtures)
+        if not mixtures_path.is_file():
+            print(f"ОШИБКА: TS-дамп смесей не найден: {mixtures_path}", file=sys.stderr)
+            return 2
+        with mixtures_path.open("r", encoding="utf-8") as handle:
+            mixtures_data = json.load(handle)
+
+    mixture_coolprop_points = []
+    mixture_mpmath_points = []
+
+    def pr_mixture_mpmath(T, P, comp_ids, fractions, kij_map, R, omega_a, omega_b):
+        """Классические правила смешения PR в mp-точности.
+
+        Независимая ре-реализация (НЕ код TS): a_ij = (1-kij)sqrt(a_i a_j),
+        a_mix = sum_i sum_j x_i x_j a_ij, b_mix = sum_i x_i b_i, та же
+        кубика, ln(phi_i) с S_i = sum_j x_j a_ij. Все binary64-входы —
+        через as_integer_ratio (точная семантика double).
+        """
+        T = mp_from_float(T)
+        P = mp_from_float(P)
+        a_list = []
+        b_list = []
+        for gas_id in comp_ids:
+            info = CATALOG[gas_id]
+            Tc = mp_from_float(info["Tc"])
+            pc = mp_from_float(info["pc"])
+            omega = mp_from_float(info["omega"])
+            kappa = mpf("0.37464") + mpf("1.54226") * omega - mpf("0.26992") * omega * omega
+            alpha = (1 + kappa * (1 - mp_sqrt(T / Tc))) ** 2
+            a_list.append(omega_a * R * R * Tc * Tc / pc * alpha)
+            b_list.append(omega_b * R * Tc / pc)
+        n = len(comp_ids)
+        aij = [[None] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    aij[i][j] = a_list[i]
+                else:
+                    key = "|".join(sorted((comp_ids[i], comp_ids[j])))
+                    kij = mp_from_float(kij_map[key])
+                    aij[i][j] = (1 - kij) * mp_sqrt(a_list[i] * a_list[j])
+        x = [mp_from_float(f) for f in fractions]
+        a_mix = sum(x[i] * x[j] * aij[i][j] for i in range(n) for j in range(n))
+        b_mix = sum(x[i] * b_list[i] for i in range(n))
+        A = a_mix * P / (R * R * T * T)
+        B = b_mix * P / (R * T)
+        c2 = -(1 - B)
+        c1 = A - 3 * B * B - 2 * B
+        c0 = -(A * B - B * B - B * B * B)
+        roots, _pair, _disc, _scale = cubic_real_roots_mp(c2, c1, c0)
+        physical = sorted(z for z in roots if z > B)
+        s_list = [sum(x[j] * aij[i][j] for j in range(n)) for i in range(n)]
+
+        def lnphi_i(i, z):
+            return ((b_list[i] / b_mix) * (z - 1)
+                    - mp_log(z - B)
+                    - A / (2 * mp_sqrt(2) * B)
+                    * (2 * s_list[i] / a_mix - b_list[i] / b_mix)
+                    * mp_log((z + (1 + mp_sqrt(2)) * B)
+                             / (z + (1 - mp_sqrt(2)) * B)))
+
+        return {"A": A, "B": B, "physical": physical, "lnphi_i": lnphi_i,
+                "a_mix": a_mix, "b_mix": b_mix}
+
+    if mixtures_data is not None:
+        for row in mixtures_data.get("points", []):
+            comp_ids = [c["gasId"] for c in row["composition"]]
+            fractions = [float(c["moleFraction"]) for c in row["composition"]]
+            index_of = {c["gasId"]: i for i, c in enumerate(row["composition"])}
+            kij_map = {p["pairKey"]: float(p["kij"]) for p in row["kijUsed"]}
+
+            # --- CoolProp: смесь зарегистрированных флюидов + kij каталога ---
+            phase_specified = None
+            coolprop_vals = {"Z": None, "Z_source": None, "phi": [],
+                             "fugacity": [], "rhomolar": None, "error": None}
+            fluid_errors = [custom_fluids["fluids"][g]["error"] for g in comp_ids]
+            if add_error is not None or any(e is not None for e in fluid_errors):
+                coolprop_vals["error"] = (
+                    f"add_fluids_as_JSON error: {add_error}; "
+                    f"per-fluid: {fluid_errors}")
+            else:
+                try:
+                    names = [CATALOG[g]["custom"] for g in comp_ids]
+                    state = CP.AbstractState("PR", "&".join(names))
+                    # Каталожные kij вводятся ДО update; значения — из
+                    # TS-дампа точки (те же цифры, что использует TS).
+                    for pair in row["kijUsed"]:
+                        a, b = pair["pairKey"].split("|")
+                        state.set_binary_interaction_double(
+                            index_of[a], index_of[b], "kij", float(pair["kij"]))
+                        # Симметрично (j, i): матрица взаимодействия в CoolProp
+                        # хранится по направлениям; каталожный kij симметричен.
+                        state.set_binary_interaction_double(
+                            index_of[b], index_of[a], "kij", float(pair["kij"]))
+                    state.set_mole_fractions(fractions)
+                    if len(row["physicalRoots"]) >= 2:
+                        phase_specified = "gas" if row["root"] == "vapor" else "liquid"
+                        state.specify_phase(
+                            CP.iphase_gas if row["root"] == "vapor" else CP.iphase_liquid)
+                    try:
+                        state.update(CP.PT_INPUTS, row["pressurePa"], row["temperatureK"])
+                    except ValueError as exc:
+                        msg = str(exc)
+                        if phase_specified is not None or not (
+                                "phase not imposed" in msg or "guess density" in msg):
+                            raise
+                        phase_specified = "gas" if row["root"] == "vapor" else "liquid"
+                        state.specify_phase(
+                            CP.iphase_gas if row["root"] == "vapor" else CP.iphase_liquid)
+                        coolprop_vals["phase_imposed_after_refusal"] = (
+                            f"update(PT) отказал ({msg}); фаза "
+                            f"'{phase_specified}' навязана по ветви TS, update повторён")
+                        state.update(CP.PT_INPUTS, row["pressurePa"], row["temperatureK"])
+                    rho = float(state.rhomolar())
+                    coolprop_vals["rhomolar"] = rho
+                    try:
+                        coolprop_vals["Z"] = float(state.keyed_output(CP.iZ))
+                        coolprop_vals["Z_source"] = "AS.keyed_output(CP.iZ)"
+                    except Exception:  # noqa: BLE001 — документированный fallback
+                        r_coolprop = coolprop_meta["r_universal"]
+                        if r_coolprop is None:
+                            r_coolprop = mixtures_data["universalGasConstantJPerMolK"]
+                        coolprop_vals["Z"] = (row["pressurePa"]
+                                              / (rho * r_coolprop * row["temperatureK"]))
+                        coolprop_vals["Z_source"] = "P/(rhomolar*R*T), R CoolProp"
+                    for i in range(len(comp_ids)):
+                        coolprop_vals["phi"].append(float(state.fugacity_coefficient(i)))
+                        coolprop_vals["fugacity"].append(float(state.fugacity(i)))
+                except Exception as exc:  # noqa: BLE001 — точная причина, НЕ подмена
+                    coolprop_vals["error"] = f"{type(exc).__name__}: {exc}"
+
+            comparisons = {"Z": None, "components": []}
+            point_pass = coolprop_vals["error"] is None
+            if coolprop_vals["error"] is None:
+                abs_err = abs(coolprop_vals["Z"] - row["Z"])
+                rel_err = abs_err / abs(row["Z"])
+                comparisons["Z"] = {"abs": abs_err, "rel": rel_err,
+                                     "tolerance": RTOL_COOLPROP,
+                                     "pass": rel_err <= RTOL_COOLPROP}
+                if rel_err > RTOL_COOLPROP:
+                    point_pass = False
+                for i, comp in enumerate(row["components"]):
+                    comp_entry = {"component": comp["component"],
+                                  "phi": None, "fugacity": None}
+                    for name, ts_value, cp_value in (
+                            ("phi", comp["phi"], coolprop_vals["phi"][i]),
+                            ("fugacity", comp["fugacityPa"],
+                             coolprop_vals["fugacity"][i])):
+                        abs_err = abs(cp_value - ts_value)
+                        rel_err = abs_err / abs(ts_value)
+                        comp_entry[name] = {"abs": abs_err, "rel": rel_err,
+                                            "tolerance": RTOL_COOLPROP,
+                                            "pass": rel_err <= RTOL_COOLPROP}
+                        if rel_err > RTOL_COOLPROP:
+                            point_pass = False
+                    comparisons["components"].append(comp_entry)
+            mixture_coolprop_points.append({
+                "id": row["id"],
+                "composition": row["composition"],
+                "kijUsed": row["kijUsed"],
+                "temperatureK": row["temperatureK"],
+                "pressurePa": row["pressurePa"],
+                "root": row["root"],
+                "phase_specified": phase_specified,
+                "semantics": ("ВАЛИДАЦИЯ РЕАЛИЗАЦИИ при одинаковых kij "
+                              "(введены в CoolProp через "
+                              "set_binary_interaction_double); НЕ независимое "
+                              "подтверждение значений kij (PARTIALLY_VERIFIED)"),
+                "coolprop": coolprop_vals,
+                "typescript": {"Z": row["Z"],
+                                "dimensionlessA": row["dimensionlessA"],
+                                "dimensionlessB": row["dimensionlessB"],
+                                "aMix": row["aMixPaM6PerMol2"],
+                                "bMix": row["bMixM3PerMol"],
+                                "components": row["components"]},
+                "comparison": comparisons,
+                "pass": point_pass,
+            })
+
+            # --- mpmath: независимая реализация правил смешения против TS ---
+            calc = pr_mixture_mpmath(row["temperatureK"], row["pressurePa"],
+                                     comp_ids, fractions, kij_map, R_TS,
+                                     omega_a_rounded, omega_b_rounded)
+            physical = calc["physical"]
+            entry = {"id": row["id"], "dps": MPMATH_DPS, "pass": True,
+                     "comparison": {}}
+            if not physical:
+                entry["error"] = "нет физических корней"
+                entry["pass"] = False
+            else:
+                z_sel = (physical[-1] if row["root"] == "vapor" else physical[0])
+                entry["Z"] = float(z_sel)
+                entry["physicalRootCount"] = len(physical)
+                for name, ts_value, mp_value in (
+                        ("Z", row["Z"], float(z_sel)),
+                        ("aMix", row["aMixPaM6PerMol2"], float(calc["a_mix"])),
+                        ("bMix", row["bMixM3PerMol"], float(calc["b_mix"]))):
+                    rel_err = abs(mp_value - ts_value) / abs(ts_value)
+                    entry["comparison"][name] = {
+                        "abs": abs(mp_value - ts_value), "rel": rel_err,
+                        "tolerance": RTOL_MPMATH,
+                        "pass": rel_err <= RTOL_MPMATH}
+                    if rel_err > RTOL_MPMATH:
+                        entry["pass"] = False
+                entry["components"] = []
+                for i, comp in enumerate(row["components"]):
+                    lnphi = calc["lnphi_i"](i, z_sel)
+                    phi = float(mp.exp(lnphi))
+                    fugacity = float(mp_from_float(comp["moleFraction"])
+                                     * mp.exp(lnphi) * mp_from_float(row["pressurePa"]))
+                    comp_entry = {"component": comp["component"],
+                                  "lnPhi": float(lnphi), "phi": phi,
+                                  "fugacity": fugacity, "comparison": {}}
+                    for name, ts_value, mp_value in (
+                            ("phi", comp["phi"], phi),
+                            ("fugacity", comp["fugacityPa"], fugacity)):
+                        rel_err = abs(mp_value - ts_value) / abs(ts_value)
+                        comp_entry["comparison"][name] = {
+                            "abs": abs(mp_value - ts_value), "rel": rel_err,
+                            "tolerance": RTOL_MPMATH,
+                            "pass": rel_err <= RTOL_MPMATH}
+                        if rel_err > RTOL_MPMATH:
+                            entry["pass"] = False
+                    entry["components"].append(comp_entry)
+            mixture_mpmath_points.append(entry)
+
+    # ============================================
     # Итоги
     # ============================================
     coolprop_pass = all(p["pass"] for p in points)
     mpmath_pass = all(p["pass"] for p in mpmath_points)
     boundary_pass = all(p["pass"] for p in boundary)
-    all_pass = coolprop_pass and mpmath_pass and boundary_pass and add_error is None
+    mixture_coolprop_pass = all(p["pass"] for p in mixture_coolprop_points)
+    mixture_mpmath_pass = all(p["pass"] for p in mixture_mpmath_points)
+    all_pass = (coolprop_pass and mpmath_pass and boundary_pass
+                and mixture_coolprop_pass and mixture_mpmath_pass
+                and add_error is None)
 
     report = {
-        "stage": "4.4.4.2.2",
+        "stage": "4.4.4.2.2 + 4.4.4.3 (смеси)",
         "coolprop": coolprop_meta,
         "builtin_pr_parameters": builtin_parameters,
         "custom_fluids": custom_fluids,
@@ -582,6 +862,18 @@ def main() -> int:
         "mpmath_independent": mpmath_points,
         "omega_probe": omega_probe,
         "boundary": boundary,
+        "mixtures": {
+            "stage": "4.4.4.3",
+            "available": mixtures_data is not None,
+            "coolprop_points": mixture_coolprop_points,
+            "mpmath_independent": mixture_mpmath_points,
+            "semantics": ("CoolProp получает каталожные kij через "
+                          "set_binary_interaction_double (собственных значений "
+                          "kij в CoolProp PR нет): сверка ВАЛИДИРУЕТ "
+                          "РЕАЛИЗАЦИЮ правил смешения/кубики/phi_i, а НЕ "
+                          "подтверждает значения kij — они остаются "
+                          "PARTIALLY_VERIFIED по provenance каталога"),
+        },
         "tolerances": {
             "coolprop_rtol": RTOL_COOLPROP,
             "coolprop_rtol_justification": (
@@ -606,6 +898,9 @@ def main() -> int:
             "coolprop": coolprop_pass,
             "mpmath": mpmath_pass,
             "boundary": boundary_pass,
+            "mixtures_available": mixtures_data is not None,
+            "mixtures_coolprop": mixture_coolprop_pass,
+            "mixtures_mpmath": mixture_mpmath_pass,
             "all": all_pass,
         },
     }
@@ -633,10 +928,17 @@ def main() -> int:
     justified_refusals = sum(
         1 for e in boundary
         if e.get("ts_status") == "solver_failure" and e["pass"])
+    mix_pts = ", ".join(
+        f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
+        for p in mixture_coolprop_points)
     print(f"::notice title=Peng-Robinson benchmark::{verdict} "
           f"(CoolProp {coolprop_meta['version']}): точки [{cp_pts}]; "
           f"mpmath={'ok' if mpmath_pass else 'FAIL'}; "
           f"boundary={'ok' if boundary_pass else 'FAIL'}; "
+          f"смеси [{mix_pts}] "
+          f"CoolProp={'ok' if mixture_coolprop_pass else 'FAIL'}, "
+          f"mpmath={'ok' if mixture_mpmath_pass else 'FAIL'} "
+          f"(валидация реализации, kij из каталога); "
           f"solver_failures_justified={justified_refusals}")
     if not all_pass:
         for point in points:
@@ -652,8 +954,17 @@ def main() -> int:
             if not entry["pass"]:
                 print(f"::error title=Peng-Robinson boundary {entry['label']}::"
                        f"{json.dumps(entry, ensure_ascii=False)[:800]}")
+        for point in mixture_coolprop_points:
+            if not point["pass"]:
+                detail = point["coolprop"]["error"] or json.dumps(
+                    point["comparison"], ensure_ascii=False)
+                print(f"::error title=Peng-Robinson mixture {point['id']}::{detail}")
+        for entry in mixture_mpmath_points:
+            if not entry["pass"]:
+                print(f"::error title=Peng-Robinson mixture mpmath {entry['id']}::"
+                       f"{json.dumps(entry, ensure_ascii=False)[:800]}")
 
-    print(f"\nИТОГ Stage 4.4.4.2.2 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
+    print(f"\nИТОГ Stage 4.4.4.2.2/4.4.4.3 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
     return 0 if all_pass else 1
 
 
@@ -683,7 +994,7 @@ def build_summary_md(report):
     gitrev = (f"`{cp['gitrevision']}`" if cp.get("gitrevision")
               else "не экспортируется (null)")
     lines = [
-        "# Stage 4.4.4.2.2 — Peng-Robinson benchmark",
+        "# Stage 4.4.4.2.2/4.4.4.3 — Peng-Robinson benchmark (чистые + смеси)",
         "",
         f"CoolProp `{cp['version']}` (gitrev {gitrev}), backend `PR`; "
         f"mpmath `{cp.get('mpmath_version')}` ({MPMATH_DPS} знаков).",
@@ -730,12 +1041,60 @@ def build_summary_md(report):
             f"| {entry['label']} | {entry['mp_real_root_count']} | {entry['ts_root_count']} "
             f"| {entry.get('ts_status', 'ok')} | {entry['disc_rel']:.2e} | {entry['disc_sign']} "
             f"| {'ok' if entry['pass'] else 'FAIL'} |")
+    if report.get("mixtures", {}).get("available"):
+        lines += [
+            "",
+            "## Смеси 4.4.4.3: CoolProp PR (те же каталожные kij) vs TS, rtol 2e-4",
+            "",
+            "Валидация РЕАЛИЗАЦИИ при одинаковых kij "
+            "(set_binary_interaction_double); НЕ подтверждение значений kij.",
+            "",
+            "| смесь | ветвь | Z (rel) | max phi_i (rel) | итог |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for point in report["mixtures"]["coolprop_points"]:
+            if point["coolprop"]["error"] is not None:
+                lines.append(f"| {point['id']} | {point['root']} | ошибка | ошибка | FAIL |")
+                continue
+            comp = point["comparison"]
+            z_rel = comp["Z"]["rel"] if comp.get("Z") else None
+            phi_rels = [c["phi"]["rel"] for c in comp["components"]
+                        if c.get("phi")]
+            max_phi = max(phi_rels) if phi_rels else None
+            lines.append(
+                f"| {point['id']} | {point['root']} | "
+                f"{z_rel:.2e} | "
+                f"{'—' if max_phi is None else f'{max_phi:.2e}'} | "
+                f"{'ok' if point['pass'] else 'FAIL'} |")
+        lines += [
+            "",
+            "## Смеси 4.4.4.3: mpmath (50 знаков, наши константы) vs TS, rtol 5e-13",
+            "",
+            "| смесь | Z (rel) | a_mix (rel) | b_mix (rel) | max phi_i (rel) | итог |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for entry in report["mixtures"]["mpmath_independent"]:
+            comp = entry.get("comparison", {})
+            def mrel(table, name):
+                value = table.get(name)
+                return "—" if value is None else f"{value['rel']:.2e}"
+            phi_rels = [c["comparison"]["phi"]["rel"]
+                        for c in entry.get("components", [])
+                        if c.get("comparison", {}).get("phi")]
+            max_phi = max(phi_rels) if phi_rels else None
+            lines.append(
+                f"| {entry['id']} | {mrel(comp, 'Z')} | {mrel(comp, 'aMix')} "
+                f"| {mrel(comp, 'bMix')} | "
+                f"{'—' if max_phi is None else f'{max_phi:.2e}'} | "
+                f"{'ok' if entry['pass'] else 'FAIL'} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
     lines += [
         "",
         f"**Итог: {verdict}** (CoolProp: {'ok' if report['summary']['coolprop'] else 'FAIL'}; "
         f"mpmath: {'ok' if report['summary']['mpmath'] else 'FAIL'}; "
-        f"boundary: {'ok' if report['summary']['boundary'] else 'FAIL'})",
+        f"boundary: {'ok' if report['summary']['boundary'] else 'FAIL'}; "
+        f"смеси CoolProp: {'ok' if report['summary']['mixtures_coolprop'] else 'FAIL'}; "
+        f"смеси mpmath: {'ok' if report['summary']['mixtures_mpmath'] else 'FAIL'})",
         "",
     ]
     return "\n".join(lines)
@@ -753,3 +1112,4 @@ if __name__ == "__main__":
         print(f"::error title=Peng-Robinson benchmark CRASH::{safe}", flush=True)
         print(tb, file=sys.stderr, flush=True)
         sys.exit(3)
+
