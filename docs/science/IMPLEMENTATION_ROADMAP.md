@@ -856,6 +856,27 @@
 > фазы, интеграция с solveEquilibrium (result.model = 'ideal_gas' НЕ
 > меняется). Phase 4.4.4 НЕ завершена.
 
+> Ревизия Stage 4.4.4.2.1 (2026-11-05, корректирующая — независимый
+> CoolProp benchmark ВЫПОЛНЕН и ПРОЙДЕН): исправлена классификация
+> кратных корней кубики PR (дискриминант: > +discErr — один корень,
+> < −discErr — три корня, полоса |disc| ≤ discErr — явные критические
+> точки полинома, два корня); добавлен фасад
+> src/modules/Data/pengRobinsonFacade.ts (computePengRobinsonPure,
+> fail-closed lookup по gasId с замороженным provenance-деревом;
+> экспорт Data/index.ts, переэкспорт Core) — устранён цикл импортов
+> Core→Data→Core; независимый программный benchmark CoolProp
+> (backend 'PR', CoolProp==8.0.0, custom-fluids EVW-* через
+> add_fluids_as_JSON; второй оракул mpmath==1.3.0, 50 dps) выполнен
+> через GitHub Actions (scripts/benchmarks/peng_robinson_coolprop.py,
+> workflow .github/workflows/peng-robinson-benchmark.yml): все
+> 7 контрольных точек ok (rtol 1e-3), mpmath ok (rtol 5e-13),
+> граничные случаи кратных корней ok; N₂ 400 K / 5 МПа — фаза навязана
+> CoolProp-оракулу после отказа update(PT)
+> (phase_imposed_after_refusal в отчёте). Значения каталога и golden
+> baseline не менялись; история Git не переписывалась. Phase 4.4.4 НЕ
+> завершена; 4.4.4.3 НЕ начат. Детали — DATA_PROVENANCE.md §2.30;
+> статус — §4.4.4.
+
 ## Карта этапов
 
 ```mermaid
@@ -1847,9 +1868,9 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   solveEquilibrium (result.model = 'ideal_gas' не меняется).
   Детали источников — DATA_PROVENANCE.md §2.29.
 
-- **Статус (04.11.2026, Stage 4.4.4.2 выполнен ЧАСТИЧНО — по
-  benchmark-критерию): чистокомпонентный Peng–Robinson Z, φ,
-  фугитивность реализован** (`src/modules/Core/pengRobinson.ts`,
+- **Статус (05.11.2026, Stage 4.4.4.2 + корректирующая 4.4.4.2.1:
+  чистокомпонентный Peng–Robinson Z, φ, фугитивность реализован,
+  независимый CoolProp benchmark ПРОЙДЕН)** (`src/modules/Core/pengRobinson.ts`,
   экспорт `Core/index.ts`, тесты `Tests/pengRobinson.test.ts`);
   каталог 4.4.4.1 укреплён без изменения значений/источников/статусов:
   deep-readonly типы всех структур, runtime deepFreeze каталога,
@@ -1883,16 +1904,36 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   allow_unresolved_cross_check (предупреждение с конфликтом ω:
   CoolProp 0.01142 против Antoine-Питцера ≈ 0.00661). H₂O — всегда
   предупреждение о полярности/ассоциации/границах классического PR.
-  **Benchmark**: независимый программный сверочный расчёт CoolProp
-  (backend 'PR', НЕ HEOS) НЕ выполнен — блокер среды разработки
-  (CoolProp недоступен), процедура и зафиксированные точки —
-  DATA_PROVENANCE.md §2.30; выполнены аналитические независимые
-  проверки: идеальный предел P → 0, тройной корень критической точки
+  **Benchmark (обновление 4.4.4.2.1, 05.11.2026): независимый
+  программный сверочный расчёт CoolProp (backend 'PR', НЕ HEOS)
+  ВЫПОЛНЕН и ПРОЙДЕН** через GitHub Actions: оракул CoolProp==8.0.0
+  (custom-fluids EVW-* через add_fluids_as_JSON с параметрами каталога
+  4.4.4.1), второй оракул mpmath==1.3.0 (50 dps); скрипт
+  scripts/benchmarks/peng_robinson_coolprop.py, workflow
+  .github/workflows/peng-robinson-benchmark.yml; итоговый run:
+  coolprop-benchmark ✓ SUCCESS, verify ✓. Все 7 контрольных точек ok
+  (Z, φ; rtol 1e-3 — допуск обусловлен расхождением округлённых
+  констант каталога против точных Ω CoolProp, НЕ слабостью сверки),
+  mpmath ok (rtol 5e-13), граничные случаи кратных корней ok
+  (изолированный корень atol 1e-9, near-pair atol 1e-6 при пороге
+  пары 1e-4, band-критерий rel_disc < 1e-15); N₂ 400 K / 5 МПа —
+  CoolProp-оракул навязывает фазу (iphase_gas/liquid) после отказа
+  update(PT) «phase not imposed», факт зафиксирован в отчёте
+  (phase_imposed_after_refusal); перечень точек —
+  DATA_PROVENANCE.md §2.30. Аналитические независимые проверки также
+  выполнены: идеальный предел P → 0, тройной корень критической точки
   (Zc = 0.3074013… против публикации 0.307 для точных констант Ω),
   интегральное тождество ln φ = ∫(Z−1)/P dP (квадратура Симпсона),
   равенство фугитивностей vapor/liquid на PR-изобаре насыщения
-  (бисекция f_v = f_l). **Этап честно ЧАСТИЧНЫЙ** по критерию
-  независимого benchmark; 4.4.4 НЕ завершён. **Границы 4.4.4.2
+  (бисекция f_v = f_l). Ревизия 4.4.4.2.1 также исправила
+  классификацию кратных корней кубики (дискриминант: > +discErr —
+  один корень, < −discErr — три корня, полоса — явные критические
+  точки полинома, два корня) и добавила фасад
+  src/modules/Data/pengRobinsonFacade.ts (computePengRobinsonPure,
+  fail-closed lookup по gasId с замороженным provenance-деревом;
+  экспорт Data/index.ts, переэкспорт Core) — цикл импортов
+  Core→Data→Core устранён. **Критерий независимого benchmark 4.4.4.2
+  закрыт; 4.4.4 НЕ завершён.** **Границы 4.4.4.2
   (не реализовано)**: смеси, kij, правила смешения, PPR78 (4.4.4.3),
   фугитивность смесей, flash/VLE/LLE, устойчивость фаз,
   конденсированные фазы, интеграция с solveEquilibrium
