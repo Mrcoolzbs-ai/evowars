@@ -44,6 +44,7 @@ import type {
   PengRobinsonComponentFailure,
   PengRobinsonComponentInputs,
   PengRobinsonComponentResult,
+  PengRobinsonComponentSuccess,
   PengRobinsonEvidencePolicy,
   PengRobinsonRootBranch
 } from '../Core/pengRobinson';
