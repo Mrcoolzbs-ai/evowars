@@ -208,12 +208,14 @@ describe('Stage 4.4.4.2: Peng–Robinson — идеальный предел P -
     for (const gasId of EOS_PURE_COMPONENT_IDS) {
       const s = expectSuccess(
         computePengRobinsonPure(
-          baseRequest({ gasId, temperatureK: 300, pressurePa: 100, evidencePolicy: policies[gasId] })
+          baseRequest({ gasId, temperatureK: 300, pressurePa: 10, evidencePolicy: policies[gasId] })
         )
       );
+      // h2o имеет наибольшие a/b: |Z - 1| ~ 1.5e-6 даже при 10 Па —
+      // допуск 1e-5 покрывает все пять компонентов с запасом.
       expect(Math.abs(s.Z - 1)).toBeLessThan(1e-5);
       expect(Math.abs(s.phi - 1)).toBeLessThan(1e-5);
-      expect(Math.abs(s.fugacityPa - 100)).toBeLessThan(1e-3);
+      expect(Math.abs(s.fugacityPa - 10)).toBeLessThan(1e-4);
     }
   });
 });
