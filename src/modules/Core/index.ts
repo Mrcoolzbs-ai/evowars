@@ -30,6 +30,10 @@
 //   pengRobinson      — чистокомпонентный PR: Z, phi, фугитивность (4.4.4.2);
 //                      чистая математика без импортов из Data; gasId-фасад
 //                      каталога — Data/pengRobinsonFacade.ts (4.4.4.2.1);
+//   pengRobinsonMixture — PR многокомпонентных смесей: правила смешения,
+//                      кубика смеси, компонентные phi_i/f_i (4.4.4.3); чистая
+//                      математика без импортов из Data; каталоги kij и чистых
+//                      параметров — Data/pengRobinsonMixtureFacade.ts (4.4.4.3);
 //   migrations        — версии схем, датасетов и миграции сохранений;
 //   adapters          — мосты к существующим модулям (этап 1–3).
 
@@ -54,6 +58,7 @@ export * from './worldState';
 export * from './solverBackend';
 export * from './odeSolver';
 export * from './pengRobinson';
+export * from './pengRobinsonMixture';
 export * from './migrations';
 export * from './adapters';
 

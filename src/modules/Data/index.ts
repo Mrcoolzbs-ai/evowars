@@ -320,3 +320,20 @@ export type {
   BinaryInteractionCoverage
 } from './binaryInteractionParameters';
 
+// Stage 4.4.4.3: фасад смесевого Peng–Robinson над Core.
+// Валидация состава, lookup чистых параметров (каталог 4.4.4.1) и
+// бинарных параметров взаимодействия kij (каталог 4.4.4.3, fail-closed:
+// unresolved-пары — явный отказ, kij = 0 молча не подставляется),
+// вызов Core/pengRobinsonMixture.ts и прикрепление ТОГО ЖЕ
+// замороженного provenance-дерева каталогов к результату.
+import { computePengRobinsonMixtureFromCatalog } from './pengRobinsonMixtureFacade';
+
+export { computePengRobinsonMixtureFromCatalog };
+export type {
+  PengRobinsonMixtureCompositionEntry,
+  PengRobinsonMixtureCatalogRequest,
+  PengRobinsonMixtureCatalogResult,
+  PengRobinsonMixtureCatalogSuccess,
+  PengRobinsonMixtureComponentProvenance,
+  PengRobinsonMixtureBinaryProvenance
+} from './pengRobinsonMixtureFacade';
