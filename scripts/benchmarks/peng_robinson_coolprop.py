@@ -86,6 +86,15 @@ Stage 4.4.4.2.2 / 4.4.4.3 — независимый benchmark Peng–Robinson:
    причина фиксируется ТОЧНО, результат НЕ подменяется собственным
    расчётом — проверкой предела остаётся mpmath.
 
+   НЕ-КОНЕЧНЫЕ значения CoolProp (NaN/±Infinity) классифицируются
+   ЯВНО (unavailable_nonfinite): относительная ошибка НЕ вычисляется
+   (сравнение NaN > rtol ложно и ранее маскировало провал сверки),
+   частичные конечные результаты (например, конечный Z при NaN phi)
+   сохраняют собственный PASS, статус CoolProp и PASS mpmath
+   указываются РАЗДЕЛЬНО; конечное, но неверное значение CoolProp
+   проваливает benchmark. Отчёт сериализуется СТРОГИМ JSON
+   (allow_nan=False) после нормализации NaN/Infinity -> null.
+
 Числа из TS-дампа — выход СОБСТВЕННОЙ реализации (вход сравнения, НЕ
 эталон). Неудачные точки НЕ скрываются: любая из них делает код
 выхода ненулевым. Если CoolProp не может дать ветвь или параметр,
@@ -104,6 +113,7 @@ from __future__ import annotations
 import argparse
 import importlib.metadata
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -165,6 +175,151 @@ KIJ_CATALOG = {
     "co2|n2": -0.017,
     "h2o|n2": -0.0501,
 }
+
+
+# ============================================
+# Классификация результатов CoolProp (Stage 4.4.4.3.1, benchmark
+# integrity): не-конечные значения (NaN/±Infinity) НЕ могут
+# маскироваться как PASS (сравнение NaN > rtol ложно), НЕ
+# сериализуются в JSON как NaN/Infinity и фиксируются с явным
+# статусом unavailable_nonfinite. Функции ЧИСТЫЕ (без CoolProp) и
+# покрыты Python unit-тестами test_peng_robinson_coolprop.py.
+# ============================================
+COOLPROP_STATUS_AVAILABLE = "available"
+COOLPROP_STATUS_UNAVAILABLE_NONFINITE = "unavailable_nonfinite"
+COOLPROP_STATUS_UNAVAILABLE_ERROR = "unavailable_error"
+
+COOLPROP_POINT_AVAILABLE_PASS = "available_pass"
+COOLPROP_POINT_AVAILABLE_FAIL = "available_fail"
+
+
+def coolprop_value_status(value):
+    """Статус одного значения CoolProp: available / unavailable_nonfinite / missing."""
+    if value is None:
+        return "missing"
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return COOLPROP_STATUS_AVAILABLE
+    return COOLPROP_STATUS_UNAVAILABLE_NONFINITE
+
+
+def observed_token(value):
+    """Токен наблюдаемого не-конечного значения: 'NaN' / '+Infinity' / '-Infinity'."""
+    if isinstance(value, float) and math.isnan(value):
+        return "NaN"
+    return "+Infinity" if value > 0 else "-Infinity"
+
+
+def compare_coolprop_field(ts_value, cp_value, rtol):
+    """Одно сравнение CoolProp против TS с ЯВНОЙ классификацией конечности.
+
+    Конечность проверяется ДО вычисления ошибок: не-конечное значение
+    (NaN/±Infinity) не сравнивается относительно (NaN > rtol ложно и
+    ранее маскировало провал сверки) — поле получает статус
+    unavailable_nonfinite, pass=None (никогда не True); наблюдаемый
+    токен фиксируется без догадки о внутреннем механизме CoolProp.
+    """
+    status = coolprop_value_status(cp_value)
+    result = {"status": status, "tolerance": rtol}
+    if status != COOLPROP_STATUS_AVAILABLE:
+        result["pass"] = None
+        result["observed"] = (observed_token(cp_value)
+                              if cp_value is not None else None)
+        result["note"] = ("CoolProp вернул не конечное значение без "
+                          "исключения; относительная ошибка НЕ "
+                          "вычисляется, сравнение недоступно и НЕ "
+                          "засчитывается как PASS")
+        return result
+    abs_err = abs(cp_value - ts_value)
+    rel_err = abs_err / abs(ts_value)
+    result["abs"] = abs_err
+    result["rel"] = rel_err
+    result["pass"] = rel_err <= rtol
+    return result
+
+
+def normalize_coolprop_vals(coolprop_vals):
+    """Нормализация не-конечных значений CoolProp для СТРОГОГО JSON.
+
+    NaN/±Infinity -> None (сериализуются как null) с фиксацией полей,
+    вернувших не-конечное значение. Вызывать ПОСЛЕ сравнений: класс
+    сравнивается по сырому значению, сериализуется — по нормализованному.
+    Возвращает список не-конечных полей (пустой, если все конечны).
+    """
+    nonfinite = []
+    for name in ("Z", "phi", "fugacity", "rhomolar"):
+        value = coolprop_vals.get(name)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, float) and not math.isfinite(item):
+                    nonfinite.append(f"{name}[{i}]")
+                    value[i] = None
+        elif isinstance(value, float) and not math.isfinite(value):
+            nonfinite.append(name)
+            coolprop_vals[name] = None
+    coolprop_vals["nonfinite_fields"] = nonfinite
+    return nonfinite
+
+
+def make_json_safe(obj):
+    """Рекурсивная нормализация: NaN/±Infinity -> None (строгий JSON).
+
+    Возвращает (нормализованный объект, список (путь, токен) замен).
+    Страховка поверх посекционной нормализации: итоговый отчёт
+    сериализуется с allow_nan=False — невалидные NaN/Infinity в JSON
+    невозможны.
+    """
+    replaced = []
+
+    def walk(value, path):
+        if isinstance(value, float) and not math.isfinite(value):
+            replaced.append((path or "<root>", observed_token(value)))
+            return None
+        if isinstance(value, dict):
+            return {key: walk(item, f"{path}.{key}" if path else str(key))
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [walk(item, f"{path}[{i}]" if path else f"[{i}]")
+                    for i, item in enumerate(value)]
+        return value
+
+    return walk(obj, ""), replaced
+
+
+def zero_limit_coolprop_status(exception, field_comparisons):
+    """Итоговый статус CoolProp для zero-attraction точки.
+
+    unavailable_error — исключение CoolProp; available_fail — конечное
+    значение вне допуска (провал benchmark); unavailable_nonfinite —
+    NaN/±Infinity хотя бы в одном поле (сравнение недоступно, НЕ PASS);
+    available_pass — все поля конечны и в допуске.
+    """
+    if exception is not None:
+        return COOLPROP_STATUS_UNAVAILABLE_ERROR
+    if any(field.get("pass") is False for field in field_comparisons.values()):
+        return COOLPROP_POINT_AVAILABLE_FAIL
+    if any(field.get("status") == COOLPROP_STATUS_UNAVAILABLE_NONFINITE
+           for field in field_comparisons.values()):
+        return COOLPROP_STATUS_UNAVAILABLE_NONFINITE
+    if field_comparisons and all(field.get("pass") is True
+                                 for field in field_comparisons.values()):
+        return COOLPROP_POINT_AVAILABLE_PASS
+    return COOLPROP_POINT_AVAILABLE_FAIL
+
+
+def zero_limit_point_verdict(mp_pass, coolprop_status):
+    """Правило итогового PASS zero-attraction точки (Stage 4.4.4.3.1).
+
+    mpmath — ГЛАВНЫЙ оракул предельного случая: его провал проваливает
+    точку. Конечное, но неверное значение CoolProp проваливает точку.
+    Не-конечный результат или исключение CoolProp — зарегистрированная
+    недоступность соответствующего сравнения: НЕ PASS и НЕ провал
+    (проверкой предела остаётся mpmath).
+    """
+    if not mp_pass:
+        return False
+    return coolprop_status != COOLPROP_POINT_AVAILABLE_FAIL
 
 
 def main() -> int:
@@ -452,13 +607,15 @@ def main() -> int:
                 comparisons[name] = None
                 point_pass = False
                 continue
-            abs_err = abs(cp_value - ts_value)
-            rel_err = abs_err / abs(ts_value)
-            comparisons[name] = {"abs": abs_err, "rel": rel_err,
-                                 "tolerance": RTOL_COOLPROP,
-                                 "pass": rel_err <= RTOL_COOLPROP}
-            if rel_err > RTOL_COOLPROP:
+            # Конечность ДО ошибок: NaN/±Infinity не сравниваются
+            # относительно (NaN > rtol ложно и маскировал провал) —
+            # точка честно проваливается с явным статусом.
+            field = compare_coolprop_field(ts_value, cp_value, RTOL_COOLPROP)
+            comparisons[name] = field
+            if field["pass"] is not True:
                 point_pass = False
+        # Нормализация NaN/±Infinity -> null для строгого JSON
+        normalize_coolprop_vals(coolprop_vals)
 
         points.append({
             "id": row["id"], "gasId": gas_id,
@@ -783,12 +940,12 @@ def main() -> int:
             comparisons = {"Z": None, "components": []}
             point_pass = coolprop_vals["error"] is None
             if coolprop_vals["error"] is None:
-                abs_err = abs(coolprop_vals["Z"] - row["Z"])
-                rel_err = abs_err / abs(row["Z"])
-                comparisons["Z"] = {"abs": abs_err, "rel": rel_err,
-                                     "tolerance": RTOL_COOLPROP,
-                                     "pass": rel_err <= RTOL_COOLPROP}
-                if rel_err > RTOL_COOLPROP:
+                # Конечность ДО ошибок: NaN/±Infinity не сравниваются
+                # относительно (NaN > rtol ложно и маскировал провал).
+                z_field = compare_coolprop_field(row["Z"], coolprop_vals["Z"],
+                                                 RTOL_COOLPROP)
+                comparisons["Z"] = z_field
+                if z_field["pass"] is not True:
                     point_pass = False
                 for i, comp in enumerate(row["components"]):
                     comp_entry = {"component": comp["component"],
@@ -797,14 +954,14 @@ def main() -> int:
                             ("phi", comp["phi"], coolprop_vals["phi"][i]),
                             ("fugacity", comp["fugacityPa"],
                              coolprop_vals["fugacity"][i])):
-                        abs_err = abs(cp_value - ts_value)
-                        rel_err = abs_err / abs(ts_value)
-                        comp_entry[name] = {"abs": abs_err, "rel": rel_err,
-                                            "tolerance": RTOL_COOLPROP,
-                                            "pass": rel_err <= RTOL_COOLPROP}
-                        if rel_err > RTOL_COOLPROP:
+                        field = compare_coolprop_field(ts_value, cp_value,
+                                                        RTOL_COOLPROP)
+                        comp_entry[name] = field
+                        if field["pass"] is not True:
                             point_pass = False
                     comparisons["components"].append(comp_entry)
+                # Нормализация NaN/±Infinity -> null для строгого JSON
+                normalize_coolprop_vals(coolprop_vals)
             mixture_coolprop_points.append({
                 "id": row["id"],
                 "composition": row["composition"],
@@ -936,14 +1093,22 @@ def main() -> int:
                 coolprop_vals["error"] = f"{type(exc).__name__}: {exc}"
 
         ts_comp = case["components"][0]
+        # Исключение CoolProp (если было) — отдельно от не-конечных
+        # значений: недоступность сравнения классифицируется ПО-РАЗНОМУ
+        # (unavailable_error против unavailable_nonfinite).
+        coolprop_exception = coolprop_vals["error"]
         entry = {
             "id": case["id"], "gasId": gas_id,
             "temperatureK": case["temperatureK"], "pressurePa": case["pressurePa"],
             "note": case.get("note"),
             "semantics": ("точный нулевой предел a_mix (Stage 4.4.4.3.1); "
                           "главный оракул — mpmath с точными binary64-"
-                          "входами; CoolProp — та же ветвь gas, при отказе "
-                          "причина фиксируется без подмены результата"),
+                          "входами; CoolProp — та же ветвь gas, статус "
+                          "классифицируется явно (available_pass / "
+                          "available_fail / unavailable_nonfinite / "
+                          "unavailable_error) и указывается РАЗДЕЛЬНО от "
+                          "PASS mpmath; не-конечные значения CoolProp "
+                          "сравнением НЕ засчитываются"),
             "coolprop": coolprop_vals,
             "typescript": {"Z": case["Z"], "aMix": case["aMixPaM6PerMol2"],
                            "bMix": case["bMixM3PerMol"],
@@ -954,20 +1119,50 @@ def main() -> int:
             "coolprop_comparison": {}, "mpmath": {}, "pass": True,
         }
 
-        # --- CoolProp: дал значения — сверка rtol 2e-4 ---
-        if coolprop_vals["error"] is None:
+        # --- CoolProp: классификация результата и сверка rtol 2e-4 ---
+        # Конечность каждого значения проверяется ДО вычисления ошибок:
+        # NaN/±Infinity не сравниваются относительно (NaN > rtol ложно и
+        # ранее маскировал провал сверки: точка ошибочно объявлялась ok).
+        if coolprop_exception is None:
             for name, ts_value, cp_value in (
                     ("Z", case["Z"], coolprop_vals["Z"]),
                     ("phi", ts_comp["phi"], coolprop_vals["phi"]),
                     ("fugacity", ts_comp["fugacityPa"], coolprop_vals["fugacity"])):
-                abs_err = abs(cp_value - ts_value)
-                rel_err = abs_err / abs(ts_value)
-                entry["coolprop_comparison"][name] = {
-                    "abs": abs_err, "rel": rel_err,
-                    "tolerance": RTOL_COOLPROP,
-                    "pass": rel_err <= RTOL_COOLPROP}
-                if rel_err > RTOL_COOLPROP:
-                    entry["pass"] = False
+                entry["coolprop_comparison"][name] = compare_coolprop_field(
+                    ts_value, cp_value, RTOL_COOLPROP)
+            nonfinite_fields = [
+                name for name, field in entry["coolprop_comparison"].items()
+                if field["status"] == COOLPROP_STATUS_UNAVAILABLE_NONFINITE]
+            if nonfinite_fields:
+                observed = ", ".join(
+                    f"{name}={observed_token(coolprop_vals[name])}"
+                    for name in nonfinite_fields)
+                # Внутреннюю причину поведения CoolProp НЕ выдумываем:
+                # библиотека не сообщила исключение — фиксируется ТОЧНО
+                # наблюдаемое состояние (какие вызовы вернули не-конечное
+                # значение после успешного update(PT) с specify_phase(gas)).
+                field_sources = {"Z": "keyed_output(CP.iZ) или P/(rhomolar*R*T)",
+                                 "phi": "fugacity_coefficient(0)",
+                                 "fugacity": "fugacity(0)"}
+                coolprop_vals["error"] = (
+                    f"non-finite output без исключения: {observed} "
+                    f"(после успешного update(PT) с specify_phase(gas)); "
+                    f"сравнение этих полей недоступно и НЕ засчитывается "
+                    f"как PASS")
+                coolprop_vals["observed_state"] = (
+                    "update(PT) с specify_phase(gas) выполнен без "
+                    "исключения; "
+                    + "; ".join(
+                        f"{field_sources[name]} -> {observed_token(coolprop_vals[name])}"
+                        for name in nonfinite_fields)
+                    + " — причина библиотекой НЕ сообщена (не исключение), "
+                    "внутренний механизм не реконструируется")
+                # Частичные конечные результаты сохраняются: конечное
+                # поле имеет собственный PASS в coolprop_comparison.
+                normalize_coolprop_vals(coolprop_vals)
+        coolprop_status = zero_limit_coolprop_status(
+            coolprop_exception, entry["coolprop_comparison"])
+        entry["coolprop_status"] = coolprop_status
 
         # --- mpmath: точный предел при точных binary64-входах ---
         calc = pr_mixture_mpmath(case["temperatureK"], case["pressurePa"],
@@ -978,7 +1173,6 @@ def main() -> int:
         if not physical:
             mp_entry["error"] = "нет физических корней"
             mp_entry["pass"] = False
-            entry["pass"] = False
         else:
             z_sel = physical[-1]  # vapor — наибольший физический корень
             lnphi_mp = calc["lnphi_i"](0, z_sel)
@@ -1012,12 +1206,16 @@ def main() -> int:
                 "1e-30")
             if mp_entry["a_mix_abs_diff"] > ZERO_LIMIT_AMIX_ATOL:
                 mp_entry["pass"] = False
-            if not mp_entry["pass"]:
-                entry["pass"] = False
         entry["mpmath"] = mp_entry
+        # Итоговый вердикт точки: mpmath (главный оракул) обязан пройти;
+        # конечное, но неверное значение CoolProp проваливает точку;
+        # не-конечный результат/исключение CoolProp — зарегистрированная
+        # недоступность сравнения (НЕ PASS и НЕ провал).
+        entry["pass"] = zero_limit_point_verdict(mp_entry["pass"], coolprop_status)
         zero_limit_points.append(entry)
 
     zero_limit_pass = all(p["pass"] for p in zero_limit_points)
+    zero_limit_mpmath_pass = all(p["mpmath"]["pass"] for p in zero_limit_points)
     zero_limit_available = mixtures_data is not None and bool(zero_limit_cases)
 
     # ============================================
@@ -1080,6 +1278,20 @@ def main() -> int:
                           "АБСОЛЮТНАЯ сверка <= 1e-30). CoolProp — та же "
                           "ветвь gas; отказ CoolProp фиксируется с "
                           "причиной и НЕ подменяется собственным расчётом"),
+            "coolprop_semantics": (
+                "статус CoolProp классифицируется ЯВНО и указывается "
+                "РАЗДЕЛЬНО от PASS mpmath: available_pass — все значения "
+                "конечны и в допуске 2e-4; available_fail — конечное "
+                "значение вне допуска (провал benchmark); "
+                "unavailable_nonfinite — CoolProp вернул NaN/±Infinity "
+                "(конечность проверяется ДО вычисления ошибок: NaN > rtol "
+                "ложно и ранее маскировал провал; частичные конечные "
+                "результаты сохраняют собственный PASS; причина "
+                "библиотекой не сообщена — фиксируется наблюдаемое "
+                "состояние, внутренний механизм НЕ реконструируется); "
+                "unavailable_error — исключение CoolProp. Не-конечное "
+                "значение и исключение НЕ засчитываются как CoolProp "
+                "PASS; проверкой предельного случая остаётся mpmath"),
         },
         "tolerances": {
             "coolprop_rtol": RTOL_COOLPROP,
@@ -1110,19 +1322,30 @@ def main() -> int:
             "mixtures_mpmath": mixture_mpmath_pass,
             "zero_attraction_limit": zero_limit_pass,
             "zero_attraction_limit_available": zero_limit_available,
+            "zero_attraction_limit_mpmath": zero_limit_mpmath_pass,
+            "zero_attraction_limit_coolprop": {
+                p["id"]: p["coolprop_status"] for p in zero_limit_points},
             "all": all_pass,
         },
     }
 
+    # СТРОГИЙ JSON: нормализация NaN/±Infinity -> null (страховка поверх
+    # посекционной нормализации) и allow_nan=False — невалидные
+    # JSON-значения NaN/Infinity в отчёте невозможны.
+    report, nonfinite_replaced = make_json_safe(report)
+    if nonfinite_replaced:
+        print("ВНИМАНИЕ: нормализованы не-конечные значения, пропущенные "
+              f"посекционной нормализацией: {nonfinite_replaced}", file=sys.stderr)
+
     report_path = Path(args.report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with report_path.open("w", encoding="utf-8") as handle:
-        json.dump(report, handle, ensure_ascii=False, indent=2)
+        json.dump(report, handle, ensure_ascii=False, indent=2, allow_nan=False)
         handle.write("\n")
 
     # Полный отчёт — в stdout (логи GitHub Actions), чтобы числа были
     # доступны без скачивания артефактов.
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
 
     # Markdown-итог для $GITHUB_STEP_SUMMARY.
     summary_md = build_summary_md(report)
@@ -1141,9 +1364,13 @@ def main() -> int:
         f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
         for p in mixture_coolprop_points)
     zl_pts = ", ".join(
-        f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
-        + ("" if p["coolprop"]["error"] is None
-           else " (CoolProp: причина в отчёте)")
+        f"{p['id']}: mpmath={'ok' if p['mpmath']['pass'] else 'FAIL'}, "
+        f"CoolProp={p['coolprop_status']}"
+        + (f" (non-finite: {', '.join(p['coolprop']['nonfinite_fields'])}; "
+           f"конечные поля сохраняют собственный PASS)"
+           if p["coolprop"].get("nonfinite_fields") else "")
+        + (" (исключение; причина в отчёте)"
+           if p["coolprop_status"] == COOLPROP_STATUS_UNAVAILABLE_ERROR else "")
         for p in zero_limit_points)
     print(f"::notice title=Peng-Robinson benchmark::{verdict} "
           f"(CoolProp {coolprop_meta['version']}): точки [{cp_pts}]; "
@@ -1154,8 +1381,9 @@ def main() -> int:
           f"mpmath={'ok' if mixture_mpmath_pass else 'FAIL'} "
           f"(валидация реализации, kij из каталога); "
           f"нулевой предел a_mix [{zl_pts}] "
-          f"mpmath={'ok' if zero_limit_pass else 'FAIL'} "
-          f"(главный оракул предела); "
+          f"mpmath={'ok' if zero_limit_mpmath_pass else 'FAIL'} "
+          f"(главный оракул предела; статусы CoolProp указаны раздельно "
+          f"и НЕ засчитываются как PASS при non-finite/исключении); "
           f"solver_failures_justified={justified_refusals}")
     if not all_pass:
         for point in points:
@@ -1232,7 +1460,9 @@ def build_summary_md(report):
         comp = point["comparison"]
         def rel(name):
             value = comp.get(name)
-            return "—" if value is None else f"{value['rel']:.2e}"
+            if not isinstance(value, dict) or "rel" not in value:
+                return "—"
+            return f"{value['rel']:.2e}"
         lines.append(
             f"| {point['id']} | {point['root']} | {rel('Z')} | {rel('phi')} | "
             f"{rel('fugacity')} | {'ok' if point['pass'] else 'FAIL'} |")
@@ -1278,13 +1508,14 @@ def build_summary_md(report):
                 lines.append(f"| {point['id']} | {point['root']} | ошибка | ошибка | FAIL |")
                 continue
             comp = point["comparison"]
-            z_rel = comp["Z"]["rel"] if comp.get("Z") else None
+            z_value = comp.get("Z")
+            z_rel = z_value.get("rel") if isinstance(z_value, dict) else None
             phi_rels = [c["phi"]["rel"] for c in comp["components"]
-                        if c.get("phi")]
+                        if isinstance(c.get("phi"), dict) and "rel" in c["phi"]]
             max_phi = max(phi_rels) if phi_rels else None
             lines.append(
                 f"| {point['id']} | {point['root']} | "
-                f"{z_rel:.2e} | "
+                f"{'—' if z_rel is None else f'{z_rel:.2e}'} | "
                 f"{'—' if max_phi is None else f'{max_phi:.2e}'} | "
                 f"{'ok' if point['pass'] else 'FAIL'} |")
         lines += [
@@ -1317,32 +1548,56 @@ def build_summary_md(report):
             "ln(phi_i) предельной формой (b_i/b_mix)(Z-1) - ln(Z-B_mix); "
             "главный оракул предела — mpmath с точными binary64-входами "
             "(rtol 5e-13); a_mix — АБСОЛЮТНАЯ сверка <= 1e-30. CoolProp — "
-            "та же ветвь gas (rtol 2e-4); отказ фиксируется с причиной "
-            "и НЕ подменяется собственным расчётом.",
+            "та же ветвь gas (rtol 2e-4): статус указывается РАЗДЕЛЬНО "
+            "от mpmath; не-конечные значения CoolProp (NaN/±Infinity) — "
+            "unavailable_nonfinite: сравнение недоступно и НЕ "
+            "засчитывается как PASS (частичные конечные результаты "
+            "сохраняют собственный PASS); конечное, но неверное "
+            "значение проваливает benchmark; причина non-finite "
+            "возвращения библиотекой не сообщена — фиксируется "
+            "наблюдаемое состояние без догадки о внутреннем механизме.",
             "",
-            "| точка | Z (rel) | phi (rel) | f (rel) | |mp a_mix − ts a_mix| | CoolProp | итог |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| точка | mpmath Z (rel) | mpmath phi (rel) | mpmath f (rel) "
+            "| |mp a_mix − ts a_mix| | mpmath | CoolProp | итог |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
         for entry in report["zeroAttractionLimit"]["points"]:
             mpm = entry.get("mpmath", {})
             comp = mpm.get("comparison", {})
             def zrel(name):
                 value = comp.get(name)
-                return "—" if value is None else f"{value['rel']:.2e}"
+                if not isinstance(value, dict) or "rel" not in value:
+                    return "—"
+                return f"{value['rel']:.2e}"
             adiff = mpm.get("a_mix_abs_diff")
-            cp_err = entry["coolprop"]["error"]
-            if cp_err is not None:
-                cp_state = f"отказ ({cp_err.split(':')[0]})"
-            elif entry.get("coolprop_comparison", {}).get("Z"):
-                cp_state = f"{entry['coolprop_comparison']['Z']['rel']:.2e}"
+            status = entry.get("coolprop_status", "—")
+            cp_comp = entry.get("coolprop_comparison", {})
+            if status == "available_pass":
+                cp_state = "available_pass"
+            elif status == "available_fail":
+                cp_state = "available_fail (конечное значение вне допуска)"
+            elif status == "unavailable_nonfinite":
+                finite_ok = [name for name, field in cp_comp.items()
+                             if field.get("pass") is True]
+                nonfinite = ", ".join(entry["coolprop"].get("nonfinite_fields", []))
+                cp_state = (f"unavailable_nonfinite (ок: "
+                            f"{', '.join(finite_ok) if finite_ok else '—'}; "
+                            f"non-finite: {nonfinite})")
+            elif status == "unavailable_error":
+                cp_state = "unavailable_error (причина в отчёте)"
             else:
                 cp_state = "—"
             lines.append(
                 f"| {entry['id']} | {zrel('Z')} | {zrel('phi')} | "
                 f"{zrel('fugacity')} | "
-                f"{'—' if adiff is None else f'{adiff:.2e}'} | {cp_state} | "
+                f"{'—' if adiff is None else f'{adiff:.2e}'} | "
+                f"{'ok' if mpm.get('pass') else 'FAIL'} | {cp_state} | "
                 f"{'ok' if entry['pass'] else 'FAIL'} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
+    zl_coolprop_md = ", ".join(
+        f"{key}={value}"
+        for key, value in report["summary"]
+        .get("zero_attraction_limit_coolprop", {}).items()) or "—"
     lines += [
         "",
         f"**Итог: {verdict}** (CoolProp: {'ok' if report['summary']['coolprop'] else 'FAIL'}; "
@@ -1350,7 +1605,9 @@ def build_summary_md(report):
         f"boundary: {'ok' if report['summary']['boundary'] else 'FAIL'}; "
         f"смеси CoolProp: {'ok' if report['summary']['mixtures_coolprop'] else 'FAIL'}; "
         f"смеси mpmath: {'ok' if report['summary']['mixtures_mpmath'] else 'FAIL'}; "
-        f"нулевой предел a_mix: {'ok' if report['summary']['zero_attraction_limit'] else 'FAIL'})",
+        f"нулевой предел a_mix: {'ok' if report['summary']['zero_attraction_limit'] else 'FAIL'} "
+        f"(mpmath: {'ok' if report['summary']['zero_attraction_limit_mpmath'] else 'FAIL'}; "
+        f"CoolProp по точкам: {zl_coolprop_md}))",
         "",
     ]
     return "\n".join(lines)
