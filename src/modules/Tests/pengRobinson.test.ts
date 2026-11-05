@@ -6,7 +6,8 @@
 // - Peng & Robinson 1976, Ind. Eng. Chem. Fundam. 15(1):59–64,
 //   doi:10.1021/i160057a011 (кубическое уравнение, ln(phi), kappa(omega),
 //   Zc = 0.307 для точных констант Omega_a/Omega_b);
-// - R = 8.314462618 J/(mol*K) — CODATA 2018 / СИ-2019;
+// - R = N_A·k = 8.31446261815324 J/(mol*K) — точное значение СИ-2019,
+//   единая константа репозитория (Core/thermoFunctions.ts);
 // - каталог параметров Stage 4.4.4.1 (src/modules/Data/eosParameters.ts).
 //
 // НЕЗАВИСИМЫЙ ПРОГРАММНЫЙ BENCHMARK (CoolProp, backend 'PR') НЕ ВЫПОЛНЕН:
@@ -34,9 +35,11 @@ import {
   pengRobinsonCubicCoefficients,
   pengRobinsonLnPhi,
   prPhysicalRoots,
-  solvePrCubicRealRoots,
-  UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K
+  solvePrCubicRealRoots
 } from '../Core/pengRobinson';
+
+// R — единая константа репозитория (точное СИ-2019), из Core/thermoFunctions.
+import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 import type {
   PengRobinsonEvidencePolicy,
@@ -255,9 +258,9 @@ describe('Stage 4.4.4.2: Peng–Robinson — нормальные и высок�
     const l3 = expectSuccess(computePengRobinsonPure(baseRequest({ temperatureK: 250, pressurePa: 3e6, root: 'liquid' })));
     expect(v2.Z).toBeGreaterThan(v3.Z);
     expect(l2.Z).toBeLessThan(l3.Z);
-    expect(v3.Z).toBeCloseTo(0.6113430329320098, 12);
-    expect(l3.Z).toBeCloseTo(0.05895036236602169, 12);
-    expect(l3.phi).toBeCloseTo(0.5089253481353827, 12);
+    expect(v3.Z).toBeCloseTo(0.6113430329320095, 12);
+    expect(l3.Z).toBeCloseTo(0.05895036236602158, 12);
+    expect(l3.phi).toBeCloseTo(0.5089253481353818, 12);
   });
 });
 
@@ -275,9 +278,9 @@ describe('Stage 4.4.4.2: Peng–Robinson — единственный корен
     expect(vapor.physicalRoots).toHaveLength(1);
     expect(vapor.distinctPhysicalRootCount).toBe(1);
     expect(vapor.hasDistinctBranches).toBe(false);
-    expect(vapor.Z).toBeCloseTo(0.651228897868, 11);
-    expect(vapor.lnPhi).toBeCloseTo(-0.3409363036421742, 12);
-    expect(vapor.phi).toBeCloseTo(0.7111042015115561, 12);
+    expect(vapor.Z).toBeCloseTo(0.6512288978680003, 12);
+    expect(vapor.lnPhi).toBeCloseTo(-0.340936303642174, 12);
+    expect(vapor.phi).toBeCloseTo(0.7111042015115562, 12);
     // Жидкая ветвь выбирает тот же единственный корень с явным предупреждением.
     expect(liquid.Z).toBe(vapor.Z);
     expect(liquid.lnPhi).toBe(vapor.lnPhi);
@@ -296,7 +299,7 @@ describe('Stage 4.4.4.2: Peng–Robinson — три корня ниже крит
     const s = expectSuccess(computePengRobinsonPure(baseRequest({ temperatureK: 250, pressurePa: 2e6 })));
     expect(s.realRoots).toHaveLength(3);
     expect(s.realRoots[0]).toBeCloseTo(0.039538821208198904, 12);
-    expect(s.realRoots[1]).toBeCloseTo(0.15073626915579433, 12);
+    expect(s.realRoots[1]).toBeCloseTo(0.15073626915579444, 12);
     expect(s.realRoots[2]).toBeCloseTo(0.7840665533701641, 12);
     // Отсортированы по возрастанию.
     expect(s.realRoots[0]).toBeLessThan(s.realRoots[1]);
@@ -408,11 +411,11 @@ describe('Stage 4.4.4.2: Peng–Robinson — выбор ветви vapor/liquid'
     expect(v.selectedRoot).toBe(v.physicalRoots[v.physicalRoots.length - 1]);
     expect(l.selectedRoot).toBe(l.physicalRoots[0]);
     expect(v.Z).toBeCloseTo(0.7840665533701641, 12);
-    expect(v.lnPhi).toBeCloseTo(-0.19699325578790394, 12);
-    expect(v.phi).toBeCloseTo(0.821196171615136, 12);
+    expect(v.lnPhi).toBeCloseTo(-0.196993255787904, 12);
+    expect(v.phi).toBeCloseTo(0.8211961716151359, 12);
     expect(l.Z).toBeCloseTo(0.039538821208198904, 12);
-    expect(l.lnPhi).toBeCloseTo(-0.28969799209063085, 12);
-    expect(l.phi).toBeCloseTo(0.7484895832218048, 12);
+    expect(l.lnPhi).toBeCloseTo(-0.2896979920906313, 12);
+    expect(l.phi).toBeCloseTo(0.7484895832218045, 12);
     // Промежуточные величины не зависят от ветви.
     expect(l.dimensionlessA).toBe(v.dimensionlessA);
     expect(l.dimensionlessB).toBe(v.dimensionlessB);
@@ -429,7 +432,7 @@ describe('Stage 4.4.4.2: Peng–Robinson — корни Z <= B физическ�
     const s = expectSuccess(computePengRobinsonPure(baseRequest({ gasId: 'n2', temperatureK: 400, pressurePa: 5e6 })));
     expect(s.realRoots).toHaveLength(3);
     expect(s.realRoots[0]).toBeLessThan(0);
-    expect(s.dimensionlessB).toBeCloseTo(0.036139266152305796, 12);
+    expect(s.dimensionlessB).toBeCloseTo(0.03613926615230579, 12);
     // 0.005540237764369571 < B = 0.036139… — отброшен вместе с отрицательным.
     expect(s.realRoots[1]).toBeLessThan(s.dimensionlessB);
     expect(s.physicalRoots).toHaveLength(1);
@@ -500,7 +503,7 @@ describe('Stage 4.4.4.2: Peng–Robinson — фугитивность f = phi * 
     expect(v.fugacityPa).toBe(v.phi * v.pressurePa);
     expect(l.fugacityPa).toBe(l.phi * l.pressurePa);
     expect(h.fugacityPa).toBe(h.phi * h.pressurePa);
-    expect(v.fugacityPa).toBeCloseTo(0.821196171615136 * 2e6, 10);
+    expect(v.fugacityPa).toBeCloseTo(0.8211961716151359 * 2e6, 10);
   });
 });
 
@@ -746,10 +749,10 @@ describe('Stage 4.4.4.2: Peng–Robinson — промежуточные вели
     const s = expectSuccess(computePengRobinsonPure(baseRequest({ temperatureK: 250, pressurePa: 2e6 })));
     expect(s.kappa).toBeCloseTo(0.7064774529578879, 12);
     expect(s.alpha).toBeCloseTo(1.1362424339624086, 12);
-    expect(s.aPaM6PerMol2).toBeCloseTo(0.45029749306347294, 12);
-    expect(s.bM3PerMol).toBeCloseTo(2.6666930501459208e-5, 15);
-    expect(s.dimensionlessA).toBeCloseTo(0.20844003496011446, 12);
-    expect(s.dimensionlessB).toBeCloseTo(0.02565835626584252, 12);
+    expect(s.aPaM6PerMol2).toBeCloseTo(0.45029749308007133, 12);
+    expect(s.bM3PerMol).toBeCloseTo(2.6666930501950694e-5, 15);
+    expect(s.dimensionlessA).toBeCloseTo(0.20844003496011448, 12);
+    expect(s.dimensionlessB).toBeCloseTo(0.025658356265842515, 12);
   });
 
   it('ch4 200 K, 1 MPa: kappa, alpha, a, b, A, B', () => {
@@ -760,9 +763,9 @@ describe('Stage 4.4.4.2: Peng–Robinson — промежуточные вели
     );
     expect(s.kappa).toBeCloseTo(0.392217407205312, 12);
     expect(s.alpha).toBeCloseTo(0.9809055656396592, 12);
-    expect(s.aPaM6PerMol2).toBeCloseTo(0.24481566848099243, 12);
-    expect(s.bM3PerMol).toBeCloseTo(2.6802317443769295e-5, 15);
-    expect(s.dimensionlessA).toBeCloseTo(0.08853415534145984, 12);
+    expect(s.aPaM6PerMol2).toBeCloseTo(0.24481566849001654, 12);
+    expect(s.bM3PerMol).toBeCloseTo(2.6802317444263274e-5, 15);
+    expect(s.dimensionlessA).toBeCloseTo(0.08853415534145982, 12);
     expect(s.dimensionlessB).toBeCloseTo(0.01611788919812141, 12);
   });
 
@@ -845,14 +848,14 @@ describe('Stage 4.4.4.2: Peng–Robinson — аналитические неза
   it('log1p-форма ln(phi) совпадает с прямой формулой PR 1976', () => {
     // co2 250 K, 2 МПа, vapor: Z, A, B из проверенных якорей.
     const z = 0.7840665533701641;
-    const A = 0.20844003496011446;
-    const B = 0.02565835626584252;
+    const A = 0.20844003496011448;
+    const B = 0.025658356265842515;
     const direct =
       z - 1 - Math.log(z - B) -
       (A / (2 * Math.SQRT2 * B)) * Math.log((z + (1 + Math.SQRT2) * B) / (z + (1 - Math.SQRT2) * B));
     const stable = pengRobinsonLnPhi(z, A, B);
     expect(Math.abs(direct - stable)).toBeLessThan(1e-12);
-    expect(stable).toBeCloseTo(-0.19699325578790394, 12);
+    expect(stable).toBeCloseTo(-0.196993255787904, 12);
   });
 
   it('ln(phi) за пределами области определения (Z <= B) возвращает NaN', () => {

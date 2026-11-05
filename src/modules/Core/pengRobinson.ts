@@ -57,6 +57,9 @@
 // пакетов НЕ копировались.
 
 import { getEosPureComponentParameters, EosParametersError } from '../Data/eosParameters';
+// R — единая константа репозитория (точное значение СИ-2019,
+// N_A·k); дубль в этом модуле НЕ создаётся.
+import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from './thermoFunctions';
 
 import type {
   EosPureComponentGasId,
@@ -71,11 +74,12 @@ import type {
 // ============================================
 
 /**
- * Универсальная газовая постоянная, J/(mol*K).
- * CODATA 2018 / определение СИ-2019: R = 8.31446261815324… J/(mol*K)
- * (точное значение через N_A * k); хранится с 12 значащими цифрами.
+ * Универсальная газовая постоянная R, J/(mol*K) — импортируется из
+ * './thermoFunctions' (единый источник репозитория): точное значение
+ * СИ-2019 R = N_A·k = 8.31446261815324 J/(mol*K) (постоянные Больцмана
+ * и Авогадро определены точно). Локального дублирующего объявления
+ * в этом модуле нет.
  */
-export const UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K = 8.314462618;
 
 /** Константа члена притяжения a(T) классического PR (Peng & Robinson 1976). */
 export const PR_OMEGA_A = 0.45724;
