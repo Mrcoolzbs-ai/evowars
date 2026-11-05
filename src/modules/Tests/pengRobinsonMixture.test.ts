@@ -981,3 +981,206 @@ describe('Stage 4.4.4.3: запрет молчаливого kij = 0', () => {
     }
   });
 });
+
+// ----------------------------------------------------------------------------
+// 10. Stage 4.4.4.3.1 — точный нулевой предел a_mix
+// ----------------------------------------------------------------------------
+
+describe('Stage 4.4.4.3.1: точный нулевой предел a_mix', () => {
+  // Воспроизводимый binary64-случай (значения фикстуры — независимый
+  // пересчёт литералов теста, НЕ вывод реализации): для N2
+  // (Tc = 126.192 K, pc = 3395800 Pa, omega = 0.0372) при
+  // T = 1388.2195230363366 K внутренний член 1 + kappa*(1 - sqrt(T/Tc))
+  // вычисляется в binary64 РОВНО в 0, alpha = 0, следовательно
+  // a_i = a_mix = S_i = A_mix = 0 при b_mix > 0, B_mix > 0.
+  const N2_ZERO_ATTRACTION_T = 1388.2195230363366;
+  // Соседнее binary64-значение T (на 1 ulp ниже): alpha очень мал, но
+  // НЕ ноль — общий путь вычисления (проверка отсутствия искусственного
+  // epsilon-переключения и численной нестабильности).
+  const N2_NEAR_ZERO_T = 1388.2195230363363;
+  const ZERO_LIMIT_P = 1e6;
+
+  /** Независимый пересчёт промежуточных величин N2 (литералы теста). */
+  function independentN2Intermediates(temperatureK: number) {
+    const { tcK, pcPa, omega } = CATALOG_PARAMS['n2'];
+    const kappa = 0.37464 + 1.54226 * omega - 0.26992 * omega * omega;
+    const alpha = (1 + kappa * (1 - Math.sqrt(temperatureK / tcK))) ** 2;
+    const a = (0.45724 * R * R * tcK * tcK * alpha) / pcPa;
+    const b = (0.0778 * R * tcK) / pcPa;
+    const dimensionlessA = (a * ZERO_LIMIT_P) / (R * R * temperatureK * temperatureK);
+    const dimensionlessB = (b * ZERO_LIMIT_P) / (R * temperatureK);
+    return { kappa, alpha, a, b, dimensionlessA, dimensionlessB };
+  }
+
+  it('N2, T = 1388.2195230363366 K: alpha = 0 РОВНО; смесь и чистый PR оба завершаются успехом', () => {
+    // Фиксация фикстуры независимым пересчётом.
+    const params = independentN2Intermediates(N2_ZERO_ATTRACTION_T);
+    expect(params.alpha).toBe(0);
+    expect(params.a).toBe(0);
+    expect(params.dimensionlessA).toBe(0);
+    expect(params.b).toBeGreaterThan(0);
+    expect(params.dimensionlessB).toBeGreaterThan(0);
+
+    const mixture = mixSuccess({
+      composition: [entry('n2', 1.0)],
+      temperatureK: N2_ZERO_ATTRACTION_T,
+      pressurePa: ZERO_LIMIT_P,
+      root: 'vapor',
+      evidencePolicy: 'allow_partial'
+    });
+    const pureResult = computePengRobinsonPure({
+      gasId: 'n2',
+      temperatureK: N2_ZERO_ATTRACTION_T,
+      pressurePa: ZERO_LIMIT_P,
+      root: 'vapor',
+      evidencePolicy: 'allow_partial'
+    });
+    expect(pureResult.status).toBe('success');
+    if (pureResult.status !== 'success') {
+      throw new Error('ожидался успех чистого PR');
+    }
+    const p = pureResult as PengRobinsonPureSuccess;
+
+    // Точный нулевой предел: a_i = a_mix = S_i = A_mix = 0, b_mix > 0.
+    expect(mixture.components).toHaveLength(1);
+    const c = mixture.components[0];
+    expect(c.aPaM6PerMol2).toBe(0);
+    expect(c.sIPaM6PerMol2).toBe(0);
+    expect(mixture.aMixPaM6PerMol2).toBe(0);
+    expect(mixture.dimensionlessA).toBe(0);
+    expect(mixture.bMixM3PerMol).toBe(params.b);
+    expect(mixture.bMixM3PerMol).toBeGreaterThan(0);
+    expect(mixture.dimensionlessB).toBe(params.dimensionlessB);
+    expect(mixture.dimensionlessB).toBeGreaterThan(0);
+
+    // Результат конечен, без NaN/Infinity; ветвь выбрана из физических корней.
+    expect(mixture.Z).toBe(mixture.selectedRoot);
+    expect(mixture.Z).toBeGreaterThan(mixture.dimensionlessB);
+    for (const z of mixture.realRoots) {
+      expect(Number.isFinite(z)).toBe(true);
+    }
+    for (const z of mixture.physicalRoots) {
+      expect(z).toBeGreaterThan(mixture.dimensionlessB);
+    }
+    expect(Number.isFinite(c.lnPhi)).toBe(true);
+    expect(Number.isFinite(c.phi)).toBe(true);
+    expect(Number.isFinite(c.fugacityPa)).toBe(true);
+    expect(c.phi).toBeGreaterThan(0);
+    expect(c.fugacityPa).toBeGreaterThan(0);
+
+    // Побитовое совпадение с чистым PR (та же кубика A = 0, та же
+    // предельная ln(phi) без члена притяжения).
+    expect(mixture.Z).toBe(p.Z);
+    expect(mixture.selectedRoot).toBe(p.selectedRoot);
+    expect(mixture.dimensionlessA).toBe(p.dimensionlessA);
+    expect(mixture.dimensionlessB).toBe(p.dimensionlessB);
+    expect(c.aPaM6PerMol2).toBe(p.aPaM6PerMol2);
+    expect(c.bM3PerMol).toBe(p.bM3PerMol);
+    expect(c.lnPhi).toBe(p.lnPhi);
+    expect(c.phi).toBe(p.phi);
+    expect(c.fugacityPa).toBe(p.fugacityPa);
+    expect([...mixture.realRoots]).toEqual([...p.realRoots]);
+    expect([...mixture.physicalRoots]).toEqual([...p.physicalRoots]);
+
+    // Коды предупреждений совпадают с чистым PR; в notes — примечание
+    // о точном нулевом пределе a_mix (наблюдаемость предельной формы).
+    expect(mixture.warnings.map((w) => w.code).sort())
+      .toEqual(p.warnings.map((w) => w.code).sort());
+    expect(mixture.notes.join(' ')).toContain('точный нулевой предел a_mix');
+    // Однокомпонентный предел: пары не требуются.
+    expect(mixture.binaryInteractionsUsed).toEqual([]);
+  });
+
+  it('N2, T = 1388.2195230363363 K (1 ulp ниже): alpha = 1.23e-32, НЕ ноль — общий путь без epsilon-переключения', () => {
+    const params = independentN2Intermediates(N2_NEAR_ZERO_T);
+    // Фиксация соседней фикстуры: alpha мал, но положителен.
+    expect(params.alpha).toBe(1.232595164407831e-32);
+    expect(params.alpha).toBeGreaterThan(0);
+    expect(params.a).toBe(1.8270674846805776e-33);
+    expect(params.dimensionlessA).toBe(1.371418245802473e-35);
+
+    const mixture = mixSuccess({
+      composition: [entry('n2', 1.0)],
+      temperatureK: N2_NEAR_ZERO_T,
+      pressurePa: ZERO_LIMIT_P,
+      root: 'vapor',
+      evidencePolicy: 'allow_partial'
+    });
+    const pureResult = computePengRobinsonPure({
+      gasId: 'n2',
+      temperatureK: N2_NEAR_ZERO_T,
+      pressurePa: ZERO_LIMIT_P,
+      root: 'vapor',
+      evidencePolicy: 'allow_partial'
+    });
+    expect(pureResult.status).toBe('success');
+    if (pureResult.status !== 'success') {
+      throw new Error('ожидался успех чистого PR');
+    }
+    const p = pureResult as PengRobinsonPureSuccess;
+
+    // a_mix > 0: точный ноль НЕ подставлен, предельная форма НЕ применена
+    // (отсутствие искусственного epsilon-переключения).
+    expect(mixture.aMixPaM6PerMol2).toBe(params.a);
+    expect(mixture.aMixPaM6PerMol2).toBeGreaterThan(0);
+    expect(mixture.dimensionlessA).toBe(params.dimensionlessA);
+    expect(mixture.dimensionlessA).toBeGreaterThan(0);
+    expect(mixture.components).toHaveLength(1);
+    const c = mixture.components[0];
+    expect(c.sIPaM6PerMol2).toBe(params.a);
+    expect(Number.isFinite(c.lnPhi)).toBe(true);
+    expect(Number.isFinite(c.phi)).toBe(true);
+    expect(Number.isFinite(c.fugacityPa)).toBe(true);
+
+    // Побитовое совпадение с чистым PR (общий путь корректен при
+    // крошечном ненулевом a_mix; S_i/a_mix конечно).
+    expect(mixture.Z).toBe(p.Z);
+    expect(mixture.selectedRoot).toBe(p.selectedRoot);
+    expect(c.lnPhi).toBe(p.lnPhi);
+    expect(c.phi).toBe(p.phi);
+    expect(c.fugacityPa).toBe(p.fugacityPa);
+    expect([...mixture.realRoots]).toEqual([...p.realRoots]);
+
+    // Численной нестабильности нет: ln(phi_i) совпадает с предельной
+    // формой (b_i/b_mix)*(Z-1) - ln(Z - B_mix) с точностью до члена
+    // притяжения ~1e-35 (кубика та же, A_mix ~ 1e-35).
+    const lnPhiLimit =
+      (c.bM3PerMol / mixture.bMixM3PerMol) * (mixture.Z - 1) -
+      Math.log(mixture.Z) -
+      Math.log1p(-mixture.dimensionlessB / mixture.Z);
+    expect(Math.abs(c.lnPhi - lnPhiLimit)).toBeLessThan(1e-30);
+    // Примечание о нулевом пределе НЕ прикреплено (общий путь).
+    expect(mixture.notes).toHaveLength(1);
+  });
+
+  it('a_mix = 0 при ненулевом a_i компонента с нулевой долей: отказ degenerate_attraction_limit', () => {
+    // N2 (x = 1.0, a = 0 при T фикстуры) + co2 (x = 0.0, a > 0):
+    // нулевая доля co2 исключает её a_ij из сумм, поэтому a_mix = 0, но
+    // компонентные a_i НЕ все нулевые — предельная форма без члена
+    // притяжения НЕ применяется автоматически (предел зависит от пути
+    // вырождения): структурированный отказ с точной причиной.
+    const failure = mixFailure({
+      composition: [entry('n2', 1.0), entry('co2', 0.0)],
+      temperatureK: N2_ZERO_ATTRACTION_T,
+      pressurePa: ZERO_LIMIT_P,
+      root: 'vapor',
+      evidencePolicy: 'allow_partial'
+    });
+    expect(failure.code).toBe('degenerate_attraction_limit');
+    expect(failure.message).toContain('вырожденная компенсация');
+    expect(failure.message).toContain('co2');
+  });
+
+  it('предупреждение h2o_classical_pr_limitations содержит оговорку Köster о константах Генри', () => {
+    const s = mixSuccess(vaporRequest([entry('n2', 0.9), entry('h2o', 0.1)], 400, 5e6));
+    const warning = s.warnings.find((w) => w.code === 'h2o_classical_pr_limitations');
+    if (warning === undefined) {
+      throw new Error('ожидалось предупреждение h2o_classical_pr_limitations');
+    }
+    expect(warning.message).toContain('константы Генри');
+    expect(warning.message).toContain('Supplementary Section 4');
+    // Явная оговорка: растворимость N2 в воде моделью НЕ предсказывается
+    // (benchmark PR-смесей НЕ является проверкой растворимости).
+    expect(warning.message).toContain('растворимость N2 в воде');
+  });
+});

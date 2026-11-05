@@ -69,6 +69,23 @@ Stage 4.4.4.2.2 / 4.4.4.3 — независимый benchmark Peng–Robinson:
    flash/фазовое равновесие в объём 4.4.4.3 НЕ входят — сверяется
    выбранная ветвь той же кубики.
 
+5. Точный нулевой предел a_mix (Stage 4.4.4.3.1, ключ дампа
+   zeroAttractionLimit): N2 при T = 1388.2195230363366 K — alpha(T)
+   вычисляется в binary64 РОВНО в 0 (a_i = a_mix = S_i = A_mix = 0);
+   TS вычисляет ln(phi_i) ТОЧНОЙ предельной формой без члена
+   притяжения; соседнее binary64-значение T = 1388.2195230363363 K
+   (alpha = 1.232595164407831e-32) идёт общим путём (проверка
+   отсутствия epsilon-переключения). Нулевой alpha — АРТЕФАКТ
+   округления binary64 (точное значение нулю не равно), поэтому
+   ГЛАВНЫЙ оракул предельного случая — mpmath с ТОЧНЫМИ binary64-
+   входами: сходимость Z/ln(phi)/phi/f к значениям TS подтверждает,
+   что предельная форма есть истинный предел; a_mix сверяется по
+   АБСОЛЮТНОЙ близости к нулю (точный alpha — тот же порядок
+   величины, что артефакт округления). CoolProp проверяет ту же
+   ветвь gas одиночного флюида; если CoolProp точку дать не может,
+   причина фиксируется ТОЧНО, результат НЕ подменяется собственным
+   расчётом — проверкой предела остаётся mpmath.
+
 Числа из TS-дампа — выход СОБСТВЕННОЙ реализации (вход сравнения, НЕ
 эталон). Неудачные точки НЕ скрываются: любая из них делает код
 выхода ненулевым. Если CoolProp не может дать ветвь или параметр,
@@ -97,6 +114,10 @@ RTOL_MPMATH = 5e-13    # проверка реализации против 50-�
 ATOL_ISOLATED_ROOT = 1e-9    # изолированный корень: двойная точность решателя
 ATOL_NEAR_PAIR_ROOT = 1e-6  # корень вблизи кратного: обусловленность ~ sqrt(eps)
 NEAR_PAIR_SPLIT = 1e-4      # порог «пары» (расщепление меньше — кластер)
+ZERO_LIMIT_AMIX_ATOL = 1e-30  # |mp a_mix − ts a_mix| для нулевого предела:
+                             # точный alpha — артефакт округления binary64,
+                             # сверка АБСОЛЮТНАЯ (относительная невозможна
+                             # и не требуется: проверяется предельная форма)
 
 # ============================================
 # Каталог Stage 4.4.4.1 (значения — из src/modules/Data/eosParameters.ts)
@@ -855,6 +876,151 @@ def main() -> int:
             mixture_mpmath_points.append(entry)
 
     # ============================================
+    # Точный нулевой предел a_mix (Stage 4.4.4.3.1)
+    # ============================================
+    # Фикстуры TS-дампа (однокомпонентная «смесь» N2, 1 МПа):
+    #   T = 1388.2195230363366 K — alpha(T) в binary64 РОВНО 0
+    #     (a_i = a_mix = S_i = A_mix = 0, b_mix > 0): TS вычисляет
+    #     ln(phi_i) ТОЧНОЙ предельной формой без члена притяжения;
+    #   T = 1388.2195230363363 K (соседнее binary64-значение, 1 ulp
+    #     ниже): alpha = 1.232595164407831e-32 — общий путь, проверка
+    #     отсутствия epsilon-переключения.
+    # СЕМАНТИКА: нулевой alpha — АРТЕФАКТ округления binary64 (точное
+    # значение нулю не равно), поэтому ГЛАВНЫЙ оракул предельного
+    # случая — mpmath с ТОЧНЫМИ binary64-входами: сходимость
+    # Z/ln(phi)/phi/f к значениям TS подтверждает, что предельная
+    # форма есть истинный предел. a_mix НЕ сравнивается относительно
+    # (точный alpha — тот же порядок величины, что артефакт округления):
+    # проверяется АБСОЛЮТНАЯ близость |mp a_mix − ts a_mix| <= 1e-30.
+    # CoolProp проверяет ту же ветвь gas одиночного флюида; если
+    # CoolProp точку дать не может, причина фиксируется ТОЧНО,
+    # результат НЕ подменяется собственным расчётом — проверкой
+    # предела остаётся mpmath.
+    zero_limit_cases = []
+    if mixtures_data is not None:
+        zero_limit_cases = (mixtures_data.get("zeroAttractionLimit", {})
+                            .get("cases", []))
+    zero_limit_points = []
+    for case in zero_limit_cases:
+        comp_ids = [c["gasId"] for c in case["composition"]]
+        fractions = [float(c["moleFraction"]) for c in case["composition"]]
+        gas_id = comp_ids[0]
+        info = CATALOG[gas_id]
+
+        # --- CoolProp: одиночный флюид, ветвь gas (ветвь TS) ---
+        coolprop_vals = {"Z": None, "Z_source": None, "phi": None,
+                         "fugacity": None, "rhomolar": None, "error": None,
+                         "phase_specified": "gas"}
+        if add_error is not None or custom_fluids["fluids"][gas_id]["error"] is not None:
+            coolprop_vals["error"] = "флюид не зарегистрирован (add_fluids_as_JSON)"
+        else:
+            try:
+                state = CP.AbstractState("PR", info["custom"])
+                state.specify_phase(CP.iphase_gas)
+                state.update(CP.PT_INPUTS, case["pressurePa"], case["temperatureK"])
+                coolprop_vals["rhomolar"] = float(state.rhomolar())
+                try:
+                    coolprop_vals["Z"] = float(state.keyed_output(CP.iZ))
+                    coolprop_vals["Z_source"] = "AS.keyed_output(CP.iZ)"
+                except Exception:  # noqa: BLE001 — документированный fallback
+                    r_coolprop = coolprop_meta["r_universal"]
+                    if r_coolprop is None:
+                        r_coolprop = mixtures_data["universalGasConstantJPerMolK"]
+                    coolprop_vals["Z"] = (case["pressurePa"]
+                                          / (coolprop_vals["rhomolar"] * r_coolprop
+                                             * case["temperatureK"]))
+                    coolprop_vals["Z_source"] = "P/(rhomolar*R*T), R CoolProp"
+                coolprop_vals["phi"] = float(state.fugacity_coefficient(0))
+                coolprop_vals["fugacity"] = float(state.fugacity(0))
+            except Exception as exc:  # noqa: BLE001 — точная причина, НЕ подмена
+                coolprop_vals["error"] = f"{type(exc).__name__}: {exc}"
+
+        ts_comp = case["components"][0]
+        entry = {
+            "id": case["id"], "gasId": gas_id,
+            "temperatureK": case["temperatureK"], "pressurePa": case["pressurePa"],
+            "note": case.get("note"),
+            "semantics": ("точный нулевой предел a_mix (Stage 4.4.4.3.1); "
+                          "главный оракул — mpmath с точными binary64-"
+                          "входами; CoolProp — та же ветвь gas, при отказе "
+                          "причина фиксируется без подмены результата"),
+            "coolprop": coolprop_vals,
+            "typescript": {"Z": case["Z"], "aMix": case["aMixPaM6PerMol2"],
+                           "bMix": case["bMixM3PerMol"],
+                           "dimensionlessA": case["dimensionlessA"],
+                           "dimensionlessB": case["dimensionlessB"],
+                           "lnPhi": ts_comp["lnPhi"], "phi": ts_comp["phi"],
+                           "fugacityPa": ts_comp["fugacityPa"]},
+            "coolprop_comparison": {}, "mpmath": {}, "pass": True,
+        }
+
+        # --- CoolProp: дал значения — сверка rtol 2e-4 ---
+        if coolprop_vals["error"] is None:
+            for name, ts_value, cp_value in (
+                    ("Z", case["Z"], coolprop_vals["Z"]),
+                    ("phi", ts_comp["phi"], coolprop_vals["phi"]),
+                    ("fugacity", ts_comp["fugacityPa"], coolprop_vals["fugacity"])):
+                abs_err = abs(cp_value - ts_value)
+                rel_err = abs_err / abs(ts_value)
+                entry["coolprop_comparison"][name] = {
+                    "abs": abs_err, "rel": rel_err,
+                    "tolerance": RTOL_COOLPROP,
+                    "pass": rel_err <= RTOL_COOLPROP}
+                if rel_err > RTOL_COOLPROP:
+                    entry["pass"] = False
+
+        # --- mpmath: точный предел при точных binary64-входах ---
+        calc = pr_mixture_mpmath(case["temperatureK"], case["pressurePa"],
+                                comp_ids, fractions, {}, R_TS,
+                                omega_a_rounded, omega_b_rounded)
+        physical = calc["physical"]
+        mp_entry = {"dps": MPMATH_DPS, "comparison": {}, "pass": True}
+        if not physical:
+            mp_entry["error"] = "нет физических корней"
+            mp_entry["pass"] = False
+            entry["pass"] = False
+        else:
+            z_sel = physical[-1]  # vapor — наибольший физический корень
+            lnphi_mp = calc["lnphi_i"](0, z_sel)
+            phi_mp = float(mp.exp(lnphi_mp))
+            fugacity_mp = phi_mp * case["pressurePa"]
+            for name, ts_value, mp_value in (
+                    ("Z", case["Z"], float(z_sel)),
+                    ("lnPhi", ts_comp["lnPhi"], float(lnphi_mp)),
+                    ("phi", ts_comp["phi"], phi_mp),
+                    ("fugacity", ts_comp["fugacityPa"], fugacity_mp)):
+                abs_err = abs(mp_value - ts_value)
+                rel_err = abs_err / abs(ts_value)
+                mp_entry["comparison"][name] = {
+                    "abs": abs_err, "rel": rel_err,
+                    "tolerance": RTOL_MPMATH,
+                    "pass": rel_err <= RTOL_MPMATH}
+                if rel_err > RTOL_MPMATH:
+                    mp_entry["pass"] = False
+            # a_mix: АБСОЛЮТНАЯ близость (точный alpha — тот же порядок
+            # величины, что артефакт округления binary64; относительная
+            # сверка невозможна и НЕ требуется — проверяется предельная
+            # форма, а не точное значение крошечного a_mix).
+            a_mix_mp = float(calc["a_mix"])
+            mp_entry["a_mix_mp"] = a_mix_mp
+            mp_entry["a_mix_ts"] = case["aMixPaM6PerMol2"]
+            mp_entry["a_mix_abs_diff"] = abs(a_mix_mp - case["aMixPaM6PerMol2"])
+            mp_entry["a_mix_abs_tolerance"] = ZERO_LIMIT_AMIX_ATOL
+            mp_entry["a_mix_semantics"] = (
+                "точный alpha нулю не равен (артефакт округления "
+                "binary64); сверка АБСОЛЮТНАЯ: |mp a_mix − ts a_mix| <= "
+                "1e-30")
+            if mp_entry["a_mix_abs_diff"] > ZERO_LIMIT_AMIX_ATOL:
+                mp_entry["pass"] = False
+            if not mp_entry["pass"]:
+                entry["pass"] = False
+        entry["mpmath"] = mp_entry
+        zero_limit_points.append(entry)
+
+    zero_limit_pass = all(p["pass"] for p in zero_limit_points)
+    zero_limit_available = mixtures_data is not None and bool(zero_limit_cases)
+
+    # ============================================
     # Итоги
     # ============================================
     coolprop_pass = all(p["pass"] for p in points)
@@ -864,6 +1030,7 @@ def main() -> int:
     mixture_mpmath_pass = all(p["pass"] for p in mixture_mpmath_points)
     all_pass = (coolprop_pass and mpmath_pass and boundary_pass
                 and mixture_coolprop_pass and mixture_mpmath_pass
+                and zero_limit_pass
                 and add_error is None)
 
     report = {
@@ -888,7 +1055,31 @@ def main() -> int:
                           "PARTIALLY_VERIFIED по provenance каталога. "
                           "Фаза CoolProp навязана по математической ветви "
                           "TS (gas для vapor): flash/фазовое равновесие "
-                          "в объём 4.4.4.3 НЕ входят"),
+                          "в объём 4.4.4.3 НЕ входят. Точка n2-h2o — "
+                          "НЕ проверка растворимости N2 в воде: "
+                          "постоянный (температурно-независимый) BIP "
+                          "классического PR качественно НЕ воспроизводит "
+                          "константы Генри газов (H2, N2, O2, Ar) в воде "
+                          "(Köster, Thol & Vrabec 2018, Supplementary "
+                          "Section 4)"),
+        },
+        "zeroAttractionLimit": {
+            "stage": "4.4.4.3.1",
+            "available": zero_limit_available,
+            "points": zero_limit_points,
+            "semantics": ("точный нулевой предел a_mix (alpha = 0 РОВНО в "
+                          "binary64 для N2 при T = 1388.2195230363366 K): "
+                          "ln(phi_i) предельной формой (b_i/b_mix)(Z-1) - "
+                          "ln(Z-B_mix); вырожденная компенсация (a_mix = 0 "
+                          "при ненулевых a_i) — отказ "
+                          "degenerate_attraction_limit; epsilon-порог НЕ "
+                          "вводится. Главный оракул предела — mpmath с "
+                          "точными binary64-входами (в точной арифметике "
+                          "alpha нулю не равен; сходимость Z/ln(phi)/phi/f "
+                          "подтверждает предельную форму; a_mix — "
+                          "АБСОЛЮТНАЯ сверка <= 1e-30). CoolProp — та же "
+                          "ветвь gas; отказ CoolProp фиксируется с "
+                          "причиной и НЕ подменяется собственным расчётом"),
         },
         "tolerances": {
             "coolprop_rtol": RTOL_COOLPROP,
@@ -917,6 +1108,8 @@ def main() -> int:
             "mixtures_available": mixtures_data is not None,
             "mixtures_coolprop": mixture_coolprop_pass,
             "mixtures_mpmath": mixture_mpmath_pass,
+            "zero_attraction_limit": zero_limit_pass,
+            "zero_attraction_limit_available": zero_limit_available,
             "all": all_pass,
         },
     }
@@ -947,6 +1140,11 @@ def main() -> int:
     mix_pts = ", ".join(
         f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
         for p in mixture_coolprop_points)
+    zl_pts = ", ".join(
+        f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
+        + ("" if p["coolprop"]["error"] is None
+           else " (CoolProp: причина в отчёте)")
+        for p in zero_limit_points)
     print(f"::notice title=Peng-Robinson benchmark::{verdict} "
           f"(CoolProp {coolprop_meta['version']}): точки [{cp_pts}]; "
           f"mpmath={'ok' if mpmath_pass else 'FAIL'}; "
@@ -955,6 +1153,9 @@ def main() -> int:
           f"CoolProp={'ok' if mixture_coolprop_pass else 'FAIL'}, "
           f"mpmath={'ok' if mixture_mpmath_pass else 'FAIL'} "
           f"(валидация реализации, kij из каталога); "
+          f"нулевой предел a_mix [{zl_pts}] "
+          f"mpmath={'ok' if zero_limit_pass else 'FAIL'} "
+          f"(главный оракул предела); "
           f"solver_failures_justified={justified_refusals}")
     if not all_pass:
         for point in points:
@@ -979,8 +1180,12 @@ def main() -> int:
             if not entry["pass"]:
                 print(f"::error title=Peng-Robinson mixture mpmath {entry['id']}::"
                        f"{json.dumps(entry, ensure_ascii=False)[:800]}")
+        for entry in zero_limit_points:
+            if not entry["pass"]:
+                print(f"::error title=Peng-Robinson zero-limit {entry['id']}::"
+                       f"{json.dumps(entry, ensure_ascii=False)[:800]}")
 
-    print(f"\nИТОГ Stage 4.4.4.2.2/4.4.4.3 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
+    print(f"\nИТОГ Stage 4.4.4.2.2/4.4.4.3/4.4.4.3.1 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
     return 0 if all_pass else 1
 
 
@@ -1103,6 +1308,40 @@ def build_summary_md(report):
                 f"| {mrel(comp, 'bMix')} | "
                 f"{'—' if max_phi is None else f'{max_phi:.2e}'} | "
                 f"{'ok' if entry['pass'] else 'FAIL'} |")
+    if report.get("zeroAttractionLimit", {}).get("available"):
+        lines += [
+            "",
+            "## Точный нулевой предел a_mix (4.4.4.3.1)",
+            "",
+            "alpha = 0 РОВНО в binary64 (N2, T = 1388.2195230363366 K): "
+            "ln(phi_i) предельной формой (b_i/b_mix)(Z-1) - ln(Z-B_mix); "
+            "главный оракул предела — mpmath с точными binary64-входами "
+            "(rtol 5e-13); a_mix — АБСОЛЮТНАЯ сверка <= 1e-30. CoolProp — "
+            "та же ветвь gas (rtol 2e-4); отказ фиксируется с причиной "
+            "и НЕ подменяется собственным расчётом.",
+            "",
+            "| точка | Z (rel) | phi (rel) | f (rel) | |mp a_mix − ts a_mix| | CoolProp | итог |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for entry in report["zeroAttractionLimit"]["points"]:
+            mpm = entry.get("mpmath", {})
+            comp = mpm.get("comparison", {})
+            def zrel(name):
+                value = comp.get(name)
+                return "—" if value is None else f"{value['rel']:.2e}"
+            adiff = mpm.get("a_mix_abs_diff")
+            cp_err = entry["coolprop"]["error"]
+            if cp_err is not None:
+                cp_state = f"отказ ({cp_err.split(':')[0]})"
+            elif entry.get("coolprop_comparison", {}).get("Z"):
+                cp_state = f"{entry['coolprop_comparison']['Z']['rel']:.2e}"
+            else:
+                cp_state = "—"
+            lines.append(
+                f"| {entry['id']} | {zrel('Z')} | {zrel('phi')} | "
+                f"{zrel('fugacity')} | "
+                f"{'—' if adiff is None else f'{adiff:.2e}'} | {cp_state} | "
+                f"{'ok' if entry['pass'] else 'FAIL'} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
     lines += [
         "",
@@ -1110,7 +1349,8 @@ def build_summary_md(report):
         f"mpmath: {'ok' if report['summary']['mpmath'] else 'FAIL'}; "
         f"boundary: {'ok' if report['summary']['boundary'] else 'FAIL'}; "
         f"смеси CoolProp: {'ok' if report['summary']['mixtures_coolprop'] else 'FAIL'}; "
-        f"смеси mpmath: {'ok' if report['summary']['mixtures_mpmath'] else 'FAIL'})",
+        f"смеси mpmath: {'ok' if report['summary']['mixtures_mpmath'] else 'FAIL'}; "
+        f"нулевой предел a_mix: {'ok' if report['summary']['zero_attraction_limit'] else 'FAIL'})",
         "",
     ]
     return "\n".join(lines)

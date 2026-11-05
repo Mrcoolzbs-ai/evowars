@@ -469,3 +469,51 @@ describe('Stage 4.4.4.3: детерминизм', () => {
     expect(roundTripped).toEqual(original);
   });
 });
+
+// ----------------------------------------------------------------------------
+// 8. Stage 4.4.4.3.1 — оговорка Köster Supplementary Section 4 (N2–H2O)
+// ----------------------------------------------------------------------------
+
+describe('Stage 4.4.4.3.1: оговорка Supplementary Section 4 для h2o|n2', () => {
+  it('постоянный BIP не воспроизводит константы Генри: оговорка в limitations, запись остаётся available', () => {
+    const record = BINARY_INTERACTION_PARAMETERS['h2o|n2'];
+    // Значение, источник и статус НЕ меняются: kij = -0.0501, Köster,
+    // Thol & Vrabec 2018 (doi:10.1021/acs.jced.7b00706, Таблица 4),
+    // PARTIALLY_VERIFIED, числовой температурный диапазон не назначен.
+    expect(record.status).toBe('available');
+    if (record.status !== 'available') {
+      throw new Error('ожидалась available-запись h2o|n2');
+    }
+    expect(record.kij.value).toBe(-0.0501);
+    expect(record.kij.provenance.sourceId).toContain('10.1021/acs.jced.7b00706');
+    expect(record.kij.provenance.evidence).toBe('PARTIALLY_VERIFIED');
+    expect(record.applicabilityRangeK).toBeNull();
+
+    // Конкретная оговорка источника (Supplementary Section 4): постоянный
+    // BIP в PR и PC-SAFT качественно НЕ воспроизводит константы Генри
+    // H2, N2, O2 и Ar в воде — пригодность для предсказания растворимости
+    // газа в воде ограничена.
+    const joined = record.limitations.join(' ');
+    expect(joined).toContain('Supplementary Section 4');
+    expect(joined).toContain('константы Генри');
+    expect(joined).toContain('H2, N2, O2 и Ar');
+    // Запись НЕ переводится в unresolved из-за оговорки (значение
+    // опубликовано для VLE-подгонки), но растворимость N2 в воде по
+    // этой паре НЕ считается проверенной.
+    expect(joined).toContain('НЕ считается проверенной');
+    expect(record.status).toBe('available');
+  });
+
+  it('прочие записи каталога не содержат оговорку Генри (оговорка специфична для N2–H2O)', () => {
+    for (const key of listBinaryInteractionPairKeys()) {
+      if (key === 'h2o|n2') {
+        continue;
+      }
+      const record: BinaryInteractionPairRecord = BINARY_INTERACTION_PARAMETERS[key];
+      const limitations = record.status === 'available'
+        ? record.limitations.join(' ')
+        : '';
+      expect(limitations).not.toContain('константы Генри');
+    }
+  });
+});

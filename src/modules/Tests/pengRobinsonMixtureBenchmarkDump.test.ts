@@ -128,6 +128,43 @@ const MIXTURE_POINTS: readonly MixturePointSpec[] = [
   }
 ];
 
+// Точки ТОЧНОГО НУЛЕВОГО ПРЕДЕЛА a_mix (Stage 4.4.4.3.1): N2,
+// 1 МПа, два соседних binary64-значения T. При T = 1388.2195230363366 K
+// alpha(T) вычисляется в binary64 РОВНО в 0 (a_i = a_mix = S_i =
+// A_mix = 0, b_mix > 0, B_mix > 0) — ln(phi_i) вычисляется ТОЧНОЙ
+// предельной формой (b_i/b_mix)*(Z-1) - ln(Z-B_mix); при
+// T = 1388.2195230363363 K (1 ulp ниже) alpha = 1.232595164407831e-32 —
+// общий путь (проверка отсутствия epsilon-переключения). Оба случая —
+// вход для независимых оракулов: CoolProp проверяет ту же ветвь gas
+// (при отказе точку фиксирует причину БЕЗ подмены собственным
+// расчётом), mpmath (50 знаков, точные binary64-входы через
+// as_integer_ratio) — точный предел: в точной арифметике alpha нулю
+// не равен (нулевой alpha — артефакт округления binary64), и
+// сходимость Z/ln(phi)/phi/f к значениям TS подтверждает корректность
+// предельной формы.
+const ZERO_ATTRACTION_POINTS: readonly {
+  readonly id: string;
+  readonly temperatureK: number;
+  readonly pressurePa: number;
+  readonly expectExactZero: boolean;
+  readonly note: string;
+}[] = [
+  {
+    id: 'n2-zero-attraction-1388K-1MPa-vapor',
+    temperatureK: 1388.2195230363366,
+    pressurePa: 1e6,
+    expectExactZero: true,
+    note: 'alpha = 0 ровно в binary64: ln(phi_i) точной предельной формой без члена притяжения'
+  },
+  {
+    id: 'n2-near-zero-alpha-1388K-1MPa-vapor',
+    temperatureK: 1388.2195230363363,
+    pressurePa: 1e6,
+    expectExactZero: false,
+    note: 'alpha = 1.232595164407831e-32 (соседнее binary64-значение T): общий путь, без epsilon-переключения'
+  }
+];
+
 // ============================================
 // 2. ХЕЛПЕРЫ
 // ============================================
@@ -150,6 +187,8 @@ function expectFiniteNumber(value: number, label: string): void {
 
 // Накопитель строк дампа (заполняется тестами, выгружается в afterAll).
 const mixtureRows: Record<string, unknown>[] = [];
+// Накопитель строк нулевого предела a_mix (Stage 4.4.4.3.1).
+const zeroAttractionRows: Record<string, unknown>[] = [];
 
 // ============================================
 // 3. ТЕСТЫ
@@ -234,6 +273,86 @@ describe('Stage 4.4.4.3: дамп смесевых контрольных точ
     });
   }
 
+  // --- Stage 4.4.4.3.1: точки точного нулевого предела a_mix ---
+  for (const point of ZERO_ATTRACTION_POINTS) {
+    it(`нулевой предел a_mix ${point.id}: успех, конечные значения, предельная форма`, () => {
+      const s = expectMixtureSuccess(computePengRobinsonMixtureFromCatalog({
+        composition: [{ gasId: 'n2', moleFraction: 1.0 }],
+        temperatureK: point.temperatureK,
+        pressurePa: point.pressurePa,
+        root: 'vapor',
+        evidencePolicy: 'allow_partial'
+      }));
+
+      // Структура и конечность.
+      expectFiniteNumber(s.Z, `${point.id}: Z`);
+      expectFiniteNumber(s.aMixPaM6PerMol2, `${point.id}: a_mix`);
+      expectFiniteNumber(s.bMixM3PerMol, `${point.id}: b_mix`);
+      expectFiniteNumber(s.dimensionlessA, `${point.id}: A_mix`);
+      expectFiniteNumber(s.dimensionlessB, `${point.id}: B_mix`);
+      expect(s.Z).toBe(s.selectedRoot);
+      expect(s.Z).toBeGreaterThan(s.dimensionlessB);
+      for (const c of s.components) {
+        expectFiniteNumber(c.lnPhi, `${point.id}: lnPhi(${c.component})`);
+        expectFiniteNumber(c.phi, `${point.id}: phi(${c.component})`);
+        expectFiniteNumber(c.fugacityPa, `${point.id}: f(${c.component})`);
+        expectFiniteNumber(c.sIPaM6PerMol2, `${point.id}: S(${c.component})`);
+        expect(c.phi).toBeGreaterThan(0);
+        expect(c.fugacityPa).toBeGreaterThan(0);
+      }
+
+      if (point.expectExactZero) {
+        // Точный нулевой предел: a_i = a_mix = S_i = A_mix = 0 при
+        // b_mix > 0; ln(phi_i) — предельной формой; примечание
+        // о нулевом пределе прикреплено к результату.
+        expect(s.aMixPaM6PerMol2).toBe(0);
+        expect(s.dimensionlessA).toBe(0);
+        expect(s.components[0].aPaM6PerMol2).toBe(0);
+        expect(s.components[0].sIPaM6PerMol2).toBe(0);
+        expect(s.bMixM3PerMol).toBeGreaterThan(0);
+        expect(s.dimensionlessB).toBeGreaterThan(0);
+        expect(s.notes.join(' ')).toContain('точный нулевой предел a_mix');
+      } else {
+        // Соседняя точка: a_mix крошечный, но НЕ ноль (общий путь,
+        // без epsilon-переключения); примечание о пределе НЕ прикреплено.
+        expect(s.aMixPaM6PerMol2).toBeGreaterThan(0);
+        expect(s.dimensionlessA).toBeGreaterThan(0);
+        expect(s.notes.join(' ')).not.toContain('точный нулевой предел a_mix');
+      }
+
+      // Предупреждение об единственной физической ветви обязательно.
+      expect(s.warnings.map((w) => w.code)).toContain('single_physical_root');
+
+      // Строка дампа: значения СОБСТВЕННОЙ реализации (вход для оракула).
+      zeroAttractionRows.push({
+        id: point.id,
+        temperatureK: s.temperatureK,
+        pressurePa: s.pressurePa,
+        root: s.root,
+        composition: [{ gasId: 'n2', moleFraction: 1.0 }],
+        aMixPaM6PerMol2: s.aMixPaM6PerMol2,
+        bMixM3PerMol: s.bMixM3PerMol,
+        dimensionlessA: s.dimensionlessA,
+        dimensionlessB: s.dimensionlessB,
+        Z: s.Z,
+        realRoots: [...s.realRoots],
+        physicalRoots: [...s.physicalRoots],
+        components: s.components.map((c) => ({
+          component: c.component,
+          moleFraction: c.moleFraction,
+          aPaM6PerMol2: c.aPaM6PerMol2,
+          bM3PerMol: c.bM3PerMol,
+          sIPaM6PerMol2: c.sIPaM6PerMol2,
+          lnPhi: c.lnPhi,
+          phi: c.phi,
+          fugacityPa: c.fugacityPa
+        })),
+        warningCodes: s.warnings.map((w) => w.code),
+        note: point.note
+      });
+    });
+  }
+
   // Выгрузка дампа: безусловная запись в benchmark-artifacts/
   // (рабочая директория vitest; каталог не отслеживается git).
   afterAll(() => {
@@ -246,12 +365,18 @@ describe('Stage 4.4.4.3: дамп смесевых контрольных точ
         '(CoolProp 8.0.0 backend PR с введёнными каталожными kij; mpmath)',
       validationSemantics: {
         coolprop: 'ВАЛИДАЦИЯ РЕАЛИЗАЦИИ при одинаковых kij (CoolProp собственных значений kij не содержит); НЕ независимое подтверждение значений kij',
-        kijEvidence: 'значения kij остаются PARTIALLY_VERIFIED по provenance каталога (подгонки Okoro 2024 / Köster 2018)'
+        kijEvidence: 'значения kij остаются PARTIALLY_VERIFIED по provenance каталога (подгонки Okoro 2024 / Köster 2018)',
+        aqueousSolubility: 'точка n2-h2o — валидация РЕАЛИЗАЦИИ при одинаковых kij, НЕ проверка растворимости N2 в воде: постоянный BIP классического PR качественно не воспроизводит константы Генри газов в воде (Köster, Thol & Vrabec 2018, Supplementary Section 4)'
       },
       universalGasConstantJPerMolK: UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K,
       omegaA: 0.45724,
       omegaB: 0.0778,
-      points: mixtureRows
+      points: mixtureRows,
+      zeroAttractionLimit: {
+        stage: '4.4.4.3.1',
+        semantics: 'точный нулевой предел a_mix (alpha = 0 ровно в binary64 при T = 1388.2195230363366 K для N2): ln(phi_i) точной предельной формой (b_i/b_mix)*(Z-1) - ln(Z-B_mix); вырожденная компенсация (a_mix = 0 при ненулевых a_i) — отказ degenerate_attraction_limit; epsilon-порог не вводится (соседняя точка alpha = 1.232595164407831e-32 идёт общим путём). Независимая проверка предела: mpmath с ТОЧНЫМИ binary64-входами (в точной арифметике alpha не равен нулю — нулевой alpha есть артефакт округления; сходимость Z/ln(phi)/phi/f к значениям TS подтверждает корректность предельной формы; a_mix сверяется по АБСОЛЮТНОЙ близости к нулю). CoolProp проверяет ту же ветвь gas; при отказе CoolProp причина фиксируется, результат НЕ подменяется собственным расчётом (главный оракул этого предельного случая — mpmath)',
+        cases: zeroAttractionRows
+      }
     };
     writeFileSync(
       'benchmark-artifacts/peng-robinson-mixture-ts-dump.json',
