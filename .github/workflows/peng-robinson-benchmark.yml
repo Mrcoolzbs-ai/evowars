@@ -39,8 +39,6 @@ jobs:
 
       - name: TS-дамп контрольных точек PR
         run: npx vitest run src/modules/Tests/pengRobinsonBenchmarkDump.test.ts
-        env:
-          BENCHMARK_DUMP_DIR: benchmark-artifacts
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5

@@ -5,8 +5,9 @@
 // Stage 4.4.4.2.1. Этот файл НЕ является самостоятельной проверкой
 // корректности: он фиксирует (1) контрольные точки Stage 4.4.4.2 из
 // каталога через фасад Data и (2) сетку A0±delta границы кратного
-// корня кубики, а затем — ТОЛЬКО при заданной переменной окружения
-// BENCHMARK_DUMP_DIR — записывает их значения в JSON-дамп.
+// корня кубики, а затем записывает их значения в JSON-дамп
+// benchmark-artifacts/peng-robinson-ts-dump.json (рабочая директория
+// запуска vitest — тот же паттерн, что у golden-baseline теста).
 //
 // Дамп потребляется НЕЗАВИСИМЫМ оракулом scripts/benchmarks/
 // peng_robinson_coolprop.py (CoolProp 8.0.0, backend 'PR', и
@@ -17,17 +18,17 @@
 //
 // Значения в дампе — выход СОБСТВЕННОЙ реализации (фасад ->
 // Core/pengRobinson.ts): они служат входом сравнения, а не
-// эталоном. Без BENCHMARK_DUMP_DIR файл ведёт себя как обычный
-// модульный тест (проверки успех/предупреждения/структура), ничего
-// не записывая на диск.
+// эталоном. Файл ведёт себя как обычный модульный тест (проверки
+// успех/предупреждения/структура) и пишет дамп в каталог
+// benchmark-artifacts, не отслеживаемый git.
 //
 // Границы: смеси/kij/flash — Stage 4.4.4.3+ (НЕ реализованы);
 // результат этого модуля не влияет на phaseProperties.ts и
 // solveEquilibrium.
 
 import { describe, it, expect, afterAll } from 'vitest';
+// @ts-expect-error типы node:fs не подключены в tsconfig проекта (паттерн golden-baseline теста)
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { computePengRobinsonPure } from '../Data/pengRobinsonFacade';
 import type { PengRobinsonPureResult, PengRobinsonPureSuccess } from '../Data/pengRobinsonFacade';
@@ -226,7 +227,7 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
       }
 
       // Предупреждения: обязательные коды присутствуют, запрещённых нет.
-      const codes = s.warnings.map((w) => w.code);
+      const codes: readonly string[] = s.warnings.map((w) => w.code);
       for (const required of point.mustWarn) {
         if (!codes.includes(required)) {
           throw new Error(`${point.id}: ожидалось предупреждение ${required}, получено: [${codes.join(', ')}]`);
@@ -298,14 +299,12 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
     expect(boundaryRows).toHaveLength(BOUNDARY_CASES.length);
   });
 
-  // Выгрузка дампа: ТОЛЬКО при BENCHMARK_DUMP_DIR (workflow benchmark;
-  // в обычном CI ничего не записывается).
+  // Выгрузка дампа: безусловная запись в benchmark-artifacts/
+  // (рабочая директория vitest — паттерн golden-baseline теста);
+  // каталог не отслеживается git, в CI файл существует только в
+  // workspace раннера.
   afterAll(() => {
-    const dir = process.env.BENCHMARK_DUMP_DIR;
-    if (dir === undefined || dir === '') {
-      return;
-    }
-    mkdirSync(dir, { recursive: true });
+    mkdirSync('benchmark-artifacts', { recursive: true });
     const payload = {
       generator: 'evowars Stage 4.4.4.2.1 — TS-дамп контрольных точек PR и сетки границы кратного корня',
       consumer: 'scripts/benchmarks/peng_robinson_coolprop.py (CoolProp 8.0.0, backend PR; mpmath)',
@@ -320,6 +319,7 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
         cases: boundaryRows
       }
     };
-    writeFileSync(join(dir, 'peng-robinson-ts-dump.json'), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    writeFileSync('benchmark-artifacts/peng-robinson-ts-dump.json',
+      JSON.stringify(payload, null, 2) + '\n', 'utf8');
   });
 });

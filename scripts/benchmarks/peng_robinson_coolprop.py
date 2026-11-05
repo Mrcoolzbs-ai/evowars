@@ -114,8 +114,8 @@ def main() -> int:
         print(f"ОШИБКА: CoolProp недоступен: {exc}", file=sys.stderr)
         return 2
     try:
-        from mpmath import mp, mpf, findroot, sqrt as mp_sqrt, cos as mp_cos, \
-            acos as mp_acos, pi as mp_pi, log as mp_log
+        from mpmath import mp, mpf, findroot, nstr, sqrt as mp_sqrt, \
+            cos as mp_cos, acos as mp_acos, pi as mp_pi, log as mp_log
     except Exception as exc:  # noqa: BLE001
         print(f"ОШИБКА: mpmath недоступен: {exc}", file=sys.stderr)
         return 2
@@ -126,7 +126,7 @@ def main() -> int:
     # Для кубики PR в критической точке A_c = Ω_a, B_c = Ω_b и кубика обязана
     # иметь тройной корень Zc = (1-Ω_b)/3. Решение системы условий тройного
     # корня даёт АНАЛИТИЧЕСКИЕ (точные) значения Ω — ими пользуется CoolProp.
-    mp.mp.dps = MPMATH_DPS
+    mp.dps = MPMATH_DPS
 
     def omega_system(oa, ob):
         return (oa - 3 * ob * ob - 2 * ob - (1 - ob) ** 2 / 3,
@@ -368,7 +368,7 @@ def main() -> int:
             continue
         z_sel = (physical[-1] if row["root"] == "vapor" else physical[0])
         lnphi = float(calc["lnphi"](z_sel))
-        phi = float(mp.e ** calc["lnphi"](z_sel))
+        phi = float(mp.exp(calc["lnphi"](z_sel)))
         fugacity = phi * row["pressurePa"]
         entry = {"id": row["id"], "dps": MPMATH_DPS,
                  "Z": float(z_sel), "lnPhi": lnphi, "phi": phi, "fugacity": fugacity,
@@ -392,8 +392,8 @@ def main() -> int:
     # ============================================
     omega_probe = {"omega_a_rounded": str(omega_a_rounded),
                    "omega_b_rounded": str(omega_b_rounded),
-                   "omega_a_exact": mp.nstr(omega_a_exact, 30),
-                   "omega_b_exact": mp.nstr(omega_b_exact, 30),
+                   "omega_a_exact": nstr(omega_a_exact, 30),
+                   "omega_b_exact": nstr(omega_b_exact, 30),
                    "per_point_max_rel": []}
     rounded_wins = 0
     exact_wins = 0
@@ -409,7 +409,7 @@ def main() -> int:
             if not calc["physical"]:
                 continue
             z_sel = (calc["physical"][-1] if row["root"] == "vapor" else calc["physical"][0])
-            phi = float(mp.e ** calc["lnphi"](z_sel))
+            phi = float(mp.exp(calc["lnphi"](z_sel)))
             worst[variant] = abs(phi - point["coolprop"]["phi"]) / abs(point["coolprop"]["phi"])
         if worst["rounded"] is not None and worst["exact"] is not None:
             worst["closer"] = ("rounded" if worst["rounded"] < worst["exact"] else "exact")
@@ -440,8 +440,8 @@ def main() -> int:
         ts_roots = case["roots"]
         entry = {"label": case["label"], "A": case["A"], "B": case["B"],
                  "mp_real_root_count": len(real),
-                 "mp_real_roots": [mp.nstr(z, 20) for z in sorted(real)],
-                 "mp_complex_pair_center": (mp.nstr(pair_center, 20)
+                 "mp_real_roots": [nstr(z, 20) for z in sorted(real)],
+                 "mp_complex_pair_center": (nstr(pair_center, 20)
                                              if pair_center is not None else None),
                  "disc_sign": ("positive" if disc > 0 else "negative" if disc < 0 else "zero"),
                  "disc_rel": rel_disc,
@@ -640,4 +640,14 @@ def build_summary_md(report):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except BaseException:  # noqa: BLE001 — диагностика крэша в аннотации
+        import traceback
+        tb = traceback.format_exc()
+        safe = tb.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")[:3500]
+        print(f"::error title=Peng-Robinson benchmark CRASH::{safe}", flush=True)
+        print(tb, file=sys.stderr, flush=True)
+        sys.exit(3)
