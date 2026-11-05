@@ -939,6 +939,34 @@
 > 4.4.4.3 НЕ начат. Детали — DATA_PROVENANCE.md §2.30; статус —
 > §4.4.4.
 
+> Ревизия Stage 4.4.4.3 (2026-11-05 — Peng–Robinson для многокомпонентных
+> смесей): каталог kij 10 пар с per-pair provenance (5 available
+> PARTIALLY_VERIFIED: Okoro et al. 2024 doi:10.1002/ghg.2300 —
+> ch4|co2 0.09897, ar|co2 0.129219, co2|n2 −0.017 (применимость
+> 228.15–273.15 K); Köster, Thol & Vrabec 2018
+> doi:10.1021/acs.jced.7b00706 — ar|n2 −0.0037, h2o|n2 −0.0501;
+> 5 пар unresolved — ЯВНЫЙ отказ, kij = 0 НЕ нейтрален,
+> CoolProp-дефолты НЕ импортированы); Core/pengRobinsonMixture.ts —
+> правила смешения a_ij = (1−kij)√(a_i a_j), a_mix, b_mix, A_mix,
+> B_mix, та же кубика решателем 4.4.4.2.2 (фильтр Z > B_mix), S_i,
+> ln φ_i, φ_i, f_i = x_i·φ_i·P; фасад Data/pengRobinsonMixtureFacade.ts
+> (fail-closed lookup, provenance-дерево, валидация состава БЕЗ
+> нормализации); Core НЕ импортирует Data; однокомпонентный предел
+> = чистый PR; тесты (однокомпонентный предел; идеальный предел
+> P → 0: Z → 1, φ_i → 1; a_mix/b_mix/A_mix/B_mix; компонентные
+> ln φ_i/φ_i/f_i; симметрия при перестановке компонентов; отказы:
+> нет kij, невалидный состав, асимметрия, вне применимости; запрет
+> молчаливого kij = 0; неизменность чистых результатов 4.4.4.2.2)
+> и независимый benchmark: CoolProp 8.0.0 PR (EVW-флюиды, те же
+> kij, фаза по математической ветви TS) + mpmath 50 знаков —
+> валидация РЕАЛИЗАЦИИ, НЕ значений kij; итог: verify ✓ SUCCESS,
+> coolprop-benchmark ✓ SUCCESS (5 смесей ok + 7 чистых точек ok,
+> mpmath ok, boundary ok, solver_failures_justified = 1).
+> Flash/VLE/LLE, PPR78, устойчивость фаз — НЕ реализованы; каталог,
+> golden baseline, solveEquilibrium, NASA CEA, кинетика, Radau IIA
+> не менялись. Phase 4.4.4 НЕ завершена; следующий подэтап НЕ
+> начат. Детали — DATA_PROVENANCE.md §2.31; статус — §4.4.4.
+
 ## Карта этапов
 
 ```mermaid
@@ -2033,6 +2061,64 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   (result.model = 'ideal_gas' не меняется); phaseProperties.ts,
   thermodynamics.ts, NASA CEA, golden baseline, кинетика, Radau IIA
   не менялись. Детали источников — DATA_PROVENANCE.md §2.30.
+
+**Статус 4.4.4.3 — Peng–Robinson для многокомпонентных смесей
+(2026-11-05): РЕАЛИЗОВАНО.** Архитектура (направление зависимостей
+Data -> Core сохранено): Data/binaryInteractionParameters.ts —
+отдельный каталог kij, 10 пар (5 available PARTIALLY_VERIFIED,
+5 unresolved; канонические ключи без дублирования i-j/j-i,
+симметричность, применимость, per-pair provenance, deepFreeze,
+fail-closed lookup; значения/источники/статусы чистокомпонентного
+EOS-каталога НЕ менялись); Core/pengRobinsonMixture.ts —
+классические правила смешения a_ij = (1−kij)·√(a_i·a_j), a_mix,
+b_mix, A_mix, B_mix; та же PR-кубика решателем 4.4.4.2.2 (фильтр
+Z > B_mix, структурные отказы, без фиктивных корней); S_i, ln φ_i,
+φ_i, f_i = x_i·φ_i·P; структурированные отказы invalid_composition /
+missing_binary_interaction / asymmetric_binary_interaction /
+parameter_evidence_not_accepted / binary_interaction_applicability;
+состав валидируется (конечность, неотрицательность, уникальность,
+сумма 1 в допуске 1e-9) БЕЗ молчаливой нормализации; Core НЕ
+импортирует Data; Data/pengRobinsonMixtureFacade.ts
+(computePengRobinsonMixtureFromCatalog) — fail-closed lookup обоих
+каталогов, provenance-дерево; нулевые доли kij не требуют;
+однокомпонентный предел совпадает с чистым PR 4.4.4.2. Источники
+kij: Okoro et al. 2024 (doi:10.1002/ghg.2300, Табл.1 Original BIP:
+ch4|co2 0.09897, ar|co2 0.129219, co2|n2 −0.017; применимость
+228.15–273.15 K, CO2-rich) и Köster, Thol & Vrabec 2018
+(doi:10.1021/acs.jced.7b00706, Табл.4: ar|n2 −0.0037, h2o|n2 −0.0501);
+дефолты CoolProp за подтверждённые данные НЕ приняты; kij = 0 НЕ
+нейтрален (отсутствие пары — отказ). Тесты: однокомпонентный
+предел (полное совпадение с чистым PR), идеальный предел P → 0
+(Z → 1, φ_i → 1), двух- и трёхкомпонентные смеси с известными kij,
+симметрия результата при перестановке компонентов, корректность
+a_mix/b_mix/A_mix/B_mix, компонентные ln φ_i/φ_i/f_i, отказы при
+отсутствующем kij / невалидном составе (включая дубль gasId) /
+асимметричном kij / вне области применимости, запрет молчаливого
+kij = 0, неизменность всех чистокомпонентных результатов и тестов
+4.4.4.2.2. Независимый benchmark (workflow coolprop-benchmark,
+расширен на смеси; полные JSON-отчёты — артефакты workflow):
+CoolProp 8.0.0 PR-backend, смеси EVW-флюидов, set_binary_interaction_double
+симметрично i-j/j-i теми же kij каталога, фаза навязана по
+математической ветви TS gas/liquid (иначе CoolProp сам делает
+flash и отказывает в two-phase области — зафиксировано в отчёте);
+mpmath 50 знаков (rtol 5e-13). СЕМАНТИКА: валидация РЕАЛИЗАЦИИ при
+одинаковых kij, НЕ подтверждение значений kij. Итоговый run:
+5 смесей ok (CoolProp, rtol 2e-4: co2-n2 250 K/2 МПа, co2-ar
+250 K/2 МПа, n2-ar 150 K/5 МПа, n2-h2o 400 K/5 МПа, co2-n2-ar
+250 K/2 МПа; vapor-ветвь), mpmath ok, 7 чистых точек 4.4.4.2.2 ok,
+boundary ok, solver_failures_justified = 1; verify ✓ SUCCESS (tsc,
+vitest, lint, build, golden baseline
+877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20).
+Ограничения: kij PARTIALLY_VERIFIED (подгонки авторов источников,
+не независимые экспериментальные данные); покрытие 5/10 пар
+(остальные — fail-closed отказ); применимость пар Okoro ограничена
+228.15–273.15 K (CO2-rich); выбор ветви корня НЕ доказывает
+фазовую устойчивость; per-point числа — только в артефактах
+workflow. НЕ реализовано и НЕ начато: flash, VLE/LLE, устойчивость
+фаз, PPR78, конденсированные фазы, произвольные ternary-параметры,
+интеграция с solveEquilibrium (result.model = 'ideal_gas' не
+меняется). Phase 4.4.4 НЕ завершена; следующий подэтап НЕ начат.
+Детали источников — DATA_PROVENANCE.md §2.31.
 
 ## 4.5 Химическая кинетика
 
