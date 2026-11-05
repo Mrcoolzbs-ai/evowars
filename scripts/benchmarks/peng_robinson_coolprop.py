@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Stage 4.4.4.2.1 — независимый benchmark чистокомпонентного Peng–Robinson.
+Stage 4.4.4.2.2 — независимый benchmark чистокомпонентного Peng–Robinson.
 
 Оракулы (оба НЕ зависят от TypeScript-реализации):
 
@@ -12,7 +12,7 @@ Stage 4.4.4.2.1 — независимый benchmark чистокомпонен�
    значениями каталога (EVWCO2/EVWN2/EVWCH4/EVWH2O/EVWAR); встроенные
    флюиды PR опрашиваются отдельно и фиксируются в отчёте, но для
    сравнения НЕ используются (никаких молчаливых замен параметров).
-   Допуск: rtol 1e-3 — CoolProp вычисляет Ω_a/Ω_b аналитически
+   Допуск: rtol 2e-4 — CoolProp вычисляет Ω_a/Ω_b аналитически
    (точные значения), тогда как наша реализация использует округлённые
    константы 0.45724/0.0778 textbook; фактические расхождения
    записываются в отчёт.
@@ -22,13 +22,19 @@ Stage 4.4.4.2.1 — независимый benchmark чистокомпонен�
    Кардано в высокой точности. Допуск rtol 5e-13 — это ГЛАВНАЯ
    проверка самой реализации (сходится до предела двойной точности).
 
-3. Граничный оракул: сетка A0±delta около двойного корня кубики
-   (B = 0.01980480623881198) пересчитывается в mpmath по тем же
-   значениям A, что использовала TS-реализация (значения A читаются
-   из дампа); сравниваются число действительных корней и их значения.
-   Случай A0 (полоса кратного корня, TS даёт 2 корня при
-   математически одном + комплексной паре) — документированное
-   поведение, проверяется отдельными критериями.
+3. Граничный оракул: сетка A0±delta около нулевого дискриминанта
+   кубики (B = 0.01980480623881198) плюс точный double-root fixture
+   (A = 49/128, B = 1/16, корни 3/16 и 9/16) пересчитываются в mpmath
+   по ТЕМ ЖЕ binary64-значениям A, что использовала TS-реализация:
+   mpmath получает ТОЧНОЕ значение каждого float через
+   float.as_integer_ratio() (целые numerator/denominator), БЕЗ
+   промежуточного mpf(str(x)) — семантика double не теряется.
+   Сравнение СТРОГОЕ: число действительных корней обязано совпадать,
+   значения — в допусках (изолированный корень atol 1e-9, кластер
+   у кратного корня atol 1e-6). Исключений для «полосы кратного
+   корня» НЕТ: расхождение числа корней — провал точки. Точно
+   кратные корни (D = 0) оракул классифицирует независимо по знаку
+   дискриминанта.
 
 Числа из TS-дампа — выход СОБСТВЕННОЙ реализации (вход сравнения, НЕ
 эталон). Неудачные точки НЕ скрываются: любая из них делает код
@@ -46,14 +52,15 @@ CoolProp и mpmath НЕ входят в runtime-зависимости TypeScrip
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import sys
 from pathlib import Path
 
 MPMATH_DPS = 50
-RTOL_COOLPROP = 1e-3   # Ω: exact (CoolProp) против округлённых 0.45724/0.0778 (наша)
+RTOL_COOLPROP = 2e-4   # Ω: exact (CoolProp) против округлённых 0.45724/0.0778 (наша);
+                       # максимум наблюдённых rel-ошибок ~9.8e-5, запас ~2x
 RTOL_MPMATH = 5e-13    # проверка реализации против 50-значной арифметики
-BAND_REL_DISC_LIMIT = 1e-15  # «полоса кратного корня»: |disc|/scale ниже шума double
 ATOL_ISOLATED_ROOT = 1e-9    # изолированный корень: двойная точность решателя
 ATOL_NEAR_PAIR_ROOT = 1e-6  # корень вблизи кратного: обусловленность ~ sqrt(eps)
 NEAR_PAIR_SPLIT = 1e-4      # порог «пары» (расщепление меньше — кластер)
@@ -91,7 +98,7 @@ OMEGA_B_ROUNDED_VALUE = "0.0778"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="CoolProp PR benchmark (Stage 4.4.4.2.1)")
+    parser = argparse.ArgumentParser(description="CoolProp PR benchmark (Stage 4.4.4.2.2)")
     parser.add_argument("--dump", default="benchmark-artifacts/peng-robinson-ts-dump.json",
                         help="путь к TS-дампу контрольных точек")
     parser.add_argument("--report", default="benchmark-artifacts/peng-robinson-coolprop-report.json",
@@ -127,6 +134,17 @@ def main() -> int:
     # иметь тройной корень Zc = (1-Ω_b)/3. Решение системы условий тройного
     # корня даёт АНАЛИТИЧЕСКИЕ (точные) значения Ω — ими пользуется CoolProp.
     mp.dps = MPMATH_DPS
+
+    def mp_from_float(x):
+        """Точное binary64-значение float x как mpf: num/den из as_integer_ratio.
+
+        float.as_integer_ratio() даёт ТОЧНЫЕ целые числитель/знаменатель
+        binary64-числа (знаменатель — степень двойки); mpmath строит
+        точное отношение — семантика double НЕ теряется через
+        промежуточную десятичную строку mpf(str(x)).
+        """
+        num, den = float(x).as_integer_ratio()
+        return mpf(num) / mpf(den)
 
     def omega_system(oa, ob):
         return (oa - 3 * ob * ob - 2 * ob - (1 - ob) ** 2 / 3,
@@ -213,8 +231,20 @@ def main() -> int:
         "r_universal": None,
         "r_source": None,
     }
-    coolprop_meta["version"] = str(getattr(CP, "__version__", None))
-    coolprop_meta["gitrevision"] = str(getattr(CP, "__gitrevision__", None))
+    try:
+        coolprop_meta["version"] = importlib.metadata.version("CoolProp")
+    except Exception as exc:  # noqa: BLE001 — честная фиксация, НЕ подмена
+        coolprop_meta["version"] = f"не определена: {exc}"
+    # CoolProp не экспортирует git revision (getattr по __gitrevision__
+    # возвращал None) — фиксируем явный null с пояснением, SHA не выдумываем.
+    coolprop_meta["gitrevision"] = None
+    coolprop_meta["gitrevision_note"] = (
+        "CoolProp не экспортирует git revision; поле null, SHA не "
+        "реконструируется")
+    try:
+        coolprop_meta["mpmath_version"] = importlib.metadata.version("mpmath")
+    except Exception as exc:  # noqa: BLE001
+        coolprop_meta["mpmath_version"] = f"не определена: {exc}"
     try:
         coolprop_meta["r_universal"] = float(CP.gas_constant())
         coolprop_meta["r_source"] = "CP.gas_constant()"
@@ -378,7 +408,7 @@ def main() -> int:
     # ============================================
     # mpmath: независимая реализация с НАШИМИ константами против TS
     # ============================================
-    R_TS = mpf(str(dump["universalGasConstantJPerMolK"]))
+    R_TS = mp_from_float(dump["universalGasConstantJPerMolK"])
     mpmath_points = []
     for row in dump.get("points", []):
         info = CATALOG[row["gasId"]]
@@ -449,12 +479,12 @@ def main() -> int:
                                  if rounded_wins > exact_wins else "неопределённо")
 
     # ============================================
-    # Граничный оракул: A0±delta против TS
+    # Граничный оракул: A0±delta и double-root fixture против TS
     # ============================================
     boundary = []
     for case in dump.get("boundary", {}).get("cases", []):
-        A = mpf(str(case["A"]))
-        B = mpf(str(case["B"]))
+        A = mp_from_float(case["A"])
+        B = mp_from_float(case["B"])
         c2 = -(1 - B)
         c1 = A - 3 * B * B - 2 * B
         c0 = -(A * B - B * B - B * B * B)
@@ -469,31 +499,18 @@ def main() -> int:
                  "disc_sign": ("positive" if disc > 0 else "negative" if disc < 0 else "zero"),
                  "disc_rel": rel_disc,
                  "ts_root_count": len(ts_roots), "ts_roots": ts_roots,
-                 "documented_band_behavior": False, "match": None, "pass": False}
+                 "match": None, "pass": False}
         if len(real) == len(ts_roots):
             match = match_root_lists(ts_roots, [float(z) for z in sorted(real)])
-        elif len(real) == 1 and len(ts_roots) == 2 and pair_center is not None:
-            # Полоса кратного корня: математически один корень + комплексная
-            # пара; TS-решатель возвращает ДВА различимых корня (документировано
-            # в 4.4.4.2.1). Проверяем: (1) знак дискриминанта ниже шума double,
-            # (2) изолированный TS-корень = mp-корню, (3) второй TS-корень =
-            # центру комплексной пары.
-            isolated_ok = abs(ts_roots[1] - float(real[0])) <= ATOL_ISOLATED_ROOT
-            band_ok = abs(ts_roots[0] - float(pair_center)) <= ATOL_NEAR_PAIR_ROOT
-            entry["documented_band_behavior"] = True
-            match = {
-                "isolated_root_atol": abs(ts_roots[1] - float(real[0])),
-                "band_root_vs_pair_center_atol": abs(ts_roots[0] - float(pair_center)),
-                "isolated_pass": isolated_ok, "band_pass": band_ok,
-                "rel_disc_below_double_noise": rel_disc < BAND_REL_DISC_LIMIT,
-            }
-            entry["pass"] = bool(isolated_ok and band_ok
-                                 and rel_disc < BAND_REL_DISC_LIMIT)
-            boundary.append(entry)
-            continue
         else:
-            entry["match"] = {"error": (f"несогласованное число корней: mp={len(real)}, "
-                                        f"ts={len(ts_roots)}")}
+            # Строгая сверка числа действительных корней: расхождение —
+            # провал точки. Исключение «полосы кратного корня» из 4.4.4.2.1
+            # УДАЛЕНО: TS-решатель 4.4.4.2.2 классифицирует знак
+            # дискриминанта double-double арифметикой и возвращает
+            # математически корректное число корней либо отказ —
+            # критическая точка производной больше не выдаётся за корень.
+            entry["match"] = {"error": (f"разное число действительных корней: "
+                                        f"mp={len(real)}, ts={len(ts_roots)}")}
             boundary.append(entry)
             continue
         entry["match"] = match
@@ -509,7 +526,7 @@ def main() -> int:
     all_pass = coolprop_pass and mpmath_pass and boundary_pass and add_error is None
 
     report = {
-        "stage": "4.4.4.2.1",
+        "stage": "4.4.4.2.2",
         "coolprop": coolprop_meta,
         "builtin_pr_parameters": builtin_parameters,
         "custom_fluids": custom_fluids,
@@ -522,7 +539,9 @@ def main() -> int:
             "coolprop_rtol_justification": (
                 "CoolProp вычисляет Ω аналитически (точные значения), наша "
                 "реализация использует textbook 0.45724/0.0778; расхождение "
-                "параметров ~5e-5 отн. по b; фактические ошибки — в comparison"),
+                "параметров ~5e-5 отн. по b. Допуск ужесточён с 1e-3 до 2e-4: "
+                "максимальная наблюдённая rel-ошибка прогона ~9.8e-5 (запас "
+                "~2x); фактические ошибки — в comparison"),
             "mpmath_rtol": RTOL_MPMATH,
             "mpmath_dps": MPMATH_DPS,
             "boundary_atol_isolated": ATOL_ISOLATED_ROOT,
@@ -575,7 +594,7 @@ def main() -> int:
                 print(f"::error title=Peng-Robinson boundary {entry['label']}::"
                        f"{json.dumps(entry, ensure_ascii=False)[:800]}")
 
-    print(f"\nИТОГ Stage 4.4.4.2.1 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
+    print(f"\nИТОГ Stage 4.4.4.2.2 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
     return 0 if all_pass else 1
 
 
@@ -601,14 +620,16 @@ def has_near_neighbor(z, roots):
 
 
 def build_summary_md(report):
+    cp = report["coolprop"]
+    gitrev = (f"`{cp['gitrevision']}`" if cp.get("gitrevision")
+              else "не экспортируется (null)")
     lines = [
-        "# Stage 4.4.4.2.1 — Peng-Robinson benchmark",
+        "# Stage 4.4.4.2.2 — Peng-Robinson benchmark",
         "",
-        f"CoolProp `{report['coolprop']['version']}` (gitrev "
-        f"`{report['coolprop']['gitrevision']}`), backend `PR`; "
-        f"mpmath {MPMATH_DPS} знаков.",
+        f"CoolProp `{cp['version']}` (gitrev {gitrev}), backend `PR`; "
+        f"mpmath `{cp.get('mpmath_version')}` ({MPMATH_DPS} знаков).",
         "",
-        "## Контрольные точки (CoolProp vs TS, rtol 1e-3)",
+        "## Контрольные точки (CoolProp vs TS, rtol 2e-4)",
         "",
         "| точка | ветвь | Z (rel) | phi (rel) | f (rel) | итог |",
         "| --- | --- | --- | --- | --- | --- |",
@@ -640,16 +661,15 @@ def build_summary_md(report):
                      f"{rel2('fugacity')} | {'ok' if entry['pass'] else 'FAIL'} |")
     lines += [
         "",
-        "## Граница кратного корня (mpmath vs TS)",
+        "## Граница нулевого дискриминанта (mpmath vs TS)",
         "",
-        "| случай | mp корней | TS корней | disc (отн.) | поведение | итог |",
+        "| случай | mp корней | TS корней | disc (отн.) | знак disc | итог |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for entry in report["boundary"]:
         lines.append(
             f"| {entry['label']} | {entry['mp_real_root_count']} | {entry['ts_root_count']} "
-            f"| {entry['disc_rel']:.2e} "
-            f"| {'полоса (документировано)' if entry['documented_band_behavior'] else '—'} "
+            f"| {entry['disc_rel']:.2e} | {entry['disc_sign']} "
             f"| {'ok' if entry['pass'] else 'FAIL'} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
     lines += [
