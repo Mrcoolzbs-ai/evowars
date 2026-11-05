@@ -28,6 +28,9 @@
 // Stage 4.4.4.2.2: знак дискриминанта классифицируется в double-double
 // (~106 бит) из точных binary64-входов; high-precision оракул (mpmath,
 // 50 знаков) сверяет и ЧИСЛО действительных корней, а не только значения.
+// Closeout 4.4.4.2.2: знак В ПОЛОСЕ порога вычисляет ТОЧНЫЙ dyadic-BigInt
+// fallback; DD-деление исправлено (Core/prDoubleDouble.ts) и покрыто
+// изолированными тестами с независимым BigInt-оракулом (секция 20).
 
 import { describe, expect, it } from 'vitest';
 
@@ -42,6 +45,22 @@ import {
   prPhysicalRoots,
   solvePrCubicRealRoots
 } from '../Core/pengRobinson';
+
+// Closeout Stage 4.4.4.2.2: ВНУТРЕННИЙ модуль Core (НЕ входит в публичный
+// контракт слоя) для ИЗОЛИРОВАННЫХ тестов DD-деления с НЕЗАВИСИМЫМ
+// dyadic-BigInt-оракулом; производственный решатель импортирует его же
+// (тот же код, что и в Core/pengRobinson.ts), но без тестового API в
+// публичном Core/index.ts.
+import {
+  ddAdd,
+  ddDiv,
+  ddFromDouble,
+  ddMul,
+  ddNeg,
+  ddSub,
+  ddToDouble
+} from '../Core/prDoubleDouble';
+import type { DoubleDouble } from '../Core/prDoubleDouble';
 
 import { computePengRobinsonPure } from '../Data/pengRobinsonFacade';
 import * as corePrModule from '../Core/pengRobinson';
@@ -1233,3 +1252,26 @@ describe('Stage 4.4.4.2.1: архитектурная граница Core/Data',
   });
 });
 
+
+// ============================================
+// 20. STAGE 4.4.4.2.2 (CLOSEOUT): DD-ДЕЛЕНИЕ И ТОЧНЫЙ ЗНАК ДИСКРИМИНАНТА
+// ============================================
+//
+// Closeout-дефекты, закрытые этой секцией:
+// - ddDiv учитывал в остатке ТОЛЬКО старшую часть знаменателя
+//   (ddTwoProd(q1, b.hi)) и терял слагаемое q1*b.lo — ошибка частного
+//   деградировала до ~double для знаменателей с ненулевой lo;
+// - полоса |D| <= discThreshold пыталась доказать кратный корень по
+//   допуску невязки — невязка НЕ доказывает точное D = 0 (ненулевой
+//   дискриминант возможен у почти кратного корня). Теперь знак в полосе
+//   вычисляет ТОЧНЫЙ dyadic-BigInt fallback по исходным binary64 A/B;
+// - при доказанных ТРЁХ корнях с неразличимой в double парой решатель
+//   мог молча схлопнуть их дедупликацией — теперь контролируемый отказ.
+
+describe('Stage 4.4.4.2.2 (closeout): DD-деление и точный знак дискриминанта', () => {
+  // --- НЕЗАВИСИМЫЙ dyadic-BigInt-оракул: СОБСТВЕННАЯ реализация в тесте
+  // (DataView + BigInt); производственный Core/prDoubleDouble оракулом
+  // НЕ является. Все сравнения точные, без округления в number. ---
+  type TestDyadic = { readonly num: bigint; readonly exp: number };
+  const testDyadicBuffer = new ArrayBuffer(8);
+  const testDyadicView = new DataView(testDyadicBuffer);

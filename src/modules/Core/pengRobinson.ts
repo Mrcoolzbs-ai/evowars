@@ -3,7 +3,10 @@
 // ============================================
 //
 // Stage 4.4.4.2 «Чистокомпонентный Peng–Robinson: Z, phi и фугитивность»,
-// ревизия Stage 4.4.4.2.2 (строгая DD-классификация знака дискриминанта),
+// ревизия Stage 4.4.4.2.2 (строгая классификация знака дискриминанта;
+// closeout: точный dyadic-BigInt-знак внутри полосы порога,
+// исправленное DD-деление (Core/prDoubleDouble.ts), отказ вместо
+// молчаливого схлопывания неразличимых корней),
 // ревизия Stage 4.4.4.2.1 (классификация кратных корней + архитектура).
 //
 // Реализованы ТОЛЬКО классические соотношения Peng–Robinson для ЧИСТОГО
@@ -70,6 +73,25 @@
 //    CoolProp НЕ входит.
 
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from './thermoFunctions';
+
+// Closeout Stage 4.4.4.2.2: арифметика double-double (~106 бит)
+// выделена во ВНУТРЕННИЙ модуль Core/prDoubleDouble (НЕ входит в
+// публичный контракт слоя: Core/index.ts его не реэкспортирует).
+// Деление ddDiv исправлено на полный алгоритм QD: остаток
+// r = a - q*b учитывает ОБЕ части знаменателя (DD-умножение),
+// уточняющие шаги частного q1 -> q2 -> q3.
+import {
+  ddAbs,
+  ddAdd,
+  ddDiv,
+  ddFromDouble,
+  ddMul,
+  ddNeg,
+  ddSign,
+  ddSub,
+  ddToDouble
+} from './prDoubleDouble';
+import type { DoubleDouble } from './prDoubleDouble';
 
 // ============================================
 // 1. КОНСТАНТЫ И ТИПЫ
@@ -325,99 +347,13 @@ export type PrCubicRealRootsResult =
 // ============================================
 // 2a. DOUBLE-DOUBLE АРИФМЕТИКА (STAGE 4.4.4.2.2)
 // ============================================
-
-/**
- * Число расширенной точности double-double: hi — старшая часть, lo —
- * младшая; объединённая мантисса даёт ~106 бит. Используется ТОЛЬКО
- * для классификации знака дискриминанта кубического уравнения PR
- * (Stage 4.4.4.2.2): вблизи кратных корней знак не разрешим в
- * double-точности, а ложный второй действительный корень создаёт
- * фиктивную liquid-ветвь (Z > B).
- */
-type DoubleDouble = { readonly hi: number; readonly lo: number };
-
-/** Константа разбиения Деккера (2^27 + 1) для точного произведения. */
-const DD_SPLITTER = 134217729;
-
-/**
- * Точное сложение (two_sum Кнута): [s, e], где s + e == a + b без
- * потери информации (s — округлённая сумма, e — точная ошибка).
- */
-function ddTwoSum(a: number, b: number): readonly [number, number] {
-  const s = a + b;
-  const bb = s - a;
-  return [s, (a - (s - bb)) + (b - bb)];
-}
-
-/** Быстрый two_sum для |a| >= |b| (quick_two_sum). */
-function ddQuickTwoSum(a: number, b: number): readonly [number, number] {
-  const s = a + b;
-  return [s, b - (s - a)];
-}
-
-/**
- * Точное произведение (two_prod Деккера): [p, e], где p + e == a * b
- * (разбиение мантисс константой DD_SPLITTER).
- */
-function ddTwoProd(a: number, b: number): readonly [number, number] {
-  const p = a * b;
-  const ah = DD_SPLITTER * a - (DD_SPLITTER * a - a);
-  const bh = DD_SPLITTER * b - (DD_SPLITTER * b - b);
-  return [p, (a - ah) * (b - bh) - ((p - ah * bh) - ah * (b - bh) - (a - ah) * bh)];
-}
-
-/** Точное представление binary64-числа в double-double (младшая часть 0). */
-function ddFromDouble(x: number): DoubleDouble {
-  return { hi: x, lo: 0 };
-}
-
-/** Сложение double-double (two_sum + перенормировка). */
-function ddAdd(a: DoubleDouble, b: DoubleDouble): DoubleDouble {
-  const [s, e1] = ddTwoSum(a.hi, b.hi);
-  const [hi, lo] = ddQuickTwoSum(s, e1 + a.lo + b.lo);
-  return { hi, lo };
-}
-
-/** Смена знака double-double (точная). */
-function ddNeg(a: DoubleDouble): DoubleDouble {
-  return { hi: -a.hi, lo: -a.lo };
-}
-
-/** Вычитание double-double. */
-function ddSub(a: DoubleDouble, b: DoubleDouble): DoubleDouble {
-  return ddAdd(a, ddNeg(b));
-}
-
-/** Умножение double-double (алгоритм QD-библиотеки), ~106 бит. */
-function ddMul(a: DoubleDouble, b: DoubleDouble): DoubleDouble {
-  const [p, err] = ddTwoProd(a.hi, b.hi);
-  const [hi, lo] = ddQuickTwoSum(p, a.hi * b.lo + a.lo * b.hi + err);
-  return { hi, lo };
-}
-
-/** Деление double-double (алгоритм QD-библиотеки), ~106 бит. */
-function ddDiv(a: DoubleDouble, b: DoubleDouble): DoubleDouble {
-  const q1 = a.hi / b.hi;
-  const [p, err] = ddTwoProd(q1, b.hi);
-  const remainder = (a.hi - p) + (a.lo - err);
-  const [hi, lo] = ddQuickTwoSum(q1, remainder / b.hi);
-  return { hi, lo };
-}
-
-/** Модуль double-double. */
-function ddAbs(a: DoubleDouble): DoubleDouble {
-  return a.hi < 0 || (a.hi === 0 && a.lo < 0) ? ddNeg(a) : a;
-}
-
-/** Знак double-double (+1 / -1 / 0); 0 — только точный ноль обеих частей. */
-function ddSign(a: DoubleDouble): number {
-  return a.hi > 0 ? 1 : a.hi < 0 ? -1 : a.lo > 0 ? 1 : a.lo < 0 ? -1 : 0;
-}
-
-/** Округление double-double к ближайшему binary64. */
-function ddToDouble(a: DoubleDouble): number {
-  return a.hi + a.lo;
-}
+//
+// Closeout Stage 4.4.4.2.2: весь DD-блок перенесён во ВНУТРЕННИЙ
+// модуль Core/prDoubleDouble.ts (импорты в шапке), чтобы
+// изолированные тесты DD-деления (Tests/pengRobinson.test.ts с
+// НЕЗАВИСИМЫМ dyadic-BigInt-оракулом) проверяли тот же код, что и
+// производственный решатель, БЕЗ тестового API в публичном
+// Core/index.ts (index реэкспортирует этот модуль через export *).
 
 /** Классификация кубического уравнения PR в double-double точности. */
 interface PrCubicDdClassification {
@@ -481,6 +417,119 @@ function classifyPrCubicDd(
   return { c0, c1, c2, p, q, shift, discriminant, discScale, discThreshold };
 }
 
+// ============================================
+// 2b. ТОЧНЫЙ ЗНАК ДИСКРИМИНАНТА (DYADIC BIGINT)
+// ============================================
+//
+// Closeout Stage 4.4.4.2.2: DD-цепочка (~106 бит) не может доказать
+// знак D внутри полосы |D| <= discThreshold, а допуск невязки знака
+// НЕ доказывает (ненулевой дискриминант возможен у почти кратного
+// корня). Точный знак для ТОЧНЫХ binary64-входов A/B вычисляет этот
+// fallback: dyadic-BigInt-арифметика без единого округления.
+// Fallback включается ТОЛЬКО внутри полосы порога — на обычных
+// вызовах решателя затрат нет.
+
+/** Точный dyadic rational: значение num * 2^exp, num — BigInt. */
+interface PrDyadic {
+  readonly num: bigint;
+  readonly exp: number;
+}
+
+const PR_DYADIC_BUFFER = new ArrayBuffer(8);
+const PR_DYADIC_VIEW = new DataView(PR_DYADIC_BUFFER);
+
+/**
+ * Точное разложение конечного binary64 в dyadic rational через битовое
+ * представление IEEE-754 (включая субнормальные числа); ноль -> num = 0.
+ */
+function prDyadicFromDouble(x: number): PrDyadic {
+  PR_DYADIC_VIEW.setFloat64(0, x);
+  const bits = PR_DYADIC_VIEW.getBigUint64(0);
+  const negative = (bits & 0x8000000000000000n) !== 0n;
+  const biasedExponent = Number((bits >> 52n) & 0x7ffn);
+  const mantissa = bits & 0x000fffffffffffffn;
+  // Нормальные: мантисса с неявной единицей, экспонента be - 1075;
+  // субнормальные (be = 0): без неявной единицы, экспонента -1074.
+  const num = biasedExponent === 0 ? mantissa : mantissa | 0x0010000000000000n;
+  const exp = biasedExponent === 0 ? -1074 : biasedExponent - 1075;
+  return { num: negative ? -num : num, exp };
+}
+
+/** Точное dyadic-произведение: BigInt-умножение, экспоненты складываются. */
+function prDyadicMul(a: PrDyadic, b: PrDyadic): PrDyadic {
+  return { num: a.num * b.num, exp: a.exp + b.exp };
+}
+
+/** Точное dyadic-вычитание с выравниванием экспонент BigInt-сдвигами. */
+function prDyadicSub(a: PrDyadic, b: PrDyadic): PrDyadic {
+  const exp = Math.min(a.exp, b.exp);
+  return {
+    num: (a.num << BigInt(a.exp - exp)) - (b.num << BigInt(b.exp - exp)),
+    exp
+  };
+}
+
+/** Точное dyadic-сложение с выравниванием экспонент BigInt-сдвигами. */
+function prDyadicAdd(a: PrDyadic, b: PrDyadic): PrDyadic {
+  const exp = Math.min(a.exp, b.exp);
+  return {
+    num: (a.num << BigInt(a.exp - exp)) + (b.num << BigInt(b.exp - exp)),
+    exp
+  };
+}
+
+/**
+ * ТОЧНЫЙ знак дискриминанта кубики z^3 + c2*z^2 + c1*z + c0 с
+ * коэффициентами PR (c2 = B - 1, c1 = A - 3B^2 - 2B, c0 = B^2 + B^3 - AB)
+ * для ТОЧНЫХ binary64-входов. Классический дискриминант
+ * Delta = c2^2*c1^2 - 4*c1^3 - 4*c2^3*c0 - 27*c0^2 + 18*c2*c1*c0 связан
+ * с депрессированным D = (q/2)^2 + (p/3)^3 соотношением Delta = -108*D,
+ * поэтому sign(D) = -sign(Delta). Все коэффициенты — dyadic rational
+ * (полиномы от binary64 A/B), слагаемые Delta приводятся к общему
+ * степенному знаменателю и вычисляются точно в BigInt; ни одно
+ * промежуточное значение не округляется в number до определения
+ * знака. Возвращает +1 / -1 / 0 — ТОЧНЫЙ знак D.
+ */
+function prExactCubicDiscriminantSign(
+  dimensionlessA: number,
+  dimensionlessB: number
+): number {
+  const a = prDyadicFromDouble(dimensionlessA);
+  const b = prDyadicFromDouble(dimensionlessB);
+  const one = prDyadicFromDouble(1);
+  const two = prDyadicFromDouble(2);
+  const three = prDyadicFromDouble(3);
+  const four = prDyadicFromDouble(4);
+  const eighteen = prDyadicFromDouble(18);
+  const twentySeven = prDyadicFromDouble(27);
+  const c2 = prDyadicSub(b, one);
+  const bSquared = prDyadicMul(b, b);
+  const bCubed = prDyadicMul(bSquared, b);
+  const c1 = prDyadicSub(
+    prDyadicSub(a, prDyadicMul(bSquared, three)),
+    prDyadicMul(b, two)
+  );
+  const c0 = prDyadicSub(prDyadicAdd(bSquared, bCubed), prDyadicMul(a, b));
+  const c1Squared = prDyadicMul(c1, c1);
+  const c1Cubed = prDyadicMul(c1Squared, c1);
+  const c2Squared = prDyadicMul(c2, c2);
+  const c2Cubed = prDyadicMul(c2Squared, c2);
+  const c0Squared = prDyadicMul(c0, c0);
+  // Delta = (c2^2*c1^2 + 18*c2*c1*c0) - (4*c1^3 + 4*c2^3*c0 + 27*c0^2).
+  const delta = prDyadicSub(
+    prDyadicAdd(
+      prDyadicMul(c2Squared, c1Squared),
+      prDyadicMul(prDyadicMul(eighteen, prDyadicMul(c2, c1)), c0)
+    ),
+    prDyadicAdd(
+      prDyadicAdd(prDyadicMul(four, c1Cubed), prDyadicMul(prDyadicMul(four, c2Cubed), c0)),
+      prDyadicMul(twentySeven, c0Squared)
+    )
+  );
+  const deltaSign = delta.num > 0n ? 1 : delta.num < 0n ? -1 : 0;
+  return -deltaSign;
+}
+
 /**
  * Действительные корни кубического уравнения PR (Stage 4.4.4.2.2:
  * строгая классификация знака дискриминанта в double-double).
@@ -502,18 +551,28 @@ function classifyPrCubicDd(
  * комплексная), а решатель возвращал второй «корень» у 0.05 — он
  * больше B и формировал ФИКТИВНУЮ liquid-ветвь.
  *
- * Ревизия 4.4.4.2.2: знак D классифицируется в double-double
- * арифметике (~106 бит) из ТОЧНЫХ binary64-входов A/B (см.
- * classifyPrCubicDd). Семантика:
- * - уверенно D > 0 — ровно ОДИН действительный корень;
- * - уверенно D < 0 — ровно ТРИ действительных корня;
- * - |D| <= порога — попытка ТОЧНОГО кратного корня закрытой формой
- *   (тройной z = (1-B)/3 при p = q = 0; иначе двойной
- *   y_d = -3q/(2p) и простой y_s = 3q/p) с ПОДТВЕРЖДЕНИЕМ невязкой
- *   полинома в double-double точности; неподтверждённый случай —
- *   структурный отказ (cubic_solver_failure у вызывающего
- *   вычислителя), а НЕ приблизительная физическая ветвь. Критические
- *   точки производной корнями НЕ объявляются.
+ * Ревизия 4.4.4.2.2 (closeout): знак D доказывается ДВУМЯ
+ * механизмами. Вне полосы |D| > discThreshold знак классифицирует
+ * DD-цепочка classifyPrCubicDd (~106 бит) из ТОЧНЫХ binary64-входов
+ * A/B. ВНУТРИ полосы знак неопределим даже в double-double, а допуск
+ * невязки его НЕ доказывает (ненулевой дискриминант возможен у
+ * почти кратного корня): точный знак вычисляет fallback
+ * prExactCubicDiscriminantSign — dyadic-BigInt-арифметика по
+ * ТОЧНЫМ binary64 A/B без единого округления. Семантика однозначна:
+ * - ТОЧНЫЙ D > 0 — ровно ОДИН действительный корень;
+ * - ТОЧНЫЙ D < 0 — ровно ТРИ действительных корня;
+ * - ТОЧНЫЙ D = 0 — кратный корень закрытой формой (тройной
+ *   z = (1-B)/3 при p = q = 0; иначе двойной y_d = -3q/(2p) и
+ *   простой y_s = 3q/p) с ПОДТВЕРЖДЕНИЕМ невязкой полинома в
+ *   double-double точности; неподтверждённый случай — структурный
+ *   отказ, а НЕ приблизительная физическая ветвь. Кратная ветвь
+ *   входится ТОЛЬКО по точному знаку 0. Критические точки
+ *   производной корнями НЕ объявляются;
+ * - если точный знак доказывает N различимых корней, а двойная
+ *   реализация не может представить их различными в допуске
+ *   дедупликации (например, пара тройки с расщеплением много
+ *   меньше допуска) — структурный отказ, а НЕ молчаливое
+ *   схлопывание числа корней и НЕ подмена пары кратным корнем.
  *
  * Ветви вычисления корней (двойная точность — классификация уже
  * доказана DD-знаком D):
@@ -534,7 +593,9 @@ function classifyPrCubicDd(
  * Дополнительно: невязка полинома проверяется для КАЖДОГО корня
  * относительно масштаба коэффициентов (допуск не ослабляется);
  * дедупликация кратных корней с допуском 1e-8*max(1, |z_max|, B)
- * (ошибка кратного корня в double ~ sqrt(eps) ~ 1.5e-8); неконечные
+ * (ошибка кратного корня в double ~ sqrt(eps) ~ 1.5e-8), причём
+ * дедуплицированное число корней ОБЯЗАНО совпасть с числом,
+ * доказанным точным знаком D (иначе структурный отказ); неконечные
  * A/B — отказ. Отказ решателя — надёжный fail-closed: приближённая
  * точка за корень НЕ выдаётся.
  */
@@ -556,15 +617,83 @@ export function solvePrCubicRealRoots(
   const discThreshold = dd.discThreshold;
   const pSign = ddSign(dd.p);
 
+  // Точный знак D (closeout 4.4.4.2.2): вне полосы |D| > discThreshold
+  // знак доказан DD-цепочкой (~106 бит). ВНУТРИ полосы знак неопределим
+  // даже в double-double, а допуск невязки его НЕ доказывает: точный
+  // знак вычисляет dyadic-BigInt fallback по исходным binary64 A/B.
+  const signProven =
+    dd.discriminant.hi > discThreshold ? 1
+      : dd.discriminant.hi < -discThreshold ? -1
+        : prExactCubicDiscriminantSign(dimensionlessA, dimensionlessB);
+
   const rawRoots: number[] = [];
-  // Ветви DD-классификации возвращают корни в y-координатах
+  // Ветви классификации возвращают корни в y-координатах
   // (депрессированная форма, требуется сдвиг shift); ветвь кратного
   // корня — сразу в z-координатах.
   let rawRootsInZCoordinates = false;
+  // Доказанное число РАЗЛИЧИМЫХ действительных корней: после
+  // дедупликации обязано совпасть, иначе структурный отказ (см.
+  // проверку в конце) — молчаливое схлопывание запрещено.
+  let provenDistinctCount = 0;
 
-  if (pSign < 0 && dd.discriminant.hi > discThreshold) {
-    // Уверенно ПОЛОЖИТЕЛЬНЫЙ дискриминант: ровно ОДИН действительный
+  if (signProven === 0) {
+    // ТОЧНЫЙ D = 0 (знак доказан dyadic-BigInt): кратный корень
+    // закрытой формой с подтверждением невязкой в DD-точности;
+    // неподтверждённый случай — структурный отказ, а НЕ
+    // приблизительная физическая ветвь. Кратная ветвь входится
+    // ТОЛЬКО по точному знаку 0 — невязка-допуск доказательством
+    // D = 0 НЕ является.
+    rawRootsInZCoordinates = true;
+    const ddCoefficientScale = Math.max(1, Math.abs(c2D), Math.abs(c1D), Math.abs(c0D));
+    const polyEval = (z: DoubleDouble): DoubleDouble =>
+      ddAdd(ddAdd(ddAdd(ddMul(ddMul(z, z), z), ddMul(dd.c2, ddMul(z, z))), ddMul(dd.c1, z)), dd.c0);
+    const residualTolerance = (z: DoubleDouble): number =>
+      Math.pow(2, -90) * ddCoefficientScale * Math.pow(Math.max(1, Math.abs(ddToDouble(z))), 3);
+    if (pSign === 0 && ddSign(dd.q) === 0) {
+      // Тройной корень депрессированной формы: y = 0, z = shift.
+      const zTriple = dd.shift;
+      const residual = ddAbs(polyEval(zTriple));
+      if (residual.hi > residualTolerance(zTriple)) {
+        return {
+          ok: false,
+          reason: `точный знак дискриминанта D = 0 (dyadic-BigInt), но тройной корень не подтверждён невязкой полинома`
+        };
+      }
+      rawRoots.push(ddToDouble(zTriple));
+      provenDistinctCount = 1;
+    } else if (pSign !== 0) {
+      // D = 0: двойной корень y_d = -3q/(2p) и простой y_s = 3q/p
+      // (тождества депрессированной формы при D = 0).
+      const yDouble = ddDiv(ddMul(ddFromDouble(-3), dd.q), ddMul(ddFromDouble(2), dd.p));
+      const ySimple = ddDiv(ddMul(ddFromDouble(3), dd.q), dd.p);
+      const zDouble = ddAdd(yDouble, dd.shift);
+      const zSimple = ddAdd(ySimple, dd.shift);
+      const residualDouble = ddAbs(polyEval(zDouble));
+      const residualSimple = ddAbs(polyEval(zSimple));
+      if (
+        residualDouble.hi > residualTolerance(zDouble) ||
+        residualSimple.hi > residualTolerance(zSimple)
+      ) {
+        return {
+          ok: false,
+          reason: `точный знак дискриминанта D = 0 (dyadic-BigInt), но кратный корень не подтверждён невязкой полинома в расширенной точности`
+        };
+      }
+      rawRoots.push(ddToDouble(zDouble), ddToDouble(zSimple));
+      provenDistinctCount = 2;
+    } else {
+      // p = 0, q != 0: математически D = (q/2)^2 > 0 — сюда попасть
+      // нельзя при точном знаке 0; честный отказ вместо
+      // приблизительной ветви.
+      return {
+        ok: false,
+        reason: `точный знак дискриминанта D = 0 противоречит p = 0 при q != 0 (|D| <= ${discThreshold}); отказ`
+      };
+    }
+  } else if (pSign < 0 && signProven > 0) {
+    // ТОЧНО ПОЛОЖИТЕЛЬНЫЙ дискриминант: ровно ОДИН действительный
     // корень. Никаких фиктивных повторных корней.
+    provenDistinctCount = 1;
     const arg = ((3 * qD) / (2 * pD)) * Math.sqrt(-3 / pD);
     const h = Math.abs(arg);
     if (h >= 1) {
@@ -583,10 +712,11 @@ export function solvePrCubicRealRoots(
         rawRoots.push(w - (pD / 3) / w);
       }
     }
-  } else if (pSign < 0 && dd.discriminant.hi < -discThreshold) {
-    // Уверенно ОТРИЦАТЕЛЬНЫЙ дискриминант: ровно ТРИ действительных
+  } else if (pSign < 0 && signProven < 0) {
+    // ТОЧНО ОТРИЦАТЕЛЬНЫЙ дискриминант: ровно ТРИ действительных
     // корня — кламп arg в [-1, 1] допустим (число корней доказано
-    // знаком D), это защита только от округления аргумента.
+    // точным знаком D), это защита только от округления аргумента.
+    provenDistinctCount = 3;
     const arg = ((3 * qD) / (2 * pD)) * Math.sqrt(-3 / pD);
     const clamped = Math.max(-1, Math.min(1, arg));
     const theta = Math.acos(clamped) / 3;
@@ -594,9 +724,10 @@ export function solvePrCubicRealRoots(
     for (let k = 0; k < 3; k += 1) {
       rawRoots.push(amplitude * Math.cos(theta - (2 * Math.PI * k) / 3));
     }
-  } else if (pSign >= 0 && dd.discriminant.hi > discThreshold) {
+  } else if (pSign >= 0 && signProven > 0) {
     // p >= 0: дискриминант неотрицателен, ровно один действительный
     // корень. Стабильный Cardano: слагаемые одного знака + Виет.
+    provenDistinctCount = 1;
     const squareRoot = Math.sqrt(Math.max(0, discD));
     const big = qD <= 0 ? -qD / 2 + squareRoot : -qD / 2 - squareRoot;
     if (big === 0) {
@@ -607,54 +738,13 @@ export function solvePrCubicRealRoots(
       rawRoots.push(w - (pD / 3) / w);
     }
   } else {
-    // |D| <= порога: знак неопределим даже в double-double.
-    // Единственный допустимый исход — МАТЕМАТИЧЕСКИ ТОЧНЫЙ кратный
-    // корень закрытой формой с подтверждением невязкой в DD-точности;
-    // иначе — структурный отказ, а НЕ приблизительная ветвь.
-    rawRootsInZCoordinates = true;
-    const ddCoefficientScale = Math.max(1, Math.abs(c2D), Math.abs(c1D), Math.abs(c0D));
-    const polyEval = (z: DoubleDouble): DoubleDouble =>
-      ddAdd(ddAdd(ddAdd(ddMul(ddMul(z, z), z), ddMul(dd.c2, ddMul(z, z))), ddMul(dd.c1, z)), dd.c0);
-    const residualTolerance = (z: DoubleDouble): number =>
-      Math.pow(2, -90) * ddCoefficientScale * Math.pow(Math.max(1, Math.abs(ddToDouble(z))), 3);
-    if (pSign === 0 && ddSign(dd.q) === 0) {
-      // Тройной корень депрессированной формы: y = 0, z = shift.
-      const zTriple = dd.shift;
-      const residual = ddAbs(polyEval(zTriple));
-      if (residual.hi > residualTolerance(zTriple)) {
-        return {
-          ok: false,
-          reason: `знак дискриминанта неопределим в double-double (|D| <= ${discThreshold}); тройной корень не подтверждён невязкой полинома`
-        };
-      }
-      rawRoots.push(ddToDouble(zTriple));
-    } else if (pSign !== 0) {
-      // D = 0: двойной корень y_d = -3q/(2p) и простой y_s = 3q/p
-      // (тождества депрессированной формы при D = 0).
-      const yDouble = ddDiv(ddMul(ddFromDouble(-3), dd.q), ddMul(ddFromDouble(2), dd.p));
-      const ySimple = ddDiv(ddMul(ddFromDouble(3), dd.q), dd.p);
-      const zDouble = ddAdd(yDouble, dd.shift);
-      const zSimple = ddAdd(ySimple, dd.shift);
-      const residualDouble = ddAbs(polyEval(zDouble));
-      const residualSimple = ddAbs(polyEval(zSimple));
-      if (
-        residualDouble.hi > residualTolerance(zDouble) ||
-        residualSimple.hi > residualTolerance(zSimple)
-      ) {
-        return {
-          ok: false,
-          reason: `знак дискриминанта неопределим в double-double (|D| <= ${discThreshold}); кратный корень не подтверждён невязкой полинома в расширенной точности`
-        };
-      }
-      rawRoots.push(ddToDouble(zDouble), ddToDouble(zSimple));
-    } else {
-      // p = 0, q != 0: D = (q/2)^2 > 0 уверенно — сюда попасть нельзя;
-      // честный отказ вместо приблизительной ветви.
-      return {
-        ok: false,
-        reason: `знак дискриминанта неопределим в double-double (|D| <= ${discThreshold}) при p = 0`
-      };
-    }
+    // p >= 0 математически даёт D = (q/2)^2 + (p/3)^3 >= 0; точный
+    // D < 0 при DD-знаке p >= 0 — противоречие округлений DD-цепочки
+    // в недостижимой зоне: честный отказ вместо противоречивой ветви.
+    return {
+      ok: false,
+      reason: `точный знак дискриминанта D < 0 противоречит p >= 0 (p=${pD}); отказ вместо противоречивой ветви`
+    };
   }
 
   // Возврат к z (только для ветвей в y-координатах) и проверка невязки
@@ -685,6 +775,18 @@ export function solvePrCubicRealRoots(
     if (distinct.length === 0 || Math.abs(z - distinct[distinct.length - 1]) > dedupTolerance) {
       distinct.push(z);
     }
+  }
+  // Контроль против схлопывания (closeout 4.4.4.2.2): дедуплицированное
+  // число корней обязано совпасть с доказанным точным знаком D. Если
+  // точный знак доказывает N различимых корней, а пара (например,
+  // тройки) ближе допуска дедупликации, двойная реализация НЕ может
+  // надёжно представить их различными — структурный отказ вместо
+  // молчаливого схлопывания или подмены пары кратным корнем.
+  if (distinct.length !== provenDistinctCount) {
+    return {
+      ok: false,
+      reason: `точный знак дискриминанта доказывает ${provenDistinctCount} различимых действительных корней, но двойная реализация не может надёжно представить их различными в допуске дедупликации ${dedupTolerance}; отказ вместо молчаливого схлопывания корней или подмены пары кратным корнем`
+    };
   }
   return { ok: true, roots: distinct };
 }
