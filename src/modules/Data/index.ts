@@ -271,3 +271,52 @@ export type {
   PengRobinsonPureSuccess,
   PengRobinsonPureFailure
 } from './pengRobinsonFacade';
+
+// Stage 4.4.4.3: каталог бинарных параметров взаимодействия kij
+// Peng–Robinson (все 10 пар пяти компонентов каталога 4.4.4.1) с
+// per-pair provenance и fail-closed lookup. Аудит источников и
+// политика каталога — заголовок Data/binaryInteractionParameters.ts и
+// DATA_PROVENANCE.md §2.31; математика смешения —
+// Core/pengRobinsonMixture.ts, фасад над обоими каталогами —
+// Data/pengRobinsonMixtureFacade.ts.
+import {
+  BINARY_INTERACTION_PARAMETERS,
+  BINARY_INTERACTION_PAIR_KEYS,
+  BINARY_INTERACTIONS_RETRIEVED_AT,
+  BINARY_INTERACTIONS_SCOPE_NOTE,
+  BINARY_NO_ZERO_DEFAULT_NOTE,
+  BINARY_PAIR_STATUSES,
+  canonicalBinaryPairKey,
+  getBinaryInteractionCoverage,
+  getBinaryInteractionParameter,
+  listBinaryInteractionPairKeys,
+  validateBinaryInteractionPairRecord,
+  validateBinaryInteractionCatalog,
+  BinaryInteractionError
+} from './binaryInteractionParameters';
+
+export {
+  BINARY_INTERACTION_PARAMETERS,
+  BINARY_INTERACTION_PAIR_KEYS,
+  BINARY_INTERACTIONS_RETRIEVED_AT,
+  BINARY_INTERACTIONS_SCOPE_NOTE,
+  BINARY_NO_ZERO_DEFAULT_NOTE,
+  BINARY_PAIR_STATUSES,
+  canonicalBinaryPairKey,
+  getBinaryInteractionCoverage,
+  getBinaryInteractionParameter,
+  listBinaryInteractionPairKeys,
+  validateBinaryInteractionPairRecord,
+  validateBinaryInteractionCatalog,
+  BinaryInteractionError
+};
+export type {
+  BinaryInteractionPairStatus,
+  BinaryInteractionApplicability,
+  BinaryInteractionAvailableRecord,
+  BinaryInteractionUnresolvedRecord,
+  BinaryInteractionPairRecord,
+  BinaryInteractionErrorCode,
+  BinaryInteractionCoverage
+} from './binaryInteractionParameters';
+
