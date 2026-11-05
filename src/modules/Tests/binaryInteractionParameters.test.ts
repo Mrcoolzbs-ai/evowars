@@ -156,7 +156,7 @@ describe('Stage 4.4.4.3: покрытие каталога', () => {
       expect((unresolved.reason as string).length).toBeGreaterThan(0);
       expect(typeof unresolved.auditNote).toBe('string');
       expect((unresolved.auditNote as string).length).toBeGreaterThan(0);
-      expect((rec as Record<string, unknown>).kij).toBeUndefined();
+      expect((rec as unknown as Record<string, unknown>).kij).toBeUndefined();
     }
   });
 });

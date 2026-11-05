@@ -62,7 +62,12 @@ Stage 4.4.4.2.2 / 4.4.4.3 — независимый benchmark Peng–Robinson:
    оракул — mpmath (50 знаков): независимая ре-реализация классических
    правил смешения PR (a_ij = (1-kij)sqrt(a_i a_j), a_mix, b_mix,
    кубика, ln(phi_i)) с НАШИМИ округлёнными константами; допуск
-   rtol 5e-13. Сравниваются Z, phi_i, f_i каждого компонента.
+   rtol 5e-13. Сравниваются Z, phi_i, f_i каждого компонента. Фаза
+   CoolProp для смесей навязана по МАТЕМАТИЧЕСКОЙ ветви TS (gas для
+   vapor): CoolProp без фазы может сам выполнить корневой выбор/flash
+   и пометить состояние двухфазным (fugacity_coefficient откажет);
+   flash/фазовое равновесие в объём 4.4.4.3 НЕ входят — сверяется
+   выбранная ветвь той же кубики.
 
 Числа из TS-дампа — выход СОБСТВЕННОЙ реализации (вход сравнения, НЕ
 эталон). Неудачные точки НЕ скрываются: любая из них делает код
@@ -710,10 +715,18 @@ def main() -> int:
                         state.set_binary_interaction_double(
                             index_of[b], index_of[a], "kij", float(pair["kij"]))
                     state.set_mole_fractions(fractions)
-                    if len(row["physicalRoots"]) >= 2:
-                        phase_specified = "gas" if row["root"] == "vapor" else "liquid"
-                        state.specify_phase(
-                            CP.iphase_gas if row["root"] == "vapor" else CP.iphase_liquid)
+                    # Для смесей фаза навязывается ВСЕГДА по математической
+                    # ветви TS (gas для vapor / liquid для liquid). При
+                    # (P, T, x) без навязанной фазы CoolProp может сам
+                    # выполнить корневой выбор/flash и пометить состояние
+                    # двухфазным — тогда fugacity_coefficient отказывает
+                    # («not well-defined in the two-phase region»).
+                    # Flash/фазовое равновесие в объём 4.4.4.3 НЕ входят:
+                    # оракул проверяет выбранную TS МАТЕМАТИЧЕСКУЮ ветвь
+                    # той же кубики (правила смешения, корни, phi_i).
+                    phase_specified = "gas" if row["root"] == "vapor" else "liquid"
+                    state.specify_phase(
+                        CP.iphase_gas if row["root"] == "vapor" else CP.iphase_liquid)
                     try:
                         state.update(CP.PT_INPUTS, row["pressurePa"], row["temperatureK"])
                     except ValueError as exc:
@@ -872,7 +885,10 @@ def main() -> int:
                           "kij в CoolProp PR нет): сверка ВАЛИДИРУЕТ "
                           "РЕАЛИЗАЦИЮ правил смешения/кубики/phi_i, а НЕ "
                           "подтверждает значения kij — они остаются "
-                          "PARTIALLY_VERIFIED по provenance каталога"),
+                          "PARTIALLY_VERIFIED по provenance каталога. "
+                          "Фаза CoolProp навязана по математической ветви "
+                          "TS (gas для vapor): flash/фазовое равновесие "
+                          "в объём 4.4.4.3 НЕ входят"),
         },
         "tolerances": {
             "coolprop_rtol": RTOL_COOLPROP,
