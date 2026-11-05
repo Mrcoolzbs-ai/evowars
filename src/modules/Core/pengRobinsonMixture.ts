@@ -85,6 +85,15 @@ import type {
   PengRobinsonRootBranch
 } from './pengRobinson';
 
+// Реэкспорт общих типов PR для потребителей смесевого API (фасад
+// Data/pengRobinsonMixtureFacade.ts и тесты): политики доказанности,
+// статусы и ветви объявлены в ./pengRobinson (единый источник).
+export type {
+  PengRobinsonEvidencePolicy,
+  PengRobinsonEvidenceStatus,
+  PengRobinsonRootBranch
+} from './pengRobinson';
+
 // ============================================
 // 1. ТИПЫ: КОДЫ, ПОЛИТИКА, ВХОДЫ, РЕЗУЛЬТАТ
 // ============================================

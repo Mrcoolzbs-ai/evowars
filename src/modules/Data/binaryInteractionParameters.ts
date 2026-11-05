@@ -83,11 +83,9 @@
 
 import type {
   EosCrossCheck,
-  EosEvidenceStatus,
   EosParameterProvenance,
   EosPureComponentGasId,
-  EosScalarParameter,
-  EosValueOrigin
+  EosScalarParameter
 } from './eosParameters';
 import {
   EOS_CROSS_CHECK_OUTCOMES,
