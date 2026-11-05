@@ -990,6 +990,25 @@
 > фиксируется с причиной, без подмены собственного расчёта).
 > Phase 4.4.4 НЕ завершена; следующий подэтап НЕ начат.
 > Детали — DATA_PROVENANCE.md §2.31; статус — §4.4.4.
+>
+> Ревизия Stage 4.4.4.3.1 (2026-11-05 — корректировка benchmark
+> integrity): исправлен дефект учёта результатов CoolProp в
+> scripts/benchmarks/peng_robinson_coolprop.py (run 42116866598,
+> точка n2-near-zero-alpha: CoolProp вернул конечный Z, но NaN для
+> phi и fugacity без исключения; сравнение NaN > допуск ложно →
+> точка ошибочно объявлялась ok для CoolProp). Конечность каждого
+> значения проверяется ДО вычисления ошибок; статусная
+> классификация available_pass / available_fail /
+> unavailable_nonfinite / unavailable_error; non-finite CoolProp —
+> зарегистрированная НЕДОСТУПНОСТЬ сравнения, НЕ PASS и НЕ провал;
+> частичный конечный Z сохраняет собственный PASS; в аннотации
+> PASS mpmath и статус CoolProp раздельны по каждой zero-limit
+> точке; строгий JSON (allow_nan=False, NaN/Infinity → null);
+> Python unit-тесты классификации — шаг benchmark workflow.
+> mpmath — ГЛАВНЫЙ оракул предельного случая; PR-математика,
+> формулы смешения, zero-limit fixture, golden baseline НЕ
+> менялись. Phase 4.4.4 НЕ завершена; следующий подэтап НЕ начат.
+> Детали — DATA_PROVENANCE.md §2.31; статус — §4.4.4.
 
 ## Карта этапов
 
@@ -2174,9 +2193,21 @@ zero-limit секцией (2 точки в TS-дампе): главный ора
 (Z/ln φ/φ/f, rtol 5e-13; a_mix — АБСОЛЮТНАЯ сверка ≤ 1e-30:
 точный alpha нулю не равен, артефакт округления binary64, —
 относительная сверка a_mix невозможна и не требуется);
-CoolProp — та же ветвь gas одиночного флюида (rtol 2e-4), отказ
-CoolProp фиксируется с причиной и НЕ подменяется собственным
-расчётом; все прежние точки сохраняются (5 смесей, 7 чистых точек
+CoolProp — та же ветвь gas одиночного флюида (rtol 2e-4); результат
+CoolProp классифицируется явно (available_pass / available_fail /
+unavailable_nonfinite / unavailable_error), non-finite вывод —
+зарегистрированная недоступность сравнения, НЕ PASS и НЕ провал
+(частичный конечный Z сохраняет собственный PASS); на точке
+нулевого alpha CoolProp вернул конечные Z/phi/fugacity; на
+соседней near-zero точке CoolProp вернул КОНЕЧНЫЙ Z, но NaN для
+phi и fugacity БЕЗ исключения — фиксируется наблюдаемый non-finite
+результат (причина библиотекой не выдана, внутренний механизм НЕ
+реконструируется), значения НЕ засчитываются как CoolProp PASS;
+PASS mpmath и статус CoolProp указываются в аннотации РАЗДЕЛЬНО;
+отказ CoolProp фиксируется с причиной и НЕ подменяется собственным
+расчётом; строгий JSON (allow_nan=False, NaN/Infinity → null);
+Python unit-тесты классификации non-finite — шаг benchmark workflow;
+все прежние точки сохраняются (5 смесей, 7 чистых точек
 4.4.4.2.2, boundary, solver_failures_justified = 1); benchmark НЕ
 является проверкой растворимости N2 в воде. Ограничения прежние:
 kij PARTIALLY_VERIFIED, покрытие 5/10 пар, применимость пар Okoro
