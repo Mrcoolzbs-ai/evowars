@@ -34,9 +34,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      # npm ci на раннерах GitHub может транзиентно отказывать (сеть/кэш);
-      # признак — exit code 1 на ранней строке лога БЕЗ аннотаций скрипта;
-      # в этом случае workflow просто перезапускается.
       - name: Install dependencies
         run: npm ci
 
@@ -62,8 +59,7 @@ jobs:
         if: always()
         run: |
           if [ -f benchmark-artifacts/benchmark-summary.md ]; then
-       
-     cat benchmark-artifacts/benchmark-summary.md >> "$GITHUB_STEP_SUMMARY"
+            cat benchmark-artifacts/benchmark-summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload benchmark artifacts

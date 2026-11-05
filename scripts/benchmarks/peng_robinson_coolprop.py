@@ -37,8 +37,7 @@ Stage 4.4.4.2.1 — независимый benchmark чистокомпонен�
 расчётом.
 
 CoolProp и mpmath НЕ входят в runtime-зависимости TypeScript-приложения
-(см. scripts/benchmarks/requirements.txt и отдельный workflo
-w
+(см. scripts/benchmarks/requirements.txt и отдельный workflow
 .github/workflows/peng-robinson-benchmark.yml).
 
 Документация CoolProp: https://coolprop.org/coolprop/Cubics.html
@@ -80,8 +79,7 @@ CATALOG = {
             "molemass": 0.01604, "builtin": "Methane",
             "custom": "EVWCH4", "cas": "90000-00-3"},
     "h2o": {"Tc": 647.096, "pc": 22064000.0, "omega": 0.3442920843,
-            "molemass": 0.018015, "builtin": "Water"
-,
+            "molemass": 0.018015, "builtin": "Water",
             "custom": "EVWH2O", "cas": "90000-00-4"},
     "ar": {"Tc": 150.687, "pc": 4863000.0, "omega": -0.00219,
            "molemass": 0.039948, "builtin": "Argon",
@@ -126,8 +124,7 @@ def main() -> int:
     # mpmath: точные Ω из условия ТРОЙНОГО корня в критической точке
     # ============================================
     # Для кубики PR в критической точке A_c = Ω_a, B_c = Ω_b и кубика обязана
-    # иметь трой
-ной корень Zc = (1-Ω_b)/3. Решение системы условий тройного
+    # иметь тройной корень Zc = (1-Ω_b)/3. Решение системы условий тройного
     # корня даёт АНАЛИТИЧЕСКИЕ (точные) значения Ω — ими пользуется CoolProp.
     mp.dps = MPMATH_DPS
 
@@ -179,8 +176,7 @@ def main() -> int:
                 t = mp_acos(arg) / 3 - 2 * mp_pi * k / 3
                 real.append(m * mp_cos(t) - c2 / 3)
             return real, None, disc, disc_scale
-        # disc == 0: 
-кратный корень
+        # disc == 0: кратный корень
         u = real_cbrt(-q / 2)
         real = [2 * u - c2 / 3, -u - c2 / 3]
         return real, None, disc, disc_scale
@@ -225,8 +221,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001 — диагностика в отчёт
         try:
             coolprop_meta["r_universal"] = float(CP.get_global_param_double("gas_constant"))
-            coolprop_meta["r_source"] = "CP.get_global_p
-aram_double('gas_constant')"
+            coolprop_meta["r_source"] = "CP.get_global_param_double('gas_constant')"
         except Exception as exc:  # noqa: BLE001
             coolprop_meta["r_source"] = f"недоступно: {exc}"
 
@@ -270,8 +265,7 @@ aram_double('gas_constant')"
         print(f"ОШИБКА: add_fluids_as_JSON: {add_error}", file=sys.stderr)
     for gas_id, info in CATALOG.items():
         match = {"name": info["custom"], "parameter_match": {}, "error": None}
-        for key, expected, prop i
-n (("Tc", info["Tc"], "Tcrit"),
+        for key, expected, prop in (("Tc", info["Tc"], "Tcrit"),
                                     ("pc", info["pc"], "Pcrit"),
                                     ("acentric", info["omega"], "acentric"),
                                     ("molemass", info["molemass"], "molemass")):
@@ -311,11 +305,13 @@ n (("Tc", info["Tc"], "Tcrit"),
                     state.update(CP.PT_INPUTS, row["pressurePa"], row["temperatureK"])
                 except ValueError as exc:
                     # CoolProp отказывается сам выбирать корень, если у
-                    # кубики ТРИ действительных корня и фаза не задана.
-                    # У TS в такой точке один ФИЗИЧЕСКИЙ корень (Z > B);
-                    # остальные корни кубики лежат вне физической области.
-                    # Навязываем ветвь TS и повторяем update; деталь
-                    # честно фиксируется в отчёте точки.
+                    # кубики ТРИ действительных корня и фаза не задана
+                    # ("Cubic has three roots, but phase not imposed and
+                    # guess density not provided"). У TS в такой точке
+                    # один ФИЗИЧЕСКИЙ корень (Z > B); остальные корни
+                    # кубики лежат вне физической области. Навязываем
+                    # ветвь TS и повторяем update; деталь честно
+                    # фиксируется в отчёте точки.
                     msg = str(exc)
                     if phase_specified is not None or not (
                             "phase not imposed" in msg or "guess density" in msg):
@@ -330,8 +326,7 @@ n (("Tc", info["Tc"], "Tcrit"),
                 rho = float(state.rhomolar())
                 coolprop_vals["rhomolar"] = rho
                 try:
-                    coolprop_vals["Z"] = float(state.keyed_output(
-CP.iZ))
+                    coolprop_vals["Z"] = float(state.keyed_output(CP.iZ))
                     coolprop_vals["Z_source"] = "AS.keyed_output(CP.iZ)"
                 except Exception:  # noqa: BLE001 — документированный fallback
                     r_coolprop = coolprop_meta["r_universal"]
@@ -368,8 +363,7 @@ CP.iZ))
             "temperatureK": row["temperatureK"], "pressurePa": row["pressurePa"],
             "root": row["root"], "phase_specified": phase_specified,
             "oracle_parameters": {
-                "Tc": info["Tc"], "pc"
-: info["pc"], "omega": info["omega"],
+                "Tc": info["Tc"], "pc": info["pc"], "omega": info["omega"],
                 "molemass": info["molemass"], "name": info["custom"],
                 "source": "каталог Stage 4.4.4.1 через add_fluids_as_JSON",
             },
@@ -406,8 +400,7 @@ CP.iZ))
                                          ("phi", row["phi"], phi),
                                          ("fugacity", row["fugacityPa"], fugacity)):
             rel_err = abs(mp_value - ts_value) / abs(ts_value)
-            entry["comparison"][name] = {"abs": a
-bs(mp_value - ts_value),
+            entry["comparison"][name] = {"abs": abs(mp_value - ts_value),
                                          "rel": rel_err, "tolerance": RTOL_MPMATH,
                                          "pass": rel_err <= RTOL_MPMATH}
             if rel_err > RTOL_MPMATH:
@@ -442,8 +435,7 @@ bs(mp_value - ts_value),
             phi = float(mp.exp(calc["lnphi"](z_sel)))
             worst[variant] = abs(phi - point["coolprop"]["phi"]) / abs(point["coolprop"]["phi"])
         if worst["rounded"] is not None and worst["exact"] is not None:
-            worst["closer"] = ("rounded" if worst["rounded"] < worst["exact"] else "exact
-")
+            worst["closer"] = ("rounded" if worst["rounded"] < worst["exact"] else "exact")
             if worst["closer"] == "rounded":
                 rounded_wins += 1
             else:
@@ -481,8 +473,7 @@ bs(mp_value - ts_value),
         if len(real) == len(ts_roots):
             match = match_root_lists(ts_roots, [float(z) for z in sorted(real)])
         elif len(real) == 1 and len(ts_roots) == 2 and pair_center is not None:
-            # 
-Полоса кратного корня: математически один корень + комплексная
+            # Полоса кратного корня: математически один корень + комплексная
             # пара; TS-решатель возвращает ДВА различимых корня (документировано
             # в 4.4.4.2.1). Проверяем: (1) знак дискриминанта ниже шума double,
             # (2) изолированный TS-корень = mp-корню, (3) второй TS-корень =
@@ -523,8 +514,7 @@ bs(mp_value - ts_value),
         "builtin_pr_parameters": builtin_parameters,
         "custom_fluids": custom_fluids,
         "points": points,
-        "mpmath_independen
-t": mpmath_points,
+        "mpmath_independent": mpmath_points,
         "omega_probe": omega_probe,
         "boundary": boundary,
         "tolerances": {
@@ -572,8 +562,7 @@ t": mpmath_points,
           f"boundary={'ok' if boundary_pass else 'FAIL'}")
     if not all_pass:
         for point in points:
-            if not p
-oint["pass"]:
+            if not point["pass"]:
                 detail = point["coolprop"]["error"] or json.dumps(
                     point["comparison"], ensure_ascii=False)
                 print(f"::error title=Peng-Robinson benchmark {point['id']}::{detail}")
@@ -621,8 +610,7 @@ def build_summary_md(report):
         "",
         "## Контрольные точки (CoolProp vs TS, rtol 1e-3)",
         "",
-        "| точка | ветвь | Z (rel) | phi (re
-l) | f (rel) | итог |",
+        "| точка | ветвь | Z (rel) | phi (rel) | f (rel) | итог |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for point in report["points"]:
@@ -667,8 +655,7 @@ l) | f (rel) | итог |",
     lines += [
         "",
         f"**Итог: {verdict}** (CoolProp: {'ok' if report['summary']['coolprop'] else 'FAIL'}; "
-        f"mpmath: {'ok' if report['sum
-mary']['mpmath'] else 'FAIL'}; "
+        f"mpmath: {'ok' if report['summary']['mpmath'] else 'FAIL'}; "
         f"boundary: {'ok' if report['summary']['boundary'] else 'FAIL'})",
         "",
     ]
