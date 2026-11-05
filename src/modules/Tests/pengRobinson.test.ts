@@ -29,8 +29,11 @@
 
 import { describe, expect, it } from 'vitest';
 
+// Stage 4.4.4.2.1 (архитектура Core/Data): чистая математика PR и
+// низкоуровневые хелперы — в Core; gasId-вычислитель по каталогу —
+// фасад Data над Core.
 import {
-  computePengRobinsonPure,
+  computePengRobinsonFromComponent,
   computePengRobinsonPureParameters,
   pengRobinsonCubicCoefficients,
   pengRobinsonLnPhi,
@@ -38,16 +41,27 @@ import {
   solvePrCubicRealRoots
 } from '../Core/pengRobinson';
 
+import { computePengRobinsonPure } from '../Data/pengRobinsonFacade';
+import * as corePrModule from '../Core/pengRobinson';
+import * as facadePrModule from '../Data/pengRobinsonFacade';
+
 // R — единая константа репозитория (точное СИ-2019), из Core/thermoFunctions.
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 import type {
-  PengRobinsonEvidencePolicy,
+  PengRobinsonComponentInputs,
+  PengRobinsonComponentRequest,
+  PengRobinsonComponentResult,
+  PengRobinsonComponentSuccess,
+  PengRobinsonEvidencePolicy
+} from '../Core/pengRobinson';
+
+import type {
   PengRobinsonPureFailure,
   PengRobinsonPureRequest,
   PengRobinsonPureResult,
   PengRobinsonPureSuccess
-} from '../Core/pengRobinson';
+} from '../Data/pengRobinsonFacade';
 
 import {
   EOS_PURE_COMPONENT_IDS,
@@ -78,8 +92,17 @@ function expectSuccess(result: PengRobinsonPureResult): PengRobinsonPureSuccess 
   return result;
 }
 
+/** Успех компонентного вычислителя Core (без provenance-скаляров каталога). */
+function expectComponentSuccess(result: PengRobinsonComponentResult): PengRobinsonComponentSuccess {
+  expect(result.status).toBe('success');
+  if (result.status !== 'success') {
+    throw new Error(`ожидался успех, получен отказ: ${JSON.stringify(result)}`);
+  }
+  return result;
+}
+
 function expectFailure(
-  result: PengRobinsonPureResult,
+  result: PengRobinsonPureResult | PengRobinsonComponentResult,
   code: PengRobinsonPureFailure['code']
 ): PengRobinsonPureFailure {
   expect(result.status).toBe('failure');
@@ -90,7 +113,7 @@ function expectFailure(
   return result;
 }
 
-function expectAllNumbersFinite(s: PengRobinsonPureSuccess): void {
+function expectAllNumbersFinite(s: PengRobinsonComponentSuccess): void {
   const numericFields = [
     'temperatureK',
     'pressurePa',
@@ -898,5 +921,278 @@ describe('Stage 4.4.4.2: Peng–Robinson — границы подэтапа', (
       // Ограничения каталога включены в сообщение.
       expect(warning?.message).toContain('смес');
     }
+  });
+});
+
+// ============================================
+// 18. ГРАНИЦА ДИСКРИМИНАНТА (STAGE 4.4.4.2.1)
+// ============================================
+//
+// Регрессионная серия около нулевого дискриминанта с одним и тем же
+// B = 0.01980480623881198 и базовым A0 = 0.13130582290421344
+// (сконструированный двойной корень у 0.05, простой корень
+// 0.880195193761188). Ожидания подтверждены НЕЗАВИСИМЫМ расчётом
+// корней исходного полинома в расширенной точности (double-double,
+// ~106 бит; воспроизводимый oracle с mpmath 50 знаков —
+// scripts/benchmarks/peng_robinson_coolprop.py, секция boundary);
+// метод и результаты зафиксированы в DATA_PROVENANCE.md §2.30.
+
+const PR_BOUNDARY_B = 0.01980480623881198;
+const PR_BOUNDARY_A0 = 0.13130582290421344;
+
+describe('Stage 4.4.4.2.1: граница дискриминанта кубического уравнения', () => {
+  it('регрессионный случай A = A0 - 1e-13: ровно один действительный корень (фиктивная liquid-ветвь устранена)', () => {
+    // До ревизии 4.4.4.2.1 условие discriminant <= 1e-12*discScale
+    // направляло и ПОЛОЖИТЕЛЬНЫЙ дискриминант в тригонометрическую
+    // ветвь, кламп acos создавал фиктивный повторный корень у 0.05:
+    // он больше B, проходил проверку Z > B и мог становиться ложной
+    // liquid-ветвью. Математически существует ровно ОДИН
+    // действительный корень 0.8801951937613128; пара
+    // 0.05 ± 6.04e-8 i — комплексная (оракул расширенной точности).
+    const result = solvePrCubicRealRoots(0.13130582290411344, PR_BOUNDARY_B);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(result.roots).toHaveLength(1);
+    expect(result.roots[0]).toBeCloseTo(0.8801951937613128, 12);
+    // Фиктивного корня у 0.05 больше нет ни в каком виде.
+    for (const z of result.roots) {
+      expect(Math.abs(z - 0.05)).toBeGreaterThan(1e-3);
+    }
+    // Physical root selection: ровно один физически допустимый корень.
+    const physical = prPhysicalRoots(result.roots, PR_BOUNDARY_B);
+    expect(physical).toHaveLength(1);
+    expect(physical[0]).toBeCloseTo(0.8801951937613128, 12);
+  });
+
+  it('A0 - 1e-12 и A0 - 1e-11: уверенно один действительный корень', () => {
+    const d12 = solvePrCubicRealRoots(PR_BOUNDARY_A0 - 1e-12, PR_BOUNDARY_B);
+    const d11 = solvePrCubicRealRoots(PR_BOUNDARY_A0 - 1e-11, PR_BOUNDARY_B);
+    expect(d12.ok).toBe(true);
+    expect(d11.ok).toBe(true);
+    if (!d12.ok || !d11.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(d12.roots).toHaveLength(1);
+    expect(d12.roots[0]).toBeCloseTo(0.8801951937624364, 12);
+    expect(d11.roots).toHaveLength(1);
+    expect(d11.roots[0]).toBeCloseTo(0.8801951937736714, 12);
+    for (const r of [d12, d11]) {
+      for (const z of r.roots) {
+        expect(Math.abs(z - 0.05)).toBeGreaterThan(1e-3);
+      }
+    }
+  });
+
+  it('A0: положительный, но численно неразрешимый знак дискриминанта — полоса кратного корня, два различимых корня', () => {
+    // Точный дискриминант A0 чуть ПОЛОЖИТЕЛЕН (~ +4.2e-16 отн.), но его
+    // знак НЕ разрешим в double (граница ошибки ~ 1.1e-14 отн.):
+    // классификация по знаку с явной границей ошибки честно признаёт
+    // неопределённость и обрабатывает случай как полосу кратного
+    // корня — кратный корень (центр пары у 0.05) и удалённый корень.
+    // Мнимый третий исход (фиктивный корень или молчаливая потеря
+    // ветви) не создаётся. Значения совпадают с тестом двойного корня
+    // (раздел 5) и с оракулом расширенной точности: действительный
+    // корень 0.880195193761188, центр комплексной пары 0.05.
+    const result = solvePrCubicRealRoots(PR_BOUNDARY_A0, PR_BOUNDARY_B);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(result.roots).toHaveLength(2);
+    expect(result.roots[0]).toBeCloseTo(0.05, 12);
+    expect(result.roots[1]).toBeCloseTo(0.880195193761188, 12);
+    // Оба корня физически допустимы — различимые ветви.
+    const physical = prPhysicalRoots(result.roots, PR_BOUNDARY_B);
+    expect(physical).toHaveLength(2);
+  });
+
+  it('A0 + 1e-13: уверенно три действительных корня, расщепление пары выше допуска дедупликации', () => {
+    const result = solvePrCubicRealRoots(0.13130582290431344, PR_BOUNDARY_B);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(result.roots).toHaveLength(3);
+    // Пара у 0.05 расщеплена на ~1.2e-7 — дедупликация (допуск 1e-8)
+    // различает корни; это три РАЗЛИЧИМЫХ действительных корня.
+    const pairSplit = result.roots[1] - result.roots[0];
+    expect(pairSplit).toBeGreaterThan(1e-8);
+    expect(pairSplit).toBeLessThan(2e-7);
+    // Точность пары против оракула расширенной точности (~1e-9 отн.):
+    // ошибка кратных/близких корней в double ~ sqrt(eps)-масштаба.
+    expect(result.roots[0]).toBeCloseTo(0.04999993977067657, 9);
+    expect(result.roots[1]).toBeCloseTo(0.05000006022944803, 9);
+    // Простой корень — с полной точностью.
+    expect(result.roots[2]).toBeCloseTo(0.8801951937610631, 12);
+    // Все три корня больше B — физически допустимы.
+    for (const z of result.roots) {
+      expect(z).toBeGreaterThan(PR_BOUNDARY_B);
+    }
+    const physical = prPhysicalRoots(result.roots, PR_BOUNDARY_B);
+    expect(physical).toHaveLength(3);
+  });
+
+  it('A0 + 1e-12 и A0 + 1e-11: уверенно три действительных корня', () => {
+    const d12 = solvePrCubicRealRoots(PR_BOUNDARY_A0 + 1e-12, PR_BOUNDARY_B);
+    const d11 = solvePrCubicRealRoots(PR_BOUNDARY_A0 + 1e-11, PR_BOUNDARY_B);
+    expect(d12.ok).toBe(true);
+    expect(d11.ok).toBe(true);
+    if (!d12.ok || !d11.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(d12.roots).toHaveLength(3);
+    expect(d12.roots[0]).toBeCloseTo(0.04999980933037945, 9);
+    expect(d12.roots[1]).toBeCloseTo(0.05000019067086875, 9);
+    expect(d12.roots[2]).toBeCloseTo(0.8801951937599396, 12);
+    expect(d11.roots).toHaveLength(3);
+    expect(d11.roots[0]).toBeCloseTo(0.04999939694119104, 9);
+    expect(d11.roots[1]).toBeCloseTo(0.05000060307129239, 9);
+    expect(d11.roots[2]).toBeCloseTo(0.8801951937487045, 12);
+  });
+});
+
+// ============================================
+// 19. АРХИТЕКТУРНАЯ ГРАНИЦА CORE/DATA (STAGE 4.4.4.2.1)
+// ============================================
+//
+// CORE_SCIENTIFIC_ENGINE.md: зависимости слоёв ацикличны, фундамент
+// Core не получает runtime из Data; каталог строится ПОВЕРХ контрактов
+// Core. Core/pengRobinson.ts принимает валидированные параметры и
+// evidence напрямую; lookup по gasId и обработка EosParametersError —
+// в фасаде Data/pengRobinsonFacade.ts.
+
+describe('Stage 4.4.4.2.1: архитектурная граница Core/Data', () => {
+  const syntheticInputs: PengRobinsonComponentInputs = {
+    gasId: 'synthetic',
+    formula: 'XeSyn',
+    name: 'Синтетический компонент (тест Core)',
+    criticalTemperatureK: 200,
+    criticalPressurePa: 5e6,
+    acentricFactor: 0.1,
+    evidence: {
+      criticalTemperatureK: 'VERIFIED',
+      criticalPressurePa: 'VERIFIED',
+      acentricFactor: 'VERIFIED'
+    },
+    crossChecks: [],
+    limitations: []
+  };
+
+  const syntheticRequest = (overrides: Partial<PengRobinsonComponentRequest> = {}): PengRobinsonComponentRequest => ({
+    temperatureK: 250,
+    pressurePa: 1e6,
+    root: 'vapor',
+    evidencePolicy: 'verified_only',
+    ...overrides
+  });
+
+  it('Core считает синтетический компонент без каталога (verified_only, без предупреждений)', () => {
+    const s = expectComponentSuccess(
+      computePengRobinsonFromComponent(syntheticInputs, syntheticRequest())
+    );
+    expectAllNumbersFinite(s);
+    expect(s.gasId).toBe('synthetic');
+    expect(s.formula).toBe('XeSyn');
+    expect(s.evidence.acentricFactor).toBe('VERIFIED');
+    expect(s.warnings).toHaveLength(0);
+    expect(s.Z).toBeGreaterThan(0.9);
+    expect(s.notes.join(' ')).toContain('НЕ доказывает');
+  });
+
+  it('некорректные числовые параметры — invalid_parameters (fail-closed Core)', () => {
+    const badOverrides: ReadonlyArray<Partial<PengRobinsonComponentInputs>> = [
+      { criticalTemperatureK: 0 },
+      { criticalTemperatureK: -200 },
+      { criticalTemperatureK: Number.NaN },
+      { criticalPressurePa: 0 },
+      { criticalPressurePa: -5e6 },
+      { criticalPressurePa: Number.POSITIVE_INFINITY },
+      { acentricFactor: Number.NaN },
+      { acentricFactor: Number.POSITIVE_INFINITY }
+    ];
+    for (const bad of badOverrides) {
+      const f = expectFailure(
+        computePengRobinsonFromComponent({ ...syntheticInputs, ...bad }, syntheticRequest()),
+        'invalid_parameters'
+      );
+      expect(f.message.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('некорректные статусы evidence и структуры входа — invalid_parameters', () => {
+    const badEvidence = { ...syntheticInputs, evidence: { ...syntheticInputs.evidence, acentricFactor: 'MAYBE' as unknown as PengRobinsonComponentInputs['evidence']['acentricFactor'] } };
+    expectFailure(
+      computePengRobinsonFromComponent(badEvidence, syntheticRequest()),
+      'invalid_parameters'
+    );
+    const badCrossChecks = { ...syntheticInputs, crossChecks: 'не массив' as unknown as PengRobinsonComponentInputs['crossChecks'] };
+    expectFailure(
+      computePengRobinsonFromComponent(badCrossChecks, syntheticRequest()),
+      'invalid_parameters'
+    );
+    const badGasId = { ...syntheticInputs, gasId: '   ' };
+    expectFailure(
+      computePengRobinsonFromComponent(badGasId, syntheticRequest()),
+      'invalid_parameters'
+    );
+  });
+
+  it('UNRESOLVED отклоняется даже политикой allow_unresolved_cross_check (Core без каталога)', () => {
+    const f = expectFailure(
+      computePengRobinsonFromComponent(
+        { ...syntheticInputs, evidence: { ...syntheticInputs.evidence, acentricFactor: 'UNRESOLVED' } },
+        syntheticRequest({ evidencePolicy: 'allow_unresolved_cross_check' })
+      ),
+      'parameter_evidence_not_accepted'
+    );
+    expect(f.detail).toContain('acentricFactor=UNRESOLVED');
+    expect(f.message).toContain('UNRESOLVED');
+  });
+
+  it('некорректный запрос (T/P/root/policy) — invalid_input из общей валидации Core', () => {
+    expectFailure(
+      computePengRobinsonFromComponent(syntheticInputs, syntheticRequest({ temperatureK: 0 })),
+      'invalid_input'
+    );
+    expectFailure(
+      computePengRobinsonFromComponent(syntheticInputs, syntheticRequest({ pressurePa: -1 })),
+      'invalid_input'
+    );
+    expectFailure(
+      computePengRobinsonFromComponent(
+        syntheticInputs,
+        syntheticRequest({ root: 'solid' as unknown as PengRobinsonComponentRequest['root'] })
+      ),
+      'invalid_input'
+    );
+    expectFailure(
+      computePengRobinsonFromComponent(
+        syntheticInputs,
+        syntheticRequest({ evidencePolicy: 'yolo' as unknown as PengRobinsonEvidencePolicy })
+      ),
+      'invalid_input'
+    );
+  });
+
+  it('публичный API: gasId-вычислитель вынесен из Core в фасад Data', () => {
+    // Core экспортирует чистую математику (computePengRobinsonFromComponent
+    // и низкоуровневые хелперы), но больше НЕ экспортирует
+    // computePengRobinsonPure — он определён в Data/pengRobinsonFacade.ts.
+    const coreModule = corePrModule as Record<string, unknown>;
+    expect(coreModule.computePengRobinsonPure).toBeUndefined();
+    expect(coreModule.computePengRobinsonFromComponent).toBeDefined();
+    expect(coreModule.solvePrCubicRealRoots).toBeDefined();
+    const facadeModule = facadePrModule as Record<string, unknown>;
+    expect(facadeModule.computePengRobinsonPure).toBeDefined();
+  });
+
+  it('фасад возвращает уточнённый gasId каталога и то же замороженное provenance', () => {
+    const s = expectSuccess(computePengRobinsonPure(baseRequest()));
+    const catalog = getEosPureComponentParameters('co2');
+    expect(s.gasId).toBe('co2');
+    expect(s.criticalTemperatureK).toBe(catalog.criticalTemperatureK);
+    expect(Object.isFrozen(s.criticalTemperatureK)).toBe(true);
   });
 });

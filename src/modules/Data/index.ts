@@ -111,7 +111,7 @@ export type { IsotopeCandidateCoverage } from './elementIsotopeCandidates';
 
 // Stage 4.3.3 (аудит R4, C3/C4): воспроизводимая утилита аудита NUBASE2020 —
 // строгий fail-closed парсер фиксированных колонок официального ASCII-файла
-// (диагностика обрезанных, повреждённых и дублирующихся строк), контекстная
+// (диагностика обрезанных, повреждённых и дублирующих строк), контекстная
 // классификация состояний (i, s), ранжирование кандидатов, SHA-256
 // ФАКТИЧЕСКОГО входного текста (computeNubaseAuditTextSha256) и метаданные
 // конкретного запуска (NubaseAuditRunMetadata). Полный ASCII-файл NUBASE2020
@@ -249,3 +249,25 @@ export type {
   EosPureComponentGasId,
   EosParametersErrorCode
 } from './eosParameters';
+
+// Stage 4.4.4.2.1: фасад чистокомпонентного Peng–Robinson над Core.
+// Архитектурная граница Core/Data (CORE_SCIENTIFIC_ENGINE.md):
+// Core/pengRobinson.ts — чистая математика БЕЗ импортов из Data
+// (computePengRobinsonFromComponent принимает валидированные параметры
+// и evidence); поиск по gasId в каталоге 4.4.4.1, обработка
+// EosParametersError и прикрепление ТОГО ЖЕ замороженного
+// provenance-дерева каталога к результату выполняет ЭТОТ слой Data
+// (Data -> Core, обратное направление запрещено; прежний цикл
+// Core -> Data -> Core устранён). Независимый CoolProp-benchmark —
+// scripts/benchmarks/peng_robinson_coolprop.py (отдельный workflow,
+// в runtime-зависимости приложения CoolProp НЕ входит); источники и
+// результаты — DATA_PROVENANCE.md §2.30.
+import { computePengRobinsonPure } from './pengRobinsonFacade';
+
+export { computePengRobinsonPure };
+export type {
+  PengRobinsonPureRequest,
+  PengRobinsonPureResult,
+  PengRobinsonPureSuccess,
+  PengRobinsonPureFailure
+} from './pengRobinsonFacade';

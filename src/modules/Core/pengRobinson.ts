@@ -2,7 +2,8 @@
 // PENG–ROBINSON — чистокомпонентный EOS: Z, phi, фугитивность
 // ============================================
 //
-// Stage 4.4.4.2 «Чистокомпонентный Peng–Robinson: Z, phi и фугитивность».
+// Stage 4.4.4.2 «Чистокомпонентный Peng–Robinson: Z, phi и фугитивность»,
+// ревизия Stage 4.4.4.2.1 (классификация кратных корней + архитектура).
 //
 // Реализованы ТОЛЬКО классические соотношения Peng–Robinson для ЧИСТОГО
 // компонента (Peng & Robinson 1976, doi:10.1021/i160057a011):
@@ -20,6 +21,17 @@
 // Все величины в SI: T — K, P — Pa, a — Pa*m^6/mol^2, b — m^3/mol,
 // f — Pa; Z, A, B, kappa, alpha, phi — безразмерные.
 //
+// АРХИТЕКТУРА (Stage 4.4.4.2.1, CORE_SCIENTIFIC_ENGINE.md): этот модуль
+// — фундаментальный слой Core и НЕ импортирует runtime из слоя Data.
+// Чистая математика PR принимает УЖЕ валидированные чистокомпонентные
+// параметры и evidence через PengRobinsonComponentInputs
+// (computePengRobinsonFromComponent); поиск по gasId в каталоге
+// Stage 4.4.4.1, обработка EosParametersError и прикрепление
+// provenance-скаляров каталога к результату находятся в фасаде
+// src/modules/Data/pengRobinsonFacade.ts (computePengRobinsonPure).
+// Направление зависимостей: Data -> Core (обратно запрещено);
+// цикл Core -> Data -> Core (validateUncertainty) устранён.
+//
 // ВАЖНО о выборе ветви: выбор корня 'vapor' (наибольший физически
 // допустимый корень) или 'liquid' (наименьший) — это выбор
 // МАТЕМАТИЧЕСКОЙ ветви кубического уравнения. Он сам по себе НЕ
@@ -35,51 +47,32 @@
 //                                    предупреждением о конфликте).
 // Статус UNRESOLVED не принимается НИ ПРИ КАКОЙ политике. Политика не
 // подставляется молча: отсутствующая/неизвестная политика — отказ
-// invalid_input. Статусы данных НЕ повышаются ради прохождения тестов:
-// omega всех пяти компонентов каталога — PARTIALLY_VERIFIED (CH4 —
-// UNRESOLVED_CROSS_CHECK), поэтому verified_only отказывает всем пяти,
-// allow_partial разрешает co2/n2/h2o/ar, CH4 — только при явной политике
-// allow_unresolved_cross_check.
+// invalid_input. Статусы данных НЕ повышаются ради прохождения тестов.
 //
-// НЕ реализовано в этом подэтапе (границы Stage 4.4.4.2):
+// НЕ реализовано в этом подэтапе (границы Stage 4.4.4.2/4.4.4.2.1):
 // - бинарные смеси, правила смешения, kij, PPR78 (4.4.4.3+);
 // - фугитивность смесей, VLE/LLE flash, равновесная устойчивость фаз;
 // - конденсированные фазы; интеграция с solveEquilibrium;
 // - изменение result.model = 'ideal_gas' равновесного решателя.
 //
-// Независимый программный benchmark (CoolProp, backend 'PR') в среде
-// разработки НЕ ВЫПОЛНЕН (нет доступа к CoolProp в рабочем окружении):
-// зафиксирован блокер, выполнены аналитические проверки (идеальный
-// предел, тройной корень критической точки, интегральное тождество
-// ln(phi) = интеграл (Z-1)/P dP, равенство фугитивностей ветвей на
-// PR-изобаре насыщения) — см. Tests/pengRobinson.test.ts и
-// docs/science/DATA_PROVENANCE.md §2.30. Числовые значения закрытых
-// пакетов НЕ копировались.
+// Проверки корректности (Stage 4.4.4.2.1, см. Tests/pengRobinson.test.ts
+// и docs/science/DATA_PROVENANCE.md §2.30):
+// 1) аналитические проверки (идеальный предел, тройной корень точных
+//    констант Omega, сконструированные кратные корни);
+// 2) внутренние проверки самосогласованности (интегральное тождество
+//    ln(phi) = Int (Z-1)/P dP по самой кубике, равенство фугитивностей
+//    ветвей на PR-изобаре насыщения) — рассчитаны из ТОЙ ЖЕ PR-модели
+//    и независимым программным benchmark НЕ являются;
+// 3) независимый CoolProp benchmark (backend 'PR', CoolProp==8.0.0,
+//    GitHub Actions) — scripts/benchmarks/peng_robinson_coolprop.py;
+//    выполняется отдельным workflow, в runtime-зависимости приложения
+//    CoolProp НЕ входит.
 
-import { getEosPureComponentParameters, EosParametersError } from '../Data/eosParameters';
-// R — единая константа репозитория (точное значение СИ-2019,
-// N_A·k); дубль в этом модуле НЕ создаётся.
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from './thermoFunctions';
-
-import type {
-  EosPureComponentGasId,
-  EosPureComponentParameters,
-  EosScalarParameter,
-  EosEvidenceStatus,
-  EosCrossCheck
-} from '../Data/eosParameters';
 
 // ============================================
 // 1. КОНСТАНТЫ И ТИПЫ
 // ============================================
-
-/**
- * Универсальная газовая постоянная R, J/(mol*K) — импортируется из
- * './thermoFunctions' (единый источник репозитория): точное значение
- * СИ-2019 R = N_A·k = 8.31446261815324 J/(mol*K) (постоянные Больцмана
- * и Авогадро определены точно). Локального дублирующего объявления
- * в этом модуле нет.
- */
 
 /** Константа члена притяжения a(T) классического PR (Peng & Robinson 1976). */
 export const PR_OMEGA_A = 0.45724;
@@ -121,6 +114,43 @@ export const PENG_ROBINSON_EVIDENCE_POLICIES: readonly PengRobinsonEvidencePolic
   'allow_unresolved_cross_check'
 ];
 
+/**
+ * Статус доказанности параметра, принимаемый вычислителем Core.
+ * Структурно совместим со статусами каталога Stage 4.4.4.1
+ * (EosEvidenceStatus): Core НЕ импортирует типы Data и описывает
+ * семантику статусов собственной декларацией — совпадение строковых
+ * объединений обеспечивает структурную типизацию без зависимости
+ * слоёв.
+ */
+export type PengRobinsonEvidenceStatus =
+  | 'VERIFIED'
+  | 'PARTIALLY_VERIFIED'
+  | 'UNRESOLVED_CROSS_CHECK'
+  | 'UNRESOLVED';
+
+/** Runtime-реестр статусов доказанности (для валидации входа). */
+export const PENG_ROBINSON_EVIDENCE_STATUSES: readonly PengRobinsonEvidenceStatus[] = [
+  'VERIFIED',
+  'PARTIALLY_VERIFIED',
+  'UNRESOLVED_CROSS_CHECK',
+  'UNRESOLVED'
+];
+
+/**
+ * Задокументированная сверка параметра с независимым источником
+ * (структурно совместима с EosCrossCheck каталога; outcome — строка,
+ * распознаваемое значение 'discrepancy' включает диагностику конфликта
+ * в предупреждение).
+ */
+export interface PengRobinsonCrossCheck {
+  readonly subject: string;
+  readonly catalogValue: string;
+  readonly crossSource: string;
+  readonly crossValue: string;
+  readonly outcome: string;
+  readonly resolution: string;
+}
+
 /** Устойчивые коды отказов вычислителя PR. */
 export type PengRobinsonErrorCode =
   | 'invalid_input'
@@ -157,33 +187,56 @@ export interface PengRobinsonWarning {
   readonly message: string;
 }
 
+/** Фактические статусы доказанности использованных параметров. */
+export interface PengRobinsonParameterEvidence {
+  readonly criticalTemperatureK: PengRobinsonEvidenceStatus;
+  readonly criticalPressurePa: PengRobinsonEvidenceStatus;
+  readonly acentricFactor: PengRobinsonEvidenceStatus;
+}
+
 /**
- * Запрос к чистокомпонентному вычислителю PR. Политика доказанности
- * обязательна (её отсутствие — отказ invalid_input).
+ * Валидированные чистокомпонентные входы вычислителя Core (Stage
+ * 4.4.4.2.1): числовые параметры + статусы доказанности + сверки +
+ * ограничения применимости. Каталог Data (Stage 4.4.4.1) маппится в
+ * эту структуру фасадом; Core сам по себе от каталога НЕ зависит и
+ * может использоваться с любым проверенным источником параметров.
  */
-export interface PengRobinsonPureRequest {
+export interface PengRobinsonComponentInputs {
+  /** Идентификатор компонента (используется в диагностике и предупреждении H2O). */
   readonly gasId: string;
+  readonly formula: string;
+  readonly name: string;
+  /** Критическая температура, K (> 0). */
+  readonly criticalTemperatureK: number;
+  /** Критическое давление, Pa (> 0). */
+  readonly criticalPressurePa: number;
+  /** Ацентричный фактор (безразмерный, конечный). */
+  readonly acentricFactor: number;
+  /** Статусы доказанности трёх используемых параметров. */
+  readonly evidence: PengRobinsonParameterEvidence;
+  /** Задокументированные сверки с независимыми источниками. */
+  readonly crossChecks: readonly PengRobinsonCrossCheck[];
+  /** Ограничения применимости классического PR для вещества. */
+  readonly limitations: readonly string[];
+}
+
+/** Запрос к компонентному вычислителю Core: T, P, ветвь и политика. */
+export interface PengRobinsonComponentRequest {
   readonly temperatureK: number;
   readonly pressurePa: number;
   readonly root: PengRobinsonRootBranch;
   readonly evidencePolicy: PengRobinsonEvidencePolicy;
 }
 
-/** Фактические статусы доказанности использованных параметров. */
-export interface PengRobinsonParameterEvidence {
-  readonly criticalTemperatureK: EosEvidenceStatus;
-  readonly criticalPressurePa: EosEvidenceStatus;
-  readonly acentricFactor: EosEvidenceStatus;
-}
-
 /**
- * Успешный результат: значения, промежуточные величины, корни,
- * provenance и статусы использованных параметров, предупреждения.
+ * Успешный результат вычислителя Core: значения, промежуточные
+ * величины, корни, статусы использованных параметров, предупреждения.
  * NaN/Infinity в успешном результате исключены (проверены на выходе).
+ * Provenance-скаляры каталога (per-field) прикрепляет фасад Data.
  */
-export interface PengRobinsonPureSuccess {
+export interface PengRobinsonComponentSuccess {
   readonly status: 'success';
-  readonly gasId: EosPureComponentGasId;
+  readonly gasId: string;
   readonly formula: string;
   readonly name: string;
   readonly temperatureK: number;
@@ -191,10 +244,6 @@ export interface PengRobinsonPureSuccess {
   readonly root: PengRobinsonRootBranch;
   readonly evidencePolicy: PengRobinsonEvidencePolicy;
 
-  // Использованные параметры каталога (с per-field provenance).
-  readonly criticalTemperatureK: EosScalarParameter;
-  readonly criticalPressurePa: EosScalarParameter;
-  readonly acentricFactor: EosScalarParameter;
   readonly evidence: PengRobinsonParameterEvidence;
 
   // Промежуточные величины PR (SI / безразмерные).
@@ -225,7 +274,7 @@ export interface PengRobinsonPureSuccess {
 }
 
 /** Отказ: устойчивый код + диагностика. */
-export interface PengRobinsonPureFailure {
+export interface PengRobinsonComponentFailure {
   readonly status: 'failure';
   readonly code: PengRobinsonErrorCode;
   readonly message: string;
@@ -233,8 +282,10 @@ export interface PengRobinsonPureFailure {
   readonly detail?: string;
 }
 
-/** Discriminated union результата. */
-export type PengRobinsonPureResult = PengRobinsonPureSuccess | PengRobinsonPureFailure;
+/** Discriminated union результата вычислителя Core. */
+export type PengRobinsonComponentResult =
+  | PengRobinsonComponentSuccess
+  | PengRobinsonComponentFailure;
 
 // ============================================
 // 2. КУБИЧЕСКОЕ УРАВНЕНИЕ PR (НИЗКОУРОВНЕВЫЕ ХЕЛПЕРЫ)
@@ -271,27 +322,64 @@ export type PrCubicRealRootsResult =
   | { readonly ok: false; readonly reason: string };
 
 /**
- * Действительные корни кубического уравнения PR.
+ * Действительные корни кубического уравнения PR (Stage 4.4.4.2.1:
+ * исправлена классификация знака дискриминанта около кратных корней).
  *
- * Численная устойчивость:
- * - приведение к депрессированному виду y^3 + p y + q (z = y + (1-B)/3);
- * - при p < 0 и |arg| <= 1 — тригонометрический метод (три корня);
- * - при p < 0 и |arg| > 1 — ГИПЕРБОЛИЧЕСКИЙ метод (единственный
- *   действительный корень): y = -2 sgn(q) sqrt(-p/3) cosh(acosh(|arg|)/3).
- *   Прямой Cardano здесь теряет точность из-за катастрофического
- *   сокращения в -q/2 +- sqrt(D) около кратных корней;
- * - масштабированный дискриминант: если D = (q/2)^2 + (p/3)^3
- *   близок к нулю относительно max((q/2)^2, |p/3|^3) (допуск 1e-12),
- *   используется тригонометрическая ветвь с клампом аргумента —
- *   почти кратные корни около критической области не «теряются»;
- * - при p >= 0 — Cardano (дискриминант неотрицателен, сокращение
- *   не катастрофично);
- * - невязка полинома проверяется для КАЖДОГО корня относительно
- *   масштаба коэффициентов; недопустимая невязка — отказ;
- * - дедупликация кратных корней с допуском
- *   1e-8 * max(1, |z_max|, B) (обоснование: ошибка кратного корня
- *   при двойной точности ~ sqrt(eps) ~ 1.5e-8);
- * - неконечные A/B дают отказ (не выдумываем значения).
+ * Математика: для депрессированной формы y^3 + p*y + q (z = y + shift,
+ * shift = (1-B)/3) дискриминант D = (q/2)^2 + (p/3)^3 задаёт число
+ * действительных корней: D > 0 — ровно ОДИН (пара комплексных),
+ * D < 0 — ровно ТРИ, D = 0 — кратный корень.
+ *
+ * Классификация по знаку с ЯВНОЙ границей ошибки (Stage 4.4.4.2.1).
+ * Дискриминант вычисляется в double из коэффициентов c0..c2 и несёт
+ * ошибку округления; его знак около нуля неопределим без оценки
+ * границы. Раньше условие «D <= 1e-12 * scale» направляло и случаи с
+ * уверенно ПОЛОЖИТЕЛЬНЫМ D в тригонометрическую ветвь, а кламп acos
+ * создавал ФИКТИВНЫЙ повторный действительный корень: например, при
+ * A = 0.13130582290411344, B = 0.01980480623881198 математически
+ * существует ровно один действительный корень (0.88019…), а старый
+ * решатель возвращал и второй «корень» у 0.05, который больше B и
+ * становился ложной liquid-ветвью. Кламп аргумента acos допустим
+ * ТОЛЬКО когда число корней = 3 уже доказано знаком D < -discErr.
+ *
+ * Граница ошибки D оценивается через дифференциалы: p несёт ошибку
+ * ~8*eps*(|c1| + |c2^2/3|), q — ~8*eps*(2|c2^3|/27 + |c1*c2|/3 +
+ * |c0|); тогда discErr = |p^2/9|*pErr + |q/2|*qErr + 8*eps*discScale,
+ * discScale = |(q/2)^2| + |(p/3)^3|. Знак считается установленным
+ * только при |D| > discErr: уверенно положительный D НЕ превращается
+ * в ноль и мнимых действительных корней не создаёт.
+ *
+ * Ветви решателя:
+ * - p < 0, D > discErr: ОДИН корень. |arg| >= 1 — гиперболический
+ *   метод y = -2*sgn(q)*sqrt(-p/3)*cosh(acosh(|arg|)/3) (без
+ *   катастрофического сокращения Cardano около кратных корней);
+ *   |arg| < 1 (округление сместило аргумент при доказанном D > 0) —
+ *   стабильный Cardano (см. ниже);
+ * - p < 0, D < -discErr: ТРИ корня, тригонометрический метод; кламп
+ *   аргумента в [-1, 1] допустим — число корней доказано знаком D;
+ * - p < 0, |D| <= discErr: ПОЛОСА кратного корня — численно неопределимый
+ *   знак. Мнимые корни не выдумываются и не теряются: кратный корень
+ *   вычисляется как критическая точка полинома с меньшей |c(z)| из
+ *   двух (z = (-c2 ± sqrt(c2^2 - 3c1))/3), третий корень — по Виету
+ *   (-c2 - 2*z_double); при dd <= 0 (почти тройной корень) — центр
+ *   кластера -c2/3. Корни в z-координатах, сдвиг shift НЕ добавляется.
+ *   Дедупликация ниже схлопывает совпавшие в пределах точности корни;
+ *   число РАЗЛИЧИМЫХ корней честно отражает численную разрешимость;
+ * - p >= 0: D >= 0 всегда, СТАБИЛЬНЫЙ Cardano: из двух кубических
+ *   корней выбирается больший по модулю (big = -q/2 + sqrt(D) при
+ *   q <= 0, иначе -q/2 - sqrt(D)) — слагаемые одного знака без
+ *   сокращения; второй корень по Виету: y = w - (p/3)/w. Прямой
+ *   Cardano (cbrt(-q/2+sr) + cbrt(-q/2-sr)) при p -> 0+ теряет до
+ *   ~1.5e-7 точности катастрофическим сокращением.
+ *
+ * Дополнительно: невязка полинома проверяется для КАЖДОГО корня
+ * относительно масштаба коэффициентов (но невязка сама по себе НЕ
+ * является доказательством действительности корня — у фиктивного
+ * корня из тригонометрической ветви со сплющенным acos невязка тоже
+ * мала; действительность гарантирует только классификация по знаку D
+ * с границей ошибки); дедупликация кратных корней с допуском
+ * 1e-8*max(1, |z_max|, B) (ошибка кратного корня в double ~
+ * sqrt(eps) ~ 1.5e-8); неконечные A/B — отказ.
  */
 export function solvePrCubicRealRoots(
   dimensionlessA: number,
@@ -303,19 +391,52 @@ export function solvePrCubicRealRoots(
   const { c0, c1, c2 } = pengRobinsonCubicCoefficients(dimensionlessA, dimensionlessB);
   const p = c1 - (c2 * c2) / 3;
   const q = (2 * c2 * c2 * c2) / 27 - (c1 * c2) / 3 + c0;
+  const shift = (1 - dimensionlessB) / 3;
 
   const rawRoots: number[] = [];
+  // Полоса кратного корня возвращает корни сразу в z-координатах;
+  // остальные ветви — в y-координатах (требуется сдвиг shift).
+  let rawRootsInZCoordinates = false;
+
   if (p < 0) {
-    // Отношение, задающее тригонометрическую/гиперболическую ветвь.
     const arg = ((3 * q) / (2 * p)) * Math.sqrt(-3 / p);
-    // Масштабированный дискриминант: почти кратные корни обрабатываются
-    // тригонометрической ветвью с клампом аргумента.
     const qHalfSquared = (q / 2) * (q / 2);
     const pThirdCubed = (p / 3) * (p / 3) * (p / 3);
-    const discScale = Math.max(Math.abs(qHalfSquared), Math.abs(pThirdCubed), 1e-300);
+    const discScale = Math.abs(qHalfSquared) + Math.abs(pThirdCubed);
     const discriminant = qHalfSquared + pThirdCubed;
-    if (Math.abs(arg) <= 1 || discriminant <= 1e-12 * discScale) {
-      // Три действительных корня (кламп arg — только защита от округления).
+    // Границы ошибок округления p, q и дискриминанта (Stage 4.4.4.2.1).
+    const pErr = 8 * Number.EPSILON * (Math.abs(c1) + Math.abs((c2 * c2) / 3));
+    const qErr =
+      8 * Number.EPSILON *
+      ((2 * Math.abs(c2 * c2 * c2)) / 27 + Math.abs((c1 * c2) / 3) + Math.abs(c0));
+    const discErr =
+      Math.abs((p * p) / 9) * pErr + Math.abs(q / 2) * qErr +
+      8 * Number.EPSILON * Math.max(discScale, 1e-300);
+
+    if (discriminant > discErr) {
+      // Уверенно ПОЛОЖИТЕЛЬНЫЙ дискриминант: ровно ОДИН действительный
+      // корень. Никаких фиктивных повторных корней.
+      const h = Math.abs(arg);
+      if (h >= 1) {
+        rawRoots.push(
+          -2 * Math.sign(q) * Math.sqrt(-p / 3) * Math.cosh(Math.acosh(h) / 3)
+        );
+      } else {
+        // Округление сместило arg < 1 при доказанном D > discErr:
+        // стабильный Cardano (без клампа, сохраняющего один корень).
+        const squareRoot = Math.sqrt(Math.max(0, discriminant));
+        const big = q <= 0 ? -q / 2 + squareRoot : -q / 2 - squareRoot;
+        if (big === 0) {
+          rawRoots.push(0);
+        } else {
+          const w = Math.cbrt(big);
+          rawRoots.push(w - (p / 3) / w);
+        }
+      }
+    } else if (discriminant < -discErr) {
+      // Уверенно ОТРИЦАТЕЛЬНЫЙ дискриминант: ровно ТРИ действительных
+      // корня — кламп arg в [-1, 1] допустим (число корней доказано
+      // знаком D), это защита только от округления аргумента.
       const clamped = Math.max(-1, Math.min(1, arg));
       const theta = Math.acos(clamped) / 3;
       const amplitude = 2 * Math.sqrt(-p / 3);
@@ -323,23 +444,48 @@ export function solvePrCubicRealRoots(
         rawRoots.push(amplitude * Math.cos(theta - (2 * Math.PI * k) / 3));
       }
     } else {
-      // Единственный действительный корень: гиперболический метод без
-      // катастрофического сокращения (устойчив около кратных корней).
-      const h = Math.abs(arg);
-      rawRoots.push(
-        -2 * Math.sign(q) * Math.sqrt(-p / 3) * Math.cosh(Math.acosh(h) / 3)
-      );
+      // ПОЛОСА кратного корня: |D| <= discErr — знак численно
+      // неопределим. Кратный корень — критическая точка полинома
+      // (меньшая |c(z)| из двух), третий корень — по Виету. Корни
+      // сразу в z-координатах: сдвиг shift НЕ добавляется.
+      rawRootsInZCoordinates = true;
+      const derivativeDiscriminant = c2 * c2 - 3 * c1;
+      if (derivativeDiscriminant > 0) {
+        const sqrtDd = Math.sqrt(derivativeDiscriminant);
+        // Корни производной 3z^2 + 2c2 z + c1: больший по модулю
+        // выбирается без сокращения; второй — по Виету (c1/(3*z1)).
+        const qq = c2 >= 0 ? -(c2 + sqrtDd) : -(c2 - sqrtDd);
+        const zc1 = qq / 3;
+        const zc2 = c1 / qq;
+        const polynomial = (z: number): number => z * z * z + c2 * z * z + c1 * z + c0;
+        const zDouble =
+          Math.abs(polynomial(zc1)) <= Math.abs(polynomial(zc2)) ? zc1 : zc2;
+        rawRoots.push(zDouble, -c2 - 2 * zDouble);
+      } else {
+        // Почти тройной корень: центр кластера (для PR = (1-B)/3).
+        rawRoots.push(-c2 / 3);
+      }
     }
   } else {
-    // p >= 0: дискриминант неотрицателен, Cardano устойчив.
+    // p >= 0: дискриминант неотрицателен, ровно один действительный
+    // корень. Стабильный Cardano: слагаемые одного знака + Виет.
     const discriminant = (q / 2) * (q / 2) + (p / 3) * (p / 3) * (p / 3);
-    const squareRoot = Math.sqrt(discriminant);
-    rawRoots.push(Math.cbrt(-q / 2 + squareRoot) + Math.cbrt(-q / 2 - squareRoot));
+    const squareRoot = Math.sqrt(Math.max(0, discriminant));
+    const big = q <= 0 ? -q / 2 + squareRoot : -q / 2 - squareRoot;
+    if (big === 0) {
+      // q = 0 и p = 0: тройной корень y = 0.
+      rawRoots.push(0);
+    } else {
+      const w = Math.cbrt(big);
+      rawRoots.push(w - (p / 3) / w);
+    }
   }
 
-  // Возврат к z и проверка невязки каждого корня.
-  const shift = (1 - dimensionlessB) / 3;
-  const candidates = rawRoots.map((y) => y + shift);
+  // Возврат к z (только для ветвей в y-координатах) и проверка невязки
+  // каждого корня относительно масштаба коэффициентов.
+  const candidates = rawRootsInZCoordinates
+    ? rawRoots
+    : rawRoots.map((y) => y + shift);
   const coefficientScale = Math.max(1, Math.abs(c2), Math.abs(c1), Math.abs(c0));
   for (const z of candidates) {
     if (!Number.isFinite(z)) {
@@ -448,24 +594,15 @@ export function pengRobinsonLnPhi(
 // 4. ПОЛИТИКА ДОКАЗАННОСТИ И ПРЕДУПРЕЖДЕНИЯ
 // ============================================
 
-/** Статусы параметров записи каталога. */
-function parameterEvidence(record: EosPureComponentParameters): PengRobinsonParameterEvidence {
-  return {
-    criticalTemperatureK: record.criticalTemperatureK.provenance.evidence,
-    criticalPressurePa: record.criticalPressurePa.provenance.evidence,
-    acentricFactor: record.acentricFactor.provenance.evidence
-  };
-}
-
 /** Описание параметра для диагностик. */
 type EvidenceFieldName = 'criticalTemperatureK' | 'criticalPressurePa' | 'acentricFactor';
 
 /** Проверка статуса параметра против политики; собирает отказы и предупреждения. */
 function evaluateEvidencePolicy(
-  record: EosPureComponentParameters,
+  inputs: PengRobinsonComponentInputs,
   policy: PengRobinsonEvidencePolicy
 ): { rejected: readonly string[]; warnings: readonly PengRobinsonWarning[] } {
-  const evidence = parameterEvidence(record);
+  const evidence = inputs.evidence;
   const rejected: string[] = [];
   const warnings: PengRobinsonWarning[] = [];
   const fields: readonly EvidenceFieldName[] = [
@@ -493,8 +630,8 @@ function evaluateEvidencePolicy(
     }
     if (status === 'UNRESOLVED_CROSS_CHECK') {
       if (policy === 'allow_unresolved_cross_check') {
-        const conflicts = record.crossChecks.filter(
-          (cc: EosCrossCheck) => cc.outcome === 'discrepancy'
+        const conflicts = inputs.crossChecks.filter(
+          (cc: PengRobinsonCrossCheck) => cc.outcome === 'discrepancy'
         );
         const conflictDetails = conflicts
           .map((cc) => `${cc.subject}: каталог ${cc.catalogValue} против ${cc.crossSource}: ${cc.crossValue} (исход ${cc.outcome}); ${cc.resolution}`)
@@ -520,7 +657,7 @@ function evaluateEvidencePolicy(
 }
 
 // ============================================
-// 5. ПУБЛИЧНЫЙ ВЫЧИСЛИТЕЛЬ
+// 5. ПУБЛИЧНЫЙ КОМПОНЕНТНЫЙ ВЫЧИСЛИТЕЛЬ CORE
 // ============================================
 
 /** Дисклеймер о математическом характере выбора ветви (в каждом успехе). */
@@ -536,24 +673,20 @@ function isFiniteNumber(x: unknown): x is number {
 }
 
 /**
- * Чистокомпонентный вычислитель Peng–Robinson: Z, phi и фугитивность
- * для co2/n2/ch4/h2o/ar из каталога Stage 4.4.4.1.
- *
- * Требования к запросу: gasId — строка из каталога; T > 0 и P > 0
- * конечны; root — 'vapor' | 'liquid'; evidencePolicy — ЯВНО указана.
- * Отказы fail-closed: неизвестный компонент, непринятые статусы
- * доказанности, отсутствие физического корня, численные проблемы.
- * Успех никогда не содержит NaN/Infinity.
+ * Валидация запроса (T, P, ветвь, политика) — общая для компонентного
+ * вычислителя Core и фасада Data (Stage 4.4.4.2.1): сообщения об
+ * ошибках едины, дублирования текста нет. Возвращает отказ
+ * invalid_input или null при корректном запросе. gasId проверяет
+ * вызывающая сторона (фасад — с текстом каталога 4.4.4.1).
  */
-export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengRobinsonPureResult {
-  // --- Валидация входа (invalid_input) ---
-  if (typeof request.gasId !== 'string' || request.gasId.trim() === '') {
+export function validatePengRobinsonComponentRequest(
+  request: PengRobinsonComponentRequest
+): PengRobinsonComponentFailure | null {
+  if (request === null || typeof request !== 'object') {
     return {
       status: 'failure',
       code: 'invalid_input',
-      message:
-        `gasId должен быть непустой строкой, получено: ${String(request.gasId)}; ` +
-        `каталог PR 4.4.4.1: co2, n2, ch4, h2o, ar (h2 исключён)`
+      message: 'запрос должен быть объектом {temperatureK, pressurePa, root, evidencePolicy}'
     };
   }
   if (!isFiniteNumber(request.temperatureK) || request.temperatureK <= 0) {
@@ -587,56 +720,120 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
         `${PENG_ROBINSON_EVIDENCE_POLICIES.join(', ')}; получено: ${String(request.evidencePolicy)}`
     };
   }
+  return null;
+}
 
-  // --- Lookup каталога (fail-closed) ---
-  let record: EosPureComponentParameters;
-  try {
-    record = getEosPureComponentParameters(request.gasId);
-  } catch (error) {
-    if (error instanceof EosParametersError) {
-      if (error.code === 'unknown_gas') {
-        return {
-          status: 'failure',
-          code: 'unknown_component',
-          message: error.message,
-          gasId: request.gasId,
-          detail: `h2 и компоненты вне каталога Stage 4.4.4.1 не поддерживаются чистокомпонентным PR`
-        };
-      }
-      return {
-        status: 'failure',
-        code: 'invalid_parameters',
-        message: error.message,
-        gasId: request.gasId,
-        detail: error.issues.join('; ')
-      };
-    }
-    throw error;
+/**
+ * Чистокомпонентный вычислитель Peng–Robinson слоя Core (Stage
+ * 4.4.4.2.1): принимает УЖЕ валидированные числовые параметры
+ * компонента и evidence — БЕЗ обращения к каталогу Data. Поиск по
+ * gasId (каталог Stage 4.4.4.1) выполняет фасад
+ * Data/pengRobinsonFacade.ts; Core может использоваться и с другими
+ * проверенными источниками параметров.
+ *
+ * Контракт входов: gasId — непустая строка; Tc > 0, Pc > 0, omega —
+ * конечны; evidence — три статуса из реестра; crossChecks/limitations —
+ * массивы. Некорректные параметры — отказ invalid_parameters (fail-
+ * closed: подстановок и «частично готовых» наборов нет).
+ * Успех никогда не содержит NaN/Infinity.
+ */
+export function computePengRobinsonFromComponent(
+  inputs: PengRobinsonComponentInputs,
+  request: PengRobinsonComponentRequest
+): PengRobinsonComponentResult {
+  // --- Валидация запроса (invalid_input) ---
+  const requestFailure = validatePengRobinsonComponentRequest(request);
+  if (requestFailure !== null) {
+    return requestFailure;
+  }
+
+  // --- Валидация параметров компонента (invalid_parameters) ---
+  if (inputs === null || typeof inputs !== 'object') {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: 'inputs должен быть объектом PengRobinsonComponentInputs'
+    };
+  }
+  if (typeof inputs.gasId !== 'string' || inputs.gasId.trim() === '') {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: `inputs.gasId должен быть непустой строкой, получено: ${String(inputs.gasId)}`
+    };
+  }
+  if (!isFiniteNumber(inputs.criticalTemperatureK) || inputs.criticalTemperatureK <= 0) {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: `criticalTemperatureK должен быть конечным положительным числом (K), получено: ${String(inputs.criticalTemperatureK)}`,
+      gasId: inputs.gasId
+    };
+  }
+  if (!isFiniteNumber(inputs.criticalPressurePa) || inputs.criticalPressurePa <= 0) {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: `criticalPressurePa должен быть конечным положительным числом (Pa), получено: ${String(inputs.criticalPressurePa)}`,
+      gasId: inputs.gasId
+    };
+  }
+  if (!isFiniteNumber(inputs.acentricFactor)) {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: `acentricFactor должен быть конечным числом (безразмерным), получено: ${String(inputs.acentricFactor)}`,
+      gasId: inputs.gasId
+    };
+  }
+  if (
+    inputs.evidence === null || typeof inputs.evidence !== 'object' ||
+    !PENG_ROBINSON_EVIDENCE_STATUSES.includes(inputs.evidence.criticalTemperatureK) ||
+    !PENG_ROBINSON_EVIDENCE_STATUSES.includes(inputs.evidence.criticalPressurePa) ||
+    !PENG_ROBINSON_EVIDENCE_STATUSES.includes(inputs.evidence.acentricFactor)
+  ) {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: 'evidence должен содержать статусы доказанности всех трёх параметров из реестра PENG_ROBINSON_EVIDENCE_STATUSES',
+      gasId: inputs.gasId
+    };
+  }
+  if (!Array.isArray(inputs.crossChecks) || !Array.isArray(inputs.limitations)) {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: 'crossChecks и limitations должны быть массивами',
+      gasId: inputs.gasId
+    };
   }
 
   // --- Политика доказанности параметров ---
-  const { rejected, warnings } = evaluateEvidencePolicy(record, request.evidencePolicy);
+  const { rejected, warnings } = evaluateEvidencePolicy(inputs, request.evidencePolicy);
   if (rejected.length > 0) {
     return {
       status: 'failure',
       code: 'parameter_evidence_not_accepted',
       message:
         `политика «${request.evidencePolicy}» не принимает статусы доказанности ` +
-        `параметров компонента «${request.gasId}»: ${rejected.join(', ')}. ` +
+        `параметров компонента «${inputs.gasId}»: ${rejected.join(', ')}. ` +
         `Политики: verified_only — только VERIFIED; allow_partial — +PARTIALLY_VERIFIED; ` +
         `allow_unresolved_cross_check — +UNRESOLVED_CROSS_CHECK. ` +
         `Статус UNRESOLVED не принимается ни одной политикой. ` +
         `Статусы данных не повышаются: используйте явную политику или другой источник данных.`,
-      gasId: request.gasId,
+      gasId: inputs.gasId,
       detail: rejected.join(', ')
     };
   }
 
   // --- Промежуточные величины PR ---
-  const Tc = record.criticalTemperatureK.value;
-  const Pc = record.criticalPressurePa.value;
-  const omega = record.acentricFactor.value;
-  const intermediate = computePengRobinsonPureParameters(Tc, Pc, omega, request.temperatureK, request.pressurePa);
+  const intermediate = computePengRobinsonPureParameters(
+    inputs.criticalTemperatureK,
+    inputs.criticalPressurePa,
+    inputs.acentricFactor,
+    request.temperatureK,
+    request.pressurePa
+  );
   const finiteIntermediate =
     Number.isFinite(intermediate.kappa) &&
     Number.isFinite(intermediate.alpha) &&
@@ -653,9 +850,9 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
       status: 'failure',
       code: 'numerical_failure',
       message:
-        `неконечные промежуточные величины PR для «${request.gasId}» при ` +
+        `неконечные промежуточные величины PR для «${inputs.gasId}» при ` +
         `T=${request.temperatureK} K, P=${request.pressurePa} Pa; надёжный расчёт невозможен`,
-      gasId: request.gasId
+      gasId: inputs.gasId
     };
   }
 
@@ -665,8 +862,8 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
     return {
       status: 'failure',
       code: 'cubic_solver_failure',
-      message: `кубическое уравнение PR не решено надёжно для «${request.gasId}»: ${cubic.reason}`,
-      gasId: request.gasId
+      message: `кубическое уравнение PR не решено надёжно для «${inputs.gasId}»: ${cubic.reason}`,
+      gasId: inputs.gasId
     };
   }
   const physical = prPhysicalRoots(cubic.roots, intermediate.dimensionlessB);
@@ -676,8 +873,8 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
       code: 'no_physical_root',
       message:
         `нет физически допустимых корней (Z > B=${intermediate.dimensionlessB}) ` +
-        `для «${request.gasId}» при T=${request.temperatureK} K, P=${request.pressurePa} Pa`,
-      gasId: request.gasId,
+        `для «${inputs.gasId}» при T=${request.temperatureK} K, P=${request.pressurePa} Pa`,
+      gasId: inputs.gasId,
       detail: `действительные корни: ${cubic.roots.join(', ')}`
     };
   }
@@ -696,13 +893,14 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
   }
   // H2O: классический PR для полярного ассоциирующего компонента — всегда
   // с предупреждением (математический расчёт возможен, точным описанием
-  // воды результат НЕ является).
-  if (request.gasId === 'h2o') {
+  // воды результат НЕ является). Идентификация — по gasId входов;
+  // ограничения применимости переданы вызывающей стороной (каталогом).
+  if (inputs.gasId === 'h2o') {
     resultWarnings.push({
       code: 'h2o_classical_pr_limitations',
       message:
         `H2O — полярный ассоциирующий компонент: классический PR без специальных ` +
-        `модификаций ограниченно применим (ограничения каталога: ${record.limitations.join(' ')})`
+        `модификаций ограниченно применим (ограничения каталога: ${inputs.limitations.join(' ')})`
     });
   }
 
@@ -713,9 +911,9 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
       status: 'failure',
       code: 'logarithm_domain_error',
       message:
-        `ln(phi) вне области определения для «${request.gasId}» ` +
+        `ln(phi) вне области определения для «${inputs.gasId}» ` +
         `(корень Z=${selectedRoot}, B=${intermediate.dimensionlessB})`,
-      gasId: request.gasId
+      gasId: inputs.gasId
     };
   }
   const phi = Math.exp(lnPhi);
@@ -725,26 +923,23 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
       status: 'failure',
       code: 'numerical_failure',
       message:
-        `неконечный результат для «${request.gasId}»: ln(phi)=${lnPhi}, phi=${String(phi)}, ` +
+        `неконечный результат для «${inputs.gasId}»: ln(phi)=${lnPhi}, phi=${String(phi)}, ` +
         `f=${String(fugacityPa)}; надёжный расчёт невозможен`,
-      gasId: request.gasId
+      gasId: inputs.gasId
     };
   }
 
   return {
     status: 'success',
-    gasId: record.gasId as EosPureComponentGasId,
-    formula: record.formula,
-    name: record.name,
+    gasId: inputs.gasId,
+    formula: inputs.formula,
+    name: inputs.name,
     temperatureK: request.temperatureK,
     pressurePa: request.pressurePa,
     root: request.root,
     evidencePolicy: request.evidencePolicy,
 
-    criticalTemperatureK: record.criticalTemperatureK,
-    criticalPressurePa: record.criticalPressurePa,
-    acentricFactor: record.acentricFactor,
-    evidence: parameterEvidence(record),
+    evidence: inputs.evidence,
 
     kappa: intermediate.kappa,
     alpha: intermediate.alpha,
@@ -768,3 +963,12 @@ export function computePengRobinsonPure(request: PengRobinsonPureRequest): PengR
     notes: [BRANCH_SELECTION_NOTE]
   };
 }
+
+// ============================================
+// 6. ГРАНИЦЫ МОДУЛЯ
+// ============================================
+//
+// Stage 4.4.4.2/4.4.4.2.1 — чистая математика PR чистого компонента.
+// Границы: смеси/kij/flash/фазовая устойчивость — 4.4.4.3+; lookup
+// каталога и provenance-скаляры — Data/pengRobinsonFacade.ts;
+// интеграция с solveEquilibrium — вне объёма подэтапа.
