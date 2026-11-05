@@ -212,6 +212,23 @@ export function computePengRobinsonMixtureFromCatalog(
       };
     }
   }
+  // Уникальность gasId: дублированный компонент — invalid_composition
+  // (проверка ДО lookup параметров и kij; доли обязаны быть агрегированы
+  // вызывающим кодом заранее — слияния дублей и нормализации нет).
+  const seenGasIds = new Set<string>();
+  for (const entry of request.composition) {
+    if (seenGasIds.has(entry.gasId)) {
+      return {
+        status: 'failure',
+        code: 'invalid_composition',
+        message:
+          `компонент «${entry.gasId}» встречается в составе более одного раза: ` +
+          `состав должен содержать уникальные компоненты (дублирование не допускается; ` +
+          `доли обязаны быть агрегированы заранее, нормализации нет)`
+      };
+    }
+    seenGasIds.add(entry.gasId);
+  }
 
   // --- Lookup чистокомпонентных параметров (fail-closed) ---
   const componentRecords: { record: EosPureComponentParameters; moleFraction: number }[] = [];

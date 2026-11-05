@@ -297,9 +297,12 @@ describe('Stage 4.4.4.3: идеальный предел P -> 0', () => {
     for (const c of s.components) {
       expect(Math.abs(c.lnPhi)).toBeLessThan(1e-7);
       expect(Math.abs(c.phi - 1)).toBeLessThan(1e-7);
-      // f_i -> x_i P (phi_i -> 1).
-      expect(Math.abs(c.fugacityPa - c.moleFraction * s.pressurePa))
-        .toBeLessThan(1e-12);
+      // f_i -> x_i P (phi_i -> 1): проверка ОТНОСИТЕЛЬНО, т.к. сходимость
+      // к идеальному пределу линейна по P — при P = 1 Па величины
+      // A, B ~ 1e-8, |phi_i - 1| ~ 4e-8 (а не 1e-12).
+      expect(
+        Math.abs(c.fugacityPa / (c.moleFraction * s.pressurePa) - 1)
+      ).toBeLessThan(1e-7);
     }
   });
 
