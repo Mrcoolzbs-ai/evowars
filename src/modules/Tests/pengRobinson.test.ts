@@ -1081,8 +1081,11 @@ describe('Stage 4.4.4.2.1: архитектурная граница Core/Data',
   };
 
   const syntheticRequest = (overrides: Partial<PengRobinsonComponentRequest> = {}): PengRobinsonComponentRequest => ({
-    temperatureK: 250,
-    pressurePa: 1e6,
+    // 150 K < Tc = 200 K и P = 1.5e6 Pa — внутри купола: три
+    // действительных корня, все физически допустимые (без
+    // предупреждения single_physical_root).
+    temperatureK: 150,
+    pressurePa: 1.5e6,
     root: 'vapor',
     evidencePolicy: 'verified_only',
     ...overrides
@@ -1096,8 +1099,16 @@ describe('Stage 4.4.4.2.1: архитектурная граница Core/Data',
     expect(s.gasId).toBe('synthetic');
     expect(s.formula).toBe('XeSyn');
     expect(s.evidence.acentricFactor).toBe('VERIFIED');
+    // Три физически допустимых корня — предупреждений нет.
+    expect(s.realRoots).toHaveLength(3);
+    expect(s.physicalRoots).toHaveLength(3);
+    expect(s.hasDistinctBranches).toBe(true);
     expect(s.warnings).toHaveLength(0);
-    expect(s.Z).toBeGreaterThan(0.9);
+    // Vapor — наибольший физический корень; сжатие существенно.
+    expect(s.Z).toBe(s.selectedRoot);
+    expect(s.Z).toBe(s.physicalRoots[s.physicalRoots.length - 1]);
+    expect(s.Z).toBeGreaterThan(0.5);
+    expect(s.Z).toBeLessThan(1);
     expect(s.notes.join(' ')).toContain('НЕ доказывает');
   });
 
