@@ -103,7 +103,9 @@ export type {
  * вычислителя (4.4.4.2) сохраняют смысл; добавлены смесевые:
  * invalid_composition (состав), missing_binary_interaction (нет kij),
  * asymmetric_binary_interaction (kij != kji), binary_interaction_
- * applicability (T вне верифицированного диапазона подгонки kij).
+ * applicability (T вне верифицированного диапазона подгонки kij),
+ * degenerate_attraction_limit (Stage 4.4.4.3.1: a_mix = 0 при НЕ ВСЕХ
+ * нулевых a_i — вырожденная компенсация члена притяжения).
  */
 export type PengRobinsonMixtureErrorCode =
   | 'invalid_input'
@@ -117,6 +119,7 @@ export type PengRobinsonMixtureErrorCode =
   | 'no_physical_root'
   | 'cubic_solver_failure'
   | 'logarithm_domain_error'
+  | 'degenerate_attraction_limit'
   | 'numerical_failure';
 
 /** Реестр кодов отказов. */
@@ -132,6 +135,7 @@ export const PENG_ROBINSON_MIXTURE_ERROR_CODES: readonly PengRobinsonMixtureErro
   'no_physical_root',
   'cubic_solver_failure',
   'logarithm_domain_error',
+  'degenerate_attraction_limit',
   'numerical_failure'
 ];
 
@@ -175,6 +179,20 @@ export const PENG_ROBINSON_MIXTURE_BRANCH_NOTE: string =
   'доказывает термодинамическую устойчивость фазы и НЕ заменяет flash, ' +
   'VLE/LLE или сравнение энергий Гиббса/фугитивностей фаз (не реализовано ' +
   'в Stage 4.4.4.3).';
+
+/**
+ * Примечание о точном нулевом пределе a_mix (Stage 4.4.4.3.1):
+ * прикрепляется к успеху, когда a_mix = 0 при ВСЕХ нулевых a_i
+ * (воспроизводимый случай: alpha(T) = 0 ровно в binary64).
+ */
+export const PENG_ROBINSON_MIXTURE_ZERO_ATTRACTION_NOTE: string =
+  'Stage 4.4.4.3.1: точный нулевой предел a_mix (a_mix = 0 при всех ' +
+  'a_i = 0, например alpha(T) = 0 ровно в binary64): ln(phi_i) вычислен ' +
+  'ТОЧНОЙ предельной формой (b_i/b_mix)*(Z - 1) - ln(Z - B_mix) без ' +
+  'члена притяжения (A_mix = 0; S_i/a_mix не вычисляется). Это точное ' +
+  'значение, не приближение; вырожденная компенсация (a_mix = 0 при ' +
+  'ненулевых a_i) отказывает кодом degenerate_attraction_limit; ' +
+  'epsilon-порог НЕ вводится (малые ненулевые a_mix идут общим путём).';
 
 /**
  * Компонент смеси на входе Core: валидированные чистокомпонентные
@@ -1005,7 +1023,10 @@ export function computePengRobinsonMixture(
       message:
         'H2O — полярный ассоциирующий компонент: классический PR без специальных модификаций ' +
         'ограниченно применим к водным смесям; результат — в рамках классической PR-модели и не ' +
-        'является точным описанием водной смеси'
+        'является точным описанием водной смеси. Постоянный (температурно-независимый) BIP ' +
+        'классического PR качественно НЕ воспроизводит константы Генри газов (H2, N2, O2, Ar) ' +
+        'в воде (Köster, Thol & Vrabec 2018, Supplementary Section 4): растворимость N2 в воде ' +
+        'этой моделью НЕ предсказывается'
     });
   }
 
@@ -1024,6 +1045,41 @@ export function computePengRobinsonMixture(
         `надёжный расчёт невозможен`
     };
   }
+  // --- Точный нулевой предел a_mix (Stage 4.4.4.3.1) ---
+  // Воспроизводимый случай (N2, T = 1388.2195230363366 K): alpha(T)
+  // вычисляется в binary64 РОВНО в 0, поэтому a_i = a_mix = S_i =
+  // A_mix = 0 при b_mix > 0, B_mix > 0. Прямая подстановка даёт
+  // 2*S_i/a_mix = 0/0 = NaN и ошибочный отказ logarithm_domain_error
+  // (0 * NaN в члене притяжения). Математика предела: если a_mix = 0 и
+  // ВСЕ компонентные a_i = 0, то все a_ij = 0 и S_i = 0, член
+  // притяжения A_mix/(2*sqrt(2)*B_mix)*(2*S_i/a_mix - b_i/b_mix)*
+  // logRatio равен нулю ТОЧНО (A_mix = 0 при конечном logRatio), и
+  //   ln(phi_i) = (b_i/b_mix)*(Z - 1) - ln(Z - B_mix)
+  // — та же форма, что у чистого pengRobinsonLnPhi при A = 0
+  // (побитово совпадает с чистым PR в однокомпонентном пределе; Z —
+  // корень той же кубики с A_mix = 0). Если же a_mix = 0 при НЕ ВСЕХ
+  // нулевых a_i (вырожденная компенсация кросс-членов
+  // (1-kij)*sqrt(a_i*a_j) или ненулевой a_i у компонента с нулевой
+  // долей), предельная форма НЕ применяется автоматически: предел
+  // зависит от пути вырождения — структурированный отказ
+  // degenerate_attraction_limit. Произвольный epsilon-порог НЕ
+  // вводится: переключение ТОЛЬКО по точному a_mix === 0; сколь угодно
+  // малые ненулевые a_mix вычисляются общим путём.
+  const attractionExactlyZero = aMix === 0;
+  if (attractionExactlyZero && !perComponent.every((pc) => pc.a === 0)) {
+    return {
+      status: 'failure',
+      code: 'degenerate_attraction_limit',
+      message:
+        'a_mix = 0 при ненулевых компонентных a_i (' +
+        perComponent
+          .map((pc) => `${String(pc.component.component)}: a=${String(pc.a)}`)
+          .join('; ') +
+        ') — вырожденная компенсация члена притяжения; предельная форма ' +
+        'ln(phi_i) без члена притяжения неприменима автоматически (предел ' +
+        'зависит от пути вырождения), надёжный расчёт невозможен'
+    };
+  }
   const attractionFactor = dimensionlessA / (2 * Math.SQRT2 * dimensionlessB);
   const componentResults: PengRobinsonMixtureComponentResult[] = [];
   for (let i = 0; i < n; i += 1) {
@@ -1032,10 +1088,20 @@ export function computePengRobinsonMixture(
     for (let j = 0; j < n; j += 1) {
       sI += perComponent[j].component.moleFraction * aIJ[i][j];
     }
-    const lnPhi =
-      (perComponent[i].b / bMix) * (Z - 1) -
-      lnZMinusB -
-      attractionFactor * (2 * sI / aMix - perComponent[i].b / bMix) * logRatio;
+    if (attractionExactlyZero && sI !== 0) {
+      return {
+        status: 'failure',
+        code: 'numerical_failure',
+        message:
+          `a_mix = 0, но S_i = ${String(sI)} != 0 для компонента «${String(c.component)}» ` +
+          '(инвариант нулевого предела a_mix нарушен); надёжный расчёт невозможен'
+      };
+    }
+    const lnPhi = attractionExactlyZero
+      ? (perComponent[i].b / bMix) * (Z - 1) - lnZMinusB
+      : (perComponent[i].b / bMix) * (Z - 1) -
+        lnZMinusB -
+        attractionFactor * (2 * sI / aMix - perComponent[i].b / bMix) * logRatio;
     if (!Number.isFinite(lnPhi)) {
       return {
         status: 'failure',
@@ -1087,7 +1153,9 @@ export function computePengRobinsonMixture(
     components: componentResults,
     binaryInteractionsUsed,
     warnings,
-    notes: [PENG_ROBINSON_MIXTURE_BRANCH_NOTE]
+    notes: attractionExactlyZero
+      ? [PENG_ROBINSON_MIXTURE_BRANCH_NOTE, PENG_ROBINSON_MIXTURE_ZERO_ATTRACTION_NOTE]
+      : [PENG_ROBINSON_MIXTURE_BRANCH_NOTE]
   };
 }
 
