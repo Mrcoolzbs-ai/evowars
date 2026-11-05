@@ -1096,8 +1096,10 @@ describe('Stage 4.4.4.3.1: точный нулевой предел a_mix', () =
     // Фиксация соседней фикстуры: alpha мал, но положителен.
     expect(params.alpha).toBe(1.232595164407831e-32);
     expect(params.alpha).toBeGreaterThan(0);
-    expect(params.a).toBe(1.8270674846805776e-33);
-    expect(params.dimensionlessA).toBe(1.371418245802473e-35);
+    // Литералы ниже — точный binary64-вывод выражений этого хелпера
+    // (порядок операций зеркалирует computePengRobinsonPureParameters).
+    expect(params.a).toBe(1.8270674847479247e-33);
+    expect(params.dimensionlessA).toBe(1.3714182458024728e-35);
 
     const mixture = mixSuccess({
       composition: [entry('n2', 1.0)],
