@@ -1009,7 +1009,11 @@ describe('Stage 4.4.4.2.1: граница дискриминанта кубич�
   });
 
   it('A0 + 1e-13: уверенно три действительных корня, расщепление пары выше допуска дедупликации', () => {
-    const result = solvePrCubicRealRoots(0.13130582290431344, PR_BOUNDARY_B);
+    // PR_BOUNDARY_A0 + 1e-13 — выражение вместо литерала: литерал
+    // 0.13130582290431344 в рантайме равен 0.13130582290431345
+    // (17 значащих цифр не round-trip'ятся, предупреждение линтера
+    // о потере точности); вычисленное значение идентично.
+    const result = solvePrCubicRealRoots(PR_BOUNDARY_A0 + 1e-13, PR_BOUNDARY_B);
     expect(result.ok).toBe(true);
     if (!result.ok) {
       throw new Error('недостижимо');
