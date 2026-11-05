@@ -2,10 +2,11 @@
 // PENG–ROBINSON — дамп контрольных точек для независимого benchmark
 // ============================================
 //
-// Stage 4.4.4.2.1. Этот файл НЕ является самостоятельной проверкой
+// Stage 4.4.4.2.2. Этот файл НЕ является самостоятельной проверкой
 // корректности: он фиксирует (1) контрольные точки Stage 4.4.4.2 из
-// каталога через фасад Data и (2) сетку A0±delta границы кратного
-// корня кубики, а затем записывает их значения в JSON-дамп
+// каталога через фасад Data, (2) сетку A0±delta границы дискриминанта
+// кубики и (3) фабрику математически ТОЧНОГО двойного корня
+// (A = 49/128, B = 1/16), а затем записывает их значения в JSON-дамп
 // benchmark-artifacts/peng-robinson-ts-dump.json (рабочая директория
 // запуска vitest — тот же паттерн, что у golden-baseline теста).
 //
@@ -36,7 +37,7 @@ import { solvePrCubicRealRoots } from '../Core/pengRobinson';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 // ============================================
-// 1. КОНТРОЛЬНЫЕ ТОЧКИ (Stage 4.4.4.2 / 4.4.4.2.1)
+// 1. КОНТРОЛЬНЫЕ ТОЧКИ (Stage 4.4.4.2 / 4.4.4.2.2)
 // ============================================
 
 type BenchmarkGasId = 'co2' | 'n2' | 'ch4' | 'h2o' | 'ar';
@@ -138,24 +139,35 @@ const BENCHMARK_POINTS: readonly BenchmarkPointSpec[] = [
 ];
 
 // ============================================
-// 2. СЕТКА ГРАНИЦЫ КРАТНОГО КОРНЯ
+// 2. СЕТКА ГРАНИЦЫ ДИСКРИМИНАНТА И ТОЧНЫЙ ДВОЙНОЙ КОРЕНЬ
 // ============================================
 //
-// Те же константы, что в Tests/pengRobinson.test.ts (describe 18):
-// B = 0.01980480623881198, A0 = 0.13130582290421344 (двойной корень
-// у 0.05, одиночный у 0.8802...). Сетка A0 ± delta с обеих сторон
-// границы дискриминанта; дельта 0 — полоса кратного корня
-// (документированное поведение ревизии 4.4.4.2.1: два различимых
-// корня). Значения A, ФАКТИЧЕСКИ использованные двойной точностью,
-// попадают в дамп — высокоточный оракул (mpmath, 50 знаков)
-// пересчитывает корни именно по этим значениям.
+// Те же константы, что в Tests/pengRobinson.test.ts (граница
+// дискриминанта): B = 0.01980480623881198,
+// A0 = 0.13130582290421344. Точный дискриминант binary64-входов
+// (A0, B) ПОЛОЖИТЕЛЕН (D/scale ~ +2.7e-16) — математически ровно
+// ОДИН действительный корень 0.8802...; пара 0.05 ± 5.23e-9 i —
+// комплексная. Сетка A0 ± delta покрывает обе стороны границы
+// дискриминанта; дельта 0 — сами точные binary64-входы (A0, B):
+// один действительный корень. Фабрика ТОЧНОГО двойного корня
+// (16Z-9)(16Z-3)^2/4096 = 0 при A = 49/128 = 0.3828125,
+// B = 1/16 = 0.0625: D = 0 ТОЧНО, два различимых корня 0.1875 и
+// 0.5625, оба больше B. Значения A и B, ФАКТИЧЕСКИ использованные
+// двойной точностью, попадают в дамп — высокоточный оракул
+// (mpmath, 50 знаков) пересчитывает корни именно по этим значениям
+// (as_integer_ratio — точная binary64-семантика, без потерь).
 
 const PR_BOUNDARY_B = 0.01980480623881198;
 const PR_BOUNDARY_A0 = 0.13130582290421344;
 
 interface BoundaryCase {
   readonly label: string;
+  /** Смещение A от A0 (при незаданных absoluteA/absoluteB). */
   readonly delta: number;
+  /** Точное значение A вместо A0 + delta (фабрика кратных корней). */
+  readonly absoluteA?: number;
+  /** Точное значение B вместо граничного B (фабрика кратных корней). */
+  readonly absoluteB?: number;
   /** Ожидаемое число различимых действительных корней решателем. */
   readonly expectedRootCount: number;
 }
@@ -165,11 +177,18 @@ const BOUNDARY_CASES: readonly BoundaryCase[] = [
   { label: 'A0-1e-11', delta: -1e-11, expectedRootCount: 1 },
   { label: 'A0-1e-12', delta: -1e-12, expectedRootCount: 1 },
   { label: 'A0-1e-13', delta: -1e-13, expectedRootCount: 1 },
-  { label: 'A0 (полоса кратного корня)', delta: 0, expectedRootCount: 2 },
+  { label: 'A0 (точные binary64-входы, D > 0)', delta: 0, expectedRootCount: 1 },
   { label: 'A0+1e-13', delta: 1e-13, expectedRootCount: 3 },
   { label: 'A0+1e-12', delta: 1e-12, expectedRootCount: 3 },
   { label: 'A0+1e-11', delta: 1e-11, expectedRootCount: 3 },
-  { label: 'A0+1e-6', delta: 1e-6, expectedRootCount: 3 }
+  { label: 'A0+1e-6', delta: 1e-6, expectedRootCount: 3 },
+  {
+    label: 'точный двойной корень (A=49/128, B=1/16)',
+    delta: 0,
+    absoluteA: 0.3828125,
+    absoluteB: 0.0625,
+    expectedRootCount: 2
+  }
 ];
 
 // ============================================
@@ -198,7 +217,7 @@ const boundaryRows: Record<string, unknown>[] = [];
 // 4. ТЕСТЫ
 // ============================================
 
-describe('Stage 4.4.4.2.1: дамп контрольных точек PR для независимого benchmark', () => {
+describe('Stage 4.4.4.2.2: дамп контрольных точек PR для независимого benchmark', () => {
   for (const point of BENCHMARK_POINTS) {
     it(`точка ${point.id}: успех, ожидаемые предупреждения, конечные значения`, () => {
       const s = expectPureSuccess(computePengRobinsonPure({
@@ -271,10 +290,11 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
     });
   }
 
-  it('граница дискриминанта: сетка A0±delta (двойной корень, обе стороны, полоса)', () => {
+  it('граница дискриминанта: сетка A0±delta и фабрика точного двойного корня', () => {
     for (const testCase of BOUNDARY_CASES) {
-      const a = PR_BOUNDARY_A0 + testCase.delta;
-      const result = solvePrCubicRealRoots(a, PR_BOUNDARY_B);
+      const a = testCase.absoluteA ?? PR_BOUNDARY_A0 + testCase.delta;
+      const b = testCase.absoluteB ?? PR_BOUNDARY_B;
+      const result = solvePrCubicRealRoots(a, b);
       if (!result.ok) {
         throw new Error(`${testCase.label}: решатель отказал: ${result.reason}`);
       }
@@ -291,7 +311,7 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
         label: testCase.label,
         delta: testCase.delta,
         A: a,
-        B: PR_BOUNDARY_B,
+        B: b,
         rootCount: result.roots.length,
         roots: [...result.roots]
       });
@@ -306,7 +326,7 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
   afterAll(() => {
     mkdirSync('benchmark-artifacts', { recursive: true });
     const payload = {
-      generator: 'evowars Stage 4.4.4.2.1 — TS-дамп контрольных точек PR и сетки границы кратного корня',
+      generator: 'evowars Stage 4.4.4.2.2 — TS-дамп контрольных точек PR и сетки границы дискриминанта',
       consumer: 'scripts/benchmarks/peng_robinson_coolprop.py (CoolProp 8.0.0, backend PR; mpmath)',
       universalGasConstantJPerMolK: UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K,
       omegaA: 0.45724,
@@ -315,7 +335,7 @@ describe('Stage 4.4.4.2.1: дамп контрольных точек PR для 
       boundary: {
         B: PR_BOUNDARY_B,
         A0: PR_BOUNDARY_A0,
-        note: 'дельта 0 — полоса кратного корня (документированное поведение 4.4.4.2.1: два различимых корня)',
+        note: 'дельта 0 — точные binary64-входы A0/B: положительный дискриминант, один действительный корень; кейс 49/128 и 1/16 — математически точный двойной корень (D = 0)',
         cases: boundaryRows
       }
     };
