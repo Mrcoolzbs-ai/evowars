@@ -156,6 +156,10 @@ const BENCHMARK_POINTS: readonly BenchmarkPointSpec[] = [
 // двойной точностью, попадают в дамп — высокоточный оракул
 // (mpmath, 50 знаков) пересчитывает корни именно по этим значениям
 // (as_integer_ratio — точная binary64-семантика, без потерь).
+// Closeout 4.4.4.2.2 добавляет near-threshold пару (B = 2^-20,
+// соседние binary64-значения A): ненулевой ТОЧНЫЙ знак дискриминанта
+// внутри старой полосы порога; кейс D<0 ожидает структурный отказ
+// решателя (строка дампа со статусом solverFailure и причиной).
 
 const PR_BOUNDARY_B = 0.01980480623881198;
 const PR_BOUNDARY_A0 = 0.13130582290421344;
@@ -170,6 +174,13 @@ interface BoundaryCase {
   readonly absoluteB?: number;
   /** Ожидаемое число различимых действительных корней решателем. */
   readonly expectedRootCount: number;
+  /**
+   * Ожидается структурный отказ TS-решателя: точный знак дискриминанта
+   * (dyadic-BigInt) доказывает заданное expectedRootCount математически
+   * различимых корней, но в double они неразделимы (расщепление пары
+   * много меньше зеркала дедупликации 1e-8*max(1, |z|, B)).
+   */
+  readonly expectRefusal?: boolean;
 }
 
 const BOUNDARY_CASES: readonly BoundaryCase[] = [
@@ -188,6 +199,34 @@ const BOUNDARY_CASES: readonly BoundaryCase[] = [
     absoluteA: 0.3828125,
     absoluteB: 0.0625,
     expectedRootCount: 2
+  },
+  {
+    // Near-threshold (closeout 4.4.4.2.2): пара соседних binary64-значений
+    // A вокруг границы кратного корня при B = 2^-20 (точная степень
+    // двойки). Оба имеют НЕНУЛЕВОЙ точный дискриминант ВНУТРИ старой
+    // полосы порога |D| <= discThreshold (DD-цепочка знак не различает,
+    // dyadic-BigInt fallback различает): A+ — D/scale ~ +2.35e-27 > 0,
+    // ровно ОДИН действительный корень ~0.99999984; A- — D/scale
+    // ~ -1.50e-27 < 0, доказано ТРИ корня, но пара расщеплена на ~2e-14
+    // — много меньше зеркала TS-дедупликации 1e-8*max(1, |z|, B),
+    // поэтому решатель обязан дать структурный отказ (НЕ молчаливое
+    // схлопывание и НЕ подмена пары кратным корнем). Пара подобрана
+    // НЕЗАВИСИМЫМ exact-оракулом (dyadic-BigInt + mpmath 50 знаков),
+    // НЕ выходом TS-решателя; оракул benchmark-а проверяет отказ
+    // самостоятельно (статус solver_failure в отчёте).
+    label: 'near-threshold D>0 (B=2^-20, полоса порога)',
+    delta: 0,
+    absoluteA: 0.0000011173004678283645,
+    absoluteB: Math.pow(2, -20),
+    expectedRootCount: 1
+  },
+  {
+    label: 'near-threshold D<0 (B=2^-20, полоса порога)',
+    delta: 0,
+    absoluteA: 0.0000011173004678283643,
+    absoluteB: Math.pow(2, -20),
+    expectedRootCount: 3,
+    expectRefusal: true
   }
 ];
 
@@ -295,6 +334,36 @@ describe('Stage 4.4.4.2.2: дамп контрольных точек PR для 
       const a = testCase.absoluteA ?? PR_BOUNDARY_A0 + testCase.delta;
       const b = testCase.absoluteB ?? PR_BOUNDARY_B;
       const result = solvePrCubicRealRoots(a, b);
+      if (testCase.expectRefusal === true) {
+        // Обоснованный структурный отказ: точный знак (dyadic-BigInt)
+        // доказывает expectedRootCount математически различимых корней,
+        // но пара неразличима в double (расщепление ниже зеркала
+        // дедупликации) — решатель обязан отказаться, а НЕ схлопывать
+        // корни молча и НЕ подменять пару кратным корнем. Отказ
+        // попадает в дамп с явным статусом solver_failure; независимый
+        // оракул benchmark-а проверяет его обоснованность САМ
+        // (точный знак дискриминанта, число корней и расщепление).
+        if (result.ok) {
+          throw new Error(
+            `${testCase.label}: ожидался структурный отказ (пара корней ` +
+            `неразличима в double), получены корни: [${result.roots.join(', ')}]`
+          );
+        }
+        expect(result.reason).toContain('дедупликац');
+        expect(result.reason).toContain('3');
+        boundaryRows.push({
+          label: testCase.label,
+          delta: testCase.delta,
+          A: a,
+          B: b,
+          expectedRootCount: testCase.expectedRootCount,
+          rootCount: 0,
+          roots: [] as number[],
+          solverFailure: true,
+          reason: result.reason
+        });
+        continue;
+      }
       if (!result.ok) {
         throw new Error(`${testCase.label}: решатель отказал: ${result.reason}`);
       }
@@ -335,7 +404,7 @@ describe('Stage 4.4.4.2.2: дамп контрольных точек PR для 
       boundary: {
         B: PR_BOUNDARY_B,
         A0: PR_BOUNDARY_A0,
-        note: 'дельта 0 — точные binary64-входы A0/B: положительный дискриминант, один действительный корень; кейс 49/128 и 1/16 — математически точный двойной корень (D = 0)',
+        note: 'дельта 0 — точные binary64-входы A0/B: положительный дискриминант, один действительный корень; кейс 49/128 и 1/16 — математически точный двойной корень (D = 0); near-threshold пара (B=2^-20) — ненулевой точный дискриминант внутри старой полосы порога: D>0 — один корень, D<0 — доказано три корня, но пара неразличима в double, TS-решатель даёт структурный отказ (строка со solverFailure: true и reason; оракул проверяет отказ независимо)',
         cases: boundaryRows
       }
     };

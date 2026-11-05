@@ -35,6 +35,16 @@ Stage 4.4.4.2.2 — независимый benchmark чистокомпонен�
    корня» НЕТ: расхождение числа корней — провал точки. Точно
    кратные корни (D = 0) оракул классифицирует независимо по знаку
    дискриминанта.
+   Near-threshold пара (B = 2^-20, соседние binary64-значения A) имеет
+   НЕНУЛЕВОЙ точный дискриминант ВНУТРИ старой полосы порога: A+ —
+   D > 0 (ровно один действительный корень), A- — D < 0 (три корня с
+   парой, расщеплённой на ~2e-14). Строки дампа со статусом
+   solverFailure — структурный отказ TS-решателя: оракул проверяет
+   его обоснованность САМ (точный знак дискриминанта, число корней и
+   минимальное расщепление против зеркала TS-дедупликации
+   1e-8*max(1, |z|, B)); обоснованный отказ НЕ превращается в PASS
+   молча — статус solver_failure фиксируется в отчёте явно, число
+   обоснованных отказов выводится в аннотации.
 
 Числа из TS-дампа — выход СОБСТВЕННОЙ реализации (вход сравнения, НЕ
 эталон). Неудачные точки НЕ скрываются: любая из них делает код
@@ -491,13 +501,51 @@ def main() -> int:
         real, pair_center, disc, disc_scale = cubic_real_roots_mp(c2, c1, c0)
         rel_disc = float(abs(disc) / disc_scale) if disc_scale != 0 else 0.0
         ts_roots = case["roots"]
+        solver_failure = bool(case.get("solverFailure", False))
+        disc_sign = ("positive" if disc > 0 else "negative" if disc < 0 else "zero")
+        if solver_failure:
+            # TS дал структурный отказ (solverFailure в дампе). Оракул
+            # классифицирует случай САМ, по mpmath: отказ обоснован
+            # <=> точный дискриминант ОТРИЦАТЕЛЕН (математически ТРИ
+            # действительных корня) И минимальное расщепление соседних
+            # корней МЕНЬШЕ зеркала TS-дедупликации 1e-8*max(1,|z|,B)
+            # (пара неразличима в double). Молчаливый PASS запрещён:
+            # статус solver_failure фиксируется явно, все числа — в
+            # отчёте; необоснованный отказ — провал точки.
+            sorted_real = sorted(real)
+            splits = [float(sorted_real[i + 1] - sorted_real[i])
+                      for i in range(len(sorted_real) - 1)]
+            min_split = min(splits) if splits else None
+            ts_dedup_mirror = float(
+                1e-8 * max([mpf(1)] + [abs(z) for z in sorted_real] + [abs(B)]))
+            justified = bool(disc < 0 and len(real) == 3
+                             and min_split is not None
+                             and min_split < ts_dedup_mirror)
+            boundary.append({
+                "label": case["label"], "A": case["A"], "B": case["B"],
+                "mp_real_root_count": len(real),
+                "mp_real_roots": [nstr(z, 20) for z in sorted_real],
+                "mp_min_pair_split": min_split,
+                "ts_dedup_mirror": ts_dedup_mirror,
+                "mp_complex_pair_center": (nstr(pair_center, 20)
+                                            if pair_center is not None else None),
+                "disc_sign": disc_sign,
+                "disc_rel": rel_disc,
+                "ts_status": "solver_failure",
+                "ts_refusal_reason": case.get("reason"),
+                "ts_root_count": 0, "ts_roots": ts_roots,
+                "justified": justified,
+                "pass": justified,
+            })
+            continue
         entry = {"label": case["label"], "A": case["A"], "B": case["B"],
                  "mp_real_root_count": len(real),
                  "mp_real_roots": [nstr(z, 20) for z in sorted(real)],
                  "mp_complex_pair_center": (nstr(pair_center, 20)
                                              if pair_center is not None else None),
-                 "disc_sign": ("positive" if disc > 0 else "negative" if disc < 0 else "zero"),
+                 "disc_sign": disc_sign,
                  "disc_rel": rel_disc,
+                 "ts_status": "ok",
                  "ts_root_count": len(ts_roots), "ts_roots": ts_roots,
                  "match": None, "pass": False}
         if len(real) == len(ts_roots):
@@ -546,6 +594,13 @@ def main() -> int:
             "mpmath_dps": MPMATH_DPS,
             "boundary_atol_isolated": ATOL_ISOLATED_ROOT,
             "boundary_atol_near_pair": ATOL_NEAR_PAIR_ROOT,
+            "boundary_ts_dedup_mirror": (
+                "1e-8*max(1, |z|, B) — зеркало допуска дедупликации "
+                "TS-решателя (Core/pengRobinson.ts): структурный отказ TS "
+                "при доказанных mpmath ТРЁХ корнях обоснован, если "
+                "расщепление пары меньше этого зеркала (пара неразличима "
+                "в double); статус фиксируется явно (solver_failure), "
+                "молчаливый PASS запрещён"),
         },
         "summary": {
             "coolprop": coolprop_pass,
@@ -575,10 +630,14 @@ def main() -> int:
     verdict = "PASS" if all_pass else "FAIL"
     cp_pts = ", ".join(
         f"{p['id']}={'ok' if p['pass'] else 'FAIL'}" for p in points)
+    justified_refusals = sum(
+        1 for e in boundary
+        if e.get("ts_status") == "solver_failure" and e["pass"])
     print(f"::notice title=Peng-Robinson benchmark::{verdict} "
           f"(CoolProp {coolprop_meta['version']}): точки [{cp_pts}]; "
           f"mpmath={'ok' if mpmath_pass else 'FAIL'}; "
-          f"boundary={'ok' if boundary_pass else 'FAIL'}")
+          f"boundary={'ok' if boundary_pass else 'FAIL'}; "
+          f"solver_failures_justified={justified_refusals}")
     if not all_pass:
         for point in points:
             if not point["pass"]:
@@ -663,13 +722,13 @@ def build_summary_md(report):
         "",
         "## Граница нулевого дискриминанта (mpmath vs TS)",
         "",
-        "| случай | mp корней | TS корней | disc (отн.) | знак disc | итог |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| случай | mp корней | TS корней | статус TS | disc (отн.) | знак disc | итог |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for entry in report["boundary"]:
         lines.append(
             f"| {entry['label']} | {entry['mp_real_root_count']} | {entry['ts_root_count']} "
-            f"| {entry['disc_rel']:.2e} | {entry['disc_sign']} "
+            f"| {entry.get('ts_status', 'ok')} | {entry['disc_rel']:.2e} | {entry['disc_sign']} "
             f"| {'ok' if entry['pass'] else 'FAIL'} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
     lines += [
