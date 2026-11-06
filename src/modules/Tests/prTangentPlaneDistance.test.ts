@@ -3,13 +3,21 @@
 // ----------------------------------------------------------------------------
 // Проверяется Core/prTangentPlaneDistance.ts:
 //   - тривиальные и предельные случаи (TPD(z; z) = ровно +0);
-//   - побитовое совпадение с независимым прямым пересчётом формулы
-//     Michelsen на синтетических конечных lnPhi;
+//   - формула Michelsen против независимого прямого пересчёта на
+//     синтетических конечных lnPhi (допуск в несколько ulp: реализация
+//     использует устойчивую форму ln(w/z) и компенсированную сумму
+//     Neumaier, побитовое совпадение с наивной разностью логарифмов и
+//     наивным накоплением НЕ требуется);
 //   - KL-предел (идеальный: lnPhi(w) = lnPhi(z));
 //   - нулевые trial-доли (нет 0*ln(0), нет NaN) и структурные отказы
 //     support_violation;
 //   - совместность состояний (T, P, evidencePolicy, a_i, b_i, kij);
 //   - invalid_input / numerical_failure на некорректных входах;
+//   - численная устойчивость: компенсированная сумма Neumaier (вклады
+//     [1e16, 1, -1e16, +0] — итог ровно 1, наивная сумма теряет
+//     единицу), устойчивый ln(w/z) для близких составов (малый TPD
+//     второго порядка разрешается формой log1p, а не шумом ~1e-16),
+//     переполненный вклад — явный numerical_failure;
 //   - точный нулевой предел притяжения 4.4.4.3.1 через реальный
 //     вычислитель Core;
 //   - перестановочная инвариантность и сохранение feed/trial root;
@@ -249,11 +257,14 @@ describe('Stage 4.4.4.4.1: тривиальные и предельные слу
     expected += 0.25 * Math.log(0.25 / 0.5);
     expected += 0.75 * Math.log(0.75 / 0.5);
     expect(success.tpd).toBeCloseTo(expected, 12);
-    // И та же форма с разностью логарифмов — побитово.
-    let expectedExact = 0;
-    expectedExact += 0.25 * (Math.log(0.25) - Math.log(0.5));
-    expectedExact += 0.75 * (Math.log(0.75) - Math.log(0.5));
-    expect(success.tpd).toBe(expectedExact);
+    // Та же величина через разностную форму логарифмов — независимый
+    // оракул с допуском нескольких ulp (реализация использует
+    // устойчивую форму ln(w/z), побитовое совпадение с наивной формой
+    // НЕ требуется).
+    let expectedNaiveForm = 0;
+    expectedNaiveForm += 0.25 * (Math.log(0.25) - Math.log(0.5));
+    expectedNaiveForm += 0.75 * (Math.log(0.75) - Math.log(0.5));
+    expect(Math.abs(success.tpd - expectedNaiveForm)).toBeLessThanOrEqual(1e-15);
     expect(success.tpd).toBeGreaterThan(0);
   });
 
@@ -319,21 +330,22 @@ describe('Stage 4.4.4.4.1: побитовое совпадение с незав
       ]
     });
     const success = successOf(computePrTangentPlaneDistance({ feed, trial }));
-    // Независимый пересчёт с той же аккумуляцией (0 + вклад a + вклад b).
+    // Независимый пересчёт с той же аккумуляцией (0 + вклад a + вклад b):
+    // допуск нескольких ulp — реализация суммирует компенсированно
+    // (Neumaier) и вычисляет ln(w/z) устойчиво, побитовое совпадение
+    // с наивной формой НЕ требуется.
     let expected = 0;
     expected += 0.25 * (Math.log(0.25) - Math.log(0.4) + 0.5 - 0.3);
     expected += 0.75 * (Math.log(0.75) - Math.log(0.6) + 0.1 - -0.2);
-    expect(success.tpd).toBe(expected);
-    // Покомпонентная сверка вкладов.
+    expect(success.tpd).toBeCloseTo(expected, 12);
+    // Покомпонентная сверка вкладов (та же формула Michelsen).
     expect(success.contributions).toHaveLength(2);
     expect(success.contributions[0]?.component).toBe('a');
-    expect(success.contributions[0]?.contribution).toBe(
-      0.25 * (Math.log(0.25) - Math.log(0.4) + 0.5 - 0.3)
-    );
+    expect(Math.abs((success.contributions[0]?.contribution ?? 0)
+      - (0.25 * (Math.log(0.25) - Math.log(0.4) + 0.5 - 0.3)))).toBeLessThanOrEqual(1e-15);
     expect(success.contributions[1]?.component).toBe('b');
-    expect(success.contributions[1]?.contribution).toBe(
-      0.75 * (Math.log(0.75) - Math.log(0.6) + 0.1 - -0.2)
-    );
+    expect(Math.abs((success.contributions[1]?.contribution ?? 0)
+      - (0.75 * (Math.log(0.75) - Math.log(0.6) + 0.1 - -0.2)))).toBeLessThanOrEqual(1e-15);
   });
 
   it('интеграция с реальным вычислителем: TPD = независимый пересчёт по lnPhi состояний', () => {
@@ -362,7 +374,7 @@ describe('Stage 4.4.4.4.1: побитовое совпадение с незав
         Math.log(feedN2?.moleFraction ?? 0) +
         (trialN2?.lnPhi ?? 0) -
         (feedN2?.lnPhi ?? 0));
-    expect(success.tpd).toBe(expected);
+    expect(success.tpd).toBeCloseTo(expected, 12);
     expect(Number.isFinite(success.tpd)).toBe(true);
   });
 
@@ -399,6 +411,113 @@ describe('Stage 4.4.4.4.1: побитовое совпадение с незав
     );
     expect(reversed.tpd).toBe(forward.tpd);
     expect(reversed.contributions).toEqual(forward.contributions);
+  });
+});
+
+// ============================================
+// 5.1. Численная устойчивость: ln(w/z) и сумма Neumaier
+// ============================================
+
+describe('Stage 4.4.4.4.1: численная устойчивость (устойчивый ln(w/z), сумма Neumaier)', () => {
+  it('Neumaier: вклады [1e16, 1, -1e16, +0] дают итог ровно 1 (наивная сумма теряет единицу)', () => {
+    const feed = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.25, lnPhi: -2e16 },
+        { component: 'b', moleFraction: 0.25, lnPhi: -2 },
+        { component: 'c', moleFraction: 0.25, lnPhi: 2e16 },
+        { component: 'd', moleFraction: 0.25, lnPhi: 0.5 }
+      ]
+    });
+    const trial = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.25, lnPhi: 2e16 },
+        { component: 'b', moleFraction: 0.25, lnPhi: 2 },
+        { component: 'c', moleFraction: 0.25, lnPhi: -2e16 },
+        { component: 'd', moleFraction: 0.25, lnPhi: 0.5 }
+      ]
+    });
+    const success = successOf(computePrTangentPlaneDistance({ feed, trial }));
+    // Канонический порядок a < b < c < d; вклады вычисляются точно
+    // (w === z даёт ln(w/z) = ровно +0; разности lnPhi — точные
+    // степени двойки с точными произведениями на w = 0.25).
+    expect(success.contributions.map((c) => c.contribution)).toEqual([1e16, 1, -1e16, 0]);
+    // Демонстрация: наивное накопление тех же вкладов теряет единицу.
+    let naive = 0;
+    naive += 1e16;
+    naive += 1;
+    naive += -1e16;
+    naive += 0;
+    expect(naive).toBe(0);
+    // Компенсированная сумма Neumaier сохраняет математический итог.
+    expect(Object.is(success.tpd, 1)).toBe(true);
+  });
+
+  it('близкие составы: малый TPD второго порядка разрешается устойчивой формой log1p', () => {
+    // Сдвиг долей на 1e-11: математический TPD — второго порядка,
+    // ~2.4e-22. Наивная разность логарифмов вносит шум ~1e-16 и не
+    // разрешает значение; устойчивая форма log1p воспроизводит его.
+    const feed = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.3, lnPhi: 0 },
+        { component: 'b', moleFraction: 0.7, lnPhi: 0 }
+      ]
+    });
+    const trialA = 0.3 + 1e-11;
+    const trialB = 1 - trialA;
+    const trial = makeState({
+      components: [
+        { component: 'a', moleFraction: trialA, lnPhi: 0 },
+        { component: 'b', moleFraction: trialB, lnPhi: 0 }
+      ]
+    });
+    const success = successOf(computePrTangentPlaneDistance({ feed, trial }));
+    // Независимый устойчивый оракул: log1p относительной разности.
+    const expected =
+      trialA * Math.log1p((trialA - 0.3) / 0.3) + trialB * Math.log1p((trialB - 0.7) / 0.7);
+    expect(Math.abs(success.tpd - expected)).toBeLessThanOrEqual(1e-24);
+    expect(success.tpd).toBeGreaterThan(0);
+    // Документация мотивации: наивная форма логарифмов имеет шум на
+    // пять порядков больше самого значения.
+    const naiveOracle =
+      trialA * (Math.log(trialA) - Math.log(0.3)) +
+      trialB * (Math.log(trialB) - Math.log(0.7));
+    expect(Math.abs(naiveOracle - expected)).toBeGreaterThan(1e-20);
+  });
+
+  it('тривиальный случай: w === z и одинаковые lnPhi — TPD ровно +0 (все вклады +0)', () => {
+    const state = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.4, lnPhi: 0.3 },
+        { component: 'b', moleFraction: 0.6, lnPhi: -0.2 }
+      ]
+    });
+    const success = successOf(computePrTangentPlaneDistance({ feed: state, trial: state }));
+    expect(Object.is(success.tpd, 0)).toBe(true);
+    for (const contribution of success.contributions) {
+      expect(Object.is(contribution.contribution, 0)).toBe(true);
+    }
+  });
+
+  it('переполненный вклад (разность lnPhi = 2e308): numerical_failure, не success с неfinite TPD', () => {
+    // Оба lnPhi конечны (проходят проверку конечности), но разность
+    // 1e308 - (-1e308) переполняется: вклад = Infinity обязан стать
+    // ЯВНЫМ numerical_failure. Переполнение самой суммы вкладов при
+    // валидном составе (sum w_i = 1) математически недостижимо:
+    // SUM w_i * inside_i <= max_i inside_i <= DBL_MAX.
+    const feed = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.5, lnPhi: -1e308 },
+        { component: 'b', moleFraction: 0.5, lnPhi: 0 }
+      ]
+    });
+    const trial = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.5, lnPhi: 1e308 },
+        { component: 'b', moleFraction: 0.5, lnPhi: 0 }
+      ]
+    });
+    const failure = failureOf(computePrTangentPlaneDistance({ feed, trial }));
+    expect(failure.code).toBe('numerical_failure');
   });
 });
 

@@ -20,10 +20,17 @@
 // - поиск минимумов TPD, successive substitution, Baker–Michelsen
 //   search, multi-start, перебор граней симплекса и какие-либо
 //   фазовые заключения НЕ реализованы;
-// - один TPD-результат (любой знак) НЕ доказывает ни устойчивости,
-//   ни неустойчивости: для положительного заключения нужно исключить
-//   отрицательные минимумы по всему допустимому пространству пробных
-//   составов, что выходит за границы этого модуля;
+// - семантика знака (исправление научной формулировки): надёжно
+//   вычисленное TPD(w; z) < 0 для любой допустимой пробной точки w —
+//   ДОСТАТОЧНОЕ свидетельство неустойчивости feed-фазы в рамках
+//   выбранной PR-модели и принятых данных; неотрицательный TPD
+//   (включая тривиальный w = z, где TPD = 0) сам по себе НЕ доказывает
+//   глобальной устойчивости: положительное заключение требует
+//   исключить отрицательные значения по всему допустимому пространству
+//   пробных составов, что выходит за границы этого модуля; в реальном
+//   численном поиске отрицательность отличают от численной погрешности
+//   порогом — порог будет частью будущего search-stage (4.4.4.4.2),
+//   НЕ этого модуля;
 // - flash, VLE/LLE, фазовый split и интеграция с solveEquilibrium
 //   НЕ реализованы.
 //
@@ -37,9 +44,18 @@
 //
 // Числовая дисциплина: вклады суммируются в каноническом порядке
 // компонентов (лексикографическая сортировка идентификаторов), поэтому
-// результат побитово инвариантен к перестановке входных массивов;
-// TPD(z; z) для одинаковых состояний даёт РОВНО +0; никакой
-// epsilon-подмены состава и никакой автоматической нормализации.
+// результат побитово инвариантен к перестановке входных массивов.
+// Сумма — компенсированная (Neumaier): при взаимной компенсации вкладов
+// малых TPD поглощение малых слагаемых восстанавливается (пример:
+// вклады [1e16, 1, -1e16, +0] дают итог ровно 1, тогда как наивное
+// накопление теряет единицу). ln(w/z) вычисляется устойчиво: w === z
+// даёт ровно +0; близкие значения — Math.log1p относительной разности
+// (без катаклизмического сокращения двух близких логарифмов); заметно
+// различные — безопасная разность логарифмов без переполнения
+// промежуточного отношения. TPD(z; z) для одинаковых состояний даёт
+// РОВНО +0; никакой epsilon-подмены состава и никакой автоматической
+// нормализации. Неконечный вклад или итог — явный numerical_failure,
+// не NaN/Infinity в успехе.
 //
 // Направление зависимостей: модуль живёт в Core, импортирует ТОЛЬКО
 // './pengRobinsonMixture' (значение допуска суммы состава + типы);
@@ -71,14 +87,19 @@ export const PR_TANGENT_PLANE_DISTANCE_ERROR_CODES: readonly PrTangentPlaneDista
 
 /**
  * Примечание о границах: TPD — скаляр для двух уже вычисленных
- * состояний, НЕ verdict о фазовой устойчивости.
+ * состояний, НЕ verdict о фазовой устойчивости. Надёжно вычисленное
+ * TPD < 0 для допустимой пробной точки — достаточное свидетельство
+ * неустойчивости feed-фазы в рамках PR-модели; неотрицательный TPD
+ * (включая w = z) глобальной устойчивости не доказывает.
  */
 export const PR_TANGENT_PLANE_DISTANCE_SCOPE_NOTE =
   'TPD — безразмерный скаляр (dG/RT) для двух уже вычисленных состояний PR-смеси; ' +
-  'это НЕ verdict о фазовой устойчивости: поиск минимумов TPD, фазовые ' +
-  'заключения и доказательство глобальной устойчивости не реализованы ' +
-  '(границы Stage 4.4.4.4.1); давление не входит отдельным членом — оно ' +
-  'одинаково в feed и trial состояниях и сокращается';
+  'это НЕ verdict о фазовой устойчивости: надёжно вычисленное TPD < 0 для ' +
+  'допустимой пробной точки — достаточное свидетельство неустойчивости ' +
+  'feed-фазы в рамках PR-модели, но поиск минимумов TPD, порог отличия ' +
+  'отрицательности от численной погрешности и фазовые заключения ' +
+  'не реализованы (границы Stage 4.4.4.4.1); давление не входит отдельным ' +
+  'членом — оно одинаково в feed и trial состояниях и сокращается';
 
 /**
  * Примечание о единственном физическом корне: при единственном корне
@@ -165,6 +186,63 @@ function pairKey(componentA: string, componentB: string): string {
   return componentA < componentB
     ? `${componentA}|${componentB}`
     : `${componentB}|${componentA}`;
+}
+
+/**
+ * Порог переключения форм ln(w/z): при |(w - z)/z| <= 0.5 используется
+ * Math.log1p относительной разности — аргумент хорошо обусловлен,
+ * катаклизмического сокращения двух близких логарифмов нет. За
+ * порогом |ln(w/z)| >= ln(1.5) ~ 0.405: разность логарифмов далека от
+ * сокращения, промежуточное отношение w/z не образуется и переполниться
+ * не может. Доли конечны, неотрицательны и в сумме дают 1, поэтому
+ * переполнение (w - z)/z исключено; критерий — условная граница двух
+ * областей точности, НЕ epsilon-подмена значений.
+ */
+const PR_TPD_LOG_RATIO_LOG1P_THRESHOLD = 0.5;
+
+/**
+ * Устойчивый ln(w/z) для конечных положительных w и z. w === z даёт
+ * РОВНО +0 (тривиальный случай TPD(z; z) сохраняется побитово).
+ * Возвращает null, если устойчивое вычисление невозможно (неконечный
+ * результат), — вызывающий код переводит это в ЯВНЫЙ
+ * numerical_failure. Никаких epsilon-подмен значений и молчаливой
+ * нормализации.
+ */
+function stableLogRatio(w: number, z: number): number | null {
+  if (w === z) {
+    return 0;
+  }
+  const relativeDifference = (w - z) / z;
+  if (Math.abs(relativeDifference) <= PR_TPD_LOG_RATIO_LOG1P_THRESHOLD) {
+    const viaLog1p = Math.log1p(relativeDifference);
+    return Number.isFinite(viaLog1p) ? viaLog1p : null;
+  }
+  const viaDifference = Math.log(w) - Math.log(z);
+  return Number.isFinite(viaDifference) ? viaDifference : null;
+}
+
+/**
+ * Состояние компенсированной суммы Neumaier: sum — текущая наивная
+ * частичная сумма, compensation — накопленная невязка округлений.
+ * Финальное значение = sum + compensation. Восстанавливает
+ * поглощение малых вкладов при взаимной компенсации (малые TPD);
+ * стандартный Kahan НЕ используется: на последовательности
+ * [1e16, 1, -1e16] он может потерять единицу, Neumaier сохраняет итог 1.
+ */
+interface NeumaierSum {
+  sum: number;
+  compensation: number;
+}
+
+/** Один шаг компенсированного суммирования Neumaier. */
+function neumaierAdd(state: NeumaierSum, value: number): void {
+  const newSum = state.sum + value;
+  if (Math.abs(state.sum) >= Math.abs(value)) {
+    state.compensation += (state.sum - newSum) + value;
+  } else {
+    state.compensation += (value - newSum) + state.sum;
+  }
+  state.sum = newSum;
 }
 
 interface ValidatedComponents {
@@ -317,7 +395,14 @@ function validateInteractions(
  * Скалярный tangent-plane distance TPD(w; z) для двух уже вычисленных
  * успешных состояний PR-смеси (feed = z, trial = w) при одинаковых
  * T, P и evidencePolicy. Возвращает ТОЛЬКО значение (dG/RT) и
- * вклады; никаких verdict о фазовой устойчивости.
+ * вклады; никаких verdict о фазовой устойчивости. Семантика знака:
+ * надёжно вычисленное TPD(w; z) < 0 — достаточное свидетельство
+ * неустойчивости feed-фазы в рамках выбранной PR-модели и принятых
+ * данных; неотрицательный TPD (включая w = z) глобальной устойчивости
+ * не доказывает. Числа: устойчивый ln(w/z) (w === z — ровно +0;
+ * близкие значения — log1p; заметно различные — разность логарифмов)
+ * и компенсированная сумма Neumaier в каноническом порядке;
+ * TPD(z; z) = ровно +0; неконечный вклад/итог — numerical_failure.
  */
 export function computePrTangentPlaneDistance(
   input: PrTangentPlaneDistanceInput
@@ -519,9 +604,9 @@ export function computePrTangentPlaneDistance(
     }
   }
 
-  // --- 3.7. Вклады и итоговая сумма ---------------------------------------
+  // --- 3.7. Вклады и компенсированная итоговая сумма ---------------------
   const contributions: PrTangentPlaneDistanceContribution[] = [];
-  let tpd = 0;
+  const total: NeumaierSum = { sum: 0, compensation: 0 };
   for (const trialComponent of trialSupport) {
     const feedComponent = feedById.get(trialComponent.component);
     if (feedComponent === undefined) {
@@ -539,14 +624,22 @@ export function computePrTangentPlaneDistance(
           `feed = ${String(lnPhiFeed)}, trial = ${String(lnPhiTrial)}`
       );
     }
-    const contribution = w * (Math.log(w) - Math.log(z) + lnPhiTrial - lnPhiFeed);
+    const lnRatio = stableLogRatio(w, z);
+    if (lnRatio === null) {
+      return failure(
+        'numerical_failure',
+        `устойчивое вычисление ln(w/z) для компонента «${trialComponent.component}» ` +
+          `невозможно: w = ${String(w)}, z = ${String(z)}`
+      );
+    }
+    const contribution = w * (lnRatio + lnPhiTrial - lnPhiFeed);
     if (!Number.isFinite(contribution)) {
       return failure(
         'numerical_failure',
         `вклад компонента «${trialComponent.component}» не конечен: ${String(contribution)}`
       );
     }
-    tpd += contribution;
+    neumaierAdd(total, contribution);
     contributions.push({
       component: trialComponent.component,
       trialMoleFraction: w,
@@ -556,8 +649,12 @@ export function computePrTangentPlaneDistance(
       contribution
     });
   }
+  const tpd = total.sum + total.compensation;
   if (!Number.isFinite(tpd)) {
-    return failure('numerical_failure', `итоговая сумма TPD не конечна: ${String(tpd)}`);
+    return failure(
+      'numerical_failure',
+      `итоговая компенсированная сумма TPD не конечна: ${String(tpd)}`
+    );
   }
 
   // --- 3.8. Сборка результата (без verdicts) ------------------------------

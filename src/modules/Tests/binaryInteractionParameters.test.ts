@@ -579,15 +579,26 @@ describe('Stage 4.4.4.4.1: корректировка интерпретации
     const record = okoroAvailableRecord('co2|n2');
     const joined = record.limitations.join(' ');
     // Численные расхождения original PR/vdW по Table A4 (независимый аудит
-    // DOI 10.1002/ghg.2300).
+    // DOI 10.1002/ghg.2300) — опубликованные сравнения сохранены как есть.
     expect(joined).toContain('4.6749');
     expect(joined).toContain('3.0322');
     expect(joined).toContain('35.14%');
     expect(joined).toContain('5.9178');
     expect(joined).toContain('4.6566');
     expect(joined).toContain('21.31%');
-    // Adjusted BIP -0.01322 НЕ импортируется.
+    expect(joined).toContain('4.7241');
+    expect(joined).toContain('1.05%');
+    // Adjusted/New BIP -0.01322 — скаляр Table 1; adjusted BIPs описаны
+    // статьёй как квадратично зависящие от температуры.
     expect(joined).toContain('-0.01322');
+    expect(joined).toContain('квадратично зависящие от температуры');
+    // Точная температурная атрибуция скаляра Table 1 НЕ утверждается
+    // (Table 1 сама по себе не устанавливает -0.01322 как kij(T) при
+    // какой-либо конкретной температуре).
+    expect(joined).not.toContain('-0.01322 при 253.1 K');
+    expect(joined).not.toContain('при 253.1 K равен -0.01322');
+    expect(joined).toContain('точная температурная атрибуция скаляра одной');
+    // Adjusted параметризация НЕ импортируется.
     expect(joined).toContain('НЕ импортируется');
     // Точки Table A4 — контекст, НЕ количественный TPD-оракул.
     expect(joined).toContain('НЕ используется как количественный TPD-оракул');
@@ -595,6 +606,24 @@ describe('Stage 4.4.4.4.1: корректировка интерпретации
     expect(joined).toContain('~5.92 МПа');
     // Оговорка Генри не затронута этой правкой (специфична для N2–H2O).
     expect(joined).not.toContain('константы Генри');
+  });
+
+  it('корректировка атрибуции adjusted BIP не меняет числа и статусы каталога co2|n2', () => {
+    const record = okoroAvailableRecord('co2|n2');
+    // Каталогное значение, статус и диапазон применимости неизменны.
+    expect(record.kij.value).toBe(-0.017);
+    expect(record.kij.provenance.evidence).toBe('PARTIALLY_VERIFIED');
+    expect(record.applicabilityRangeK?.minTemperatureK).toBe(228.15);
+    expect(record.applicabilityRangeK?.maxTemperatureK).toBe(273.15);
+    // Metadata отражает original vs adjusted/New и температурно-зависимый
+    // характер adjusted модели БЕЗ атрибуции скаляра конкретной температуре.
+    const joined =
+      (record.kij.provenance.note ?? '') + ' ' + record.limitations.join(' ');
+    expect(joined).toContain('original BIP подогнан к литературным');
+    expect(joined).toContain('Adjusted/New BIP -0.01322');
+    expect(joined).toContain('квадратично зависящие от температуры');
+    expect(joined).not.toContain('adjusted kij = -0.01322 при');
+    expect(joined).not.toContain('adjusted BIP при 253.1 K');
   });
 
   it('корректировка не меняет структуру каталога: 10 пар, 5 available, аудит валиден', () => {
