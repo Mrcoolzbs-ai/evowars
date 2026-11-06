@@ -17,7 +17,12 @@
 //     [1e16, 1, -1e16, +0] — итог ровно 1, наивная сумма теряет
 //     единицу), устойчивый ln(w/z) для близких составов (малый TPD
 //     второго порядка разрешается формой log1p, а не шумом ~1e-16),
-//     переполненный вклад — явный numerical_failure;
+//     порядок скобки вклада (разность lnPhi ПЕРЕД прибавлением
+//     lnRatio — малый composition-член не теряется при большом
+//     одинаковом сдвиге lnPhi), subnormal feed-доля (переполнение
+//     относительной разности — fallback разности логарифмов, TPD
+//     остаётся конечным), переполненный вклад — явный
+//     numerical_failure;
 //   - точный нулевой предел притяжения 4.4.4.3.1 через реальный
 //     вычислитель Core;
 //   - перестановочная инвариантность и сохранение feed/trial root;
@@ -484,6 +489,81 @@ describe('Stage 4.4.4.4.1: численная устойчивость (усто
     expect(Math.abs(naiveOracle - expected)).toBeGreaterThan(1e-20);
   });
 
+  it('регрессия порядка скобки: малый lnRatio не теряется при большом одинаковом сдвиге lnPhi', () => {
+    // lnRatio ~ 3.3e-12, lnPhiTrial = lnPhiFeed = 1e8. Лево-
+    // ассоциативная группировка (lnRatio + 1e8) - 1e8 округляется к
+    // нулю и теряет composition-член целиком; корректный порядок —
+    // сначала разность lnPhi (ровно +0), затем прибавление lnRatio.
+    // Тест обязан падать на прежней группировке и проходить после
+    // исправления.
+    const feed = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.3, lnPhi: 1e8 },
+        { component: 'b', moleFraction: 0.7, lnPhi: 1e8 }
+      ]
+    });
+    const trialA = 0.3 + 1e-11;
+    const trialB = 1 - trialA;
+    const trial = makeState({
+      components: [
+        { component: 'a', moleFraction: trialA, lnPhi: 1e8 },
+        { component: 'b', moleFraction: trialB, lnPhi: 1e8 }
+      ]
+    });
+    const success = successOf(computePrTangentPlaneDistance({ feed, trial }));
+    // Независимый оракул: разности lnPhi равны ровно нулю, TPD — чистая
+    // KL-величина log1p-формы, вычисленная БЕЗ производственной
+    // функции.
+    const expected =
+      trialA * Math.log1p((trialA - 0.3) / 0.3) +
+      trialB * Math.log1p((trialB - 0.7) / 0.7);
+    expect(Number.isFinite(success.tpd)).toBe(true);
+    expect(success.tpd).toBeGreaterThan(0);
+    expect(success.tpd).not.toBe(0);
+    expect(Math.abs(success.tpd - expected)).toBeLessThanOrEqual(1e-24);
+    // Демонстрация потери на прежней группировке: (lnRatio + 1e8) - 1e8
+    // равно нулю, оракул отличим от нуля на ~1e-22.
+    const naiveBracketA = (Math.log1p((trialA - 0.3) / 0.3) + 1e8) - 1e8;
+    expect(naiveBracketA).toBe(0);
+    expect(expected).toBeGreaterThan(1e-23);
+  });
+
+  it('subnormal feed-доля: переполнение относительной разности — fallback разности логарифмов, TPD конечен', () => {
+    // z_a = Number.MIN_VALUE (subnormal, > 0): (w - z)/z переполняется
+    // до Infinity, форма log1p неприменима — fallback
+    // Math.log(w) - Math.log(z) сохраняет конечный результат. Никаких
+    // epsilon-подмен и нормализации состава.
+    const subnormal = Number.MIN_VALUE;
+    const feed = makeState({
+      components: [
+        { component: 'a', moleFraction: subnormal, lnPhi: 0 },
+        { component: 'b', moleFraction: 1 - subnormal, lnPhi: 0 }
+      ]
+    });
+    const trial = makeState({
+      components: [
+        { component: 'a', moleFraction: 0.5, lnPhi: 0 },
+        { component: 'b', moleFraction: 0.5, lnPhi: 0 }
+      ]
+    });
+    // Мотивация: относительная разность действительно переполняется.
+    expect((0.5 - subnormal) / subnormal).toBe(Infinity);
+    const success = successOf(computePrTangentPlaneDistance({ feed, trial }));
+    expect(Number.isFinite(success.tpd)).toBe(true);
+    expect(success.tpd).toBeGreaterThan(0);
+    // Независимый оракул разностной формы логарифмов.
+    const expected =
+      0.5 * (Math.log(0.5) - Math.log(subnormal)) +
+      0.5 * (Math.log(0.5) - Math.log(1 - subnormal));
+    expect(success.tpd).toBeCloseTo(expected, 12);
+    // Состав не подменён: subnormal-доля сохранена в компактной копии
+    // feed-состава (без нормализации).
+    expect(success.feedComposition).toEqual([
+      { component: 'a', moleFraction: subnormal },
+      { component: 'b', moleFraction: 1 - subnormal }
+    ]);
+  });
+
   it('тривиальный случай: w === z и одинаковые lnPhi — TPD ровно +0 (все вклады +0)', () => {
     const state = makeState({
       components: [
@@ -500,9 +580,10 @@ describe('Stage 4.4.4.4.1: численная устойчивость (усто
 
   it('переполненный вклад (разность lnPhi = 2e308): numerical_failure, не success с неfinite TPD', () => {
     // Оба lnPhi конечны (проходят проверку конечности), но разность
-    // 1e308 - (-1e308) переполняется: вклад = Infinity обязан стать
-    // ЯВНЫМ numerical_failure. Переполнение самой суммы вкладов при
-    // валидном составе (sum w_i = 1) математически недостижимо:
+    // 1e308 - (-1e308) переполняется до Infinity и обязана стать
+    // ЯВНЫМ numerical_failure (как разность lnPhi, так и скобка/вклад
+    // проверяются по отдельности). Переполнение самой суммы вкладов
+    // при валидном составе (sum w_i = 1) математически недостижимо:
     // SUM w_i * inside_i <= max_i inside_i <= DBL_MAX.
     const feed = makeState({
       components: [
