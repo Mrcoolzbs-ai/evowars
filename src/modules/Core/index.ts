@@ -34,6 +34,10 @@
 //                      кубика смеси, компонентные phi_i/f_i (4.4.4.3); чистая
 //                      математика без импортов из Data; каталоги kij и чистых
 //                      параметров — Data/pengRobinsonMixtureFacade.ts (4.4.4.3);
+//   prTangentPlaneDistance — скалярный tangent-plane distance (TPD, dG/RT)
+//                      для двух уже вычисленных состояний PR-смеси (4.4.4.4.1);
+//                      ТОЛЬКО значение и вклады — без поиска минимумов и
+//                      фазовых verdicts; не пересчитывает PR, не импортирует Data;
 //   migrations        — версии схем, датасетов и миграции сохранений;
 //   adapters          — мосты к существующим модулям (этап 1–3).
 
@@ -59,6 +63,7 @@ export * from './solverBackend';
 export * from './odeSolver';
 export * from './pengRobinson';
 export * from './pengRobinsonMixture';
+export * from './prTangentPlaneDistance';
 export * from './migrations';
 export * from './adapters';
 
