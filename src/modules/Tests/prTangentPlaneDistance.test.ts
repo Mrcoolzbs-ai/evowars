@@ -26,7 +26,6 @@ import { describe, it, expect } from 'vitest';
 
 import { computePengRobinsonMixtureFromCatalog } from '../Data/pengRobinsonMixtureFacade';
 import type {
-  PengRobinsonMixtureCatalogFailure,
   PengRobinsonMixtureCatalogRequest,
   PengRobinsonMixtureCatalogSuccess
 } from '../Data/pengRobinsonMixtureFacade';
@@ -44,6 +43,7 @@ import type {
 import type {
   PengRobinsonEvidencePolicy,
   PengRobinsonEvidenceStatus,
+  PengRobinsonMixtureFailure,
   PengRobinsonMixtureSuccess,
   PengRobinsonRootBranch
 } from '../Core/pengRobinsonMixture';
@@ -68,7 +68,7 @@ function mixSuccess(
 
 function mixFailure(
   request: PengRobinsonMixtureCatalogRequest
-): PengRobinsonMixtureCatalogFailure {
+): PengRobinsonMixtureFailure {
   const result = computePengRobinsonMixtureFromCatalog(request);
   expect(result.status).toBe('failure');
   if (result.status !== 'failure') {
