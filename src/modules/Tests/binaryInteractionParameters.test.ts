@@ -517,3 +517,91 @@ describe('Stage 4.4.4.3.1: оговорка Supplementary Section 4 для h2o|n
     }
   });
 });
+
+// ----------------------------------------------------------------------------
+// Stage 4.4.4.4.1: корректировка интерпретации Okoro 2024 (текстовая
+// семантика metadata; значения, статусы и числовые диапазоны НЕ меняются)
+// ----------------------------------------------------------------------------
+
+describe('Stage 4.4.4.4.1: корректировка интерпретации Okoro 2024 (только текст metadata)', () => {
+  const OKORO_PAIRS: readonly string[] = ['ar|co2', 'ch4|co2', 'co2|n2'];
+  const OKORO_VALUES: Readonly<Record<string, number>> = {
+    'ar|co2': 0.129219,
+    'ch4|co2': 0.09897,
+    'co2|n2': -0.017
+  };
+
+  function okoroAvailableRecord(key: string): BinaryInteractionAvailableRecord {
+    const record: BinaryInteractionPairRecord = BINARY_INTERACTION_PARAMETERS[key];
+    expect(record.status).toBe('available');
+    if (record.status !== 'available') {
+      throw new Error(`ожидалась available-запись ${key}`);
+    }
+    return record;
+  }
+
+  it('значения, evidence-статусы и числовые диапазоны Okoro НЕ изменились', () => {
+    for (const key of OKORO_PAIRS) {
+      const record = okoroAvailableRecord(key);
+      expect(record.kij.value).toBe(OKORO_VALUES[key]);
+      expect(record.kij.provenance.evidence).toBe('PARTIALLY_VERIFIED');
+      expect(record.applicabilityRangeK).not.toBeNull();
+      expect(record.applicabilityRangeK?.minTemperatureK).toBe(228.15);
+      expect(record.applicabilityRangeK?.maxTemperatureK).toBe(273.15);
+    }
+  });
+
+  it('basis всех пар Okoro: original подогнан к литературным данным; ~30 МПа — общая применимость модели, НЕ покрытие измерений', () => {
+    for (const key of OKORO_PAIRS) {
+      const record = okoroAvailableRecord(key);
+      const basis = record.applicabilityRangeK?.basis ?? '';
+      expect(basis.length).toBeGreaterThan(0);
+      expect(basis).toContain('original BIP подогнан к литературным данным');
+      expect(basis).toContain('общая применимость модели');
+      expect(basis).toContain('НЕ покрытие собственных измерений');
+      expect(basis).toContain('Table A4');
+      expect(basis).toContain('~5.92 МПа');
+    }
+  });
+
+  it('note provenance Okoro разделяет original/adjusted версии и не смешивает диапазоны давлений', () => {
+    for (const key of OKORO_PAIRS) {
+      const record = okoroAvailableRecord(key);
+      const note = record.kij.provenance.note ?? '';
+      expect(note).toContain('original BIP подогнан к литературным');
+      expect(note).toContain('в каталог НЕ импортируются');
+      expect(note).toContain('общая применимость модели');
+      expect(note).toContain('НЕ покрытие собственных измерений');
+    }
+  });
+
+  it('limitations co2|n2 фиксируют отклонения Table A4 и статус «не количественный TPD-оракул»', () => {
+    const record = okoroAvailableRecord('co2|n2');
+    const joined = record.limitations.join(' ');
+    // Численные расхождения original PR/vdW по Table A4 (независимый аудит
+    // DOI 10.1002/ghg.2300).
+    expect(joined).toContain('4.6749');
+    expect(joined).toContain('3.0322');
+    expect(joined).toContain('35.14%');
+    expect(joined).toContain('5.9178');
+    expect(joined).toContain('4.6566');
+    expect(joined).toContain('21.31%');
+    // Adjusted BIP -0.01322 НЕ импортируется.
+    expect(joined).toContain('-0.01322');
+    expect(joined).toContain('НЕ импортируется');
+    // Точки Table A4 — контекст, НЕ количественный TPD-оракул.
+    expect(joined).toContain('НЕ используется как количественный TPD-оракул');
+    // Давление: фактическое покрытие измерений для x_N2 = 0.05.
+    expect(joined).toContain('~5.92 МПа');
+    // Оговорка Генри не затронута этой правкой (специфична для N2–H2O).
+    expect(joined).not.toContain('константы Генри');
+  });
+
+  it('корректировка не меняет структуру каталога: 10 пар, 5 available, аудит валиден', () => {
+    const coverage = getBinaryInteractionCoverage();
+    expect(coverage.totalPairs).toBe(10);
+    expect(coverage.availablePairKeys).toHaveLength(5);
+    expect(coverage.unresolvedPairKeys).toHaveLength(5);
+    expect(validateBinaryInteractionCatalog(BINARY_INTERACTION_PARAMETERS)).toEqual([]);
+  });
+});
