@@ -1,0 +1,88 @@
+# Stage 4.4.4.2.1 / 4.4.4.3 — независимый CoolProp benchmark чистокомпонентного
+# Peng-Robinson (4.4.4.2.x) и многокомпонентных смесей (4.4.4.3).
+# Python и CoolProp НЕ входят в runtime приложения:
+# workflow запускается вручную (workflow_dispatch) и по путям
+# benchmark-файлов; результаты — в логах, аннотациях, артефактах и
+# $GITHUB_STEP_SUMMARY. Отчёт: scripts/benchmarks/
+# peng_robinson_coolprop.py (CoolProp 8.0.0 backend 'PR' против TS-дампа,
+# mpmath 50 знаков, граничный оракул кратных корней; смеси — правила
+# смешения/кубика/phi_i при каталожных kij: ВАЛИДАЦИЯ реализации,
+# НЕ подтверждение значений kij).
+# Python unit-тесты (test_peng_robinson_coolprop.py) проверяют
+# классификацию не-конечных результатов CoolProp (NaN/±Infinity —
+# unavailable_nonfinite, никогда не PASS) и строгий JSON (allow_nan=False).
+name: Peng-Robinson CoolProp benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/benchmarks/**'
+      - 'src/modules/Core/pengRobinson.ts'
+      - 'src/modules/Core/pengRobinsonMixture.ts'
+      - 'src/modules/Data/pengRobinsonFacade.ts'
+      - 'src/modules/Data/pengRobinsonMixtureFacade.ts'
+      - 'src/modules/Data/binaryInteractionParameters.ts'
+      - 'src/modules/Tests/pengRobinsonBenchmarkDump.test.ts'
+      - 'src/modules/Tests/pengRobinsonMixtureBenchmarkDump.test.ts'
+      - '.github/workflows/peng-robinson-benchmark.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  coolprop-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TS-дамп контрольных точек PR
+        run: npx vitest run src/modules/Tests/pengRobinsonBenchmarkDump.test.ts
+
+      - name: TS-дамп смесевых контрольных точек PR (4.4.4.3)
+        run: npx vitest run src/modules/Tests/pengRobinsonMixtureBenchmarkDump.test.ts
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install benchmark dependencies
+        run: python -m pip install -r scripts/benchmarks/requirements.txt
+
+      - name: Python unit tests (классификация non-finite CoolProp, строгий JSON)
+        run: python -m unittest discover -s scripts/benchmarks -p "test_*.py" -v
+
+      - name: CoolProp PR benchmark (независимый оракул)
+        run: |
+          python scripts/benchmarks/peng_robinson_coolprop.py \
+            --dump benchmark-artifacts/peng-robinson-ts-dump.json \
+            --mixtures benchmark-artifacts/peng-robinson-mixture-ts-dump.json \
+            --report benchmark-artifacts/peng-robinson-coolprop-report.json \
+            --summary-md benchmark-artifacts/benchmark-summary.md
+
+      - name: Итог в $GITHUB_STEP_SUMMARY
+        if: always()
+        run: |
+          if [ -f benchmark-artifacts/benchmark-summary.md ]; then
+            cat benchmark-artifacts/benchmark-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peng-robinson-benchmark
+          path: benchmark-artifacts/
+          if-no-files-found: warn
