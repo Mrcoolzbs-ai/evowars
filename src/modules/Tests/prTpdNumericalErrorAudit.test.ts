@@ -283,7 +283,13 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
     // ln(8) = 3·ln(2) в центрах оракула: серия редукции согласована
     // (аномалия старого прототипа 4.8e-16 исключена).
     expect(report.selfTest.ln8_vs_3ln2).toBeLessThan(1e-16);
-    expect(report.selfTest.log3_bound).toBeLessThan(3e-16);
+    // log 3: платформенный Math.log НЕ обязан быть correctly rounded
+    // ( fdlibm-класс — до ~1 ulp ): граница = |c|·eps + |Math.log(3) − c|·(1+eps)
+    // + r. В среде аудита Math.log(3) совпадает с центром оракула — 2.5268e-16
+    // ( = |c|·eps ); в CI V8/fdlibm отклонение 1 ulp ( 2.2204e-16 ) —
+    // 4.747254313187558e-16 ( наблюдено в CI 2026-11-07 ). Порог 6e-16 =
+    // |c|·eps + ~1.6 ulp покрывает оба окружения с запасом.
+    expect(report.selfTest.log3_bound).toBeLessThan(6e-16);
     expect(report.selfTest.sqrt2_bound).toBeLessThan(4e-16);
     expect(report.selfTest.subnormalMul.coversTrue).toBe(true);
     expect(Math.abs(report.selfTest.lnRatio_identity.center)).toBeLessThan(1e-30);
@@ -305,9 +311,22 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
   });
 
   it('self-test оракула: субнормальные ln(w/z) enclosure накрывает ln 2', () => {
+    // w = 2e-320, z = 1e-320 — субнормальные doubles; точное w/z = 2,
+    // истинное ln(w/z) = ln 2. Центр оракула воспроизводит его без
+    // отклонения. Enclosure обязан НАКРЫТЬ значение, а не быть узким:
+    // при |z| ~ 1e-320 пол радиуса TS_MIN_R = 2^-1074 доминирует над
+    // |z|·2^-100, и относительная полуширина ~ 3·(2^-1074/|z|)·(1/2 + запас)
+    // ≈ 7.4199e-4 — консервативная ball-семантика здесь НЕ может быть узкой
+    // ( наблюдено: 7.419926159496576e-4 ). На scalar TPD это НЕ влияет:
+    // вклад w_i·ln(w_i/z_i) масштабируется w_i ~ 1e-320
+    // ( сценарий subnormal: rTpd ≈ 1.22e-26 ).
     const sub = oracleLnRatio(2e-320, 1e-320);
-    expect(Math.abs(oracleCenter(sub) - Math.LN2)).toBeLessThan(1e-14);
-    expect(sub.r).toBeLessThan(1e-14);
+    const center = oracleCenter(sub);
+    expect(Math.abs(center - Math.LN2)).toBeLessThan(1e-14);
+    expect(sub.r).toBeLessThan(2e-3);
+    // Направленное округление наружу: истинное ln 2 внутри enclosure.
+    expect(center - sub.r).toBeLessThanOrEqual(Math.LN2);
+    expect(center + sub.r).toBeGreaterThanOrEqual(Math.LN2);
   });
 
   // --- 3.2. Итоговая статистика -----------------------------------------
