@@ -28,6 +28,7 @@ import {
   oracleCenter,
   oracleEncloseRoot,
   oracleErrorBound,
+  oracleIsolateRealRoots,
   oracleLnRatio,
   oracleMixtureState,
   oracleTpdBall,
@@ -419,7 +420,12 @@ export interface TpdNumericalErrorAuditStateMeasurement {
   readonly oracleDiscriminantCenter: number;
   /** Радиус enclosure дискриминанта ( для отчётности ). */
   readonly oracleDiscriminantR: number;
-  /** Согласованность независимой топологии с production ( число физических ). */
+  /** ПОЛНОЕ согласование независимой топологии с production: совпадение
+   *  числа действительных корней, числа физических корней ( Z > B ) и
+   *  классификации Z > B / Z <= B каждого отсортированного
+   *  действительного корня ( production — по фактическому production B,
+   *  оракул — по доказанным enclosure-ам ). Совпадение выбранной ветви
+   *  проверяется отдельно через eZtotal, НЕ этим полем. */
   readonly topologyMatch: boolean;
 }
 
@@ -593,8 +599,9 @@ function failureMatches(expected: TpdNumericalErrorAuditExpectFailure, failure: 
  * этапе: eA/eB ( коэффициенты ), eZtotal ( корень при oracle-входах ),
  * eZsolverOnly ( корень при ТОЧНЫХ production A, B — изолирует ошибку
  * решателя ), eLnPhi per comp. Топология корней ( число действительных,
- * число физических, интервальный знак дискриминанта ) — независимо
- * доказана оракулом и сверена с production ( topologyMatch ).
+ * число физических, интервальный знак дискриминанта, классификация
+ * Z > B каждого корня ) — независимо доказана оракулом и ПОЛНОСТЬЮ
+ * сверена с production ( topologyMatch ).
  */
 function measureOracleState(
   spec: TpdNumericalErrorAuditStateSpec,
@@ -643,6 +650,34 @@ function measureOracleState(
     }
   }
   const minSep = minSeparation(prodResult.physicalRoots);
+  // Строгая сверка топологии с production ( корректировка Stage
+  // 4.4.4.4.1-A ): topologyMatch означает ПОЛНОЕ совпадение топологии:
+  // ( a ) число действительных корней, ( b ) число физических корней,
+  // ( c ) классификация Z > B / Z <= B каждого отсортированного
+  // действительного корня — production по фактическому production B,
+  // оракул по доказанным enclosure-ам ( enclosure корня против
+  // enclosure B ). Изоляция детерминирована: oracleMixtureState
+  // внутри вызывает ту же oracleIsolateRealRoots с теми же A/B,
+  // повторный вызов новых отказов не добавляет. Совпадение выбранной
+  // ветви подтверждается отдельно enclosure-ом корня ( eZtotal ),
+  // НЕ этим полем. Различия НЕ скрываются и НЕ подменяются отказами.
+  const topology = oracleIsolateRealRoots(oracleState.A, oracleState.B);
+  const prodRootsAscending = [...prodResult.realRoots].sort((x, y) => x - y);
+  const realRootCountMatch =
+    oracleState.realRootCount === prodRootsAscending.length;
+  const physicalRootCountMatch =
+    oracleState.physicalRootCount === prodResult.physicalRoots.length;
+  let perRootClassificationMatch = false;
+  if (realRootCountMatch) {
+    perRootClassificationMatch = true;
+    for (let i = 0; i < prodRootsAscending.length; i += 1) {
+      const prodIsPhysical = prodRootsAscending[i] > prodResult.dimensionlessB;
+      if (prodIsPhysical !== topology.physicalMask[i]) {
+        perRootClassificationMatch = false;
+        break;
+      }
+    }
+  }
   const measurement: TpdNumericalErrorAuditStateMeasurement = {
     branch: spec.branch,
     comps,
@@ -674,7 +709,8 @@ function measureOracleState(
     oracleDiscriminantSign: oracleState.discriminantSign,
     oracleDiscriminantCenter: oracleCenter(oracleState.discriminant),
     oracleDiscriminantR: oracleState.discriminant.r,
-    topologyMatch: oracleState.physicalRootCount === prodResult.physicalRoots.length
+    topologyMatch:
+      realRootCountMatch && physicalRootCountMatch && perRootClassificationMatch
   };
   return { measurement, oracleState, comps };
 }
