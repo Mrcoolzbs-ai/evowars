@@ -49,7 +49,7 @@
 // малых TPD поглощение малых слагаемых восстанавливается (пример:
 // вклады [1e16, 1, -1e16, +0] дают итог ровно 1, тогда как наивное
 // накопление теряет единицу). ln(w/z) вычисляется устойчиво: w === z
-// даёт ровно +0; близкие значения — Math.log1p относительной разности
+// даёт ровно +0; близкие значения — certifiedLog1p относительной разности
 // (без катаклизмического сокращения двух близких логарифмов); заметно
 // различные — безопасная разность логарифмов (промежуточное
 // переполнение (w - z)/z при subnormal z НЕ исключено и уходит в
@@ -75,6 +75,14 @@ import type {
   PengRobinsonMixtureSuccess,
   PengRobinsonRootBranch
 } from './pengRobinsonMixture';
+
+// Stage 4.4.4.4.1-C: сертифицированный производственный логарифм
+// (enclosure-границы доказаны; платформенные Math.log / Math.log1p
+// НЕ используются) для устойчивого ln(w/z). При отказе certifiedLogValue
+// возвращает NaN и существующий путь переводит его в null →
+// numerical_failure; порог 0.5, ветвление и точный +0 при w === z
+// НЕ изменены.
+import { certifiedLn, certifiedLog1p, certifiedLogValue } from './certifiedLogarithm';
 
 // ============================================
 // 1. ТИПЫ И КОНСТАНТЫ
@@ -195,12 +203,12 @@ function pairKey(componentA: string, componentB: string): string {
 
 /**
  * Порог переключения форм ln(w/z): если относительная разность
- * (w - z)/z конечна и |(w - z)/z| <= 0.5, используется Math.log1p
+ * (w - z)/z конечна и |(w - z)/z| <= 0.5, используется certifiedLog1p
  * относительной разности — аргумент хорошо обусловлен,
  * катаклизмического сокращения двух близких логарифмов нет. Если
  * относительная разность превосходит порог или переполнилась до
  * ±Infinity (например, при очень малом положительном z — доля может
- * быть subnormal), используется разность Math.log(w) - Math.log(z):
+ * быть subnormal), используется разность certifiedLn(w) - certifiedLn(z):
  * она не образует промежуточного отношения w/z и для конечных
  * положительных w и z остаётся конечной. w === z возвращает ровно +0
  * до любой арифметики. Критерий — условная граница двух областей
@@ -225,10 +233,11 @@ function stableLogRatio(w: number, z: number): number | null {
   }
   const relativeDifference = (w - z) / z;
   if (Math.abs(relativeDifference) <= PR_TPD_LOG_RATIO_LOG1P_THRESHOLD) {
-    const viaLog1p = Math.log1p(relativeDifference);
+    const viaLog1p = certifiedLogValue(certifiedLog1p(relativeDifference));
     return Number.isFinite(viaLog1p) ? viaLog1p : null;
   }
-  const viaDifference = Math.log(w) - Math.log(z);
+  const viaDifference =
+    certifiedLogValue(certifiedLn(w)) - certifiedLogValue(certifiedLn(z));
   return Number.isFinite(viaDifference) ? viaDifference : null;
 }
 

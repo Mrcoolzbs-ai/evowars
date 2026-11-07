@@ -85,6 +85,16 @@ import type {
   PengRobinsonRootBranch
 } from './pengRobinson';
 
+// Stage 4.4.4.4.1-C: сертифицированный производственный логарифм
+// (certifiedLn / certifiedLog1p с доказанными enclosure-границами,
+// БЕЗ платформенных логарифмов libm) для компонентных ln(phi_i).
+// Production использует только .value (см. certifiedLogValue): при
+// отказе значение NaN переводится существующим guard-ом в код
+// logarithm_domain_error; замены структурно идентичны заменам в
+// pengRobinsonLnPhi, побитовое совпадение чистого и смесевого путей
+// сохраняется.
+import { certifiedLn, certifiedLog1p, certifiedLogValue } from './certifiedLogarithm';
+
 // Реэкспорт общих типов PR для потребителей смесевого API (фасад
 // Data/pengRobinsonMixtureFacade.ts и тесты): политики доказанности,
 // статусы и ветви объявлены в ./pengRobinson (единый источник).
@@ -1032,10 +1042,12 @@ export function computePengRobinsonMixture(
 
   // --- Компонентные ln(phi_i), phi_i, f_i ---
   const Z = selectedRoot;
-  const lnZMinusB = Math.log(Z) + Math.log1p(-dimensionlessB / Z);
+  const lnZMinusB =
+    certifiedLogValue(certifiedLn(Z)) +
+    certifiedLogValue(certifiedLog1p(-dimensionlessB / Z));
   const logRatio =
-    Math.log1p(((1 + Math.SQRT2) * dimensionlessB) / Z) -
-    Math.log1p(((1 - Math.SQRT2) * dimensionlessB) / Z);
+    certifiedLogValue(certifiedLog1p(((1 + Math.SQRT2) * dimensionlessB) / Z)) -
+    certifiedLogValue(certifiedLog1p(((1 - Math.SQRT2) * dimensionlessB) / Z));
   if (!Number.isFinite(lnZMinusB) || !Number.isFinite(logRatio)) {
     return {
       status: 'failure',

@@ -93,6 +93,13 @@ import {
 } from './prDoubleDouble';
 import type { DoubleDouble } from './prDoubleDouble';
 
+// Stage 4.4.4.4.1-C: сертифицированный производственный логарифм
+// (certifiedLn / certifiedLog1p с доказанными enclosure-границами,
+// БЕЗ платформенных логарифмов libm) для логарифмических членов
+// ln(phi). Production использует только .value (см. certifiedLogValue):
+// публичный API и NaN-семантика этого модуля не меняются.
+import { certifiedLn, certifiedLog1p, certifiedLogValue } from './certifiedLogarithm';
+
 // ============================================
 // 1. КОНСТАНТЫ И ТИПЫ
 // ============================================
@@ -846,6 +853,11 @@ export function computePengRobinsonPureParameters(
  * форма: ln(Z - B) = ln(Z) + log1p(-B/Z), логарифмическое отношение
  * через log1p — нет неустойчивых выражений вида 0/0 при B -> 0;
  * предел A, B -> 0 (A/B = a/(bRT) — конечен) обрабатывается гладко.
+ *
+ * Stage 4.4.4.4.1-C: платформенные логарифмы libm заменены на
+ * сертифицированные certifiedLn / certifiedLog1p (enclosure-границы
+ * доказаны; при отказе — NaN, прежняя семантика). Формулы, кубический
+ * решатель и выбор корня НЕ изменены.
  */
 export function pengRobinsonLnPhi(
   z: number,
@@ -855,13 +867,15 @@ export function pengRobinsonLnPhi(
   if (!(z > dimensionlessB) || !(z > 0)) {
     return Number.NaN;
   }
-  const lnZMinusB = Math.log(z) + Math.log1p(-dimensionlessB / z);
+  const lnZMinusB =
+    certifiedLogValue(certifiedLn(z)) +
+    certifiedLogValue(certifiedLog1p(-dimensionlessB / z));
   if (!Number.isFinite(lnZMinusB)) {
     return Number.NaN;
   }
   const logRatio =
-    Math.log1p(((1 + Math.SQRT2) * dimensionlessB) / z) -
-    Math.log1p(((1 - Math.SQRT2) * dimensionlessB) / z);
+    certifiedLogValue(certifiedLog1p(((1 + Math.SQRT2) * dimensionlessB) / z)) -
+    certifiedLogValue(certifiedLog1p(((1 - Math.SQRT2) * dimensionlessB) / z));
   const result =
     z - 1 - lnZMinusB -
     (dimensionlessA / (2 * Math.SQRT2 * dimensionlessB)) * logRatio;
