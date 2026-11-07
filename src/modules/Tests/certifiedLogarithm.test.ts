@@ -612,3 +612,202 @@ describe('Stage 4.4.4.4.1-C: golden reference vectors (независимый э
     expect(maxErr).toBeLessThanOrEqual(1.2e-13);
   });
 });
+
+// ============================================
+// 4. Stage 4.4.4.4.1-D — ОТДЕЛЬНЫЙ ВЫСОКОТОЧНЫЙ ЭТАЛОН log1p (Q=1200)
+// ============================================
+// Ограничение основной батареи: fixed-point Q=420 НЕДОВОТОЧЕН для
+// субнормальных аргументов log1p — масштаб 2^420 << |ln(1+x)| ~ 2^-1074,
+// точное значение в Q=420 представимо нулём (refLog1pFix(Number.MIN_VALUE)
+// === 0n), эталон различить их не может. Для субнормальных (и граничных)
+// log1p добавлен НЕЗАВИСИМЫЙ высокоточный путь (задание Stage D §5):
+//
+//   ln(1+x) = 2·atanh(t),  t = x/(2+x);
+//
+// - вход x — ТОЧНАЯ рациональная дробь N/D по битам binary64
+//   (refDecomposeAbs/refSign), t = N/(2D+N) — точная рациональная
+//   арифметика (степени двойки сокращаются точно);
+// - ряд 2·Σ_{n=0}^{449} t^(2n+1)/(2n+1) в BigInt fixed-point Q=1200;
+// - каждый шаг — НАПРАВЛЕННОЕ округление наружу (floor/ceil) через
+//   интервальную арифметику: накопленные ошибки округления всех шагов
+//   учитываются расширением интервала (outward);
+// - наружная оценка остатка |R_450| <= 2|t|^901/(901(1-t^2)) добавляется
+//   в обе стороны (при |t| <= 1/3: 1/(1-t^2) <= 9/8);
+// - путь НЕ использует production kernel, Math.log, Math.log1p и
+//   ln(2)-кэш основной батареи; результат — ИНТЕРВАЛ (enclosure), а не
+//   одно число без границы ошибки.
+
+const HI_Q = 1200n;
+const HI_TERMS = 450;
+const HI_SCALE = 1n << HI_Q;
+
+/** floor(a/m) для m > 0 (BigInt / усекает к нулю — ветвление по знаку). */
+function hiFloorDiv(a: bigint, m: bigint): bigint {
+  return a >= 0n ? a / m : (a - (m - 1n)) / m;
+}
+
+/** ceil(a/m) для m > 0 (BigInt / усекает к нулю — ветвление по знаку). */
+function hiCeilDiv(a: bigint, m: bigint): bigint {
+  return a >= 0n ? (a + m - 1n) / m : a / m;
+}
+
+/** Точная рациональная дробь x = N/D (целые N, D > 0). */
+function hiRationalX(x: number): { N: bigint; D: bigint } {
+  const { num, exp } = refDecomposeAbs(x);
+  const s = refSign(x);
+  if (exp >= 0n) {
+    return { N: s * num * (1n << exp), D: 1n };
+  }
+  return { N: s * num, D: 1n << -exp };
+}
+
+/**
+ * Reference enclosure ln(1+x) в fixed-point Q=1200: интервал [lo, hi]
+ * (BigInt), ln(1+x)·2^1200 гарантированно внутри. Все члены ряда имеют
+ * ОДИН знак (знак t — нечётные степени), поэтому интервал строится по
+ * |t| и отражается при x < 0.
+ */
+function refLog1pHiEnclosure(x: number): { lo: bigint; hi: bigint } {
+  const { N, D } = hiRationalX(x);
+  const M = 2n * D + N; // 2 + x > 0 при x > -1
+  if (M <= 0n) {
+    throw new Error('refLog1pHiEnclosure: 2 + x <= 0');
+  }
+  const uN = N < 0n ? -N : N; // |t| = |N| / M
+  const uLo = hiFloorDiv(uN * HI_SCALE, M);
+  const uHi = hiCeilDiv(uN * HI_SCALE, M);
+  // t^2 — наружу; степени t^(2n+1) — интервально; суммы — наружу.
+  const sqLo = hiFloorDiv(uLo * uLo, HI_SCALE);
+  const sqHi = hiCeilDiv(uHi * uHi, HI_SCALE);
+  let pLo = uLo;
+  let pHi = uHi;
+  let sLo = 0n;
+  let sHi = 0n;
+  for (let n = 0; n < HI_TERMS; n += 1) {
+    const d = BigInt(2 * n + 1);
+    sLo += hiFloorDiv(pLo, d);
+    sHi += hiCeilDiv(pHi, d);
+    pLo = hiFloorDiv(pLo * sqLo, HI_SCALE);
+    pHi = hiCeilDiv(pHi * sqHi, HI_SCALE);
+  }
+  // Остаток |R_450| <= 2·u^901/(901·(1-u^2)) <= 18·pHi/(901·8) при |u|<=1/3
+  // (pHi после цикла — наружная верхняя граница u^901 в Q=1200).
+  const rFix = hiCeilDiv(18n * pHi, 901n * 8n);
+  const twoSLo = 2n * sLo;
+  const twoSHi = 2n * sHi;
+  if (N > 0n) {
+    return { lo: twoSLo - rFix, hi: twoSHi + rFix };
+  }
+  return { lo: -twoSHi - rFix, hi: -twoSLo + rFix };
+}
+
+/** floor(v·2^1200) наружу (нижняя граница production enclosure). */
+function hiDoubleToFixFloor(x: number): bigint {
+  const { num, exp } = refDecomposeAbs(x);
+  const a = refSign(x) * num;
+  const shift = exp + HI_Q;
+  if (shift >= 0n) {
+    return a << shift;
+  }
+  return hiFloorDiv(a << HI_Q, 1n << -shift);
+}
+
+/** ceil(v·2^1200) наружу (верхняя граница production enclosure). */
+function hiDoubleToFixCeil(x: number): bigint {
+  const { num, exp } = refDecomposeAbs(x);
+  const a = refSign(x) * num;
+  const shift = exp + HI_Q;
+  if (shift >= 0n) {
+    return a << shift;
+  }
+  return hiCeilDiv(a << HI_Q, 1n << -shift);
+}
+
+/**
+ * Контainment: reference interval [lo, hi] (Q=1200) входит в production
+ * enclosure, конвертированный наружу (floor нижней / ceil верхней).
+ */
+function expectHiRefContained(x: number, s: CertifiedLogSuccess): void {
+  const ref = refLog1pHiEnclosure(x);
+  const prodLo = hiDoubleToFixFloor(s.lowerBound);
+  const prodHi = hiDoubleToFixCeil(s.upperBound);
+  if (ref.lo < prodLo || ref.hi > prodHi) {
+    throw new Error(
+      `log1p(${String(x)}): Q=1200 reference [${ref.lo}, ${ref.hi}] вне ` +
+      `production enclosure [${prodLo}, ${prodHi}] ` +
+      `(границы ${String(s.lowerBound)}, ${String(s.upperBound)})`
+    );
+  }
+}
+
+describe('Stage 4.4.4.4.1-D: log1p — отдельный высокоточный эталон Q=1200', () => {
+  it('мотив отдельного пути: эталон Q=420 теряет субнормальный аргумент (ровно 0)', () => {
+    // При Q=420 масштаб 2^420 не представляет значения ~2^-1074:
+    // нормализованный t-член фиксированной точки равен нулю, точный
+    // результат основной батареи — 0. Зафиксировано как обоснование
+    // отдельного пути (не отказ основной батареи: её точки >= 2^-53).
+    expect(refLog1pFix(Number.MIN_VALUE)).toBe(0n);
+    expect(refLog1pFix(-Number.MIN_VALUE)).toBe(0n);
+  });
+
+  it('субнормальные ±Number.MIN_VALUE: reference различает значение; фактические production границы зафиксированы', () => {
+    for (const x of [Number.MIN_VALUE, -Number.MIN_VALUE]) {
+      const s = expectSuccess(certifiedLog1p(x));
+      // ФАКТИЧЕСКИЕ измеренные границы ядра (Stage D §5): enclosure НЕ
+      // обязан быть минимальным интервалом субнормальной сетки — радиус
+      // ~2^-100 (BALL_WIDEN-масштаб) доминирует над субнормальным
+      // центром; value коллапсирует к нулю (не требование контракта).
+      // Регрессионная фиксация фактического поведения.
+      expect(s.lowerBound).toBe(-7.888609052210388e-31);
+      expect(s.upperBound).toBe(7.888609052210388e-31);
+      // Reference Q=1200: СТРОГО ненулевой интервал правильного знака
+      // (ln(1+x) ~ ±2^-1074 — представим в Q=1200), containment в
+      // production enclosure.
+      const ref = refLog1pHiEnclosure(x);
+      if (x > 0) {
+        expect(ref.lo > 0n).toBe(true);
+        expect(ref.hi > 0n).toBe(true);
+      } else {
+        expect(ref.lo < 0n).toBe(true);
+        expect(ref.hi < 0n).toBe(true);
+      }
+      expectHiRefContained(x, s);
+    }
+  });
+
+  it('субнормальные ±3·Number.MIN_VALUE: reference внутри enclosure', () => {
+    const x3 = 3 * Number.MIN_VALUE;
+    for (const x of [x3, -x3]) {
+      const s = expectSuccess(certifiedLog1p(x));
+      expect(s.lowerBound).toBe(-7.888609052210388e-31);
+      expect(s.upperBound).toBe(7.888609052210388e-31);
+      expectHiRefContained(x, s);
+    }
+  });
+
+  it('малые нормальные x (MIN_NORMAL, ±1e-300, ±1e-16): reference внутри enclosure', () => {
+    const xs = [
+      2.2250738585072014e-308, // наименьшее НОРМАЛЬНОЕ binary64 (2^-1022)
+      -2.2250738585072014e-308,
+      1e-300,
+      -1e-300,
+      1e-16,
+      -1e-16
+    ];
+    for (const x of xs) {
+      const s = expectSuccess(certifiedLog1p(x));
+      expectHiRefContained(x, s);
+      // Контракт знака: ln(1+x) имеет знак x при |x| < 1.
+      if (x !== 0) {
+        expect(s.value >= s.lowerBound && s.value <= s.upperBound).toBe(true);
+      }
+    }
+  });
+
+  it('границы диапазона ±0.5: reference внутри enclosure', () => {
+    for (const x of [0.5, -0.5]) {
+      const s = expectSuccess(certifiedLog1p(x));
+      expectHiRefContained(x, s);
+    }
+  });
+});

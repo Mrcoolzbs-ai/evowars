@@ -41,6 +41,10 @@ import type {
 import { computePengRobinsonPure } from '../Data/pengRobinsonFacade';
 import type { PengRobinsonPureSuccess } from '../Data/pengRobinsonFacade';
 
+// Stage 4.4.4.4.1-D: хелпер фильтра физически допустимых корней с
+// кратностями (для сверки прокинутых метаданных топологии смеси).
+import { prPhysicalRootsWithMultiplicities } from '../Core/pengRobinson';
+
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 // ----------------------------------------------------------------------------
@@ -1184,5 +1188,53 @@ describe('Stage 4.4.4.3.1: точный нулевой предел a_mix', () =
     // Явная оговорка: растворимость N2 в воде моделью НЕ предсказывается
     // (benchmark PR-смесей НЕ является проверкой растворимости).
     expect(warning.message).toContain('растворимость N2 в воде');
+  });
+});
+
+// ============================================
+// STAGE 4.4.4.4.1-D — МЕТАДАННЫЕ ТОПОЛОГИИ КОРНЕЙ СМЕСЕВОЙ КУБИКИ
+// ============================================
+// Метаданные (знак дискриминанта депрессированной формы + кратности)
+// прокидываются в смесевой успех тем же решателем/фильтром, что и в
+// чистом PR (побитовая идентичность путей сохраняется). Проверка —
+// через Data-фасад каталога (spread не должен терять поля).
+
+describe('Stage 4.4.4.4.1-D: топология корней смесевой кубики PR (метаданные)', () => {
+  it('смесь co2+n2 250 K, 2 MPa через фасад: метаданные согласованы с корнями', () => {
+    const s = mixSuccess(vaporRequest([entry('co2', 0.7), entry('n2', 0.3)], 250, 2e6));
+    // Инварианты индексации: realRootMultiplicities[i] ↔ realRoots[i],
+    // physicalRootMultiplicities[i] ↔ physicalRoots[i].
+    expect(s.realRootMultiplicities).toHaveLength(s.realRoots.length);
+    expect(s.physicalRootMultiplicities).toHaveLength(s.physicalRoots.length);
+    expect(s.distinctPhysicalRootCount).toBe(s.physicalRoots.length);
+    // Кратности — только 1|2|3 (таблица ветвей решателя).
+    for (const m of s.realRootMultiplicities) {
+      expect(m === 1 || m === 2 || m === 3).toBe(true);
+    }
+    // Таблица кратностей по знаку D (депрессированной формы):
+    // D < 0 → три простых корня; D > 0 → один простой; D = 0 →
+    // [2, 1] (двойной + простой) либо [3] (тройной).
+    const mults = [...s.realRootMultiplicities];
+    if (s.discriminantSign === -1) {
+      expect(s.realRoots).toHaveLength(3);
+      expect(mults).toEqual([1, 1, 1]);
+    } else if (s.discriminantSign === 1) {
+      expect(s.realRoots).toHaveLength(1);
+      expect(mults).toEqual([1]);
+    } else {
+      expect(mults.length === 1 || mults.length === 2).toBe(true);
+    }
+    // Физические кратности — ровно фильтр Z > B_mix над реальными
+    // парами (без пересчёта кратностей).
+    const topology = prPhysicalRootsWithMultiplicities(
+      [...s.realRoots],
+      [...s.realRootMultiplicities],
+      s.dimensionlessB
+    );
+    expect([...s.physicalRoots]).toEqual([...topology.roots]);
+    expect([...s.physicalRootMultiplicities]).toEqual([...topology.multiplicities]);
+    // Семантика выбора ветви прежняя: vapor — наибольший физический корень.
+    expect(s.selectedRoot).toBe(s.physicalRoots[s.physicalRoots.length - 1]);
+    expect(s.Z).toBe(s.selectedRoot);
   });
 });

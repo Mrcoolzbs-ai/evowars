@@ -297,6 +297,17 @@ export interface PengRobinsonComponentSuccess {
   readonly distinctPhysicalRootCount: number;
   readonly hasDistinctBranches: boolean;
 
+  // Метаданные топологии корней (Stage 4.4.4.4.1-D): знак дискриминанта
+  // депрессированной формы и кратности, доказанные ветвью решателя.
+  // realRootMultiplicities[i] относится к realRoots[i];
+  // physicalRootMultiplicities[i] — к physicalRoots[i] (фильтр Z > B,
+  // кратности не пересчитываются). distinctPhysicalRootCount остаётся
+  // числом РАЗЛИЧНЫХ физических значений (не суммой кратностей);
+  // семантика selectedRoot/hasDistinctBranches не меняется.
+  readonly discriminantSign: PrDiscriminantSign;
+  readonly realRootMultiplicities: readonly PrRootMultiplicity[];
+  readonly physicalRootMultiplicities: readonly PrRootMultiplicity[];
+
   // Предупреждения о применимости и качестве данных.
   readonly warnings: readonly PengRobinsonWarning[];
   // Дисклеймеры (в т.ч. о том, что выбор ветви — не фазовая устойчивость).
@@ -346,9 +357,35 @@ export function pengRobinsonCubicCoefficients(
   };
 }
 
-/** Результат низкоуровневого решателя: различимые действительные корни. */
+/**
+ * Знак дискриминанта ДЕПРЕССИРОВАННОЙ формы D = (q/2)^2 + (p/3)^3,
+ * который различает решатель: +1 / 0 / -1. Это НЕ знак полного
+ * полиномиального дискриминанта кубики — знаки противоположны
+ * (D > 0: ровно один действительный корень; D = 0: кратные корни;
+ * D < 0: три различных действительных корня).
+ */
+export type PrDiscriminantSign = -1 | 0 | 1;
+
+/** Кратность действительного корня кубики по доказанной ветви решателя. */
+export type PrRootMultiplicity = 1 | 2 | 3;
+
+/**
+ * Результат низкоуровневого решателя: различимые действительные корни
+ * + метаданные топологии (Stage 4.4.4.4.1-D). Источник метаданных —
+ * ТОЛЬКО уже доказанный знак D (DD-полоса + dyadic-BigInt fallback) и
+ * выбранная математическая ветвь: дискриминант НЕ вычисляется повторно,
+ * кратности НЕ подгоняются по близости корней. rootMultiplicities[i]
+ * относится к roots[i] (пары сортируются совместно); ветвь отказа
+ * частичных метаданных НЕ несёт.
+ */
 export type PrCubicRealRootsResult =
-  | { readonly ok: true; readonly roots: readonly number[] }
+  | {
+      readonly ok: true;
+      readonly roots: readonly number[];
+      readonly discriminantSign: PrDiscriminantSign;
+      readonly distinctRealRootCount: 1 | 2 | 3;
+      readonly rootMultiplicities: readonly PrRootMultiplicity[];
+    }
   | { readonly ok: false; readonly reason: string };
 
 // ============================================
@@ -628,12 +665,21 @@ export function solvePrCubicRealRoots(
   // знак доказан DD-цепочкой (~106 бит). ВНУТРИ полосы знак неопределим
   // даже в double-double, а допуск невязки его НЕ доказывает: точный
   // знак вычисляет dyadic-BigInt fallback по исходным binary64 A/B.
-  const signProven =
+  // Stage 4.4.4.4.1-D: знак типизирован как PrDiscriminantSign для
+  // метаданных топологии; вычисление НЕ меняется (контракт
+  // prExactCubicDiscriminantSign — ровно +1/-1/0; вызов fallback
+  // остаётся ленивым — только внутри полосы порога).
+  const signProven: PrDiscriminantSign =
     dd.discriminant.hi > discThreshold ? 1
       : dd.discriminant.hi < -discThreshold ? -1
-        : prExactCubicDiscriminantSign(dimensionlessA, dimensionlessB);
+        : (prExactCubicDiscriminantSign(dimensionlessA, dimensionlessB) as PrDiscriminantSign);
 
   const rawRoots: number[] = [];
+  // Stage 4.4.4.4.1-D: кратности, назначенные выбранной математической
+  // ветвью (параллельно rawRoots, теми же push в тех же местах):
+  // D > 0 → [1]; D < 0 → [1, 1, 1]; D = 0, p = q = 0 → [3];
+  // D = 0, p != 0 → [2, 1] (2 — корню zDouble, 1 — zSimple).
+  const rawMultiplicities: PrRootMultiplicity[] = [];
   // Ветви классификации возвращают корни в y-координатах
   // (депрессированная форма, требуется сдвиг shift); ветвь кратного
   // корня — сразу в z-координатах.
@@ -667,6 +713,7 @@ export function solvePrCubicRealRoots(
         };
       }
       rawRoots.push(ddToDouble(zTriple));
+      rawMultiplicities.push(3);
       provenDistinctCount = 1;
     } else if (pSign !== 0) {
       // D = 0: двойной корень y_d = -3q/(2p) и простой y_s = 3q/p
@@ -687,6 +734,7 @@ export function solvePrCubicRealRoots(
         };
       }
       rawRoots.push(ddToDouble(zDouble), ddToDouble(zSimple));
+      rawMultiplicities.push(2, 1);
       provenDistinctCount = 2;
     } else {
       // p = 0, q != 0: математически D = (q/2)^2 > 0 — сюда попасть
@@ -707,6 +755,7 @@ export function solvePrCubicRealRoots(
       rawRoots.push(
         -2 * Math.sign(qD) * Math.sqrt(-pD / 3) * Math.cosh(Math.acosh(h) / 3)
       );
+      rawMultiplicities.push(1);
     } else {
       // Округление сместило arg < 1 при доказанном D > 0: стабильный
       // Cardano (без клампа, сохраняющего один корень).
@@ -714,9 +763,11 @@ export function solvePrCubicRealRoots(
       const big = qD <= 0 ? -qD / 2 + squareRoot : -qD / 2 - squareRoot;
       if (big === 0) {
         rawRoots.push(0);
+        rawMultiplicities.push(1);
       } else {
         const w = Math.cbrt(big);
         rawRoots.push(w - (pD / 3) / w);
+        rawMultiplicities.push(1);
       }
     }
   } else if (pSign < 0 && signProven < 0) {
@@ -730,6 +781,7 @@ export function solvePrCubicRealRoots(
     const amplitude = 2 * Math.sqrt(-pD / 3);
     for (let k = 0; k < 3; k += 1) {
       rawRoots.push(amplitude * Math.cos(theta - (2 * Math.PI * k) / 3));
+      rawMultiplicities.push(1);
     }
   } else if (pSign >= 0 && signProven > 0) {
     // p >= 0: дискриминант неотрицателен, ровно один действительный
@@ -740,9 +792,11 @@ export function solvePrCubicRealRoots(
     if (big === 0) {
       // q = 0 и p = 0: тройной корень y = 0.
       rawRoots.push(0);
+      rawMultiplicities.push(1);
     } else {
       const w = Math.cbrt(big);
       rawRoots.push(w - (pD / 3) / w);
+      rawMultiplicities.push(1);
     }
   } else {
     // p >= 0 математически даёт D = (q/2)^2 + (p/3)^3 >= 0; точный
@@ -755,12 +809,19 @@ export function solvePrCubicRealRoots(
   }
 
   // Возврат к z (только для ветвей в y-координатах) и проверка невязки
-  // каждого корня относительно масштаба коэффициентов.
-  const candidates = rawRootsInZCoordinates
-    ? rawRoots
-    : rawRoots.map((y) => y + shiftD);
+  // каждого корня относительно масштаба коэффициентов. Stage 4.4.4.4.1-D:
+  // пары (корень, кратность) переносятся совместно через возврат в
+  // z-координаты, residual-контроль, сортировку и дедупликацию; кратность
+  // берётся ТОЛЬКО из доказанной ветви (никакой подгонки по близости).
+  const candidates: readonly {
+    readonly z: number;
+    readonly multiplicity: PrRootMultiplicity;
+  }[] = rawRootsInZCoordinates
+    ? rawRoots.map((z, i) => ({ z, multiplicity: rawMultiplicities[i] ?? 1 }))
+    : rawRoots.map((y, i) => ({ z: y + shiftD, multiplicity: rawMultiplicities[i] ?? 1 }));
   const coefficientScale = Math.max(1, Math.abs(c2D), Math.abs(c1D), Math.abs(c0D));
-  for (const z of candidates) {
+  for (const candidate of candidates) {
+    const z = candidate.z;
     if (!Number.isFinite(z)) {
       return { ok: false, reason: `неконечный корень: z=${String(z)}` };
     }
@@ -775,12 +836,17 @@ export function solvePrCubicRealRoots(
   }
 
   // Сортировка и дедупликация кратных (в пределах допуска) корней.
-  const dedupTolerance = 1e-8 * Math.max(1, ...candidates.map((z) => Math.abs(z)), dimensionlessB);
-  const sorted = candidates.slice().sort((x, y) => x - y);
+  // Stage 4.4.4.4.1-D: сортировка и дедупликация — СОВМЕСТНЫЕ для пар
+  // (корень, кратность); порядок кратностей соответствует отсортированным
+  // корням: rootMultiplicities[i] относится к roots[i].
+  const dedupTolerance = 1e-8 * Math.max(1, ...candidates.map((c) => Math.abs(c.z)), dimensionlessB);
+  const sorted = candidates.slice().sort((a, b) => a.z - b.z);
   const distinct: number[] = [];
-  for (const z of sorted) {
-    if (distinct.length === 0 || Math.abs(z - distinct[distinct.length - 1]) > dedupTolerance) {
-      distinct.push(z);
+  const distinctMultiplicities: PrRootMultiplicity[] = [];
+  for (const candidate of sorted) {
+    if (distinct.length === 0 || Math.abs(candidate.z - distinct[distinct.length - 1]) > dedupTolerance) {
+      distinct.push(candidate.z);
+      distinctMultiplicities.push(candidate.multiplicity);
     }
   }
   // Контроль против схлопывания (closeout 4.4.4.2.2): дедуплицированное
@@ -795,17 +861,60 @@ export function solvePrCubicRealRoots(
       reason: `точный знак дискриминанта доказывает ${provenDistinctCount} различимых действительных корней, но двойная реализация не может надёжно представить их различными в допуске дедупликации ${dedupTolerance}; отказ вместо молчаливого схлопывания корней или подмены пары кратным корнем`
     };
   }
-  return { ok: true, roots: distinct };
+  // Контроль выше гарантирует distinct.length === provenDistinctCount ∈ {1, 2, 3}.
+  return {
+    ok: true,
+    roots: distinct,
+    discriminantSign: signProven,
+    distinctRealRootCount: distinct.length as 1 | 2 | 3,
+    rootMultiplicities: distinctMultiplicities
+  };
+}
+
+/**
+ * Пары (физический корень, кратность) — метаданные топологии
+ * (Stage 4.4.4.4.1-D). Кратности НЕ пересчитываются: физический список
+ * получается ФИЛЬТРОМ Z > B из доказанных кратностей решателя; пары
+ * сортируются совместно, порядок корней — возрастающий (тот же, что у
+ * prPhysicalRoots). multiplicities[i] относится к roots[i].
+ * Защитное значение 1 при отсутствии i-й кратности не влияет на фильтр
+ * (включение/исключение пары определяется ТОЛЬКО условием Z > B).
+ */
+export interface PrPhysicalRootsTopology {
+  readonly roots: readonly number[];
+  readonly multiplicities: readonly PrRootMultiplicity[];
+}
+
+export function prPhysicalRootsWithMultiplicities(
+  roots: readonly number[],
+  multiplicities: readonly PrRootMultiplicity[],
+  dimensionlessB: number
+): PrPhysicalRootsTopology {
+  const pairs: { z: number; multiplicity: PrRootMultiplicity }[] = [];
+  for (let i = 0; i < roots.length; i += 1) {
+    const z = roots[i];
+    if (Number.isFinite(z) && z > dimensionlessB) {
+      pairs.push({ z, multiplicity: multiplicities[i] ?? 1 });
+    }
+  }
+  pairs.sort((a, b) => a.z - b.z);
+  return {
+    roots: pairs.map((pair) => pair.z),
+    multiplicities: pairs.map((pair) => pair.multiplicity)
+  };
 }
 
 /**
  * Физически допустимые корни: Z > B (строго) — требование областей
  * определения логарифмов в ln(phi) (Z - B > 0 и Z + (1 - sqrt(2))B > 0,
  * что выполнено автоматически при Z > B, так как sqrt(2) - 1 < 1).
- * Возвращает отсортированный по возрастанию массив.
+ * Возвращает отсортированный по возрастанию массив. Stage 4.4.4.4.1-D:
+ * единый источник фильтра — prPhysicalRootsWithMultiplicities (без
+ * кратностей), чтобы фильтр Z > B никогда не разошёлся между двумя
+ * реализациями.
  */
 export function prPhysicalRoots(roots: readonly number[], dimensionlessB: number): readonly number[] {
-  return roots.filter((z) => Number.isFinite(z) && z > dimensionlessB).sort((x, y) => x - y);
+  return prPhysicalRootsWithMultiplicities(roots, [], dimensionlessB).roots;
 }
 
 // ============================================
@@ -1087,181 +1196,3 @@ export function computePengRobinsonFromComponent(
     return {
       status: 'failure',
       code: 'invalid_parameters',
-      message: 'evidence должен содержать статусы доказанности всех трёх параметров из реестра PENG_ROBINSON_EVIDENCE_STATUSES',
-      gasId: inputs.gasId
-    };
-  }
-  if (!Array.isArray(inputs.crossChecks) || !Array.isArray(inputs.limitations)) {
-    return {
-      status: 'failure',
-      code: 'invalid_parameters',
-      message: 'crossChecks и limitations должны быть массивами',
-      gasId: inputs.gasId
-    };
-  }
-
-  // --- Политика доказанности параметров ---
-  const { rejected, warnings } = evaluateEvidencePolicy(inputs, request.evidencePolicy);
-  if (rejected.length > 0) {
-    return {
-      status: 'failure',
-      code: 'parameter_evidence_not_accepted',
-      message:
-        `политика «${request.evidencePolicy}» не принимает статусы доказанности ` +
-        `параметров компонента «${inputs.gasId}»: ${rejected.join(', ')}. ` +
-        `Политики: verified_only — только VERIFIED; allow_partial — +PARTIALLY_VERIFIED; ` +
-        `allow_unresolved_cross_check — +UNRESOLVED_CROSS_CHECK. ` +
-        `Статус UNRESOLVED не принимается ни одной политикой. ` +
-        `Статусы данных не повышаются: используйте явную политику или другой источник данных.`,
-      gasId: inputs.gasId,
-      detail: rejected.join(', ')
-    };
-  }
-
-  // --- Промежуточные величины PR ---
-  const intermediate = computePengRobinsonPureParameters(
-    inputs.criticalTemperatureK,
-    inputs.criticalPressurePa,
-    inputs.acentricFactor,
-    request.temperatureK,
-    request.pressurePa
-  );
-  const finiteIntermediate =
-    Number.isFinite(intermediate.kappa) &&
-    Number.isFinite(intermediate.alpha) &&
-    Number.isFinite(intermediate.aPaM6PerMol2) &&
-    Number.isFinite(intermediate.bM3PerMol) &&
-    Number.isFinite(intermediate.dimensionlessA) &&
-    Number.isFinite(intermediate.dimensionlessB) &&
-    intermediate.bM3PerMol > 0 &&
-    intermediate.alpha >= 0 &&
-    intermediate.dimensionlessA >= 0 &&
-    intermediate.dimensionlessB > 0;
-  if (!finiteIntermediate) {
-    return {
-      status: 'failure',
-      code: 'numerical_failure',
-      message:
-        `неконечные промежуточные величины PR для «${inputs.gasId}» при ` +
-        `T=${request.temperatureK} K, P=${request.pressurePa} Pa; надёжный расчёт невозможен`,
-      gasId: inputs.gasId
-    };
-  }
-
-  // --- Решение кубического уравнения ---
-  const cubic = solvePrCubicRealRoots(intermediate.dimensionlessA, intermediate.dimensionlessB);
-  if (!cubic.ok) {
-    return {
-      status: 'failure',
-      code: 'cubic_solver_failure',
-      message: `кубическое уравнение PR не решено надёжно для «${inputs.gasId}»: ${cubic.reason}`,
-      gasId: inputs.gasId
-    };
-  }
-  const physical = prPhysicalRoots(cubic.roots, intermediate.dimensionlessB);
-  if (physical.length === 0) {
-    return {
-      status: 'failure',
-      code: 'no_physical_root',
-      message:
-        `нет физически допустимых корней (Z > B=${intermediate.dimensionlessB}) ` +
-        `для «${inputs.gasId}» при T=${request.temperatureK} K, P=${request.pressurePa} Pa`,
-      gasId: inputs.gasId,
-      detail: `действительные корни: ${cubic.roots.join(', ')}`
-    };
-  }
-
-  // --- Выбор ветви ---
-  const selectedRoot = request.root === 'vapor' ? physical[physical.length - 1] : physical[0];
-  const hasDistinctBranches = physical.length >= 2;
-  const resultWarnings: PengRobinsonWarning[] = [...warnings];
-  if (!hasDistinctBranches) {
-    resultWarnings.push({
-      code: 'single_physical_root',
-      message:
-        `единственный физически допустимый корень (Z = ${selectedRoot}); ` +
-        `отдельной альтернативной ветви нет — выбранная ветвь «${request.root}» использует тот же корень`
-    });
-  }
-  // H2O: классический PR для полярного ассоциирующего компонента — всегда
-  // с предупреждением (математический расчёт возможен, точным описанием
-  // воды результат НЕ является). Идентификация — по gasId входов;
-  // ограничения применимости переданы вызывающей стороной (каталогом).
-  if (inputs.gasId === 'h2o') {
-    resultWarnings.push({
-      code: 'h2o_classical_pr_limitations',
-      message:
-        `H2O — полярный ассоциирующий компонент: классический PR без специальных ` +
-        `модификаций ограниченно применим (ограничения каталога: ${inputs.limitations.join(' ')})`
-    });
-  }
-
-  // --- ln(phi), phi, фугитивность ---
-  const lnPhi = pengRobinsonLnPhi(selectedRoot, intermediate.dimensionlessA, intermediate.dimensionlessB);
-  if (!Number.isFinite(lnPhi)) {
-    return {
-      status: 'failure',
-      code: 'logarithm_domain_error',
-      message:
-        `ln(phi) вне области определения для «${inputs.gasId}» ` +
-        `(корень Z=${selectedRoot}, B=${intermediate.dimensionlessB})`,
-      gasId: inputs.gasId
-    };
-  }
-  const phi = Math.exp(lnPhi);
-  const fugacityPa = phi * request.pressurePa;
-  if (!Number.isFinite(phi) || !Number.isFinite(fugacityPa) || phi <= 0 || fugacityPa <= 0) {
-    return {
-      status: 'failure',
-      code: 'numerical_failure',
-      message:
-        `неконечный результат для «${inputs.gasId}»: ln(phi)=${lnPhi}, phi=${String(phi)}, ` +
-        `f=${String(fugacityPa)}; надёжный расчёт невозможен`,
-      gasId: inputs.gasId
-    };
-  }
-
-  return {
-    status: 'success',
-    gasId: inputs.gasId,
-    formula: inputs.formula,
-    name: inputs.name,
-    temperatureK: request.temperatureK,
-    pressurePa: request.pressurePa,
-    root: request.root,
-    evidencePolicy: request.evidencePolicy,
-
-    evidence: inputs.evidence,
-
-    kappa: intermediate.kappa,
-    alpha: intermediate.alpha,
-    aPaM6PerMol2: intermediate.aPaM6PerMol2,
-    bM3PerMol: intermediate.bM3PerMol,
-    dimensionlessA: intermediate.dimensionlessA,
-    dimensionlessB: intermediate.dimensionlessB,
-
-    Z: selectedRoot,
-    lnPhi,
-    phi,
-    fugacityPa,
-    selectedRoot,
-
-    realRoots: cubic.roots,
-    physicalRoots: physical,
-    distinctPhysicalRootCount: physical.length,
-    hasDistinctBranches,
-
-    warnings: resultWarnings,
-    notes: [BRANCH_SELECTION_NOTE]
-  };
-}
-
-// ============================================
-// 6. ГРАНИЦЫ МОДУЛЯ
-// ============================================
-//
-// Stage 4.4.4.2/4.4.4.2.2 — чистая математика PR чистого компонента.
-// Границы: смеси/kij/flash/фазовая устойчивость — 4.4.4.3+; lookup
-// каталога и provenance-скаляры — Data/pengRobinsonFacade.ts;
-// интеграция с solveEquilibrium — вне объёма подэтапа.
-

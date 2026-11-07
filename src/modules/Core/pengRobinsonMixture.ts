@@ -23,7 +23,7 @@
 // кубика смеси решается тем же проверенным решателем
 // solvePrCubicRealRoots (DD + точный dyadic-BigInt-знак
 // дискриминанта, ревизия 4.4.4.2.2) с тем же фильтром Z > B
-// (prPhysicalRoots). Дублирования чистой математики нет.
+// (prPhysicalRootsWithMultiplicities). Дублирования чистой математики нет.
 //
 // АРХИТЕКТУРА (граница Core/Data, как в 4.4.4.2.1): этот модуль —
 // фундаментальный слой Core и НЕ импортирует runtime из Data.
@@ -73,7 +73,7 @@
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from './thermoFunctions';
 import {
   computePengRobinsonPureParameters,
-  prPhysicalRoots,
+  prPhysicalRootsWithMultiplicities,
   solvePrCubicRealRoots,
   validatePengRobinsonComponentRequest
 } from './pengRobinson';
@@ -82,7 +82,9 @@ import type {
   PengRobinsonEvidencePolicy,
   PengRobinsonEvidenceStatus,
   PengRobinsonParameterEvidence,
-  PengRobinsonRootBranch
+  PengRobinsonRootBranch,
+  PrDiscriminantSign,
+  PrRootMultiplicity
 } from './pengRobinson';
 
 // Stage 4.4.4.4.1-C: сертифицированный производственный логарифм
@@ -303,6 +305,21 @@ export interface PengRobinsonMixtureSuccess {
   readonly physicalRoots: readonly number[];
   readonly distinctPhysicalRootCount: number;
   readonly hasDistinctBranches: boolean;
+
+  /**
+   * Метаданные топологии корней (Stage 4.4.4.4.1-D): знак дискриминанта
+   * депрессированной формы и кратности, доказанные ветвью решателя
+   * (структурно идентично чистому PR — тот же решатель и тот же фильтр
+   * Z > B_mix; кратности фильтром не пересчитываются).
+   * realRootMultiplicities[i] относится к realRoots[i];
+   * physicalRootMultiplicities[i] — к physicalRoots[i];
+   * distinctPhysicalRootCount остаётся числом РАЗЛИЧНЫХ физических
+   * значений (не суммой кратностей); семантика selectedRoot /
+   * hasDistinctBranches не меняется.
+   */
+  readonly discriminantSign: PrDiscriminantSign;
+  readonly realRootMultiplicities: readonly PrRootMultiplicity[];
+  readonly physicalRootMultiplicities: readonly PrRootMultiplicity[];
 
   /** Компонентные результаты (канонический порядок компонентов). */
   readonly components: readonly PengRobinsonMixtureComponentResult[];
@@ -1004,7 +1021,12 @@ export function computePengRobinsonMixture(
       message: `кубическое уравнение PR смеси не решено надёжно: ${cubic.reason}`
     };
   }
-  const physical = prPhysicalRoots(cubic.roots, dimensionlessB);
+  const physicalTopology = prPhysicalRootsWithMultiplicities(
+    cubic.roots,
+    cubic.rootMultiplicities,
+    dimensionlessB
+  );
+  const physical = physicalTopology.roots;
   if (physical.length === 0) {
     return {
       status: 'failure',
@@ -1162,6 +1184,10 @@ export function computePengRobinsonMixture(
     physicalRoots: physical,
     distinctPhysicalRootCount: physical.length,
     hasDistinctBranches,
+
+    discriminantSign: cubic.discriminantSign,
+    realRootMultiplicities: cubic.rootMultiplicities,
+    physicalRootMultiplicities: physicalTopology.multiplicities,
     components: componentResults,
     binaryInteractionsUsed,
     warnings,
