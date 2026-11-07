@@ -161,6 +161,14 @@ function makeState(spec: SyntheticStateSpec): PengRobinsonMixtureSuccess {
     physicalRoots: [0.05, 0.9],
     distinctPhysicalRootCount: 2,
     hasDistinctBranches: spec.hasDistinctBranches ?? true,
+    // Метаданные топологии корней (Stage 4.4.4.4.1-D): синтетическое
+    // состояние с двумя РАЗЛИЧИМЫМИ корнями соответствует ветви
+    // D = 0 (p != 0) решателя: кратности [2, 1] (двойной — меньший
+    // корень), оба корня физичны. TPD эти поля не читает; значения
+    // согласованы с realRoots/physicalRoots выше.
+    discriminantSign: 0,
+    realRootMultiplicities: [2, 1],
+    physicalRootMultiplicities: [2, 1],
     components: spec.components.map((component) => {
       const lnPhi = component.lnPhi;
       return {
