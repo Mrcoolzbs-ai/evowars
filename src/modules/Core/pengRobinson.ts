@@ -862,10 +862,16 @@ export function solvePrCubicRealRoots(
     };
   }
   // Контроль выше гарантирует distinct.length === provenDistinctCount ∈ {1, 2, 3}.
+  // Stage 4.4.4.4.1-D: канонизация нуля МЕТАДАННЫХ. Точный dyadic-BigInt
+  // fallback (prExactCubicDiscriminantSign) возвращает -0 при точном D = 0
+  // (унарный минус нуля в привязке знаков); для ветвления решателя -0 и +0
+  // неразличимы, но метаданные топологии обязаны нести канонический +0
+  // (Object.is в тестах и аудите различает нули, JSON-дампы — тоже).
+  // signProven и вся логика выбора ветви НЕ изменяются.
   return {
     ok: true,
     roots: distinct,
-    discriminantSign: signProven,
+    discriminantSign: signProven || 0,
     distinctRealRootCount: distinct.length as 1 | 2 | 3,
     rootMultiplicities: distinctMultiplicities
   };
