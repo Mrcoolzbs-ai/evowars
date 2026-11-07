@@ -292,15 +292,13 @@ function testNextDown(x: number): number {
 const R = 8.31446261815324;
 const N2_TC = 126.192;
 const N2_PC = 3395800;
-const N2_OMEGA = 0.0372;
 const FIXTURE_T = 1388.2195230363363;
 const FIXTURE_P = 1e6;
 const FIXTURE_Z = 1.0020826254379862;
 
 function fixtureDimensionlessB(): number {
-  const kappa = 0.37464 + 1.54226 * N2_OMEGA - 0.26992 * N2_OMEGA * N2_OMEGA;
-  const alpha = (1 + kappa * (1 - Math.sqrt(FIXTURE_T / N2_TC))) ** 2;
-  const a = (0.45724 * R * R * N2_TC * N2_TC * alpha) / N2_PC;
+  // B = b·P/(R·T) не зависит от притяжения a(T) (kappa/alpha), поэтому
+  // для воспроизведения B нужны только каталожные Tc/Pc азота.
   const b = (0.0778 * R * N2_TC) / N2_PC;
   return (b * FIXTURE_P) / (R * FIXTURE_T);
 }
