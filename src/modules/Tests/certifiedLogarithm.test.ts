@@ -62,12 +62,26 @@ import type { CertifiedLogResult, CertifiedLogSuccess } from '../Core/certifiedL
 
 const REF_Q = 420n;
 const REF_TERMS = 150;
-const REF_DV = new DataView(new ArrayBuffer(8));
+// Битовое представление binary64 через нативно-упорядоченные
+// TypedArray-пары на общем буфере (LE на Node/x86_64 и в среде
+// генерации эталона). DataView сознательно НЕ используется: у его
+// методов записи/чтения аргумент littleEndian по умолчанию false
+// (big-endian), и смешивание аргументов даёт байт-своп мусор.
+const REF_BUF = new ArrayBuffer(8);
+const REF_F64 = new Float64Array(REF_BUF);
+const REF_U32 = new Uint32Array(REF_BUF);
 
-/** Битовое представление binary64 (little-endian среда Node/vitest). */
+/** Битовое представление binary64 (старшее 32-битное слово сверху). */
 function refBits(x: number): bigint {
-  REF_DV.setFloat64(0, x);
-  return REF_DV.getBigUint64(0, true);
+  REF_F64[0] = x;
+  return (BigInt(REF_U32[1]) << 32n) | BigInt(REF_U32[0]);
+}
+
+/** Восстановление binary64 из битового представления. */
+function refFromBits(bits: bigint): number {
+  REF_U32[0] = Number(bits & 0xffffffffn);
+  REF_U32[1] = Number((bits >> 32n) & 0xffffffffn);
+  return REF_F64[0];
 }
 
 /** Точное разложение |x| = num * 2^exp (num целое, экспонента bigint). */
@@ -268,12 +282,9 @@ function auditAgainstReference(
   return s;
 }
 
-// nextUp/nextDown по битам (для сетки соседей; LE-среда Node).
+// nextUp/nextDown по битам (для сетки соседей), через TypedArray-пары.
 function testNextUp(x: number): number {
-  REF_DV.setFloat64(0, x);
-  const bits = REF_DV.getBigUint64(0, true);
-  REF_DV.setBigUint64(0, bits + (x >= 0 ? 1n : -1n), true);
-  return REF_DV.getFloat64(0);
+  return refFromBits(refBits(x) + (x >= 0 ? 1n : -1n));
 }
 function testNextDown(x: number): number {
   return -testNextUp(-x);
