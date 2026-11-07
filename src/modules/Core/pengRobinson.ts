@@ -882,31 +882,73 @@ export function solvePrCubicRealRoots(
  * (Stage 4.4.4.4.1-D). Кратности НЕ пересчитываются: физический список
  * получается ФИЛЬТРОМ Z > B из доказанных кратностей решателя; пары
  * сортируются совместно, порядок корней — возрастающий (тот же, что у
- * prPhysicalRoots). multiplicities[i] относится к roots[i].
- * Защитное значение 1 при отсутствии i-й кратности не влияет на фильтр
- * (включение/исключение пары определяется ТОЛЬКО условием Z > B).
+ * prPhysicalRoots). При ok: true multiplicities[i] относится к roots[i].
+ *
+ * Stage 4.4.4.4.1-E (fail-closed контракт): массивы корней и кратностей
+ * обязаны быть строго согласованной длины. Молчаливая подстановка
+ * кратности 1 при более коротком массиве кратностей (бывшее
+ * multiplicities[i] ?? 1) могла бы фабриковать правдоподобную, но
+ * ложную топологию, поэтому удалена: несогласованность длин — ЯВНЫЙ
+ * отказ { ok: false, reason } без каких-либо частичных метаданных
+ * (стиль Core — результатные объекты, исключений нет). Наличие полей
+ * кратностей само по себе доступностью топологии НЕ считается
+ * (согласованность проверяется, см. TPD_SEARCH_DESIGN.md).
  */
 export interface PrPhysicalRootsTopology {
+  readonly ok: true;
   readonly roots: readonly number[];
   readonly multiplicities: readonly PrRootMultiplicity[];
+}
+
+/** Явный fail-closed отказ физического фильтра (Stage 4.4.4.4.1-E). */
+export interface PrPhysicalRootsTopologyFailure {
+  readonly ok: false;
+  readonly reason: string;
+}
+
+export type PrPhysicalRootsTopologyResult =
+  | PrPhysicalRootsTopology
+  | PrPhysicalRootsTopologyFailure;
+
+/**
+ * Внутренний единый источник фильтра Z > B (Stage 4.4.4.4.1-D/E):
+ * выжившие ИНДЕКСЫ корней в порядке возрастания корня. Оба публичных
+ * контракта (prPhysicalRoots и prPhysicalRootsWithMultiplicities)
+ * делегируют этой функции, поэтому включение/исключение корня никогда
+ * не разойдётся между двумя реализациями. Roots-only контракт НЕ
+ * обходит защиту кратностей пустым массивом кратностей.
+ */
+function prPhysicalIndices(roots: readonly number[], dimensionlessB: number): number[] {
+  const indices: number[] = [];
+  for (let i = 0; i < roots.length; i += 1) {
+    const z = roots[i];
+    if (Number.isFinite(z) && z > dimensionlessB) {
+      indices.push(i);
+    }
+  }
+  indices.sort((left, right) => roots[left] - roots[right]);
+  return indices;
 }
 
 export function prPhysicalRootsWithMultiplicities(
   roots: readonly number[],
   multiplicities: readonly PrRootMultiplicity[],
   dimensionlessB: number
-): PrPhysicalRootsTopology {
-  const pairs: { z: number; multiplicity: PrRootMultiplicity }[] = [];
-  for (let i = 0; i < roots.length; i += 1) {
-    const z = roots[i];
-    if (Number.isFinite(z) && z > dimensionlessB) {
-      pairs.push({ z, multiplicity: multiplicities[i] ?? 1 });
-    }
+): PrPhysicalRootsTopologyResult {
+  if (multiplicities.length !== roots.length) {
+    return {
+      ok: false,
+      reason:
+        `несогласованные длины массивов топологии: корней ${roots.length}, ` +
+        `кратностей ${multiplicities.length}; fail-closed: кратности не ` +
+        `синтезируются, частичные метаданные не возвращаются`
+    };
   }
-  pairs.sort((a, b) => a.z - b.z);
+  const indices = prPhysicalIndices(roots, dimensionlessB);
   return {
-    roots: pairs.map((pair) => pair.z),
-    multiplicities: pairs.map((pair) => pair.multiplicity)
+    ok: true,
+    roots: indices.map((index) => roots[index]),
+    multiplicities: indices.map((index) => multiplicities[index])
   };
 }
 
@@ -914,13 +956,14 @@ export function prPhysicalRootsWithMultiplicities(
  * Физически допустимые корни: Z > B (строго) — требование областей
  * определения логарифмов в ln(phi) (Z - B > 0 и Z + (1 - sqrt(2))B > 0,
  * что выполнено автоматически при Z > B, так как sqrt(2) - 1 < 1).
- * Возвращает отсортированный по возрастанию массив. Stage 4.4.4.4.1-D:
- * единый источник фильтра — prPhysicalRootsWithMultiplicities (без
- * кратностей), чтобы фильтр Z > B никогда не разошёлся между двумя
- * реализациями.
+ * Возвращает отсортированный по возрастанию массив. Stage 4.4.4.4.1-E:
+ * roots-only контракт БЕЗ фиктивного назначения кратностей; единый
+ * источник фильтра — внутренняя prPhysicalIndices (общая с
+ * prPhysicalRootsWithMultiplicities), чтобы фильтр Z > B никогда
+ * не разошёлся между двумя контрактами.
  */
 export function prPhysicalRoots(roots: readonly number[], dimensionlessB: number): readonly number[] {
-  return prPhysicalRootsWithMultiplicities(roots, [], dimensionlessB).roots;
+  return prPhysicalIndices(roots, dimensionlessB).map((index) => roots[index]);
 }
 
 // ============================================
@@ -1278,6 +1321,20 @@ export function computePengRobinsonFromComponent(
     cubic.rootMultiplicities,
     intermediate.dimensionlessB
   );
+  // Stage 4.4.4.4.1-E: решатель возвращает корни и кратности совместной
+  // сборкой (равные длины инвариантны внутри ok-результата кубики), но
+  // публичный helper больше НЕ синтезирует кратности: несогласованность —
+  // явный fail-closed отказ, а не правдоподобные метаданные.
+  if (!physicalTopology.ok) {
+    return {
+      status: 'failure',
+      code: 'numerical_failure',
+      message:
+        `метаданные топологии корней PR несогласованы для «${inputs.gasId}»: ` +
+        `${physicalTopology.reason}`,
+      gasId: inputs.gasId
+    };
+  }
   const physical = physicalTopology.roots;
   if (physical.length === 0) {
     return {
@@ -1388,4 +1445,5 @@ export function computePengRobinsonFromComponent(
 // Границы: смеси/kij/flash/фазовая устойчивость — 4.4.4.3+; lookup
 // каталога и provenance-скаляры — Data/pengRobinsonFacade.ts;
 // интеграция с solveEquilibrium — вне объёма подэтапа.
+
 

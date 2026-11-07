@@ -1604,17 +1604,27 @@ describe('Stage 4.4.4.4.1-D: топология корней кубики PR (з
   it('физический фильтр Z > B: кратность оставшегося корня не теряется', () => {
     // Fixture ветви D = 0, p != 0 (корни [0, 1], кратности [2, 1]):
     // фильтр исключает один корень, НЕ пересчитывая кратности.
+    // Stage 4.4.4.4.1-E: helper возвращает fail-closed результат.
     const ownB = prPhysicalRootsWithMultiplicities([0, 1], [2, 1], 0);
-    expect(ownB.roots).toEqual([1]);
-    expect(ownB.multiplicities).toEqual([1]);
+    expect(ownB.ok).toBe(true);
+    if (ownB.ok) {
+      expect(ownB.roots).toEqual([1]);
+      expect(ownB.multiplicities).toEqual([1]);
+    }
     // B < 0: оба корня физичны, двойная кратность переносится фильтром.
     const keepBoth = prPhysicalRootsWithMultiplicities([0, 1], [2, 1], -1);
-    expect(keepBoth.roots).toEqual([0, 1]);
-    expect(keepBoth.multiplicities).toEqual([2, 1]);
+    expect(keepBoth.ok).toBe(true);
+    if (keepBoth.ok) {
+      expect(keepBoth.roots).toEqual([0, 1]);
+      expect(keepBoth.multiplicities).toEqual([2, 1]);
+    }
     // Граничный случай: Z = B исключается (строгое >).
     const boundary = prPhysicalRootsWithMultiplicities([0, 1], [2, 1], 1);
-    expect(boundary.roots).toEqual([]);
-    expect(boundary.multiplicities).toEqual([]);
+    expect(boundary.ok).toBe(true);
+    if (boundary.ok) {
+      expect(boundary.roots).toEqual([]);
+      expect(boundary.multiplicities).toEqual([]);
+    }
   });
 
   it('pure PR через фасад (co2 250 K, 2 MPa): метаданные прокинуты и согласованы', () => {
@@ -1633,8 +1643,11 @@ describe('Stage 4.4.4.4.1-D: топология корней кубики PR (з
       [...s.realRootMultiplicities],
       s.dimensionlessB
     );
-    expect([...s.physicalRoots]).toEqual([...topology.roots]);
-    expect([...s.physicalRootMultiplicities]).toEqual([...topology.multiplicities]);
+    expect(topology.ok).toBe(true);
+    if (topology.ok) {
+      expect([...s.physicalRoots]).toEqual([...topology.roots]);
+      expect([...s.physicalRootMultiplicities]).toEqual([...topology.multiplicities]);
+    }
     expect(s.distinctPhysicalRootCount).toBe(s.physicalRoots.length);
     expect(s.hasDistinctBranches).toBe(true);
     // Семантика selectedRoot не изменилась: vapor — наибольший физический.
@@ -1653,3 +1666,66 @@ describe('Stage 4.4.4.4.1-D: топология корней кубики PR (з
     expect(s.hasDistinctBranches).toBe(false);
   });
 });
+
+// ============================================
+// Stage 4.4.4.4.1-E: fail-closed контракт физического фильтра
+// ============================================
+//
+// Публичный helper топологии НЕ синтезирует кратности: молчаливая
+// подстановка кратности 1 (бывший multiplicities[i] ?? 1) могла бы
+// фабриковать правдоподобную, но ложную топологию. Несогласованность
+// длин массивов — явный отказ { ok: false, reason } БЕЗ частичных
+// метаданных. Production-вызовы передают совместно собранные массивы
+// решателя (равные длины), поэтому отказ недостижим в рабочих путях;
+// контракт ниже фиксирует поведение для внешних вызывающих.
+describe('Stage 4.4.4.4.1-E: fail-closed контракт prPhysicalRootsWithMultiplicities', () => {
+  it('согласованные массивы по-прежнему дают ok-результат с совместной сортировкой', () => {
+    const result = prPhysicalRootsWithMultiplicities([1, 0, 0.5], [1, 2, 3], 0);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.roots).toEqual([0.5, 1]);
+      expect(result.multiplicities).toEqual([3, 1]);
+    }
+  });
+
+  it('пустой массив кратностей при непустых корнях: явный отказ, метаданные не фабрикуются', () => {
+    const result = prPhysicalRootsWithMultiplicities([0, 1], [], -1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason.length).toBeGreaterThan(0);
+      expect(result.reason).toContain('несогласованные');
+    }
+    // В отказе НЕТ правдоподобных, но сфабрикованных metadata.
+    expect('roots' in result).toBe(false);
+    expect('multiplicities' in result).toBe(false);
+  });
+
+  it('кратности короче корней (молчаливая подстановка 1 запрещена): явный отказ', () => {
+    const result = prPhysicalRootsWithMultiplicities([0, 1], [2], -1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('кратностей 1');
+    }
+    expect('roots' in result).toBe(false);
+    expect('multiplicities' in result).toBe(false);
+  });
+
+  it('кратности длиннее корней: явный отказ, лишние кратности игнорируются', () => {
+    const result = prPhysicalRootsWithMultiplicities([0, 1], [2, 1, 1], -1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('кратностей 3');
+    }
+    expect('roots' in result).toBe(false);
+    expect('multiplicities' in result).toBe(false);
+  });
+
+  it('roots-only контракт prPhysicalRoots не принимает кратности и не меняет результат', () => {
+    // Фильтр Z > B общий с топологией (внутренняя prPhysicalIndices):
+    // тот же набор корней в том же порядке, кратности не назначаются.
+    expect(prPhysicalRoots([0, 1], -1)).toEqual([0, 1]);
+    expect(prPhysicalRoots([0, 1, 0.5], 0)).toEqual([0.5, 1]);
+    expect(prPhysicalRoots([0, 1], 1)).toEqual([]);
+  });
+});
+

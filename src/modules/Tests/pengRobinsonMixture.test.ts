@@ -1231,10 +1231,16 @@ describe('Stage 4.4.4.4.1-D: топология корней смесевой к
       [...s.realRootMultiplicities],
       s.dimensionlessB
     );
-    expect([...s.physicalRoots]).toEqual([...topology.roots]);
-    expect([...s.physicalRootMultiplicities]).toEqual([...topology.multiplicities]);
+    // Stage 4.4.4.4.1-E: helper fail-closed — согласованные длины
+    // обязаны давать ok (production-инвариант совместной сборки).
+    expect(topology.ok).toBe(true);
+    if (topology.ok) {
+      expect([...s.physicalRoots]).toEqual([...topology.roots]);
+      expect([...s.physicalRootMultiplicities]).toEqual([...topology.multiplicities]);
+    }
     // Семантика выбора ветви прежняя: vapor — наибольший физический корень.
     expect(s.selectedRoot).toBe(s.physicalRoots[s.physicalRoots.length - 1]);
     expect(s.Z).toBe(s.selectedRoot);
   });
 });
+

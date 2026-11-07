@@ -1026,6 +1026,17 @@ export function computePengRobinsonMixture(
     cubic.rootMultiplicities,
     dimensionlessB
   );
+  // Stage 4.4.4.4.1-E: решатель возвращает корни и кратности совместной
+  // сборкой (равные длины инвариантны внутри ok-результата кубики), но
+  // публичный helper больше НЕ синтезирует кратности: несогласованность —
+  // явный fail-closed отказ, а не правдоподобные метаданные.
+  if (!physicalTopology.ok) {
+    return {
+      status: 'failure',
+      code: 'numerical_failure',
+      message: `метаданные топологии корней PR смеси несогласованы: ${physicalTopology.reason}`
+    };
+  }
   const physical = physicalTopology.roots;
   if (physical.length === 0) {
     return {
@@ -1205,3 +1216,4 @@ export function computePengRobinsonMixture(
 // каталоги (чистых параметров и kij) — Data; flash, VLE/LLE, фазовая
 // устойчивость, PPR78, конденсированные фазы, ternary-параметры и
 // интеграция с solveEquilibrium — вне объёма подэтапа.
+
