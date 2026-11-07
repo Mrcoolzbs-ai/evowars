@@ -1196,3 +1196,190 @@ export function computePengRobinsonFromComponent(
     return {
       status: 'failure',
       code: 'invalid_parameters',
+      message: 'evidence должен содержать статусы доказанности всех трёх параметров из реестра PENG_ROBINSON_EVIDENCE_STATUSES',
+      gasId: inputs.gasId
+    };
+  }
+  if (!Array.isArray(inputs.crossChecks) || !Array.isArray(inputs.limitations)) {
+    return {
+      status: 'failure',
+      code: 'invalid_parameters',
+      message: 'crossChecks и limitations должны быть массивами',
+      gasId: inputs.gasId
+    };
+  }
+
+  // --- Политика доказанности параметров ---
+  const { rejected, warnings } = evaluateEvidencePolicy(inputs, request.evidencePolicy);
+  if (rejected.length > 0) {
+    return {
+      status: 'failure',
+      code: 'parameter_evidence_not_accepted',
+      message:
+        `политика «${request.evidencePolicy}» не принимает статусы доказанности ` +
+        `параметров компонента «${inputs.gasId}»: ${rejected.join(', ')}. ` +
+        `Политики: verified_only — только VERIFIED; allow_partial — +PARTIALLY_VERIFIED; ` +
+        `allow_unresolved_cross_check — +UNRESOLVED_CROSS_CHECK. ` +
+        `Статус UNRESOLVED не принимается ни одной политикой. ` +
+        `Статусы данных не повышаются: используйте явную политику или другой источник данных.`,
+      gasId: inputs.gasId,
+      detail: rejected.join(', ')
+    };
+  }
+
+  // --- Промежуточные величины PR ---
+  const intermediate = computePengRobinsonPureParameters(
+    inputs.criticalTemperatureK,
+    inputs.criticalPressurePa,
+    inputs.acentricFactor,
+    request.temperatureK,
+    request.pressurePa
+  );
+  const finiteIntermediate =
+    Number.isFinite(intermediate.kappa) &&
+    Number.isFinite(intermediate.alpha) &&
+    Number.isFinite(intermediate.aPaM6PerMol2) &&
+    Number.isFinite(intermediate.bM3PerMol) &&
+    Number.isFinite(intermediate.dimensionlessA) &&
+    Number.isFinite(intermediate.dimensionlessB) &&
+    intermediate.bM3PerMol > 0 &&
+    intermediate.alpha >= 0 &&
+    intermediate.dimensionlessA >= 0 &&
+    intermediate.dimensionlessB > 0;
+  if (!finiteIntermediate) {
+    return {
+      status: 'failure',
+      code: 'numerical_failure',
+      message:
+        `неконечные промежуточные величины PR для «${inputs.gasId}» при ` +
+        `T=${request.temperatureK} K, P=${request.pressurePa} Pa; надёжный расчёт невозможен`,
+      gasId: inputs.gasId
+    };
+  }
+
+  // --- Решение кубического уравнения ---
+  const cubic = solvePrCubicRealRoots(intermediate.dimensionlessA, intermediate.dimensionlessB);
+  if (!cubic.ok) {
+    return {
+      status: 'failure',
+      code: 'cubic_solver_failure',
+      message: `кубическое уравнение PR не решено надёжно для «${inputs.gasId}»: ${cubic.reason}`,
+      gasId: inputs.gasId
+    };
+  }
+  const physicalTopology = prPhysicalRootsWithMultiplicities(
+    cubic.roots,
+    cubic.rootMultiplicities,
+    intermediate.dimensionlessB
+  );
+  const physical = physicalTopology.roots;
+  if (physical.length === 0) {
+    return {
+      status: 'failure',
+      code: 'no_physical_root',
+      message:
+        `нет физически допустимых корней (Z > B=${intermediate.dimensionlessB}) ` +
+        `для «${inputs.gasId}» при T=${request.temperatureK} K, P=${request.pressurePa} Pa`,
+      gasId: inputs.gasId,
+      detail: `действительные корни: ${cubic.roots.join(', ')}`
+    };
+  }
+
+  // --- Выбор ветви ---
+  const selectedRoot = request.root === 'vapor' ? physical[physical.length - 1] : physical[0];
+  const hasDistinctBranches = physical.length >= 2;
+  const resultWarnings: PengRobinsonWarning[] = [...warnings];
+  if (!hasDistinctBranches) {
+    resultWarnings.push({
+      code: 'single_physical_root',
+      message:
+        `единственный физически допустимый корень (Z = ${selectedRoot}); ` +
+        `отдельной альтернативной ветви нет — выбранная ветвь «${request.root}» использует тот же корень`
+    });
+  }
+  // H2O: классический PR для полярного ассоциирующего компонента — всегда
+  // с предупреждением (математический расчёт возможен, точным описанием
+  // воды результат НЕ является). Идентификация — по gasId входов;
+  // ограничения применимости переданы вызывающей стороной (каталогом).
+  if (inputs.gasId === 'h2o') {
+    resultWarnings.push({
+      code: 'h2o_classical_pr_limitations',
+      message:
+        `H2O — полярный ассоциирующий компонент: классический PR без специальных ` +
+        `модификаций ограниченно применим (ограничения каталога: ${inputs.limitations.join(' ')})`
+    });
+  }
+
+  // --- ln(phi), phi, фугитивность ---
+  const lnPhi = pengRobinsonLnPhi(selectedRoot, intermediate.dimensionlessA, intermediate.dimensionlessB);
+  if (!Number.isFinite(lnPhi)) {
+    return {
+      status: 'failure',
+      code: 'logarithm_domain_error',
+      message:
+        `ln(phi) вне области определения для «${inputs.gasId}» ` +
+        `(корень Z=${selectedRoot}, B=${intermediate.dimensionlessB})`,
+      gasId: inputs.gasId
+    };
+  }
+  const phi = Math.exp(lnPhi);
+  const fugacityPa = phi * request.pressurePa;
+  if (!Number.isFinite(phi) || !Number.isFinite(fugacityPa) || phi <= 0 || fugacityPa <= 0) {
+    return {
+      status: 'failure',
+      code: 'numerical_failure',
+      message:
+        `неконечный результат для «${inputs.gasId}»: ln(phi)=${lnPhi}, phi=${String(phi)}, ` +
+        `f=${String(fugacityPa)}; надёжный расчёт невозможен`,
+      gasId: inputs.gasId
+    };
+  }
+
+  return {
+    status: 'success',
+    gasId: inputs.gasId,
+    formula: inputs.formula,
+    name: inputs.name,
+    temperatureK: request.temperatureK,
+    pressurePa: request.pressurePa,
+    root: request.root,
+    evidencePolicy: request.evidencePolicy,
+
+    evidence: inputs.evidence,
+
+    kappa: intermediate.kappa,
+    alpha: intermediate.alpha,
+    aPaM6PerMol2: intermediate.aPaM6PerMol2,
+    bM3PerMol: intermediate.bM3PerMol,
+    dimensionlessA: intermediate.dimensionlessA,
+    dimensionlessB: intermediate.dimensionlessB,
+
+    Z: selectedRoot,
+    lnPhi,
+    phi,
+    fugacityPa,
+    selectedRoot,
+
+    realRoots: cubic.roots,
+    physicalRoots: physical,
+    distinctPhysicalRootCount: physical.length,
+    hasDistinctBranches,
+
+    discriminantSign: cubic.discriminantSign,
+    realRootMultiplicities: cubic.rootMultiplicities,
+    physicalRootMultiplicities: physicalTopology.multiplicities,
+
+    warnings: resultWarnings,
+    notes: [BRANCH_SELECTION_NOTE]
+  };
+}
+
+// ============================================
+// 6. ГРАНИЦЫ МОДУЛЯ
+// ============================================
+//
+// Stage 4.4.4.2/4.4.4.2.2 — чистая математика PR чистого компонента.
+// Границы: смеси/kij/flash/фазовая устойчивость — 4.4.4.3+; lookup
+// каталога и provenance-скаляры — Data/pengRobinsonFacade.ts;
+// интеграция с solveEquilibrium — вне объёма подэтапа.
+

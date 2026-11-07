@@ -1275,3 +1275,381 @@ describe('Stage 4.4.4.2.2 (closeout): DD-деление и точный знак
   // НЕ является. Все сравнения точные, без округления в number. ---
   type TestDyadic = { readonly num: bigint; readonly exp: number };
   const testDyadicBuffer = new ArrayBuffer(8);
+  const testDyadicView = new DataView(testDyadicBuffer);
+  const testDyadicFromDouble = (x: number): TestDyadic => {
+    testDyadicView.setFloat64(0, x);
+    const bits = testDyadicView.getBigUint64(0);
+    const negative = (bits & 0x8000000000000000n) !== 0n;
+    const biasedExponent = Number((bits >> 52n) & 0x7ffn);
+    const mantissa = bits & 0x000fffffffffffffn;
+    const num = biasedExponent === 0 ? mantissa : mantissa | 0x0010000000000000n;
+    const exp = biasedExponent === 0 ? -1074 : biasedExponent - 1075;
+    return { num: negative ? -num : num, exp };
+  };
+  const testDyadicSum = (a: TestDyadic, b: TestDyadic): TestDyadic => {
+    const exp = Math.min(a.exp, b.exp);
+    return {
+      num: (a.num << BigInt(a.exp - exp)) + (b.num << BigInt(b.exp - exp)),
+      exp
+    };
+  };
+  const testDyadicFromDd = (x: DoubleDouble): TestDyadic =>
+    testDyadicSum(testDyadicFromDouble(x.hi), testDyadicFromDouble(x.lo));
+  // Точная проверка |u - v| <= 2^-bits * |v| в BigInt.
+  const testWithinRelative = (u: TestDyadic, v: TestDyadic, bits: number): boolean => {
+    const exp = Math.min(u.exp, v.exp);
+    const un = u.num << BigInt(u.exp - exp);
+    const vn = v.num << BigInt(v.exp - exp);
+    const diff = un - vn;
+    const absDiff = diff < 0n ? -diff : diff;
+    const absV = vn < 0n ? -vn : vn;
+    return absV !== 0n && absDiff * (1n << BigInt(bits)) <= absV;
+  };
+  // Точная проверка |u| <= 2^-bits * |v| в BigInt.
+  const testAbsLeqRelative = (u: TestDyadic, v: TestDyadic, bits: number): boolean => {
+    const exp = Math.min(u.exp, v.exp);
+    const un = u.num << BigInt(u.exp - exp);
+    const vn = v.num << BigInt(v.exp - exp);
+    const absU = un < 0n ? -un : un;
+    const absV = vn < 0n ? -vn : vn;
+    return absV !== 0n && absU * (1n << BigInt(bits)) <= absV;
+  };
+  // Точная сверка ddDiv(a, b) против рационального эталона:
+  // |q*Bex - Aex| * 2^100 <= |Aex| для q = ddDiv(a, b), всё в BigInt.
+  const expectDdQuotientAccurate = (a: DoubleDouble, b: DoubleDouble): void => {
+    const q = ddDiv(a, b);
+    const qExact = testDyadicFromDd(q);
+    const aExact = testDyadicFromDd(a);
+    const bExact = testDyadicFromDd(b);
+    const prodExp = qExact.exp + bExact.exp;
+    const exp = Math.min(prodExp, aExact.exp);
+    const prodNum = qExact.num * bExact.num * (1n << BigInt(prodExp - exp));
+    const aNum = aExact.num * (1n << BigInt(aExact.exp - exp));
+    const diff = prodNum - aNum;
+    const absDiff = diff < 0n ? -diff : diff;
+    const absA = aNum < 0n ? -aNum : aNum;
+    expect(absA).not.toBe(0n);
+    expect(absDiff * (1n << 100n) <= absA).toBe(true);
+  };
+
+  it('ddDiv: делители с ненулевой lo — точность 2^-100 против точного рационального частного', () => {
+    // a = x1*x2 и b = y1*y2 — ТОЧНЫЕ DD-произведения (two_prod Деккера
+    // точен), поэтому точное частное Q = (x1*x2)/(y1*y2) известно как
+    // рациональное число; сверка идёт BigInt-выравниванием экспонент.
+    // Первые четыре кейса — знаковые варианты с ДЕЛИТЕЛЕМ, у которого
+    // младшая DD-часть ненулевая (sqrt(2)*sqrt(3) — не степень двойки).
+    const loDivisorCases: readonly [number, number, number, number][] = [
+      [Math.PI, Math.E, Math.SQRT2, Math.sqrt(3)],
+      [-Math.PI, Math.E, Math.SQRT2, Math.sqrt(3)],
+      [Math.PI, Math.E, -Math.SQRT2, Math.sqrt(3)],
+      [-Math.PI, -Math.E, -Math.SQRT2, Math.sqrt(3)]
+    ];
+    for (const [x1, x2, y1, y2] of loDivisorCases) {
+      const a = ddMul(ddFromDouble(x1), ddFromDouble(x2));
+      const b = ddMul(ddFromDouble(y1), ddFromDouble(y2));
+      expect(b.lo).not.toBe(0);
+      expectDdQuotientAccurate(a, b);
+    }
+    // Масштабные кейсы: частные ~1e-71 и ~2.4e201 остаются представимыми
+    // и сохраняют DD-точность (делители — одинарные double, lo = 0).
+    const scaleCases: readonly [number, number, number, number][] = [
+      [1.234e-150, 1, -2.1e-80, 1],
+      [9e150, 8e150, 3e100, 1],
+      [1.5, -2.5, 7.25, -0.125],
+      [4.656612873077393e-10, 1, 2.220446049250313e-16, 1]
+    ];
+    for (const [x1, x2, y1, y2] of scaleCases) {
+      const a = ddMul(ddFromDouble(x1), ddFromDouble(x2));
+      const b = ddMul(ddFromDouble(y1), ddFromDouble(y2));
+      expectDdQuotientAccurate(a, b);
+    }
+  });
+
+  it('ddDiv: регрессия прежнего дефекта — остаток учитывал только старшую часть знаменателя', () => {
+    // b = 3 + 1e-17 (lo != 0): прежний ddDiv терял слагаемое q1*b.lo и
+    // ошибался на ~3.3e-18 отн. (~2^-48), новый алгоритм — на ~5e-34
+    // (проверено против ТОЧНОГО рационального эталона 1/(3 + 1e-17):
+    // условие |q*(3 + 1e-17) - 1| <= 2^-100, всё точно в BigInt).
+    const b = ddAdd(ddFromDouble(3), ddFromDouble(1e-17));
+    expect(b.lo).not.toBe(0);
+    const q = ddDiv(ddFromDouble(1), b);
+    const qExact = testDyadicFromDd(q);
+    const bExact = testDyadicFromDd(b);
+    const prodExp = qExact.exp + bExact.exp;
+    const exp = Math.min(prodExp, 0);
+    const prodNum = qExact.num * bExact.num * (1n << BigInt(prodExp - exp));
+    const oneNum = 1n << BigInt(0 - exp);
+    const diff = prodNum - oneNum;
+    const absDiff = diff < 0n ? -diff : diff;
+    expect(absDiff * (1n << 100n) <= oneNum).toBe(true);
+  });
+
+  it('ddDiv: тождество остатка и roundtrip в DD-точности', () => {
+    const a = ddMul(ddFromDouble(Math.PI), ddFromDouble(Math.E));
+    const b = ddMul(ddFromDouble(Math.SQRT2), ddFromDouble(Math.sqrt(3)));
+    const q = ddDiv(a, b);
+    // Тождество остатка: |a - q*b| <= 2^-100*|a| (точно в BigInt) —
+    // невязка деления пренебрежимо мала относительно |a|.
+    const remainder = ddSub(a, ddMul(q, b));
+    expect(testAbsLeqRelative(testDyadicFromDd(remainder), testDyadicFromDd(a), 100)).toBe(true);
+    // Roundtrip: ddMul(ddDiv(a, b), b) восстанавливает a с точностью 2^-100.
+    const roundtrip = ddMul(q, b);
+    expect(testWithinRelative(testDyadicFromDd(roundtrip), testDyadicFromDd(a), 100)).toBe(true);
+  });
+
+  it('ddDiv: знаки и масштабы частного (отрицательные числитель/знаменатель)', () => {
+    const a = ddNeg(ddMul(ddFromDouble(Math.PI), ddFromDouble(Math.E)));
+    const b = ddMul(ddFromDouble(Math.SQRT2), ddFromDouble(Math.sqrt(3)));
+    const q = ddDiv(a, b);
+    expect(q.hi).toBeLessThan(0);
+    const qBack = ddMul(q, b);
+    expect(testWithinRelative(testDyadicFromDd(qBack), testDyadicFromDd(a), 100)).toBe(true);
+    // Масштабы: частное ~ -5.9e-71 (нормальное) и ~2.4e201.
+    const small = ddDiv(ddFromDouble(1.234e-150), ddFromDouble(-2.1e-80));
+    expect(small.hi).toBeLessThan(0);
+    expect(small.hi).toBeGreaterThan(-1e-69);
+    const big = ddDiv(ddMul(ddFromDouble(9e150), ddFromDouble(8e150)), ddFromDouble(3e100));
+    expect(big.hi).toBeGreaterThan(2e201);
+    expect(big.hi).toBeLessThan(3e201);
+    expect(Number.isFinite(ddToDouble(big))).toBe(true);
+  });
+
+  // --- Точный знак дискриминанта в полосе порога (dyadic-BigInt) ---
+  // Near-threshold пары подобраны НЕЗАВИСИМЫМ exact-оракулом (dyadic
+  // BigInt + mpmath 50 знаков в benchmark-оракуле), НЕ по выходу TS
+  // решателя. B = 2^-20 — точная степень двойки; A+ и A- — соседние
+  // binary64-значения вокруг границы кратного корня: точный
+  // дискриминант A+ ПОЛОЖИТЕЛЕН (D/scale ~ +2.35e-27 < порога 2^-84,
+  // т.е. ВНУТРИ старой полосы), точный дискриминант A- ОТРИЦАТЕЛЕН
+  // (D/scale ~ -1.50e-27, тоже в полосе).
+  const NT_B = Math.pow(2, -20);
+  const NT_A_PLUS = 0.0000011173004678283645;
+  const NT_A_MINUS = 0.0000011173004678283643;
+
+  it('near-threshold D > 0 внутри старой полосы: ТОЧНО один действительный корень', () => {
+    // Точный знак дискриминанта +1 (dyadic-BigInt из исходных binary64
+    // A/B); DD-цепочка знак не различает (|D|/scale ~ 2.35e-27 <
+    // 2^-84). Решатель обязан вернуть РОВНО ОДИН действительный корень
+    // либо структурный отказ — но НЕ приблизительный второй корень.
+    // Значение корня подтверждено независимо (mpmath, benchmark-оракул).
+    const result = solvePrCubicRealRoots(NT_A_PLUS, NT_B);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(`ожидался успех, получен отказ: ${result.reason}`);
+    }
+    expect(result.roots).toHaveLength(1);
+    expect(result.roots[0]).toBeCloseTo(0.9999998363768624, 12);
+  });
+
+  it('near-threshold D < 0 внутри старой полосы: доказано три корня, пара неразличима — структурный отказ', () => {
+    // Точный знак -1 (dyadic-BigInt): математически ТРИ действительных
+    // корня, но пара расщеплена на ~2e-14 — много меньше допуска
+    // дедупликации 1e-8*max(1, |z|, B), поэтому двойная реализация не
+    // может надёжно представить их различными. Единственно честный
+    // исход — контролируемый отказ, а НЕ молчаливое схлопывание в
+    // один корень и НЕ подмена пары кратным корнем.
+    const result = solvePrCubicRealRoots(NT_A_MINUS, NT_B);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('ожидался структурный отказ, получены корни');
+    }
+    expect(result.reason).toContain('дедупликац');
+    expect(result.reason).toContain('3');
+  });
+
+  it('точный D = 0: кратная семантика — двойной корень одним значением, простым вторым', () => {
+    // (A, B) = (0, 0): кубика z^3 - z^2 = z^2 (z - 1), D = 0 ТОЧНО;
+    // двойной корень 0, простой 1. (A, B) = (0.25, 0): кубика
+    // z^3 - z^2 + 0.25 z = z (z - 1/2)^2 — двойной корень 0.5, простой 0
+    // (в двойной точности простой корень представлен значением
+    // ~ -6e-33 в пределах невязки полинома).
+    const r00 = solvePrCubicRealRoots(0, 0);
+    expect(r00.ok).toBe(true);
+    if (!r00.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(r00.roots).toHaveLength(2);
+    expect(r00.roots[0]).toBeCloseTo(0, 12);
+    expect(r00.roots[1]).toBeCloseTo(1, 12);
+    const rQuarter = solvePrCubicRealRoots(0.25, 0);
+    expect(rQuarter.ok).toBe(true);
+    if (!rQuarter.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(rQuarter.roots).toHaveLength(2);
+    expect(rQuarter.roots[0]).toBeCloseTo(0, 12);
+    expect(rQuarter.roots[1]).toBeCloseTo(0.5, 12);
+  });
+
+  it('схлопывание трёх корней ниже допуска дедупликации: отказ вместо молчаливого схлопывания', () => {
+    // Точный знак -1 для всех входов (dyadic-BigInt): доказано ТРИ
+    // корня, но пары/тройка неразличимы в double (расщепление много
+    // меньше 1e-8) — контролируемый отказ. 2^-1074 — наименьший
+    // субнормальный binary64.
+    const collapsing: readonly [number, number][] = [
+      [Math.pow(2, -44), 0],
+      [0, Math.pow(2, -50)],
+      [0, Math.pow(2, -60)],
+      [Math.pow(2, -1074), 0]
+    ];
+    for (const [a, b] of collapsing) {
+      const result = solvePrCubicRealRoots(a, b);
+      expect(result.ok).toBe(false);
+      if (result.ok) {
+        throw new Error(`ожидался отказ для A=${a}, B=${b}`);
+      }
+      expect(result.reason).toContain('дедупликац');
+    }
+  });
+
+  it('неконечные и экстремальные входы: fail-closed отказ', () => {
+    expect(solvePrCubicRealRoots(Number.NaN, 0.1).ok).toBe(false);
+    expect(solvePrCubicRealRoots(0.1, Number.POSITIVE_INFINITY).ok).toBe(false);
+    const huge = solvePrCubicRealRoots(1e308, 0.5);
+    expect(huge.ok).toBe(false);
+    if (huge.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(huge.reason).toContain('неконечный');
+  });
+});
+
+// ============================================
+// STAGE 4.4.4.4.1-D — МЕТАДАННЫЕ ТОПОЛОГИИ КОРНЕЙ КУБИКИ PR
+// ============================================
+// Знак дискриминанта ДЕПРЕССИРОВАННОЙ формы D = (q/2)^2 + (p/3)^3 и
+// кратности корней — из ДОКАЗАННОГО состояния решателя (DD-полоса +
+// dyadic-BigInt fallback + выбранная ветвь), НЕ из повторного
+// вычисления дискриминанта и НЕ из близости корней. Пары
+// (root, multiplicity) сортируются совместно; отказ частичных
+// метаданных не несёт. Сверка прокидывания — через Data-фасад
+// (computePengRobinsonPure), чтобы проверить, что фасад НЕ теряет
+// новые поля.
+
+describe('Stage 4.4.4.4.1-D: топология корней кубики PR (знак D и кратности)', () => {
+  it('D > 0 (A=1, B=0): точный D = 1/36, один корень кратности 1', () => {
+    // Кубика Z^3 - Z^2 + Z = Z(Z^2 - Z + 1): ровно один действительный
+    // корень Z = 0 (квадратичная пара комплексная); p = 2/3, q = 7/27,
+    // D = (7/54)^2 + (2/9)^3 = 49/2916 + 32/2916 = 1/36 > 0.
+    const r = solvePrCubicRealRoots(1, 0);
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(r.discriminantSign).toBe(1);
+    expect(r.distinctRealRootCount).toBe(1);
+    expect(r.roots).toHaveLength(1);
+    expect(r.distinctRealRootCount).toBe(r.roots.length);
+    expect(r.rootMultiplicities).toHaveLength(r.roots.length);
+    expect(r.rootMultiplicities).toEqual([1]);
+    expect(Math.abs(r.roots[0])).toBeLessThan(1e-9);
+  });
+
+  it('D = 0 (A=0, B=0): точный D = 0, корни [0, 1] с кратностями [2, 1]', () => {
+    // Кубика Z^3 - Z^2 = Z^2(Z - 1): двойной корень 0, простой 1;
+    // p = -1/3, q = -2/27, D = (1/27)^2 + (-1/9)^3 = 0 ТОЧНО (ветвь
+    // кратного корня: zDouble = 0, zSimple = 1).
+    const r = solvePrCubicRealRoots(0, 0);
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(r.discriminantSign).toBe(0);
+    expect(r.distinctRealRootCount).toBe(2);
+    expect(r.roots).toHaveLength(2);
+    expect(r.distinctRealRootCount).toBe(r.roots.length);
+    expect(r.rootMultiplicities).toHaveLength(r.roots.length);
+    expect(Math.abs(r.roots[0])).toBeLessThan(1e-9);
+    expect(r.roots[1]).toBeCloseTo(1, 9);
+    // Совместная сортировка пар: кратность 2 — корню ~0 (zDouble),
+    // кратность 1 — корню ~1 (zSimple).
+    expect(r.rootMultiplicities).toEqual([2, 1]);
+  });
+
+  it('D < 0 (A=0, B=1): точный D = -98/27, три корня кратности 1', () => {
+    // Кубика Z^3 - 5Z + 2 = (Z - 2)(Z^2 + 2Z - 1): корни -1±√2, 2;
+    // p = -5, q = 2, D = 1 + (-5/3)^3 = 1 - 125/27 = -98/27 < 0.
+    const r = solvePrCubicRealRoots(0, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      throw new Error('недостижимо');
+    }
+    expect(r.discriminantSign).toBe(-1);
+    expect(r.distinctRealRootCount).toBe(3);
+    expect(r.roots).toHaveLength(3);
+    expect(r.distinctRealRootCount).toBe(r.roots.length);
+    expect(r.rootMultiplicities).toHaveLength(r.roots.length);
+    expect(r.rootMultiplicities).toEqual([1, 1, 1]);
+    // Порядок кратностей соответствует отсортированным корням.
+    expect(r.roots[0]).toBeCloseTo(-1 - Math.SQRT2, 9);
+    expect(r.roots[1]).toBeCloseTo(-1 + Math.SQRT2, 9);
+    expect(r.roots[2]).toBeCloseTo(2, 9);
+    expect(r.roots[0] <= r.roots[1]).toBe(true);
+    expect(r.roots[1] <= r.roots[2]).toBe(true);
+  });
+
+  it('ветвь отказа не несёт частичных метаданных топологии', () => {
+    const nanInput = solvePrCubicRealRoots(Number.NaN, 0.1);
+    expect(nanInput.ok).toBe(false);
+    expect('roots' in nanInput).toBe(false);
+    expect('discriminantSign' in nanInput).toBe(false);
+    expect('rootMultiplicities' in nanInput).toBe(false);
+    // Структурный отказ дедупликации (пара тройки неразличима в double).
+    const collapsing = solvePrCubicRealRoots(Math.pow(2, -44), 0);
+    expect(collapsing.ok).toBe(false);
+    expect('discriminantSign' in collapsing).toBe(false);
+    expect('rootMultiplicities' in collapsing).toBe(false);
+  });
+
+  it('физический фильтр Z > B: кратность оставшегося корня не теряется', () => {
+    // Fixture ветви D = 0, p != 0 (корни [0, 1], кратности [2, 1]):
+    // фильтр исключает один корень, НЕ пересчитывая кратности.
+    const ownB = prPhysicalRootsWithMultiplicities([0, 1], [2, 1], 0);
+    expect(ownB.roots).toEqual([1]);
+    expect(ownB.multiplicities).toEqual([1]);
+    // B < 0: оба корня физичны, двойная кратность переносится фильтром.
+    const keepBoth = prPhysicalRootsWithMultiplicities([0, 1], [2, 1], -1);
+    expect(keepBoth.roots).toEqual([0, 1]);
+    expect(keepBoth.multiplicities).toEqual([2, 1]);
+    // Граничный случай: Z = B исключается (строгое >).
+    const boundary = prPhysicalRootsWithMultiplicities([0, 1], [2, 1], 1);
+    expect(boundary.roots).toEqual([]);
+    expect(boundary.multiplicities).toEqual([]);
+  });
+
+  it('pure PR через фасад (co2 250 K, 2 MPa): метаданные прокинуты и согласованы', () => {
+    // Субкритический CO2: три действительных корня (D < 0), две
+    // физические ветви. Проверка идёт ЧЕРЕЗ Data-фасад — фасад
+    // (spread) не должен молча терять новые поля.
+    const s = expectSuccess(computePengRobinsonPure(baseRequest({ temperatureK: 250, pressurePa: 2e6 })));
+    expect(s.realRoots).toHaveLength(3);
+    expect(s.discriminantSign).toBe(-1);
+    expect(s.realRootMultiplicities).toHaveLength(s.realRoots.length);
+    expect([...s.realRootMultiplicities]).toEqual([1, 1, 1]);
+    expect(s.physicalRootMultiplicities).toHaveLength(s.physicalRoots.length);
+    // Физические кратности — ровно фильтр Z > B над реальными парами.
+    const topology = prPhysicalRootsWithMultiplicities(
+      [...s.realRoots],
+      [...s.realRootMultiplicities],
+      s.dimensionlessB
+    );
+    expect([...s.physicalRoots]).toEqual([...topology.roots]);
+    expect([...s.physicalRootMultiplicities]).toEqual([...topology.multiplicities]);
+    expect(s.distinctPhysicalRootCount).toBe(s.physicalRoots.length);
+    expect(s.hasDistinctBranches).toBe(true);
+    // Семантика selectedRoot не изменилась: vapor — наибольший физический.
+    expect(s.selectedRoot).toBe(s.physicalRoots[s.physicalRoots.length - 1]);
+    expect(s.Z).toBe(s.selectedRoot);
+  });
+
+  it('pure PR сверхкритическая точка (co2 350 K, 10 MPa): один корень, D > 0', () => {
+    const s = expectSuccess(computePengRobinsonPure(baseRequest({ temperatureK: 350, pressurePa: 1e7 })));
+    expect(s.realRoots).toHaveLength(1);
+    expect(s.discriminantSign).toBe(1);
+    expect([...s.realRootMultiplicities]).toEqual([1]);
+    expect(s.physicalRoots).toHaveLength(1);
+    expect([...s.physicalRootMultiplicities]).toEqual([1]);
+    expect(s.distinctPhysicalRootCount).toBe(1);
+    expect(s.hasDistinctBranches).toBe(false);
+  });
+});
