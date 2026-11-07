@@ -465,17 +465,30 @@ describe('Stage 4.4.4.4.1-C: certifiedLog1p — контракт enclosure', () 
   });
 
   it('log1p малых |x|: разрешение ~x недостижимо для бинарного 1+x', () => {
-    for (const x of [1e-16, -1e-16, 5e-324, -5e-324, 1e-300, -1e-300]) {
-      const r = certifiedLog1p(x);
-      const s = auditAgainstReference(r, refLog1pFix(x), 4);
-      // sign(x) сохранён; масштаб ~|x|. Строгое |value| <= |x| НЕ следует
-      // из контракта: value — округление DD-центра enclosure, которое
-      // может отклоняться от точного ln(1+x) на ~1 ulp (например, для
-      // x = 1e-16 точное значение в 0.36 ulp ниже 1e-16, а округление
-      // центра даёт следующий double выше). Математическая оценка
-      // |ln(1+x)| <= |x| + x^2/2 и локальная граница ошибки дают
-      // честную форму проверки.
+    // Нормальный масштаб: добавка x разрешается и в value.
+    for (const x of [1e-16, -1e-16, 1e-300, -1e-300]) {
+      const s = auditAgainstReference(certifiedLog1p(x), refLog1pFix(x), 4);
+      // sign(x) сохранён; масштаб ~|x|. Строгое |value| <= |x| НЕ
+      // следует из контракта: value — округление DD-центра enclosure,
+      // которое может отклоняться от точного ln(1+x) на ~1 ulp
+      // (например, для x = 1e-16 точное значение в 0.36 ulp ниже
+      // 1e-16, а округление центра даёт следующий double выше).
+      // Математическая оценка |ln(1+x)| <= |x| + x^2/2 и локальная
+      // граница ошибки дают честную форму проверки.
       expect(Math.sign(s.value)).toBe(Math.sign(x));
+      expect(Math.abs(s.value)).toBeLessThanOrEqual(
+        Math.abs(x) + s.absoluteErrorBound + Math.abs(x) * Math.abs(x)
+      );
+    }
+    // Субнормальный пол (x = ±Number.MIN_VALUE): ряд строится от
+    // t = (m-1)/(m+1) ≈ x/2 = 2.5e-324 — ровно посередине субнормальной
+    // сетки (0 и 5e-324), округление к чётному даёт 0: DD-центр
+    // честно коллапсирует к ±0, при этом enclosure [0, 5e-324] содержит
+    // ТОЧНОЕ значение (проверено независимым эталоном в audit).
+    // Знак value здесь НЕ обязан совпадать со знаком x: контракт
+    // требует конечности value и lowerBound <= value <= upperBound.
+    for (const x of [5e-324, -5e-324]) {
+      const s = auditAgainstReference(certifiedLog1p(x), refLog1pFix(x), 4);
       expect(Math.abs(s.value)).toBeLessThanOrEqual(
         Math.abs(x) + s.absoluteErrorBound + Math.abs(x) * Math.abs(x)
       );
