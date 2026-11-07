@@ -1,0 +1,268 @@
+# TPD Numerical Error Audit — Stage 4.4.4.4.1-A
+
+**Статус:** аудит завершён. `validatedErrorBoundStatus.continuum = not_established`;
+`validatedErrorBoundStatus.discreteMatrix = per-point validated enclosure` для 40 audited
+сценариев дискретной матрицы (44 сценария: 40 audited, 4 expected failure, 0 unexpected,
+0 inconclusive). Континуальная (для всех T/P/составов) доказанная граница НЕ установлена —
+по правилу остановки аудита это зафиксировано как итог, без выдуманных консервативных
+коэффициентов.
+
+## 0. Жёсткие границы
+
+Аудит НЕ меняет:
+
+- `solvePrCubicRealRoots`, `prPhysicalRoots`, runtime `pengRobinson.ts`,
+  `pengRobinsonMixture.ts`, `prTangentPlaneDistance.ts`;
+- каталоги EOS, BIP, evidence/provenance и их статусы;
+- `TPD_SEARCH_DESIGN.md` (заморожен для текущего объёма);
+- `gameSpeedCoefficient`, NASA CEA, baseline.
+
+Аудит НЕ реализует: Stage 4.4.4.4.2 (TPD multi-start search), flash, VLE/LLE, phase
+stability, `solveEquilibrium` integration, PPR78. Численный аудит НЕ подменяет
+производственный код исправлениями: все артефакты аудита — независимый harness,
+независимый оракул, тесты и этот отчёт.
+
+## 1. Независимый оракул
+
+- **Арифметика:** double-double (QD-алгоритмы two_sum/two_prod/sloppy-деление, ~106 бит)
+  для центров и консервативные радиусы ошибок; точные dyadic-BigInt вычисления
+  (2^k-выравнивание мантисс) для доказанного знака дискриминанта кубики PR.
+  Направленное округление/MPFR в среде недоступно; доказательная сила взята из
+  точных dyadic-операций и консервативных DD-радиусов, а НЕ из «большого числа знаков».
+- **Независимость:** оракул (`tpdNumericalErrorAuditOracle.ts`) реализует PR и TPD
+  собственными формулами; production PR/TPD функции и их численные helpers НЕ
+  импортируются; результаты production evaluator НЕ используются как эталон.
+- **Верификация оракула:** самотест против независимых констант —
+  ln 8 vs 3·ln 2: расхождение ровно 0; enclosure для sqrt(2) — радиус 3.2527e-16;
+  log 3 — радиус 2.526808263937245e-16; субнормальное умножение покрыто точно;
+  ln(w/z) при w = z — радиус 2.37e-30. ULP-баг в ball-логарифме ln2ball был найден
+  и исправлен в ходе аудита (исправление верифицировано против эталонной QD-цепочки);
+  инцидент потери файловой системы потребовал ребилда оракула — все константы
+  самотеста воспроизведены.
+- **Разграничение ошибок:** оракул даёт enclosure численной ошибки вычислений при
+  заданных входах. Физическая неопределённость EOS/BIP-данных — отдельная величина,
+  здесь НЕ оценивается (см. §10).
+
+## 2. Аудируемая цепочка
+
+Ошибка разложена по этапам (не смешивается):
+
+1. **Коэффициенты кубики** A, B: |prod − center| = eA/eB, радиус rA/rB.
+2. **Классификация и корни:** eZtotal — ошибка выбранного корня при oracle-входах
+   (полный путь от коэффициентов); eZsolverOnly — ошибка решателя при ТОЧНЫХ
+   production A, B (изолирует вклад решателя от ошибки коэффициентов);
+   вещественные корни dedupe/фильтр Z > B; sign(discriminant) доказан
+   dyadic-BigInt при |D| ниже DD-порога.
+3. **ln(phi_i) смеси** для feed и trial: eLnPhi per comp, радиус rLnPhi.
+4. **ln(w_i/z_i):** production-формула (w = z — ровно 0; |(w−z)/z| ≤ 0.5 — log1p;
+   иначе разность логарифмов); в оракуле — независимый ball-логарифм.
+5. **Разность lnPhiTrial − lnPhiFeed** и скобка [·].
+6. **Компонентные вклады** w_i·[·].
+7. **Компенсированная сумма Neumaier** и итоговый скаляр TPD: eTpd, радиус rTpd.
+
+Перенос в per-point границу: exact ∈ [center − r, center + r] на каждом этапе,
+поэтому **|prod − exact| ≤ e + r** для каждого измеренного значения и итогового TPD.
+Составляющая решателя корня не смешивается с lnPhi: суммарная граница TPD строится
+из enclosure-ов этапов 3–7 при измеренных состояниях, а ошибка состояния Z входит
+через eZtotal/eZsolverOnly отдельно.
+
+## 3. Тестовая матрица (44 сценария, детерминированная)
+
+Входы-константы (фактические каталожные значения, статусы не повышаются):
+CO₂ Tc = 304.1282 K, Pc = 7 377 300 Pa, ω = 0.22394; N₂ Tc = 126.192 K,
+Pc = 3 395 800 Pa, ω = 0.0372; kij(CO₂–N₂) = −0.017, применимость 228.15–273.15 K,
+evidence PARTIALLY_VERIFIED; R = 8.31446261815324; политика allow_partial.
+Полный fingerprint каждого сценария: T, P, ветвь (vapor/liquid), канонический состав
+(сортировка по id), каталожные константы выше и использованные BIP.
+
+Группы: identity (4), near (5), tiny (5, включая субнормальные доли 1e-320),
+cancel (3), support (3), topology (13), cross (7), trange (4).
+
+CO₂ root-topology fixture: T = 250 K, P = 1 MPa, три физических корня
+0.01989638687192069 / 0.06520881652643673 / 0.9020656184687209 (доказано D < 0);
+oracle-enclosure корня сходится из seed 0.9020656184687209 с радиусом < 1e-12.
+Near-merge серия: P = 3343704.8307527793 … 3343704.8643061933 (три корня,
+minSep до ~1e-8), первая однокоорневая точка за границей D = 0:
+P = 3343704.864306194. Low-P: P = 1 Па (3 корня), P = 0.1 Па — отказ решателя
+(«схлопывание корней», expected). High-P: 7.6e10 и 1e14 Па — см. §6 (expected
+failure контракта).
+
+## 4. Таблица результатов (run A/B dump; production vs оракул)
+
+| id | группа | T, K | P, Pa | физ. корней | TPD (prod) | eTpd |
+|---|---|---|---|---|---|---|
+| id_co2_liq | identity | 250 | 1e6 | 3 | 0 | 1.50e-26 |
+| id_co2_vap | identity | 250 | 1e6 | 3 | 0 | 1.24e-26 |
+| id_mix_vap | identity | 250 | 2e6 | 3 | 0 | 1.18e-26 |
+| id_mix_liq | identity | 250 | 2e6 | 3 | 0 | 1.44e-26 |
+| near_1e9p | near | 250 | 2e6 | 3 | +1.8626132500981713e-17 | 3.60e-17 |
+| near_1e9n | near | 250 | 2e6 | 3 | +4.054455344135564e-18 | 3.41e-17 |
+| near_1e7 | near | 250 | 2e6 | 3 | +1.0399455942141799e-13 | 7.89e-17 |
+| near_1e6 | near | 250 | 2e6 | 3 | +1.041306105114447e-11 | 7.90e-17 |
+| near_1e3 | near | 250 | 2e6 | 3 | +1.0479992423360809e-5 | 8.35e-18 |
+| tiny_1e12 | tiny | 250 | 2e6 | 3 | +3.862332161131735e-13 | 8.33e-17 |
+| tiny_1e15 | tiny | 250 | 2e6 | 3 | +1.2696798460634119e-15 | 2.78e-17 |
+| subnormal | tiny | 250 | 2e6 | 3 | +1.3863e-320 | 1.22e-26 |
+| n2dom_1e9 | tiny | 250 | 2e6 | 1 | +3.862942751715631e-10 | 3.65e-18 |
+| co2tiny_1e9 | tiny | 250 | 2e6 | 3 | +3.862943616580431e-10 | 8.29e-17 |
+| zero_hi | cancel | 250 | 2e6 | 3 | +1.8041124150158794e-16 | 6.68e-16 |
+| zero_lo | cancel | 250 | 2e6 | 3 | −3.469446951953614e-16 | 5.36e-16 |
+| noise_3e8 | cancel | 250 | 2e6 | 3 | +9.508213600454152e-15 | 9.50e-17 |
+| support_co2only | support | 250 | 2e6 | 3 | +0.05100288150183418 | 8.11e-17 |
+| support_n2only | support | 250 | 2e6 | 3 | +2.9184633393840356 | 6.71e-16 |
+| support_violation | support | 250 | 2e6 | 3 | expected failure: support_violation | — |
+| n2_supercrit | topology | 250 | 1e6 | 1 | 0 | 5.63e-27 |
+| mix_1e7 | topology | 250 | 1e7 | 1 | 0 | 1.51e-26 |
+| co2_1e9 | topology | 250 | 1e9 | 1 | 0 | 6.22e-26 |
+| nm1e4_vap | topology | 250 | 3343704.8307527793 | 3 | 0 | 1.14e-23 |
+| nm1e6_vap | topology | 250 | 3343704.864302838 | 3 | 0 | 7.28e-22 |
+| nm1e7_vap | topology | 250 | 3343704.86430616 | 3 | 0 | 1.16e-20 |
+| nmedge_vap | topology | 250 | 3343704.8643061933 | 3 | 0 | 1.86e-19 |
+| d0_1root | topology | 250 | 3343704.864306194 | 1 | 0 | 1.51e-26 |
+| lowp1_liq | topology | 250 | 1 | 3 | 0 | 7.81e-22 |
+| lowp1_vap | topology | 250 | 1 | 3 | 0 | 1.26e-26 |
+| lowp_fail | topology | 250 | 0.1 | — | expected failure: схлопывание корней | — |
+| highzb_1e3 | topology | 250 | 7.6e10 | (1)* | expected failure: phi_overflow_guard | — |
+| highzb_1e14 | topology | 250 | 1e14 | (1)* | expected failure: phi_overflow_guard | — |
+| cross_mix_liqfeed | cross | 250 | 2e6 | 3 | −0.06419732759253399 | 4.45e-16 |
+| cross_mix_vapfeed | cross | 250 | 2e6 | 3 | +0.06419732759253399 | 4.45e-16 |
+| cross_mix_far | cross | 250 | 2e6 | 3 | −0.6268426386000936 | 2.48e-15 |
+| cross_pure | cross | 250 | 1e6 | 3 | −0.4780889274888209 | 1.44e-15 |
+| nm1e6_cross | cross | 250 | 3343704.864302838 | 3 | +0.4152544033932233 | 3.18e-16 |
+| nmedge_cross | cross | 250 | 3343704.8643061933 | 3 | +0.4152544033936044 | 6.51e-16 |
+| lowp1_cross | cross | 250 | 1 | 3 | −14.179164644846223 | 4.647420365626989e-7 |
+| t228 | trange | 228.15 | 1e6 | 1 | 0 | 9.47e-27 |
+| t273 | trange | 273.15 | 1e6 | 1 | 0 | 7.92e-27 |
+| t250z50 | trange | 250 | 1e6 | 1 | 0 | 8.64e-27 |
+| t250z005 | trange | 250 | 1e6 | 1 | 0 | 5.89e-27 |
+
+(*) цепочечные измерения highzb-точек см. в §6: в production-домен они не входят.
+eTpd — |TPD_prod − center_oracle|; per-point validated граница — eTpd + rTpd (радиусы в §5).
+TPD = 0 у identity-сценариев — это ТОЧНЫЙ ноль production (w = z, ln(w/z) = 0,
+lnPhi одинаковы), а не малое число.
+
+## 5. Численные итоги (per-point validated, run B take 5)
+
+Глобальные максимумы по 40 audited сценариям:
+
+- maxEz = 1.6761644209865285e-9 (topology/cross, near-merge точки);
+- maxELnPhi = maxETpd = 4.647420365626988e-7 (lowp1_cross — большие lnPhi ~14.18
+  при P = 1 Па и cancellation в разности);
+- maxEzsolverOnly = 5.279019707103579e-10;
+- identity-группа: maxEtpd = 2.75438225801512e-19 (TPD(z; z) = ровно +0 у production);
+- радиусы оракула: max rZ = 6.78e-21, max rLnPhi = 1.3771911289957268e-19,
+  max rTpd = 2.7543822580151195e-19.
+
+Групповые максимумы (eZ / eLnPhi / eTpd):
+
+| группа | eZ | eLnPhi | eTpd |
+|---|---|---|---|
+| identity | 6.57e-16 | 6.47e-15 | 3.08e-26 |
+| near | 2.95e-16 | 1.56e-16 | 7.90e-17 |
+| tiny | 3.36e-16 | 1.56e-16 | 8.33e-17 |
+| cancel | 2.94e-16 | 6.47e-15 | 6.59e-16 |
+| support | 2.25e-16 | 7.31e-17 | 6.71e-16 |
+| topology | 1.676e-9 | 4.65e-7 | 2.75e-19 |
+| cross | 1.676e-9 | 4.65e-7 | 4.65e-7 |
+| trange | 2.27e-16 | 7.07e-17 | 6.25e-27 |
+
+Interpretation: ошибка концентрируется в near-merge корнях (eZ ~ 1.7e-9) и в
+низко-давленческих состояниях с большими lnPhi (lowp1_cross: eLnPhi/eTpd ~ 4.6e-7);
+для «обычных» состояний (near/tiny/cancel/support/trange) eZ ~ 3e-16 (уровень
+единиц ulp), eLnPhi ~ 1e-16…6.5e-15, eTpd ~ 1e-16…8.3e-17. Продуманная стабильность
+(ln1p-формы, Neumaier) подтверждена численно: у cancellation-сценариев eTpd ≤ 6.6e-16.
+
+## 6. Документированное отклонение: phi-overflow guard (highzb_1e3, highzb_1e14)
+
+Production-контракт Stage 4.4.4.3 fail-closed: состояние отказывает кодом
+`numerical_failure`, если phi_i = exp(ln(phi_i)) или f_i = x_i·phi_i·P неконечны.
+При T = 250 K, чистый CO₂, vapor-ветвь: P = 7.6e10 Pa даёт lnPhi = 969.9588145532575,
+P = 1e14 Pa даёт lnPhi = 1282912.7504187187 — в обоих случаях exp(lnPhi) = Infinity
+(граница binary64 ≈ 709.78), поэтому реальный фасад возвращает numerical_failure.
+
+- Run A/B dump хранит для этих точек ЦЕПОЧЕЧНЫЕ измерения (движок аудита вычислял
+  цепочку PR → lnPhi → TPD в обход phi-guard): highzb_1e3 — eZtotal = 3.38e-13,
+  eLnPhi = 2.23e-13, eTpd = 3.21e-24 (identity, TPD = 0); highzb_1e14 — eLnPhi ≈
+  2.95e-10. Эти числа — enclosure уровня числовой цепочки, НЕ production-выход:
+  точки лежат ВНЕ production-домена.
+- Расхождение (dump = audited vs фасад = numerical_failure) найдено симуляцией
+  провайдера против dump: subset-проверка поймала highzb_1e14; ПОЛНАЯ симуляция
+  (154 побитовых проверки по всем 44 сценариям: состояния feed/trial, эхо lnRatio,
+  скобки, вклады, TPD, метки отказов) дополнительно нашла highzb_1e3, не покрытую
+  subset-ом. Все остальные 42 сценария совпали с dump побитово; единственное
+  методное расхождение (minSep считается по физическим корням, поэтому у co2_1e9
+  minSep = null при 3 вещественных и 1 физическом корне) уточнено и сверено.
+- Матрица фиксирует обе точки как expected_failure (`phi_overflow_guard`):
+  44 сценария / 40 audited / 4 expected failure (lowp_fail — схлопывание корней,
+  support_violation — контракт TPD, highzb_1e3 и highzb_1e14 — phi-overflow guard).
+- Граница домена по этой причине: в audited-наборе max |lnPhi| = 14.18
+  (lowp1_liq/lowp1_cross), т.е. все 40 точек далеки от границы переполнения
+  exp (~709.78); высоко-давленческая экстраполяция этой границы за пределы
+  матрицы НЕ выполняется.
+
+## 7. Audit domain: определение и границы
+
+Validated (per-point, enclosure): 40 точек матрицы §4 при точно зафиксированных
+входах §3. Для каждой точки: production-значение, независимый center, радиус r,
+абсолютная ошибка e, пер-этапная декомпозиция §2, статус применимости (audited /
+expected failure с меткой контракта). Отказы контракта (4 шт.) — детерминированные
+expected failures с вычисленными состояниями или без них.
+
+НЕ входит в validated domain:
+
+- **континуум** T/P/составов: доказанной границы нет (not_established); полученные
+  максимумы §5 — эмпирические для матрицы, НЕ экстраполируются;
+- **near-merge регуляризация:** точки nm*/nmedge имеют per-point enclosure
+  (включая minSep ~ 1e-8), но классификация режима кратности по фактическому
+  PR-контракту (multiplicity metadata) недоступна (см. TPD_SEARCH_DESIGN §7.2);
+  численный enclosure корня за границей D = 0 (d0_1root) не переносится на
+  саму границу D = 0;
+- **highzb-точки** — вне production-домена (§6);
+- **физическая применимость** EOS/BIP (см. §8): kij применим только в
+  228.15–273.15 K для пар с обеими положительными долями; beyond — не аудировано.
+
+## 8. Научные ограничения
+
+- Численная погрешность ≠ физическая неопределённость модели: enclosure §5
+  относится к вычислениям при заданных входах, НЕ к экспериментальной валидации PR.
+- Evidence-статусы каталожных EOS/BIP значений аудитом НЕ пересматриваются
+  (остаются PARTIALLY_VERIFIED с фактическими применимостями).
+- Численное совпадение production и независимого оракула НЕ является
+  экспериментальной валидацией PR как физической модели.
+- TPD ≈ 0: у zero_hi/zero_lo production-TPD лежит в ±2e-16, enclosure не
+  определяет знак (signDetermined = false); никакой порог отрицательности TPD
+  по результатам аудита НЕ устанавливается и НЕ подгоняется.
+- Stage 4.4.4.4.2 (TPD search) не реализован и этим аудитом не начат.
+
+## 9. Воспроизводимость
+
+Артефакты аудита (коммит только с ними, fast-forward):
+
+- `src/modules/Core/tpdNumericalErrorAuditOracle.ts` — независимый оракул
+  (DD-цепочки, dyadic-BigInt знак дискриминанта, ball-функции, самотест);
+- `src/modules/Core/tpdNumericalErrorAudit.ts` — harness: детерминированная
+  матрица 44 сценариев (fingerprint: T, P, ветвь, канонический состав, каталожные
+  константы, kij со своей применимостью), провайдер-интерфейс, per-этапные
+  измерения, нормализация отказов, summary;
+- `src/modules/Tests/prTpdNumericalErrorAudit.test.ts` — тесты против
+  production-фасада (Data/pengRobinsonMixtureFacade, allow_partial) и оракула:
+  самотест оракула, CO₂-fixture, summary 44/40/4, identity 18 × TPD(z; z) = +0,
+  per-групповые границы, expected failures (lowp_fail, support_violation,
+  highzb_1e3, highzb_1e14), дамп результатов в benchmark-artifacts;
+- `docs/science/TPD_NUMERICAL_ERROR_AUDIT.md` — этот отчёт.
+
+Кросс-валидация: два независимых прогона оракула совпали побитово (spread = 0);
+7 отклонений старого дампа задокументированы и устранены в ходе аудита.
+CI: job `verify` = `npx tsc -b` + `npx vitest run` (strict TS, без lint-этапа).
+
+## 10. Итог по критериям результата
+
+- **A. Validated bound established** — только как per-point enclosure для 40 точек
+  дискретной матрицы §4 (e + r на каждом этапе, §2, §5).
+- **B. Empirical envelope only** — континуальные обобщения §5 (групповые максимумы)
+  остаются эмпирическими; повышения до validated bound НЕ выполнялось.
+- **C. Audit inconclusive** — нет: оракул и матрица достаточны для per-point
+  выводов; вне домена §7 честно зафиксировано not_established.
+
+**Останов:** `validatedErrorBoundStatus.continuum = not_established` — финальный
+статус. Консервативные коэффициенты не выдуманы, TPD search не начат.
