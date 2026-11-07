@@ -468,9 +468,17 @@ describe('Stage 4.4.4.4.1-C: certifiedLog1p — контракт enclosure', () 
     for (const x of [1e-16, -1e-16, 5e-324, -5e-324, 1e-300, -1e-300]) {
       const r = certifiedLog1p(x);
       const s = auditAgainstReference(r, refLog1pFix(x), 4);
-      // sign(x) и масштаб ~|x| (для субнормалей — округление к сетке)
+      // sign(x) сохранён; масштаб ~|x|. Строгое |value| <= |x| НЕ следует
+      // из контракта: value — округление DD-центра enclosure, которое
+      // может отклоняться от точного ln(1+x) на ~1 ulp (например, для
+      // x = 1e-16 точное значение в 0.36 ulp ниже 1e-16, а округление
+      // центра даёт следующий double выше). Математическая оценка
+      // |ln(1+x)| <= |x| + x^2/2 и локальная граница ошибки дают
+      // честную форму проверки.
       expect(Math.sign(s.value)).toBe(Math.sign(x));
-      expect(Math.abs(s.value)).toBeLessThanOrEqual(Math.abs(x));
+      expect(Math.abs(s.value)).toBeLessThanOrEqual(
+        Math.abs(x) + s.absoluteErrorBound + Math.abs(x) * Math.abs(x)
+      );
     }
   });
 
