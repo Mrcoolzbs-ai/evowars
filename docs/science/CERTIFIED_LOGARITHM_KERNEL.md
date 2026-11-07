@@ -3,10 +3,11 @@
 `src/modules/Core/certifiedLogarithm.ts` (certifiedLn / certifiedLog1p)
 
 - Ветка: `stage-3-planetary-physics`, PR #1 (base `main`, не мержится).
-- Один сфокусированный коммит Stage 4.4.4.4.1-C; SHA фиксируется CI-прогоном
-  на этом коммите (job `verify`).
+- Сфокусированная серия коммитов Stage 4.4.4.4.1-C (только fast-forward,
+  без force): основной коммит `d074ad71` + CI-фиксы тест-файла (см. §8);
+  CI `verify` — success на `40a9e3ba`.
 - Предыдущий remote HEAD на момент начала этапа:
-  `fd39b9427575fc8ce4ee988d69ce88e24b73429f`; fast-forward, без force.
+  `fd39b9427575fc8ce4ee988d69ce88e24b73429f`.
 
 ---
 
@@ -230,8 +231,11 @@ log1p(1e-16), log1p(-B/Z), log1p((1±sqrt(2))·B/Z) на фикстуре.
 производительность фиксируется косвенно: полный прогон батарей ядра
 (43 эталонных точки + сетка 20022 certified-вызовов + 12000 вызовов
 производительности) укладывается в секундный бюджет; итоговое измерение —
-длительность job `verify` CI до/после коммита (см. итоговый отчёт
-этапа). N = 44, радиусы и доказательства ради скорости НЕ ослаблялись.
+длительность job `verify` CI: на финальном SHA этапа (см. §8) полный
+verify (TypeScript check + тесты + линт + production build) занимает
+31 с против типичных ~25-30 с на предыдущих HEAD ветки; накладные
+расходы certified-вызовов поглощаются бюджетом job. N = 44, радиусы
+и доказательства ради скорости НЕ ослаблялись.
 
 Влияние на production: mixture lnPhi — 4 certified-вызова на оценку
 (log + log1p + два log-ratio), pure lnPhi — те же 4, TPD — 1 вызов на
@@ -265,22 +269,42 @@ log1p(1e-16), log1p(-B/Z), log1p((1±sqrt(2))·B/Z) на фикстуре.
 
 ## 8. Коммит и CI
 
-- Коммит: один сфокусированный, fast-forward поверх
-  `fd39b9427575fc8ce4ee988d69ce88e24b73429f`. Состав:
+- Основной коммит этапа: `d074ad71` (fast-forward поверх
+  `fd39b9427575fc8ce4ee988d69ce88e24b73429f`). Состав:
   - новый `src/modules/Core/certifiedLogarithm.ts`;
   - новые тесты `src/modules/Tests/certifiedLogarithm.test.ts`;
   - минимальные правки трёх production call sites
     (`pengRobinson.ts`, `pengRobinsonMixture.ts`,
     `prTangentPlaneDistance.ts`);
   - этот документ `docs/science/CERTIFIED_LOGARITHM_KERNEL.md`.
-- CI: job `verify` на SHA коммита (типы, линт, тесты, build) —
-  обязательный гейт; отдельный workflow `peng-robinson-benchmark`
-  срабатывает по путям (не гейтит).
-- `main` (`9d7b16fe...`), история git, Stage A/B артефакты
+- Далее сфокусированные CI-фиксы ТОЛЬКО тест-файла (production-файлы
+  и ядро не менялись):
+  - `d80125d8`: noUnusedLocals — удалены неиспользуемые вычисления
+    a(T) (kappa/alpha) в тест-фикстуре B_mix (на B не влияют);
+  - `a681501c`: битовый слой тест-эталона переведён с DataView на
+    TypedArray-пары: у методов DataView аргумент littleEndian по
+    умолчанию false (big-endian), смешивание флагов записи/чтения
+    давало байт-своп мусор (знак числа, разложение по битам,
+    nextUp/nextDown). Ядро TypedArray-базировано с самого начала и
+    этим дефектом не обладало;
+  - `0f865cbe`: проверка малых |x| в log1p приведена к
+    контрактно-честной форме (|value| <= |x| + absoluteErrorBound +
+    x^2: value — округление DD-центра, не точного значения);
+  - `40a9e3ba`: знак value на субнормальном полу (±MIN_VALUE) не
+    вытекает из контракта: при t ≈ 2.5e-324 ровно посередине
+    субнормальной сетки DD-центр честно коллапсирует к ±0, enclosure
+    [0, 5e-324] содержит точное значение.
+- CI: job `verify` — success на `40a9e3ba` (31 с: TypeScript check +
+  тесты, линт, production build; полный существующий набор, включая
+  Stage A 44-сценарный аудит и побитовый якорь mixture). Отдельный
+  workflow `peng-robinson-benchmark` срабатывает по путям (не
+  гейтит).
+- `main` (`9d7b16fe...`), история git (только fast-forward, ни одного
+  force push), Stage A/B артефакты
   (`tpdNumericalErrorAuditOracle.ts`, `tpdNumericalErrorAudit.ts`,
   `TPD_NUMERICAL_ERROR_AUDIT.md`, `TPD_CONTINUOUS_ERROR_BOUND.md`),
   каталоги EOS/BIP, NASA CEA, `gameSpeedCoefficient`, Radau IIA,
-  golden baseline — НЕ изменены. PR #1 не мержился, force-push нет.
+  golden baseline — НЕ изменены. PR #1 не мержился.
   Stage 4.4.4.4.2 (TPD search), flash/VLE/LLE/PPR78 не реализованы.
 
 ## 9. Заключительная оговорка (обязательная)
