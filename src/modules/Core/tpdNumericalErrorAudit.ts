@@ -409,6 +409,18 @@ export interface TpdNumericalErrorAuditStateMeasurement {
   readonly rLnPhi: readonly number[];
   readonly eLnPhi: readonly number[];
   readonly eLnPhiMax: number;
+  /** Доказанное оракулом число действительных корней кубики (1 | 3). */
+  readonly oracleRealRootCount: 1 | 3;
+  /** Доказанное оракулом число физических корней ( Z > B ). */
+  readonly oraclePhysicalRootCount: number;
+  /** Интервальный знак депрессированного дискриминанта ( 0 — не определён ). */
+  readonly oracleDiscriminantSign: -1 | 0 | 1;
+  /** Центр enclosure дискриминанта ( для отчётности ). */
+  readonly oracleDiscriminantCenter: number;
+  /** Радиус enclosure дискриминанта ( для отчётности ). */
+  readonly oracleDiscriminantR: number;
+  /** Согласованность независимой топологии с production ( число физических ). */
+  readonly topologyMatch: boolean;
 }
 
 /** Измерение TPD: production-значения + oracle-enclosure итога и вкладов. */
@@ -580,7 +592,9 @@ function failureMatches(expected: TpdNumericalErrorAuditExpectFailure, failure: 
  * ( A, B, корень ветви, ln(phi_i) ) + граница |prod − exact| на каждом
  * этапе: eA/eB ( коэффициенты ), eZtotal ( корень при oracle-входах ),
  * eZsolverOnly ( корень при ТОЧНЫХ production A, B — изолирует ошибку
- * решателя ), eLnPhi per comp.
+ * решателя ), eLnPhi per comp. Топология корней ( число действительных,
+ * число физических, интервальный знак дискриминанта ) — независимо
+ * доказана оракулом и сверена с production ( topologyMatch ).
  */
 function measureOracleState(
   spec: TpdNumericalErrorAuditStateSpec,
@@ -654,7 +668,13 @@ function measureOracleState(
     lnPhiCenter,
     rLnPhi,
     eLnPhi,
-    eLnPhiMax
+    eLnPhiMax,
+    oracleRealRootCount: oracleState.realRootCount,
+    oraclePhysicalRootCount: oracleState.physicalRootCount,
+    oracleDiscriminantSign: oracleState.discriminantSign,
+    oracleDiscriminantCenter: oracleCenter(oracleState.discriminant),
+    oracleDiscriminantR: oracleState.discriminant.r,
+    topologyMatch: oracleState.physicalRootCount === prodResult.physicalRoots.length
   };
   return { measurement, oracleState, comps };
 }

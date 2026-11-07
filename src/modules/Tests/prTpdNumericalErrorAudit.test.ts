@@ -14,6 +14,18 @@
 // (рабочая директория vitest; тот же паттерн, что у
 // pengRobinsonMixtureBenchmarkDump.test.ts).
 //
+// ОРАКУЛ ( ревизия Stage 4.4.4.4.1-A корректировки ): enclosure-границы
+// построены НАПРАВЛЕННЫМ ОКРУГЛЕНИЕМ НАРУЖУ ( проверенные nextUp/nextDown
+// для IEEE-754 binary64, включая субнормали ) всех радиусных операций;
+// топология корней ( число действительных/физических, порядок )
+// доказана НЕЗАВИСИМО: интервальный знак депрессированного
+// дискриминанта определяет 1/3 корня, изоляция — монотонными
+// участками кубики с сертифицированной бисекцией, production-корни
+// используются ТОЛЬКО как seed-приближения. Логарифм свободен от
+// платформенного Math.log2 ( точное извлечение binary64 экспоненты ),
+// sqrt доказан невязкой y² − x и нижней границей производной.
+// Adversarial-тесты ( секции 3.1b/3.1c ) фиксируют эти гарантии.
+//
 // ПРОВАЙДЕР. Единственный канал, через который harness получает
 // production-значения: состав канонически сортируется, результат
 // смесевого вычислителя кэшируется по ключу (T, P, ветвь, состав) —
@@ -59,11 +71,27 @@ import {
   type TpdNumericalErrorAuditTpdMeasurement
 } from '../Core/tpdNumericalErrorAudit';
 import {
+  ballHi,
+  ballLo,
+  ballSign,
+  nextDown,
+  nextUp,
   oracleCenter,
+  oracleCubicCoeffs,
+  oracleCubicEval,
   oracleEncloseRoot,
   oracleErrorBound,
+  oracleIsolateRealRoots,
   oracleLnRatio,
-  oraclePureParams
+  oraclePureParams,
+  tsAddB,
+  tsBall,
+  tsDivB,
+  tsMulB,
+  tsScaleB,
+  tsSubB,
+  type Ball,
+  type OracleRootTopology
 } from '../Core/tpdNumericalErrorAuditOracle';
 
 // ============================================
@@ -272,6 +300,31 @@ function tpdOf(id: string): TpdNumericalErrorAuditTpdMeasurement {
   return t;
 }
 
+/**
+ * Независимая изоляция корней кубики PR на oracle-вычисленных A/B
+ * для чистого CO2 при (T = 250 K, P). Возвращает ДОКАЗАННУЮ топологию;
+ * любое недоказуемое место оракул превращает в исключение (fail-closed).
+ */
+function isolateCo2(pressurePa: number): OracleRootTopology {
+  const params = oraclePureParams(
+    TPD_NUMERICAL_ERROR_AUDIT_CO2,
+    250,
+    pressurePa,
+    TPD_NUMERICAL_ERROR_AUDIT_R_J_PER_MOL_K
+  );
+  return oracleIsolateRealRoots(params.A, params.B);
+}
+
+/** Дизъюнктность и порядок enclosure-ов возрастающих корней. */
+function enclosuresDisjointOrdered(roots: readonly Ball[]): boolean {
+  for (let i = 0; i + 1 < roots.length; i += 1) {
+    if (!(ballHi(roots[i] as Ball) < ballLo(roots[i + 1] as Ball))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // ============================================
 // 3. ТЕСТЫ
 // ============================================
@@ -316,10 +369,9 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
     // отклонения. Enclosure обязан НАКРЫТЬ значение, а не быть узким:
     // при |z| ~ 1e-320 пол радиуса TS_MIN_R = 2^-1074 доминирует над
     // |z|·2^-100, и относительная полуширина ~ 3·(2^-1074/|z|)·(1/2 + запас)
-    // ≈ 7.4199e-4 — консервативная ball-семантика здесь НЕ может быть узкой
-    // ( наблюдено: 7.419926159496576e-4 ). На scalar TPD это НЕ влияет:
-    // вклад w_i·ln(w_i/z_i) масштабируется w_i ~ 1e-320
-    // ( сценарий subnormal: rTpd ≈ 1.22e-26 ).
+    // — консервативная ball-семантика здесь НЕ может быть узкой.
+    // На scalar TPD это НЕ влияет: вклад w_i·ln(w_i/z_i) масштабируется
+    // w_i ~ 1e-320 ( сценарий subnormal: rTpd ~ 1.3e-27 ).
     const sub = oracleLnRatio(2e-320, 1e-320);
     const center = oracleCenter(sub);
     expect(Math.abs(center - Math.LN2)).toBeLessThan(1e-14);
@@ -327,6 +379,213 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
     // Направленное округление наружу: истинное ln 2 внутри enclosure.
     expect(center - sub.r).toBeLessThanOrEqual(Math.LN2);
     expect(center + sub.r).toBeGreaterThanOrEqual(Math.LN2);
+  });
+
+  // --- 3.1b. Adversarial: направленные округления ( outwards ) -----------
+
+  it('adversarial A.6: nextUp/nextDown — ±0, субнормали, границы, NaN/Infinity', () => {
+    // Проверенные nextUp/nextDown для IEEE-754 binary64: битовая
+    // семантика на ВСЕХ специальных значениях.
+    expect(nextUp(0)).toBe(2.5e-324);
+    expect(Object.is(nextUp(-0), 2.5e-324)).toBe(true);
+    expect(Object.is(nextDown(0), -2.5e-324)).toBe(true);
+    expect(Object.is(nextDown(-0), -2.5e-324)).toBe(true);
+    // 2.5e-324 — минимальный субнормаль: nextUp даёт 2 ulp ( тот же
+    // битовый шаг 2^-1074 ), nextDown даёт +0.
+    expect(nextUp(2.5e-324)).toBe(2.5e-324 + 2.5e-324);
+    expect(Object.is(nextDown(2.5e-324), 0)).toBe(true);
+    expect(Object.is(nextUp(-2.5e-324), -0)).toBe(true);
+    expect(nextUp(1)).toBe(1 + Math.pow(2, -52));
+    expect(nextDown(1)).toBe(1 - Math.pow(2, -53));
+    expect(nextUp(1.7976931348623157e308)).toBe(Infinity);
+    expect(nextDown(1.7976931348623157e308)).toBe(1.7976931348623155e308);
+    expect(nextUp(Infinity)).toBe(Infinity);
+    expect(nextUp(-Infinity)).toBe(-1.7976931348623157e308);
+    expect(nextDown(Infinity)).toBe(1.7976931348623157e308);
+    expect(Number.isNaN(nextUp(NaN))).toBe(true);
+    expect(Number.isNaN(nextDown(NaN))).toBe(true);
+    // Монотонность: обход 3000 субнормалей от 2^-1074 вверх.
+    let x = 2.5e-324;
+    for (let i = 0; i < 3000; i += 1) {
+      const up = nextUp(x);
+      if (!(up > x)) {
+        throw new Error(`nextUp не монотонен в субнормалях: i=${String(i)}`);
+      }
+      const dn = nextDown(x);
+      if (x === 2.5e-324) {
+        if (dn !== 0) {
+          throw new Error('nextDown(2^-1074) обязан быть +0');
+        }
+      } else if (!(dn < x)) {
+        throw new Error(`nextDown не монотонен в субнормалях: i=${String(i)}`);
+      }
+      x = up;
+    }
+    for (const v of [1.5, 0.1, 123.456, 6.02e23, 1e-9, -3.7, -1e-30, 2.2250738585072014e-308]) {
+      if (!(nextUp(v) > v) || !(nextDown(v) < v)) {
+        throw new Error(`nextUp/nextDown не монотонны в ${String(v)}`);
+      }
+    }
+  });
+
+  it('adversarial A.6: контрольный контрпример tsAddB — сумма радиусов округлена наружу', () => {
+    // Точная сумма 1e-15 + 9.860761315262648e-32 строго больше 1e-15,
+    // но binary64 округляет её к ближайшему ВНИЗ до 1e-15. При нулевом
+    // центре ballWiden практически ничего не добавляет. Enclosure без
+    // направленного округления НЕ был бы гарантированным; теперь радиус
+    // строго > 1e-15.
+    const a: Ball = { c: { hi: 1, lo: 0 }, r: 1e-15 };
+    const b: Ball = { c: { hi: -1, lo: 0 }, r: 9.860761315262648e-32 };
+    const sum = tsAddB(a, b);
+    expect(oracleCenter(sum)).toBe(0);
+    expect(sum.r).toBeGreaterThan(1e-15);
+    // Cancellation-вариант ( одинаковые центры ).
+    const diff = tsSubB(a, { c: { hi: 1, lo: 0 }, r: 9.860761315262648e-32 });
+    expect(oracleCenter(diff)).toBe(0);
+    expect(diff.r).toBeGreaterThan(1e-15);
+  });
+
+  it('adversarial A.6: радиусы умножения, деления и знаменатели округлены наружу', () => {
+    const mul = tsMulB({ c: { hi: 0, lo: 0 }, r: 1e-15 }, { c: { hi: 1, lo: 0 }, r: 9.860761315262648e-32 });
+    expect(mul.r).toBeGreaterThan(1e-15);
+    const div = tsDivB({ c: { hi: 0, lo: 0 }, r: 1e-15 }, { c: { hi: 1, lo: 0 }, r: 9.860761315262648e-32 });
+    expect(div.r).toBeGreaterThan(1e-15);
+    // Знаменатель, накрывающий ноль, обязан давать отказ (fail-closed).
+    let threw = false;
+    try {
+      tsDivB(tsBall(1), { c: { hi: 0, lo: 0 }, r: 1 });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('adversarial A.6: субнормальные радиусы не исчезают при округлении', () => {
+    // Пол 2^-1074: сумма/произведение/частное/масштаб радиусов не
+    // могут округлиться до нуля и потерять гарантию.
+    const add = tsAddB({ c: { hi: 0, lo: 0 }, r: 2.5e-324 }, { c: { hi: 0, lo: 0 }, r: 2.5e-324 });
+    expect(add.r).toBeGreaterThanOrEqual(5e-324);
+    const mul = tsMulB({ c: { hi: 1.1, lo: 0 }, r: 0 }, { c: { hi: 2.5e-324, lo: 0 }, r: 2.5e-324 });
+    expect(mul.r).toBeGreaterThan(2.5e-324);
+    const div = tsDivB({ c: { hi: 0, lo: 0 }, r: 2.5e-324 }, { c: { hi: 3, lo: 0 }, r: 0 });
+    expect(div.r).toBeGreaterThan(0);
+    const scaled = tsScaleB({ c: { hi: 0, lo: 0 }, r: 7.5e-324 }, 0.5);
+    expect(scaled.r).toBeGreaterThanOrEqual(5e-324);
+    // 1e-320 · 1e-320 = 1e-640: истинное значение 0 ( двоично );
+    // enclosure обязан его накрывать.
+    const tiny = tsMulB(tsBall(1e-320), tsBall(1e-320));
+    expect(oracleCenter(tiny) - tiny.r).toBeLessThanOrEqual(0);
+    expect(oracleCenter(tiny) + tiny.r).toBeGreaterThanOrEqual(0);
+  });
+
+  // --- 3.1c. Adversarial: независимая доказанная топология корней ---------
+
+  it('adversarial B.7: nm1e6 — 3 действительных, 3 физических, D < 0, дизъюнктность', () => {
+    const topo = isolateCo2(3343704.864302838);
+    expect(topo.realRootCount).toBe(3);
+    expect(topo.discriminantSign).toBe(-1);
+    expect([...topo.physicalMask]).toEqual([true, true, true]);
+    expect(enclosuresDisjointOrdered(topo.roots)).toBe(true);
+  });
+
+  it('adversarial B.7: смена знака на широкой скобке НЕ доказывает единственность', () => {
+    // Широкая скобка [−3, 3] для nm1e6 имеет доказанную смену знака
+    // f(−3) < 0 < f(3), хотя внутри ТРИ корня: смена знака сама по
+    // себе недостаточна. Оракул тем не менее доказывает ровно 3
+    // дизъюнктных enclosure-а — единственность каждого корня
+    // доказана монотонностью участка, а не сменой знака.
+    const params = oraclePureParams(
+      TPD_NUMERICAL_ERROR_AUDIT_CO2,
+      250,
+      3343704.864302838,
+      TPD_NUMERICAL_ERROR_AUDIT_R_J_PER_MOL_K
+    );
+    const coeffs = oracleCubicCoeffs(params.A, params.B);
+    expect(ballSign(oracleCubicEval(coeffs, tsBall(-3)))).toBe(-1);
+    expect(ballSign(oracleCubicEval(coeffs, tsBall(3)))).toBe(1);
+    const topo = oracleIsolateRealRoots(params.A, params.B);
+    expect(topo.realRootCount).toBe(3);
+    expect(enclosuresDisjointOrdered(topo.roots)).toBe(true);
+    for (const root of topo.roots) {
+      expect(ballLo(root)).toBeGreaterThanOrEqual(-3);
+      expect(ballHi(root)).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('adversarial B.7: co2_1e9 — 3 действительных, только 1 физический (Z > B)', () => {
+    const topo = isolateCo2(1e9);
+    expect(topo.realRootCount).toBe(3);
+    const physical = topo.physicalMask.filter((p) => p);
+    expect(physical).toHaveLength(1);
+    // Физический — наибольший корень (zb ~ 0.0617), остальные Z <= B.
+    expect(topo.physicalMask[2]).toBe(true);
+    expect(topo.physicalMask[0]).toBe(false);
+    expect(topo.physicalMask[1]).toBe(false);
+  });
+
+  it('adversarial B.7: d0_1root — ровно 1 действительный корень за D = 0', () => {
+    const topo = isolateCo2(3343704.864306194);
+    expect(topo.realRootCount).toBe(1);
+    expect(topo.discriminantSign).toBe(1);
+    expect([...topo.physicalMask]).toEqual([true]);
+  });
+
+  it('adversarial B.7: nmedge near-merge — 3 корня, зазор enclosure-ов >> радиусов', () => {
+    // Радиус у почти-кратного корня ограничен ДОКАЗУЕМОСТЬЮ знака f
+    // (|f'| ~ 4e-9 при шуме ball ~1.5e-30): честный предел
+    // ~1.7e-21, а не 2^-100. Разделение корней ~1.1e-8 доказано
+    // дизъюнктностью enclosure-ов с зазором > 1e6·maxR.
+    const topo = isolateCo2(3343704.8643061933);
+    expect(topo.realRootCount).toBe(3);
+    expect(enclosuresDisjointOrdered(topo.roots)).toBe(true);
+    const maxR = topo.roots.reduce((acc, rb) => Math.max(acc, rb.r), 0);
+    expect(maxR).toBeLessThanOrEqual(1e-20);
+    const gapMid = ballLo(topo.roots[2] as Ball) - ballHi(topo.roots[1] as Ball);
+    expect(gapMid).toBeGreaterThan(1e6 * maxR);
+  });
+
+  it('adversarial B.7: lowp_fail (P=0.1 Па) — оракул доказывает 3 корня, production отказ representation-допуска', () => {
+    // Математически при P = 0.1 Па кубика имеет ТРИ раздельных
+    // корня ( sep ~ 3.85e-9, доказанные enclosure-ы радиуса ~4e-31 );
+    // production отказывает «схлопывание корней», потому что его
+    // допуск различимости ( 1e-8·max(1, |z|, B) ) больше разделения.
+    // Это ожидаемый production-отказ представления, НЕ отсутствие
+    // трёх корней: независимая топология это фиксирует.
+    const topo = isolateCo2(0.1);
+    expect(topo.realRootCount).toBe(3);
+    expect(topo.discriminantSign).toBe(-1);
+    expect(enclosuresDisjointOrdered(topo.roots)).toBe(true);
+  });
+
+  it('adversarial B.7: сдвинутый seed не ломает изоляцию; Vieta-сверка суммы корней', () => {
+    // Seed — ТОЛЬКО приближение: изоляция всегда доказывается заново.
+    // Существенно сдвинутый seed ( средний production-корень + 0.5 )
+    // обязан отобразиться в ближайший ДОКАЗАННЫЙ корень ( индекс 2 ),
+    // а точный production-средний-корень — в средний ( индекс 1 ).
+    const prodRoots = [...feedOf('nm1e6_vap').rootsAll].sort((x, y) => x - y);
+    expect(prodRoots).toHaveLength(3);
+    const params = oraclePureParams(
+      TPD_NUMERICAL_ERROR_AUDIT_CO2,
+      250,
+      3343704.864302838,
+      TPD_NUMERICAL_ERROR_AUDIT_R_J_PER_MOL_K
+    );
+    const topo = oracleIsolateRealRoots(params.A, params.B);
+    const encShifted = oracleEncloseRoot(params.A, params.B, (prodRoots[1] as number) + 0.5, prodRoots);
+    expect(encShifted.index).toBe(2);
+    const ref = topo.roots[encShifted.index] as Ball;
+    // Тот же certified enclosure, что в независимой изоляции.
+    expect(oracleCenter(encShifted.root)).toBe(oracleCenter(ref));
+    expect(encShifted.root.r).toBe(ref.r);
+    const encMid = oracleEncloseRoot(params.A, params.B, prodRoots[1] as number, prodRoots);
+    expect(encMid.index).toBe(1);
+    // Vieta: сумма трёх доказанных корней накрывает 1 − B.
+    const sumLo =
+      ballLo(topo.roots[0] as Ball) + ballLo(topo.roots[1] as Ball) + ballLo(topo.roots[2] as Ball);
+    const sumHi =
+      ballHi(topo.roots[0] as Ball) + ballHi(topo.roots[1] as Ball) + ballHi(topo.roots[2] as Ball);
+    expect(sumLo).toBeLessThanOrEqual(1 - ballLo(params.B));
+    expect(sumHi).toBeGreaterThanOrEqual(1 - ballHi(params.B));
   });
 
   // --- 3.2. Итоговая статистика -----------------------------------------
@@ -349,6 +608,35 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
     expect(report.summary.maxEz).toBeLessThanOrEqual(2e-9);
     expect(report.summary.maxELnPhi).toBeLessThanOrEqual(1e-6);
     expect(report.summary.maxETpd).toBeLessThanOrEqual(1e-6);
+  });
+
+  it('радиусы enclosure-ов: rZ <= 5e-21, rLnPhi <= 1e-19, rTpd <= 2e-19', () => {
+    // Радиусы — чистые oracle-величины ( детерминированный TS-код,
+    // без платформенных функций ): сужение против прежней ревизии
+    // обеспечено DD-бисекцией до 2^-100 и probe-сериями вместо
+    // двойной точности; предел у near-merge задаётся доказуемостью
+    // знака ( см. adversarial B.7 nmedge ).
+    let maxRz = 0;
+    let maxRLnPhi = 0;
+    let maxRTpd = 0;
+    for (const r of report.results) {
+      if (r.status !== 'audited') {
+        continue;
+      }
+      for (const s of [r.feed, r.trial]) {
+        if (s === undefined) {
+          continue;
+        }
+        maxRz = Math.max(maxRz, s.rZ);
+        maxRLnPhi = Math.max(maxRLnPhi, ...s.rLnPhi);
+      }
+      if (r.tpd !== undefined) {
+        maxRTpd = Math.max(maxRTpd, r.tpd.rTpd);
+      }
+    }
+    expect(maxRz).toBeLessThanOrEqual(5e-21);
+    expect(maxRLnPhi).toBeLessThanOrEqual(1e-19);
+    expect(maxRTpd).toBeLessThanOrEqual(2e-19);
   });
 
   // --- 3.3. Identity и общая TPD-граница ---------------------------------
@@ -382,10 +670,34 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
 
   // --- 3.4. Топология корней ---------------------------------------------
 
+  it('топология: все audited узлы — topologyMatch=true, доказанный знак D, счёт корней 1/3', () => {
+    for (const r of report.results) {
+      if (r.status !== 'audited') {
+        continue;
+      }
+      for (const s of [r.feed, r.trial]) {
+        if (s === undefined) {
+          continue;
+        }
+        if (s.topologyMatch !== true) {
+          throw new Error(`«${r.id}»: независимая топология разошлась с production`);
+        }
+        if (s.oracleRealRootCount !== 1 && s.oracleRealRootCount !== 3) {
+          throw new Error(`«${r.id}»: недоказанное число корней`);
+        }
+        if (s.oracleDiscriminantSign === 0) {
+          throw new Error(`«${r.id}»: знак дискриминанта не доказан`);
+        }
+      }
+    }
+  });
+
   it('near-merge серия: 3 корня, eZ <= 2e-9, eLnPhi <= 1e-14', () => {
     for (const id of ['nm1e4_vap', 'nm1e6_vap', 'nm1e7_vap', 'nmedge_vap']) {
       const f = feedOf(id);
       expect(f.rootCount).toBe(3);
+      expect(f.oracleRealRootCount).toBe(3);
+      expect(f.oraclePhysicalRootCount).toBe(3);
       expect(f.eZtotal).toBeLessThanOrEqual(2e-9);
       expect(f.eLnPhiMax).toBeLessThanOrEqual(1e-14);
     }
@@ -401,12 +713,28 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
   });
 
   it('d0_1root: ровно 1 физический корень за границей D=0', () => {
-    expect(feedOf('d0_1root').rootCount).toBe(1);
+    const f = feedOf('d0_1root');
+    expect(f.rootCount).toBe(1);
+    expect(f.oracleRealRootCount).toBe(1);
+    expect(f.oracleDiscriminantSign).toBe(1);
   });
 
   it('single-root группы: 1 корень (сверхкритично, высокие P)', () => {
     for (const id of ['n2_supercrit', 'mix_1e7', 'co2_1e9']) {
       expect(feedOf(id).rootCount).toBe(1);
+    }
+    // co2_1e9: production отдаёт 1 физический корень; оракул
+    // независимо доказывает: действительных ТРИ, физических ОДИН
+    // ( остальные Z <= B ) — представление production корректно.
+    const c = feedOf('co2_1e9');
+    expect(c.oracleRealRootCount).toBe(3);
+    expect(c.oraclePhysicalRootCount).toBe(1);
+    // n2dom_1e9 и trange-группы: доказанно ровно 1 действительный.
+    expect(feedOf('n2dom_1e9').oracleRealRootCount).toBe(1);
+    for (const id of ['t228', 't273', 't250z50', 't250z005']) {
+      expect(feedOf(id).rootCount).toBe(1);
+      expect(feedOf(id).oracleRealRootCount).toBe(1);
+      expect(feedOf(id).oraclePhysicalRootCount).toBe(1);
     }
   });
 
@@ -442,6 +770,7 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
   it('lowp1_liq: 3 корня, eZ <= 1e-10, eLnPhi <= 1e-6 (низко-P near-merge без усиления)', () => {
     const f = feedOf('lowp1_liq');
     expect(f.rootCount).toBe(3);
+    expect(f.oracleRealRootCount).toBe(3);
     expect(f.eZtotal).toBeLessThanOrEqual(1e-10);
     expect(f.eLnPhiMax).toBeLessThanOrEqual(1e-6);
   });
@@ -565,8 +894,12 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
         'независимый replay-провайдер может воспроизвести harness по этому дампу',
       validationSemantics: {
         oracle:
-          'независимая реализация PR/TPD с enclosure-границами (double-double центры, ' +
-          'консервативные радиусы); production PR/TPD runtime не импортируется',
+          'независимая реализация PR/TPD с enclosure-границами: double-double центры, ' +
+          'радиусы с направленным округлением наружу (проверенные nextUp/nextDown binary64), ' +
+          'независимо доказанная топология корней (интервальный знак дискриминанта, ' +
+          'монотонные участки, сертифицированная бисекция), логарифм без платформенного ' +
+          'Math.log2 (точное извлечение экспоненты), sqrt через доказанную невязку y² − x; ' +
+          'production PR/TPD runtime не импортируется',
         scope:
           'измеряется численная ошибка ВЫЧИСЛЕНИЙ при заданных входах; это НЕ физическая ' +
           'неопределённость EOS/BIP-данных и НЕ валидация PR как физической модели',
@@ -576,8 +909,11 @@ describe('Stage 4.4.4.4.1-A: численный аудит ошибок PR → l
       validatedErrorBoundStatus: {
         continuum: 'not_established',
         discreteMatrix:
-          'per-point validated enclosure (40 audited сценариев матрицы; ' +
-          'highzb_1e3 и highzb_1e14 — ожидаемые production-отказы numerical_failure: ' +
+          'per-point validated enclosure (40 audited сценариев матрицы; границы построены ' +
+          'направленным округлением наружу nextUp/nextDown, топология корней каждого узла ' +
+          '(число действительных/физических) доказана независимо интервальным знаком ' +
+          'дискриминанта, монотонными участками и сертифицированной бисекцией, с учётом корней ' +
+          'Z <= B; highzb_1e3 и highzb_1e14 — ожидаемые production-отказы numerical_failure: ' +
           'phi = exp(lnPhi ~ 970 / ~1.28e6) переполняет binary64, fail-closed guard; ' +
           'per-point enclosure этих узлов существует только на уровне числовой цепочки ' +
           '(run A/B dump), не как production-выход)'
