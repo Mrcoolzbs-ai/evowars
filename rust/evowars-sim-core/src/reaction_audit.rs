@@ -37,9 +37,15 @@
 //!   индекс элемента и его количество в составе); порядок записей
 //!   вида = порядок Object.entries proven-состава;
 //! - `left_offsets`/`right_offsets`: Uint32Array (n_reactions + 1)
-//!   — CSR офсеты участников по сторонам в ОБЩЕМ массиве
-//!   участников: сегменты чередуются (L0, R0, L1, R1, ...),
-//!   офсеты глобальные, общий размер = right_offsets[n_reactions];
+//!   — running-счётчики позиций в ОБЩЕМ массиве участников,
+//!   сегменты сторон чередуются (L0, R0, L1, R1, ...):
+//!   `left_offsets[r+1]` = глобальный конец сегмента L_r,
+//!   `right_offsets[r+1]` = глобальный конец сегмента R_r,
+//!   оба с нулевым префиксом (`left_offsets[0] = right_offsets[0]
+//!   = 0`); фактические сегменты реакции r:
+//!   L_r = [right_offsets[r], left_offsets[r+1]),
+//!   R_r = [left_offsets[r+1], right_offsets[r+1]),
+//!   общий размер = right_offsets[n_reactions];
 //! - `part_species`/`part_coeff`: участники (слот вида, коэффициент)
 //!   в исходном порядке записей реакции;
 //! - `tolerance`: f64 (адаптер уже проверил её корректность).
@@ -241,8 +247,9 @@ pub fn stoichiometry_batch_impl(
     }
     let n_reactions = left_offsets.len() - 1;
     // Общий массив участников: сегменты сторон каждой реакции
-    // чередуются (L0, R0, L1, R1, ...), оба CSR — глобальные индексы,
-    // поэтому общий размер = right_offsets[n_reactions].
+    // чередуются (L0, R0, L1, R1, ...), офсеты — running-счётчики
+    // глобальных позиций, поэтому общий размер =
+    // right_offsets[n_reactions].
     let n_participants = right_offsets[n_reactions] as usize;
     if part_species.len() != n_participants || part_coeff.len() != n_participants {
         return -1;
@@ -266,6 +273,14 @@ pub fn stoichiometry_batch_impl(
     }
     for w in right_offsets.windows(2) {
         if w[0] > w[1] || w[1] as usize > n_participants {
+            return -1;
+        }
+    }
+    // Схема running-счётчиков: L_r = [right_offsets[r],
+    // left_offsets[r+1]), R_r = [left_offsets[r+1],
+    // right_offsets[r+1]); сегменты обязаны идти в этом порядке.
+    for r in 0..n_reactions {
+        if right_offsets[r] > left_offsets[r + 1] || left_offsets[r + 1] > right_offsets[r + 1] {
             return -1;
         }
     }
@@ -305,8 +320,11 @@ pub fn stoichiometry_batch_impl(
     elem_offsets.push(0u32);
 
     for r in 0..n_reactions {
+        // Схема адаптера: интерлив [L0][R0][L1][R1] с нулевым
+        // префиксом; L_r = [right_offsets[r], left_offsets[r+1]),
+        // R_r = [left_offsets[r+1], right_offsets[r+1]).
         let left = process_side(
-            left_offsets[r] as usize,
+            right_offsets[r] as usize,
             left_offsets[r + 1] as usize,
             part_species,
             part_coeff,
@@ -318,7 +336,7 @@ pub fn stoichiometry_batch_impl(
             &mut scratch,
         );
         let right = process_side(
-            right_offsets[r] as usize,
+            left_offsets[r + 1] as usize,
             right_offsets[r + 1] as usize,
             part_species,
             part_coeff,
@@ -502,7 +520,7 @@ mod tests {
             elem_indices: vec![0, 1, 0, 1],
             elem_counts: vec![2.0, 2.0, 2.0, 1.0],
             left_offsets: vec![0, 2],
-            right_offsets: vec![2, 3],
+            right_offsets: vec![0, 3],
             // Реакция: 2 H2 + O2 -> 2 H2O (участники: слоты/коэф;
             // общий массив чередуется: [L0, R0] = [H2, O2 | H2O]).
             part_species: vec![0, 1, 2],
@@ -565,8 +583,11 @@ mod tests {
     fn charge_imbalance_detected() {
         let mut b = fixture();
         // Слева добавить H+ (слот 5, коэф 1): заряд 1 против 0.
+        // Офсеты — по схеме адаптера: rightOffsets с нулевым
+        // префиксом, L = [rightOffsets[0], leftOffsets[1]) = [0,3),
+        // R = [leftOffsets[1], rightOffsets[1]) = [3,4).
         b.left_offsets = vec![0, 3];
-        b.right_offsets = vec![3, 4];
+        b.right_offsets = vec![0, 4];
         b.part_species = vec![0, 1, 5, 2];
         b.part_coeff = vec![2.0, 1.0, 1.0, 2.0];
         b.union_total = 2;
@@ -627,7 +648,7 @@ mod tests {
         // Два участника H2 (коэф 1 и 1) вместо одного с коэф 2:
         // суммирование в порядке участников даёт ту же сумму.
         b.left_offsets = vec![0, 3];
-        b.right_offsets = vec![3, 4];
+        b.right_offsets = vec![0, 4];
         b.part_species = vec![0, 0, 1, 2];
         b.part_coeff = vec![1.0, 1.0, 1.0, 2.0];
         b.union_total = 2;
