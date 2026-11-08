@@ -1,0 +1,147 @@
+# Rust/WASM Performance Pilot (Stage H)
+#
+# Отдельный минимальный workflow: НЕ изменяет существующие CI.
+# Основной ci.yml по-прежнему запускает прежние проверки; parity-тест
+# RustSim самопропускается там (pkg-node не собирается в основном CI).
+#
+# Полный конвейен пилота:
+# - cargo test --locked + release build (native);
+# - WASM-сборка (pkg-node + pkg-web, wasm-bindgen-cli = версия крейта);
+# - tsc, oxlint, vitest (включая Rust/WASM parity), production build;
+# - benchmark npm run benchmark:rust с публикацией артефактов
+#   (JSON-отчёт + MD-сводка; ключевые числа — в notices и Step Summary).
+#
+# Cargo.lock: генерируется cargo и коммитится ботом github-actions[bot]
+# (локально крейт не собирается). Шаг идемпотентен: если файл уже
+# актуален, коммита не будет, поэтому повторные запуски не зацикливаются.
+
+name: rust-wasm-pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - "rust/**"
+      - "src/modules/RustSim/**"
+      - "src/modules/Tests/rustWasmParity.test.ts"
+      - "src/modules/Core/reactionLedger.ts"
+      - "scripts/wasm/**"
+      - "scripts/benchmarks/**"
+      - ".github/workflows/rust-wasm-pilot.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  rust-wasm-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/evowars-sim-core
+
+      - name: Cargo.lock (generate-lockfile)
+        run: cargo generate-lockfile --manifest-path rust/evowars-sim-core/Cargo.toml
+
+      - name: Commit Cargo.lock (только push-события)
+        if: github.event_name == 'push'
+        run: |
+          if git diff --quiet; then
+            echo "Cargo.lock актуален, коммит не нужен."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add rust/evowars-sim-core/Cargo.lock
+            git commit -m "chore(rust): обновить Cargo.lock [rust-wasm-pilot CI]"
+            if git push; then
+              echo "Cargo.lock закоммичен."
+            else
+              echo "::warning title=Cargo.lock push::push не удался (remote сместился); файл остался локальным для этого запуска, следующий прогон закоммитит его."
+            fi
+          fi
+
+      - name: cargo test --locked
+        run: cargo test --locked --manifest-path rust/evowars-sim-core/Cargo.toml
+
+      - name: cargo release build (native bench)
+        run: cargo build --release --manifest-path rust/evowars-sim-core/Cargo.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Install wasm-bindgen-cli 0.2.95
+        run: cargo install wasm-bindgen-cli --version 0.2.95 --locked
+
+      - name: Build WASM (pkg-node + pkg-web)
+        run: npm run wasm:build
+
+      - name: Debug: форма glue-модуля pkg-node
+        run: |
+          echo "--- ключевые строки pkg-node/evowars_sim_core.js ---"
+          grep -nE 'module\.exports|__wbg_init|^exports\.|exports\.default' \
+            rust/evowars-sim-core/pkg-node/evowars_sim_core.js | head -40 || true
+
+      - name: TypeScript check (tsc -b)
+        run: npx tsc -b
+
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Vitest (включая Rust/WASM parity)
+        run: npx vitest run
+
+      - name: Production build
+        run: npm run build
+
+      - name: Benchmark (npm run benchmark:rust)
+        run: npm run benchmark:rust
+
+      - name: Benchmark notices
+        run: |
+          REPORT=benchmark-artifacts/rust-wasm-pilot-report.json
+          echo "WASM init: $(jq -r '.meta.wasmInitMs' "$REPORT") мс" \
+            | while IFS= read -r line; do echo "::notice title=rust-wasm-benchmark::$line"; done
+          jq -r '
+            del(.meta) | to_entries[] | .key as $scenario | .value | to_entries[] |
+            if (.value.skippedReason != null) then
+              "\($scenario) \(.key) ops: пропущено — \(.value.skippedReason)"
+            elif (.value.tsNative == null) then
+              "\($scenario) \(.key) ops: нет данных"
+            else
+              "\($scenario) \(.key) ops: ts=\(.value.tsNative.medianMs) ms, " +
+              "wasmE2E=\(.value.wasmEndToEnd.medianMs) ms, " +
+              "kernel=\(.value.wasmKernelOnly.medianMs) ms, " +
+              "native=\(if .value.nativeRust == null then "н/д" else (.value.nativeRust.medianMs|tostring) end) ms, " +
+              "speedupE2E=\(if .value.speedupEndToEnd == null then "н/д" else (.value.speedupEndToEnd|tostring) end), " +
+              "speedupKernel=\(if .value.speedupKernelOnly == null then "н/д" else (.value.speedupKernelOnly|tostring) end)"
+            end
+          ' "$REPORT" | while IFS= read -r line; do echo "::notice title=rust-wasm-benchmark::$line"; done
+
+      - name: Step Summary
+        run: |
+          {
+            echo "# Rust/WASM Pilot — сводка benchmark"
+            cat benchmark-artifacts/rust-wasm-pilot-summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-artifacts
+          path: |
+            benchmark-artifacts/rust-wasm-pilot-report.json
+            benchmark-artifacts/rust-wasm-pilot-summary.md
+          if-no-files-found: error
