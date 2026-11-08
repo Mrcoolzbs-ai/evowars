@@ -1,15 +1,20 @@
-# Rust/WASM Performance Pilot (Stage H)
+# Rust/WASM Pilot CI (Stage H + Stage I)
 #
 # Отдельный минимальный workflow: НЕ изменяет существующие CI.
-# Основной ci.yml по-прежнему запускает прежние проверки; parity-тест
-# RustSim самопропускается там (pkg-node не собирается в основном CI).
+# Основной ci.yml по-прежнему запускает прежние проверки; parity-тесты
+# RustSim самопропускаются там (pkg-node не собирается в основном CI).
 #
 # Полный конвейен пилота:
 # - cargo test --locked + release build (native);
 # - WASM-сборка (pkg-node + pkg-web, wasm-bindgen-cli = версия крейта);
-# - tsc, oxlint, vitest (включая Rust/WASM parity), production build;
-# - benchmark npm run benchmark:rust с публикацией артефактов
-#   (JSON-отчёт + MD-сводка; ключевые числа — в notices и Step Summary).
+# - tsc, oxlint, vitest (включая Rust/WASM parity Stage H и Stage I),
+#   production build;
+# - Stage H benchmark (npm run benchmark:rust) — immutable baseline;
+# - Stage I prepared-kinetics benchmark (npm run benchmark:prepared):
+#   TS native vs preparedTS vs WASM-сессия (Node) + notices;
+# - Stage I браузерный benchmark (npm run benchmark:browser):
+#   Chromium headless через CDP, Worker + heartbeat + transfer + notices;
+# - артефакты всех прогонов + Step Summary.
 #
 # Cargo.lock: генерируется cargo и коммитится ботом github-actions[bot]
 # (локально крейт не собирается). Шаг идемпотентен: если файл уже
@@ -26,9 +31,13 @@ on:
       - "rust/**"
       - "src/modules/RustSim/**"
       - "src/modules/Tests/rustWasmParity.test.ts"
+      - "src/modules/Tests/rustPreparedKineticsParity.test.ts"
+      - "src/modules/Core/kinetics.ts"
       - "src/modules/Core/reactionLedger.ts"
       - "scripts/wasm/**"
       - "scripts/benchmarks/**"
+      - "scripts/bench-browser/**"
+      - "rust/bench-web/**"
       - ".github/workflows/rust-wasm-pilot.yml"
 
 permissions:
@@ -173,17 +182,104 @@ jobs:
             end
           ' "$REPORT" | while IFS= read -r line; do echo "::notice title=rust-wasm-benchmark::$line"; done
 
+      - name: Stage I prepared-kinetics benchmark (npm run benchmark:prepared)
+        run: |
+          set +e
+          npm run benchmark:prepared > /tmp/step.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            msg=$(tail -c 6000 /tmp/step.log | tr -d '\r' | sed -z -e 's/%/%25/g' -e 's/\n/%0A/g')
+            echo "::error title=stage-i-prepared-benchmark-failed rc=$rc::${msg:0:6000}"
+          fi
+          exit $rc
+
+      - name: Stage I notices (Node)
+        run: |
+          REPORT=benchmark-artifacts/prepared-kinetics-report.json
+          echo "WASM init: $(jq -r '.meta.wasmInitMs' "$REPORT") мс" \
+            | while IFS= read -r line; do echo "::notice title=stage-i-prepared::$line"; done
+          jq -r '
+            .loads | to_entries[] | .value |
+            if (.skippedReason != null) then
+              "prepared \(.ops) ops: пропущено — \(.skippedReason)"
+            elif (.wasmSession == null) then
+              "prepared \(.ops) ops: нет данных"
+            else
+              "prepared \(.ops) ops: prepTs=\(.prepTs.medianMs) ms, " +
+              "prepSession=\(.prepSession.medianMs) ms, " +
+              "tickPreparedTs=\(.preparedTs.medianMs) ms, " +
+              "tickSession=\(.wasmSession.medianMs) ms, " +
+              "speedup=\(.speedupSessionVsPreparedTs), " +
+              "breakEvenTicks=\(if .breakEvenTicks == null then "недостижим" else (.breakEvenTicks|tostring) end)"
+            end
+          ' "$REPORT" | while IFS= read -r line; do echo "::notice title=stage-i-prepared::$line"; done
+          jq -r '
+            "prepared verdict: speedup1e5=\(.verdict.speedupSessionVsPreparedTs100k // "н/д"), " +
+            "speedup1e6=\(.verdict.speedupSessionVsPreparedTs1m // "н/д"), " +
+            "nodeMeetsThreshold1_5x=\(.verdict.nodeMeetsThreshold1_5x // "н/д")"
+          ' "$REPORT" | while IFS= read -r line; do echo "::notice title=stage-i-prepared::$line"; done
+
+      - name: Stage I browser benchmark (Chromium headless, npm run benchmark:browser)
+        run: |
+          set +e
+          npm run benchmark:browser > /tmp/step.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            msg=$(tail -c 6000 /tmp/step.log | tr -d '\r' | sed -z -e 's/%/%25/g' -e 's/\n/%0A/g')
+            echo "::error title=stage-i-browser-failed rc=$rc::${msg:0:6000}"
+          fi
+          exit $rc
+
+      - name: Stage I browser notices
+        if: hashFiles('benchmark-artifacts/stage-i-browser-report.json') != ''
+        run: |
+          REPORT=benchmark-artifacts/stage-i-browser-report.json
+          jq -r '"browser chrome: \(.meta.chrome), WASM init в воркере: \(.result.worker.meta.wasmInitMs) мс"' "$REPORT" \
+            | while IFS= read -r line; do echo "::notice title=stage-i-browser::$line"; done
+          jq -r '
+            .result.worker.loads | to_entries[] | .value |
+            "browser \(.ops) ops: tickPreparedTs=\(.tickPreparedTs.medianMs) ms, " +
+            "tickSession=\(.tickSession.medianMs) ms, " +
+            "speedup=\(.speedupSessionVsPreparedTs), " +
+            "breakEvenTicks=\(if .breakEvenTicks == null then "недостижим" else (.breakEvenTicks|tostring) end)"
+          ' "$REPORT" | while IFS= read -r line; do echo "::notice title=stage-i-browser::$line"; done
+          jq -r '
+            "browser verdict: speedup1e5=\(.result.worker.verdict.speedupSessionVsPreparedTs100k // "н/д"), " +
+            "speedup1e6=\(.result.worker.verdict.speedupSessionVsPreparedTs1m // "н/д"), " +
+            "browserMeetsThreshold1_5x=\(.result.worker.verdict.browserMeetsThreshold1_5x // "н/д")"
+          ' "$REPORT" | while IFS= read -r line; do echo "::notice title=stage-i-browser::$line"; done
+          jq -r '
+            .result | "browser heartbeat: Worker-фазы max gap=\([.heartbeat.maxGapByPhase | to_entries[] | select(.key != "mainThreadContrast" and .key != "startup") | .value] | max // 0) мс, " +
+            "main-thread блокирующие тики max gap=\(.heartbeat.maxGapByPhase.mainThreadContrast // 0) мс, " +
+            "контраст totalMs=\(.mainThreadContrast.totalMs)"
+          ' "$REPORT" | while IFS= read -r line; do echo "::notice title=stage-i-browser::$line"; done
+
       - name: Step Summary
         run: |
           {
-            echo "# Rust/WASM Pilot — сводка benchmark"
+            echo "# Rust/WASM Pilot — сводка benchmark (Stage H baseline)"
             cat benchmark-artifacts/rust-wasm-pilot-summary.md
+            echo ""
+            echo "# Stage I — Prepared Kinetics Session (Node)"
+            cat benchmark-artifacts/prepared-kinetics-summary.md
+            if [ -f benchmark-artifacts/stage-i-browser-summary.md ]; then
+              echo ""
+              echo "# Stage I — Prepared Kinetics Session (браузер, Chromium headless)"
+              cat benchmark-artifacts/stage-i-browser-summary.md
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        # always(): даже при падении браузерного шага Node-отчёты
+        # Stage H/Stage I попадают в артефакты для диагностики.
+        if: always()
         with:
           name: benchmark-artifacts
           path: |
             benchmark-artifacts/rust-wasm-pilot-report.json
             benchmark-artifacts/rust-wasm-pilot-summary.md
-          if-no-files-found: error
+            benchmark-artifacts/prepared-kinetics-report.json
+            benchmark-artifacts/prepared-kinetics-summary.md
+            benchmark-artifacts/stage-i-browser-report.json
+            benchmark-artifacts/stage-i-browser-summary.md
+          if-no-files-found: warn

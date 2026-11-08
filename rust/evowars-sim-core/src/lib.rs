@@ -6,7 +6,11 @@
 //!   `src/modules/Core/kinetics.ts`;
 //! - `reaction_audit` — числовое ядро суммирования стехиометрии
 //!   и заряда `auditReactionStoichiometry()` из
-//!   `src/modules/Core/reactionLedger.ts`.
+//!   `src/modules/Core/reactionLedger.ts`;
+//! - `kinetics_session` (Stage I) — prepared-сессия k(T):
+//!   неизменные параметры реакций хранятся в памяти WASM, тик
+//!   передаёт только T и M (устранение стоимости упаковки
+//!   из горячего цикла; lifecycle: prepare/tick/free).
 //!
 //! Границы: валидация, типизация, статусы данных, provenance,
 //! диагностика и итоговая классификация остаются в TypeScript.
@@ -24,4 +28,5 @@
 //!   scripts/wasm/build-wasm.mjs).
 
 pub mod kinetics;
+pub mod kinetics_session;
 pub mod reaction_audit;

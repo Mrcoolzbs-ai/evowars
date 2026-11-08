@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Evolution Wars — Stage I: prepared kinetics browser benchmark</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #10141c; color: #dce3ee; }
+    h1 { font-size: 1.2rem; }
+    p { max-width: 60rem; color: #9fb0c8; }
+    pre { background: #0b0e14; border: 1px solid #2a3446; padding: 1rem; overflow-x: auto; font-size: 0.85rem; white-space: pre-wrap; }
+    .err { color: #ff8f8f; }
+    .ok { color: #9fe8a9; }
+  </style>
+</head>
+<body>
+  <h1>Evolution Wars — Stage I: Prepared Kinetics Session (браузерный benchmark)</h1>
+  <p>
+    Автоматический браузерный прогон Stage I. Измерения выполняет модульный Worker
+    (<code>stage-i-worker.js</code>): инициализация WASM, подготовка сессии, холодный и
+    тёплые тики preparedTS vs Rust/WASM-сессии, перенос данных (clone vs transfer),
+    память параметров. Главный поток держит heartbeat-зонд (интервал 5 мс): по
+    максимальным промежуткам видно, что расчёты в Worker не блокируют UI; для
+    контраста после Worker на главном потоке выполняется блокирующий тик preparedTS.
+    Требуется собранный <code>pkg-web</code> и сервер корня репозитория.
+    Результат помещается в <code>window.__stageIResult</code> (JSON), ошибки — в
+    <code>window.__stageIError</code>. Запуск в CI:
+    <code>npm run benchmark:browser</code> (Chromium headless, Stage I browser benchmark).
+  </p>
+  <pre id="log">Запуск…</pre>
+
+  <script type="module">
+    import { buildLoad, prepareTsPort } from '/rust/bench-web/stage-i-shared.js';
+
+    const logEl = document.getElementById('log');
+    const log = (msg) => {
+      logEl.textContent += '\n' + msg;
+    };
+
+    // --- Heartbeat-зонд главного потока (интервал 5 мс) ---
+    // Каждое срабатывание фиксирует промежуток от предыдущего; зазор больше
+    // 50 мс — признак блокировки главного потока. Зазоры помечаются текущей
+    // фазой (Worker шлёт phase-сообщения).
+    const HEARTBEAT_INTERVAL_MS = 5;
+    const LONG_GAP_MS = 50;
+    let currentPhase = 'startup';
+    let lastBeat = performance.now();
+    const longGaps = [];
+    const maxGapByPhase = new Map();
+    const heartbeatTimer = setInterval(() => {
+      const now = performance.now();
+      const gap = now - lastBeat;
+      lastBeat = now;
+      const prev = maxGapByPhase.get(currentPhase) ?? 0;
+      if (gap > prev) {
+        maxGapByPhase.set(currentPhase, gap);
+      }
+      if (gap > LONG_GAP_MS) {
+        longGaps.push({ phase: currentPhase, gapMs: Number(gap.toFixed(1)), at: Number(now.toFixed(1)) });
+        if (longGaps.length > 50) {
+          longGaps.shift();
+        }
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    function finish(result) {
+      clearInterval(heartbeatTimer);
+      window.__stageIResult = result;
+      log('ГОТОВО. Результат в window.__stageIResult.');
+      logEl.classList.add('ok');
+    }
+
+    function fail(error) {
+      clearInterval(heartbeatTimer);
+      window.__stageIError = String(error);
+      log('ОШИБКА: ' + String(error));
+      logEl.classList.add('err');
+    }
+
+    try {
+      log('Запуск Worker…');
+      const worker = new Worker('/rust/bench-web/stage-i-worker.js', { type: 'module' });
+
+      worker.addEventListener('message', (ev) => {
+        const msg = ev.data;
+        if (msg.type === 'phase') {
+          currentPhase = msg.phase;
+          log('фаза: ' + msg.phase);
+        } else if (msg.type === 'progress') {
+          log('нагрузка ' + msg.load + ': speedup session vs preparedTS = ' + msg.speedup + '×');
+        } else if (msg.type === 'done') {
+          log('Worker завершил измерения. Контраст: блокирующий тик на главном потоке…');
+          runMainThreadContrast(msg.result);
+        } else if (msg.type === 'error') {
+          fail(msg.error);
+        }
+      });
+
+      worker.addEventListener('error', (ev) => {
+        fail('Worker error: ' + (ev.message ?? 'unknown'));
+      });
+
+      // --- Контраст: блокирующие тики preparedTS на ГЛАВНОМ потоке ---
+      // 10 тиков на 1e5 реакций: heartbeat покажет зазор, сопоставимый
+      // с длительностью тика (главный поток блокируется), против
+      // малых зазоров во время тех же тиков в Worker.
+      function runMainThreadContrast(workerResult) {
+        try {
+          const CONTRAST_OPS = 100000;
+          const CONTRAST_TICKS = 10;
+          currentPhase = 'mainThreadContrast';
+          const wl = buildLoad(CONTRAST_OPS);
+          const ts = prepareTsPort(wl.params, wl.kindMask);
+          // Прогрев (1 тик), чтобы JIT-профиль был сопоставим.
+          ts.tick(wl.temps, wl.third);
+          const start = performance.now();
+          let checksum = 0;
+          for (let t = 0; t < CONTRAST_TICKS; t++) {
+            ts.tick(wl.temps, wl.third);
+            checksum += ts.outK[0];
+          }
+          const totalMs = performance.now() - start;
+          if (!Number.isFinite(checksum) || checksum === 0) {
+            throw new Error('DCE-гвард: main-thread тики не произвели значений');
+          }
+          const heartbeat = {
+            intervalMs: HEARTBEAT_INTERVAL_MS,
+            longGapThresholdMs: LONG_GAP_MS,
+            maxGapMsByPhase: Object.fromEntries(
+              Array.from(maxGapByPhase.entries()).map(([k, v]) => [k, Number(v.toFixed(1))])
+            ),
+            longGaps
+          };
+          finish({
+            worker: workerResult,
+            mainThreadContrast: {
+              ops: CONTRAST_OPS,
+              ticks: CONTRAST_TICKS,
+              totalMs: Number(totalMs.toFixed(3)),
+              perTickMs: Number((totalMs / CONTRAST_TICKS).toFixed(6)),
+              note: 'preparedTS-тики на главном потоке: heartbeat-зазоры сравнимы с длительностью тика (блокировка UI); те же тики в Worker её не создавали.'
+            },
+            heartbeat
+          });
+        } catch (e) {
+          fail((e && e.stack) || e);
+        }
+      }
+    } catch (e) {
+      fail((e && e.stack) || e);
+    }
+  </script>
+</body>
+</html>
