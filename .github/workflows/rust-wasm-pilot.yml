@@ -89,7 +89,7 @@ jobs:
       - name: Build WASM (pkg-node + pkg-web)
         run: npm run wasm:build
 
-      - name: Debug: форма glue-модуля pkg-node
+      - name: "Debug: форма glue-модуля pkg-node"
         run: |
           echo "--- ключевые строки pkg-node/evowars_sim_core.js ---"
           grep -nE 'module\.exports|__wbg_init|^exports\.|exports\.default' \
