@@ -76,7 +76,6 @@ const SPECIES_UNPROVEN = 2;
 
 const FLAG_NONFINITE_LEFT = 1;
 const FLAG_NONFINITE_RIGHT = 2;
-const FLAG_ELEMENT_DIFF = 4;
 const FLAG_CHARGE_DIFF = 8;
 const SIDE_LEFT_BIT = 1;
 const SIDE_RIGHT_BIT = 2;
@@ -306,7 +305,6 @@ export function packStoichiometryBatch(
     });
   }
 
-  const nSpecies = slots.length;
   const nReactions = validIndices.length;
   return {
     speciesStatus: Int32Array.from(slots.map((s) => s.status)),
@@ -348,7 +346,6 @@ function buildKernelAudit(
 ): ReactionStoichiometryAudit {
   const audit = emptyAudit();
   const flags = packed.outFlags[kernelIndex];
-  const tolerance = packed.tolerance;
 
   // reactantElements/productElements: собственные суммы сторон
   // (Object.fromEntries по данным union с битами присутствия —

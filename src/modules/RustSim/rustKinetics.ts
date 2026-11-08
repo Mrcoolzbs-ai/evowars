@@ -242,6 +242,12 @@ export function runKineticsBatch(
     }
     const record = packed.records[i];
     const rate = record.rateConstant;
+    if (rate.status === 'unknown') {
+      // Недостижимо после пре-чеков упаковки (unknown перехвачен
+      // выше как no_kinetic_data), но сужение типа требуется здесь.
+      outcomes[i] = { ok: false, code: 'no_kinetic_data' };
+      continue;
+    }
     const dataStatus = rate.status;
     const temperatureK = packed.temperaturesK[i];
     if (rate.parameters.kind === 'arrhenius') {

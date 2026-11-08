@@ -96,7 +96,11 @@ function nativeKineticsOutcome(
 function expectKineticsOutcomeEquivalence(native: NativeKineticsOutcome, rust: RustRateConstantOutcome): void {
   expect(rust.ok).toBe(native.ok);
   if (!native.ok || !rust.ok) {
-    expect(rust.code).toBe(native.code);
+    // Несовпадение ok уже поймано expect выше; коды сравниваются
+    // только когда ОБА исхода — отказ (сужение типа для TS).
+    if (!native.ok && !rust.ok) {
+      expect(rust.code).toBe(native.code);
+    }
     return;
   }
   const a = native.evaluation;
