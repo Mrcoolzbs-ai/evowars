@@ -435,6 +435,26 @@ describe('Stage 4.4.4.2: Peng–Robinson — кратные корни и кри
     const zc = (1 - OMEGA_B_EXACT) / 3;
     expect(Math.abs(result.roots[0] - zc)).toBeLessThan(2e-6);
     expect(zc).toBeCloseTo(0.30740130869870386, 12);
+    // Stage 4.4.4.4.1-F: регрессия метаданных тройной кратности.
+    // Ветвь p = q = 0 обязана давать ТОЧНЫЙ нулевой знак
+    // дискриминанта (не «малый» и не перевёрнутый) и кратность [3]
+    // — тройной корень НЕ должен читаться как одинокий простой.
+    expect(result.discriminantSign).toBe(0);
+    expect([...result.rootMultiplicities]).toEqual([3]);
+    // Физический фильтр Z > B сохраняет единственный физический
+    // корень и его кратность [3]: fail-closed helper с
+    // согласованными длинами переносит кратность без пересчёта.
+    const topology = prPhysicalRootsWithMultiplicities(
+      [...result.roots],
+      [...result.rootMultiplicities],
+      OMEGA_B_EXACT
+    );
+    expect(topology.ok).toBe(true);
+    if (topology.ok) {
+      expect(topology.roots).toHaveLength(1);
+      expect(Math.abs(topology.roots[0] - zc)).toBeLessThan(2e-6);
+      expect([...topology.multiplicities]).toEqual([3]);
+    }
   });
 
   it('каталожная критическая точка co2 (округлённые константы): один корень', () => {
@@ -1728,4 +1748,5 @@ describe('Stage 4.4.4.4.1-E: fail-closed контракт prPhysicalRootsWithMul
     expect(prPhysicalRoots([0, 1], 1)).toEqual([]);
   });
 });
+
 
