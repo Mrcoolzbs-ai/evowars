@@ -15,6 +15,15 @@
  * структура аудита, согласованность с каталогом и сохранение fail-closed;
  * аудиту соответствует НЕ импорт параметров, а задокументированное его
  * отсутствие.
+ *
+ * Корректировка доказательной базы Stage 4.5.4 (2026-11-08, после ревизии
+ * 4.5.4.5; БЕЗ импорта параметров): актуализированы access-only проверки:
+ * полная форма уширения KIDA транскрибирована по официальным изображениям
+ * (k = k∞·Pr/(1+Pr)·F; F-формула с c/N/d; Fc(T) из a/b/c/d; коллизия
+ * обозначений), дескрипторы источников фиксируют прямые PDF-ссылки JPL
+ * (science.jpl.nasa.gov/documents/1503/, NOAA CSL) и цитату copyright-нотиса
+ * издания 25-1; все записи по-прежнему unknown, fail-closed НЕ ослаблен;
+ * число тестов НЕ менялось.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -257,6 +266,8 @@ describe('Stage 4.5.4: fail-closed интеграция и блокирующи�
       )
     ).toBe(true);
     expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('networkMultiplicity'))).toBe(true);
+    expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('k = k∞·Pr/(1+Pr)·F'))).toBe(true);
+    expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.some((q) => q.includes('коллизия обозначений'))).toBe(true);
   });
 
   it('дескрипторы источников проверяемы: URL, цитирование, дата, честные статусы', () => {
@@ -271,8 +282,11 @@ describe('Stage 4.5.4: fail-closed интеграция и блокирующи�
     expect(KIDA_TB_EXPORT_SOURCE.url).toContain('data/kida/');
     expect(KIDA_TB_EXPORT_SOURCE.note ?? '').toContain('#MODIFIED');
     expect(KIDA_DATABASE_SOURCE.note ?? '').toContain('изображениями');
+    expect(KIDA_DATABASE_SOURCE.note ?? '').toContain('3body-1.png');
     expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('публично предлагается');
     expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('НЕ импортированы');
+    expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('documents/1503/');
+    expect(JPL_EVALUATION_SOURCE.note ?? '').toContain('NASAJPLDataEvaluation20.pdf');
     expect(JPL_EVALUATION_SOURCE.citation).toContain('10.48577/jpl.KFQ0TZ');
     expect(JPL_EVALUATION_SOURCE.citation).toContain('Burkholder');
   });
@@ -510,6 +524,18 @@ describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No.
       expect(finding).not.toBe('');
     }
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.conclusion).toContain('no_kinetic_data');
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.conclusion).toContain('прямые PDF-ссылки');
+    expect(
+      JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) =>
+        f.includes('science.jpl.nasa.gov/documents/1503/NASA_Data_Evaluation_20.pdf')
+      )
+    ).toBe(true);
+    expect(
+      JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) =>
+        f.includes('csl.noaa.gov/groups/csl5/datasets/NASAJPLDataEvaluation20.pdf')
+      )
+    ).toBe(true);
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) => f.includes('Copyright 2025'))).toBe(true);
   });
 
   it('per-record согласованность с каталогом: номера, ID и строки реакций совпадают', () => {
