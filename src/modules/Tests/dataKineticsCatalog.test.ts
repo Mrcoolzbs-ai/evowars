@@ -31,6 +31,15 @@
  * детальное оглавление раздела 1; обрыв в начале подраздела 1.1 Introduction
  * раздела 1, страница 1-3); цитаты I.5 Data Formats и пункта 1.7.2 — из того
  * же слоя; число тестов НЕ менялось.
+ *
+ * Per-record provenance (2026-11-08, третья корректировка): per-record
+ * источники пяти записей зафиксированы в records[].note аудита (DOIs,
+ * NIST-записи, тип доказательства — прямое N₂-измерение / evaluated
+ * review / теория / модель, третье тело, T/P-условия, неопределённости,
+ * соответствие строкам JPL B1/C1 — рекомендации для воздуха);
+ * добавлено 9-е наблюдение доступа (зеркало Evaluation No. 19 и границы
+ * его извлечённого слоя); все записи остаются status='unknown',
+ * fail-closed НЕ ослаблен; число тестов НЕ менялось.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -60,6 +69,14 @@ const EXPECTED_IDS: readonly string[] = [
 ];
 
 const KIDA_REACTION_NUMBERS: readonly number[] = [1, 70, 72, 89, 106];
+
+const AUDIT_RECORD_PROVENANCE_MARKERS: Readonly<Record<number, readonly string[]>> = {
+  1: ['1983COH/WES531', '10.1016/0010-2180(69)90005-4', '1.5 раза'],
+  70: ['10.1063/1.555759', 'AIAA 2004-0463', 'unresolved'],
+  72: ['1977ZEL/ERL939', '10.1039/F29888400745', '10.1021/jp711800z', 'Fcent(N₂) = 0.73'],
+  89: ['1983SCH/KOH361', '10.1002/bbpc.19830870419', '10.1039/A806520I', '«No change»', 'ДЛЯ ВОЗДУХА'],
+  106: ['1987HSU/DUR1895', '10.1021/j100291a043', '«No change»', 'ДЛЯ ВОЗДУХА']
+};
 
 function kineticsError(fn: () => unknown): KineticsError {
   try {
@@ -522,11 +539,11 @@ describe('Stage 4.5.4: ошибки схемы, единицы и диапазо
 });
 
 describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No. 20 (без импорта)', () => {
-  it('структура аудита: дата, DOI, цитата источника, 8 наблюдений доступа', () => {
+  it('структура аудита: дата, DOI, цитата источника, 9 наблюдений доступа', () => {
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.auditedAt).toBe('2026-11-08');
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.doi).toBe('10.48577/jpl.KFQ0TZ');
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.evaluationCitation).toBe(JPL_EVALUATION_SOURCE.citation);
-    expect(JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.length).toBe(8);
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.length).toBe(9);
     for (const finding of JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings) {
       expect(finding).not.toBe('');
     }
@@ -550,6 +567,11 @@ describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No.
       )
     ).toBe(true);
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) => f.includes('Copyright 2025'))).toBe(true);
+    expect(
+      JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) =>
+        f.includes('NASA-JPL_Evaluation_19-5.pdf')
+      )
+    ).toBe(true);
   });
 
   it('per-record согласованность с каталогом: номера, ID и строки реакций совпадают', () => {
@@ -571,6 +593,13 @@ describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No.
       expect(auditRecord.statusAfterAudit).toBe('unknown');
       expect(auditRecord.note).toContain('не верифицированы');
       expect(auditRecord.note).toContain('no_kinetic_data');
+      const markers = AUDIT_RECORD_PROVENANCE_MARKERS[auditRecord.kidaReactionNumber] ?? [];
+      for (const marker of markers) {
+        expect(
+          auditRecord.note,
+          `запись ${auditRecord.kidaTbRecordId}, маркер ${marker}`
+        ).toContain(marker);
+      }
     }
   });
 
