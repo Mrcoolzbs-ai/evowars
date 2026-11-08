@@ -83,10 +83,20 @@ jobs:
       - name: cargo test --locked
         run: |
           set +e
+          # Свежесть артефактов крейта: rust-cache восстанавливает target-каталог
+          # с mtime новее исходников после checkout, из-за чего cargo может
+          # счесть крейт «fresh», не заметив новые/изменённые файлы, и запустить
+          # устаревший тест-бинарник (наблюдалось: шаг падал rc=101 за 1-2 с
+          # без перекомпиляции, в хвосте лога только backtrace без сводки).
+          # clean -p удаляет артефакты только evowars-sim-core во всех профилях
+          # и таргетах (debug/release/wasm32); зависимости остаются в кэше.
+          cargo clean -p evowars-sim-core --manifest-path rust/evowars-sim-core/Cargo.toml
           cargo test --locked --manifest-path rust/evowars-sim-core/Cargo.toml > /tmp/step.log 2>&1
           rc=$?
           if [ $rc -ne 0 ]; then
-            msg=$(tail -c 6000 /tmp/step.log | tr -d '\r' | sed -z -e 's/%/%25/g' -e 's/\n/%0A/g')
+            # Имя упавшего теста и сообщение ассерта идут ДО backtrace:
+            # извлекаем контекст вокруг "panicked at", затем хвост лога.
+            msg=$( { grep -a -B4 -A20 "panicked at" /tmp/step.log | head -c 4200; echo; echo "--- LOG TAIL ---"; tail -c 1200 /tmp/step.log; } | tr -d '\r' | sed -z -e 's/%/%25/g' -e 's/\n/%0A/g' )
             echo "::error title=cargo-test-failed rc=$rc::${msg:0:6000}"
           fi
           exit $rc
