@@ -247,21 +247,26 @@ function checkTripleTick(
   record: KineticReactionRecord,
   temperature: PhysicalQuantity,
   m: number | undefined,
-  temperatureK: number
+  temperatureK: number,
+  index = 0
 ): void {
   const options: RateConstantEvaluationOptions | undefined =
     m === undefined ? undefined : { thirdBodyConcentration: m };
   const native = nativeOutcome(record, temperature, options);
-  const third = new Float64Array(1);
-  third[0] = m === undefined ? Number.NaN : m;
-  const temps = new Float64Array([temperatureK]);
+  // Длины тика обязаны равняться n сессии (контракт адаптера):
+  // массивы строятся по всей сессии; сверяется только слот index,
+  // исходы остальных слотов этим вызовом не проверяются.
+  const n = triple.session.n;
+  const temps = new Float64Array(n).fill(temperatureK);
+  const third = new Float64Array(n).fill(Number.NaN);
+  third[index] = m === undefined ? Number.NaN : m;
   triple.session.tick(temps, third);
   triple.ts.tick(temps, third);
   expectOutcomeEquivalence(
     native,
-    triple.session.outcomes()[0],
-    triple.ts.outStatus[0],
-    triple.ts.outK[0]
+    triple.session.outcomes()[index],
+    triple.ts.outStatus[index],
+    triple.ts.outK[index]
   );
 }
 
@@ -277,12 +282,10 @@ maybe('RustPreparedKineticsSession: парити с нативом и prepared T
     ];
     const triple = openTriple(records);
     try {
-      for (const [record, t] of [
-        [records[0], quantity(450, 'K')],
-        [records[1], quantity(950, 'K')]
-      ] as Array<[KineticReactionRecord, PhysicalQuantity]>) {
-        checkTripleTick(triple, record, t, undefined, t.value);
-      }
+      // records[0] (E/R) — слот 0, records[1] (Ea) — слот 1:
+      // сессия тикается целиком, сверяется слот проверяемой записи.
+      checkTripleTick(triple, records[0], quantity(450, 'K'), undefined, 450, 0);
+      checkTripleTick(triple, records[1], quantity(950, 'K'), undefined, 950, 1);
     } finally {
       triple.dispose();
     }
@@ -321,8 +324,8 @@ maybe('RustPreparedKineticsSession: парити с нативом и prepared T
     const underflow = arrheniusReaction({ energy: { form: 'E_over_R', valueK: 300000 } });
     const triple = openTriple([overflow, underflow]);
     try {
-      checkTripleTick(triple, overflow, quantity(600, 'K'), undefined, 600);
-      checkTripleTick(triple, underflow, quantity(300, 'K'), undefined, 300);
+      checkTripleTick(triple, overflow, quantity(600, 'K'), undefined, 600, 0);
+      checkTripleTick(triple, underflow, quantity(300, 'K'), undefined, 300, 1);
     } finally {
       triple.dispose();
     }
@@ -378,8 +381,8 @@ maybe('RustPreparedKineticsSession: парити с нативом и prepared T
     const huge = arrheniusReaction({ preExponentialA: 1e308, temperatureExponentN: 0 });
     const triple = openTriple([tiny, huge]);
     try {
-      checkTripleTick(triple, tiny, quantity(300, 'K'), undefined, 300);
-      checkTripleTick(triple, huge, quantity(300, 'K'), undefined, 300);
+      checkTripleTick(triple, tiny, quantity(300, 'K'), undefined, 300, 0);
+      checkTripleTick(triple, huge, quantity(300, 'K'), undefined, 300, 1);
     } finally {
       triple.dispose();
     }
