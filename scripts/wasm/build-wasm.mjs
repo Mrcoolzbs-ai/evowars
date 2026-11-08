@@ -15,7 +15,7 @@
 // той же версии, что и крейт wasm-bindgen (=0.2.95).
 
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const crateDir = join(process.cwd(), 'rust', 'evowars-sim-core');
@@ -61,6 +61,27 @@ run(
   'wasm-bindgen',
   ['--target', 'nodejs', '--out-dir', 'pkg-node', 'target/wasm32-unknown-unknown/release/evowars_sim_core.wasm'],
   'wasm-bindgen (nodejs)'
+);
+
+// Корень репозитория — ESM ("type": "module" в package.json), поэтому
+// без собственного манифеста Node трактует CJS-glue wasm-bindgen
+// (--target nodejs: синхронная загрузка .wasm через __dirname/require
+// и exports.*) как ES-модуль, и require(glue) падает на неопределённом
+// require/__dirname. Явный "type": "commonjs" в pkg-node — тот же приём,
+// что использует wasm-pack для своих пакетов.
+writeFileSync(
+  join(crateDir, 'pkg-node', 'package.json'),
+  JSON.stringify(
+    {
+      name: 'evowars-sim-core-pkg-node',
+      private: true,
+      type: 'commonjs',
+      main: 'evowars_sim_core.js'
+    },
+    null,
+    2
+  ) + '\n',
+  'utf8'
 );
 
 run(
