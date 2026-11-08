@@ -68,6 +68,9 @@ import type {
 } from '../Core/prTangentPlaneDistanceSearch';
 import { computePengRobinsonMixture } from '../Core/pengRobinsonMixture';
 import type {
+  PengRobinsonBinaryInteractionInput,
+  PengRobinsonEvidenceStatus,
+  PengRobinsonMixtureComponentInput,
   PengRobinsonMixtureInputs,
   PengRobinsonMixtureRequest,
   PengRobinsonMixtureSuccess
@@ -77,11 +80,7 @@ import type {
 // Помощники фикстур
 // ----------------------------------------------------------------------------
 
-function verifiedEvidence(): {
-  criticalTemperatureK: string;
-  criticalPressurePa: string;
-  acentricFactor: string;
-} {
+function verifiedEvidence(): PengRobinsonMixtureComponentInput['evidence'] {
   return {
     criticalTemperatureK: 'VERIFIED',
     criticalPressurePa: 'VERIFIED',
@@ -95,16 +94,7 @@ function component(
   criticalTemperatureK: number,
   criticalPressurePa: number,
   acentricFactor: number
-): {
-  component: string;
-  moleFraction: number;
-  criticalTemperatureK: number;
-  criticalPressurePa: number;
-  acentricFactor: number;
-  evidence: ReturnType<typeof verifiedEvidence>;
-  crossChecks: unknown[];
-  limitations: string[];
-} {
+): PengRobinsonMixtureComponentInput {
   return {
     component: id,
     moleFraction,
@@ -121,15 +111,9 @@ function interaction(
   componentA: string,
   componentB: string,
   kij: number,
-  evidence: string,
-  applicabilityRangeK: { minTemperatureK: number; maxTemperatureK: number } | null
-): {
-  componentA: string;
-  componentB: string;
-  kij: number;
-  evidence: string;
-  applicabilityRangeK: { minTemperatureK: number; maxTemperatureK: number } | null;
-} {
+  evidence: PengRobinsonEvidenceStatus,
+  applicabilityRangeK: PengRobinsonBinaryInteractionInput['applicabilityRangeK']
+): PengRobinsonBinaryInteractionInput {
   return { componentA, componentB, kij, evidence, applicabilityRangeK };
 }
 
@@ -830,14 +814,20 @@ describe('Stage 4.4.4.4.2: три физических корня (п. 4, 5, 7, 
   if (pr.status !== 'success') {
     throw new Error('PURE PR обязан быть success');
   }
+  // Сужение фиксируется в константах: замыкания it() не полагаются на
+  // narrowing локальной переменной объединения (страховка против
+  // версионных различий сужения в замыканиях).
+  const pureRoots: readonly number[] = pr.physicalRoots;
+  const pureRootCount: number = pr.distinctPhysicalRootCount;
+  const pureHasDistinctBranches: boolean = pr.hasDistinctBranches;
 
   it('п. 46: независимый оракул — три физических корня Z', () => {
-    expect(pr.distinctPhysicalRootCount).toBe(3);
-    expect(pr.physicalRoots.length).toBe(3);
-    expect(pr.physicalRoots[0]).toBeCloseTo(0.0198964, 6);
-    expect(pr.physicalRoots[1]).toBeCloseTo(0.0652088, 6);
-    expect(pr.physicalRoots[2]).toBeCloseTo(0.9020656, 6);
-    expect(pr.hasDistinctBranches).toBe(true);
+    expect(pureRootCount).toBe(3);
+    expect(pureRoots.length).toBe(3);
+    expect(pureRoots[0]).toBeCloseTo(0.0198964, 6);
+    expect(pureRoots[1]).toBeCloseTo(0.0652088, 6);
+    expect(pureRoots[2]).toBeCloseTo(0.9020656, 6);
+    expect(pureHasDistinctBranches).toBe(true);
   });
 
   it('п. 46: physicalRootCount ≠ searchBranchCount — обследуются 2 крайние ветви', () => {
@@ -867,8 +857,8 @@ describe('Stage 4.4.4.4.2: три физических корня (п. 4, 5, 7, 
       expect(attempt.singlePhysicalRoot).toBe(false);
     }
     // vapor = наибольший корень, liquid = наименьший.
-    expect(vapor?.selectedRoot).toBe(pr.physicalRoots[2]);
-    expect(liquid?.selectedRoot).toBe(pr.physicalRoots[0]);
+    expect(vapor?.selectedRoot).toBe(pureRoots[2]);
+    expect(liquid?.selectedRoot).toBe(pureRoots[0]);
     // rootLabels точек — фактическая ветвь попытки.
     for (const point of vapor?.visitedPoints ?? []) {
       expect(point.rootLabels).toEqual(['vapor']);
@@ -951,20 +941,20 @@ describe('Stage 4.4.4.4.2: SC1 — надёжно отрицательный TPD
   it('п. 8: bestVisitedPoint <= finalStationaryPoint; глобальный минимум по всем попыткам', () => {
     let minTpd = Number.POSITIVE_INFINITY;
     for (const attempt of result.attempts) {
-      if (attempt.bestVisitedPoint !== null) {
-        minTpd = Math.min(minTpd, attempt.bestVisitedPoint.tpd);
-        if (attempt.finalStationaryPoint !== null) {
-          expect(attempt.bestVisitedPoint.tpd).toBeLessThanOrEqual(
-            attempt.finalStationaryPoint.tpd
-          );
+      const bestPoint = attempt.bestVisitedPoint;
+      if (bestPoint !== null) {
+        minTpd = Math.min(minTpd, bestPoint.tpd);
+        const finalPoint = attempt.finalStationaryPoint;
+        if (finalPoint !== null) {
+          expect(bestPoint.tpd).toBeLessThanOrEqual(finalPoint.tpd);
         }
         // Состав, ветвь, номер итерации и вклады сохранены. Вклады
         // строятся по trial-support: по одному на КАЖДУЮ ненулевую
         // долю точки (вершинные попытки — один вклад).
-        expect(attempt.bestVisitedPoint.composition.length).toBe(2);
-        expect(attempt.bestVisitedPoint.iterationIndex).toBeGreaterThanOrEqual(0);
-        expect(attempt.bestVisitedPoint.tpdContributions.length).toBe(
-          attempt.bestVisitedPoint.composition.filter((value) => value !== 0).length
+        expect(bestPoint.composition.length).toBe(2);
+        expect(bestPoint.iterationIndex).toBeGreaterThanOrEqual(0);
+        expect(bestPoint.tpdContributions.length).toBe(
+          bestPoint.composition.filter((value) => value !== 0).length
         );
       }
     }
@@ -1097,11 +1087,11 @@ describe('Stage 4.4.4.4.2: F9A — max_iterations без fallback (п. 9a, 14, 1
 
 describe('Stage 4.4.4.4.2: шесть компонентов — частичные грани', () => {
   it('s=6: faceCount = 62, examined = 22, partial => indeterminate', () => {
-    const components = [];
+    const components: PengRobinsonMixtureComponentInput[] = [];
     for (let k = 0; k < 6; k += 1) {
       components.push(component('c' + (k + 1), 1 / 6, N2.tc, N2.pc, N2.omega));
     }
-    const binaryInteractions = [];
+    const binaryInteractions: PengRobinsonBinaryInteractionInput[] = [];
     for (let a = 0; a < 6; a += 1) {
       for (let b = a + 1; b < 6; b += 1) {
         binaryInteractions.push(

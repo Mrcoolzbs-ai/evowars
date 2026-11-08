@@ -608,13 +608,45 @@ export function canonicalPrInputFingerprint(inputs: PengRobinsonMixtureInputs): 
 // ============================================
 
 /**
+ * Полный (заданный и осмысленный) дескриптор домена аудита: все секции
+ * не-null, числовые поля конечны. Уточнённый тип после guard-проверки
+ * isCompleteAuditDomainDescriptor (type predicate): сужение для
+ * strictNullChecks в evaluatePrTpdAuditDomain; runtime-значения
+ * идентичны PrTpdAuditDomainDescriptor (проверка полноты — та же).
+ */
+interface PrTpdCompleteAuditDomainDescriptor {
+  readonly temperatureRangeK: { readonly min: number; readonly max: number };
+  readonly pressureRangePa: { readonly min: number; readonly max: number };
+  readonly componentCountRange: { readonly min: number; readonly max: number };
+  readonly compositionConstraints: {
+    readonly minNonZeroMoleFraction: number;
+    readonly maxLargestToSmallestRatio: number;
+  };
+  readonly physicalRootMode: {
+    readonly twoRootCovered: boolean;
+    readonly nearRootMergeCovered: boolean;
+    readonly nearMergeSeparationTolerance: number;
+    readonly multiplicityModeAvailable: boolean;
+  };
+  readonly bipPolicy: {
+    readonly requiredEvidencePolicy: string;
+    readonly allowedBipSources: readonly string[];
+    readonly allowedBipPairIds: readonly string[];
+  };
+  readonly componentPolicy: {
+    readonly allowedComponentIds: readonly string[];
+    readonly allowedPrInputFingerprints: readonly string[];
+  };
+}
+
+/**
  * Проверка полноты дескриптора домена аудита: ЛЮБОЕ null-поле или
  * null-секция (включая не-массивы там, где ожидается массив) делает
  * дескриптор незаданным → все точки получают 'pending'. Числовые
  * поля должны быть конечными и осмысленными (min <= max, допуск
  * слияния > 0, minNonZeroMoleFraction > 0, ratio-ограничение >= 1).
  */
-function isCompleteAuditDomainDescriptor(domain: PrTpdAuditDomainDescriptor): boolean {
+function isCompleteAuditDomainDescriptor(domain: PrTpdAuditDomainDescriptor): domain is PrTpdCompleteAuditDomainDescriptor {
   if (
     domain.temperatureRangeK === null ||
     domain.pressureRangePa === null ||
