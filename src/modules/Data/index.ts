@@ -160,6 +160,8 @@ export type {
 // оставшиеся поля автоматически лицензионно очищенными); блокирующие
 // вопросы — KINETIC_CATALOG_BLOCKING_QUESTIONS, источники —
 // DATA_PROVENANCE.md §2.28.
+// Ревизия 4.5.4.5 (08.11.2026): экспорт JPL_EVALUATION_20_ACCESS_AUDIT — per-record
+// аудит доступа JPL Evaluation No. 20; параметры НЕ верифицированы и НЕ импортированы.
 import {
   KIDA_DATABASE_SOURCE,
   KIDA_TB_EXPORT_SOURCE,
@@ -170,7 +172,8 @@ import {
   kidaTbRecordId,
   buildKidaTbReactionRecord,
   buildKineticsCatalog,
-  KineticsCatalogError
+  KineticsCatalogError,
+  JPL_EVALUATION_20_ACCESS_AUDIT
 } from './kineticsCatalog';
 
 export {
@@ -183,11 +186,14 @@ export {
   kidaTbRecordId,
   buildKidaTbReactionRecord,
   buildKineticsCatalog,
-  KineticsCatalogError
+  KineticsCatalogError,
+  JPL_EVALUATION_20_ACCESS_AUDIT
 };
 export type {
   KineticsDataSourceDescriptor,
   KidaTbRecordIdentity,
+  JplEvaluation20AccessAuditRecord,
+  JplEvaluation20AccessAudit,
   KineticsCatalog
 } from './kineticsCatalog';
 

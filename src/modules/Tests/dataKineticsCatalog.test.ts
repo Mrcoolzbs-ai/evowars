@@ -9,12 +9,19 @@
  * параметров закона скорости и метаданных курирования); строгая сборка
  * каталога на SYNTHETIC-фикстурах; ошибки схемы/единиц/диапазонов валидатора
  * 4.5.1. Параметры JPL/KIDA НЕ промоутированы: все записи unknown — fail-closed.
+ *
+ * Ревизия Stage 4.5.4.5 (2026-11-08): добавлена группа тестов per-record аудита
+ * доступа JPL Evaluation No. 20 (JPL_EVALUATION_20_ACCESS_AUDIT) — проверяются
+ * структура аудита, согласованность с каталогом и сохранение fail-closed;
+ * аудиту соответствует НЕ импорт параметров, а задокументированное его
+ * отсутствие.
  */
 import { describe, expect, it } from 'vitest';
 import {
   KIDA_DATABASE_SOURCE,
   KIDA_TB_EXPORT_SOURCE,
   JPL_EVALUATION_SOURCE,
+  JPL_EVALUATION_20_ACCESS_AUDIT,
   KIDA_TB_RECORD_IDENTITIES,
   KINETIC_CATALOG_DATA,
   KINETIC_CATALOG_BLOCKING_QUESTIONS,
@@ -490,5 +497,95 @@ describe('Stage 4.5.4: ошибки схемы, единицы и диапазо
       })
     );
     expectProblem(record, 'должен быть конечным числом');
+  });
+});
+
+describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No. 20 (без импорта)', () => {
+  it('структура аудита: дата, DOI, цитата источника, 8 наблюдений доступа', () => {
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.auditedAt).toBe('2026-11-08');
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.doi).toBe('10.48577/jpl.KFQ0TZ');
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.evaluationCitation).toBe(JPL_EVALUATION_SOURCE.citation);
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.length).toBe(8);
+    for (const finding of JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings) {
+      expect(finding).not.toBe('');
+    }
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.conclusion).toContain('no_kinetic_data');
+  });
+
+  it('per-record согласованность с каталогом: номера, ID и строки реакций совпадают', () => {
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.records.length).toBe(KIDA_TB_RECORD_IDENTITIES.length);
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.records.map((r) => r.kidaReactionNumber)).toEqual([
+      ...KIDA_REACTION_NUMBERS
+    ]);
+    for (const auditRecord of JPL_EVALUATION_20_ACCESS_AUDIT.records) {
+      const catalogRecord = KINETIC_CATALOG_DATA.find((r) => r.id === auditRecord.kidaTbRecordId);
+      expect(catalogRecord, `запись ${auditRecord.kidaTbRecordId}`).toBeDefined();
+      expect(catalogRecord?.reaction, `запись ${auditRecord.kidaTbRecordId}`).toBe(auditRecord.reaction);
+    }
+  });
+
+  it('каждая запись аудита: покрытие не установлено, параметры не верифицированы, статус unknown', () => {
+    for (const auditRecord of JPL_EVALUATION_20_ACCESS_AUDIT.records) {
+      expect(auditRecord.coverage).toBe('not_established');
+      expect(auditRecord.parametersVerified).toBe(false);
+      expect(auditRecord.statusAfterAudit).toBe('unknown');
+      expect(auditRecord.note).toContain('не верифицированы');
+      expect(auditRecord.note).toContain('no_kinetic_data');
+    }
+  });
+
+  it('числовой обход аудита содержит только 5 номеров реакций KIDA; запрещённые ключи отсутствуют', () => {
+    const numericLeaves: number[] = [];
+    const walk = (node: unknown): void => {
+      if (typeof node === 'number') {
+        numericLeaves.push(node);
+        return;
+      }
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          walk(item);
+        }
+        return;
+      }
+      if (node !== null && typeof node === 'object') {
+        for (const value of Object.values(node)) {
+          walk(value);
+        }
+      }
+    };
+    walk(JPL_EVALUATION_20_ACCESS_AUDIT);
+    expect(numericLeaves).toEqual([...KIDA_REACTION_NUMBERS]);
+    const serialized = JSON.stringify(JPL_EVALUATION_20_ACCESS_AUDIT);
+    const forbiddenKeys = [
+      'k0Alpha',
+      'kInfAlpha',
+      'fcA',
+      'preExponentialA',
+      'temperatureExponentN',
+      'lowPressureLimit',
+      'highPressureLimit',
+      'centeringFactorFc',
+      'broadeningN',
+      'temperatureRangeK',
+      'networkMultiplicity',
+      'recommendation'
+    ];
+    for (const key of forbiddenKeys) {
+      expect(serialized.includes(`"${key}"`), `ключ ${key}`).toBe(false);
+    }
+  });
+
+  it('fail-closed сохранён: все записи unknown, no_kinetic_data, 4 блокирующих вопроса', () => {
+    for (const record of KINETIC_CATALOG_DATA) {
+      expect(record.rateConstant.status).toBe('unknown');
+      const error = kineticsError(() => evaluateRateConstant(record, quantity(300, 'K')));
+      expect(error.code, `запись ${record.id}`).toBe('no_kinetic_data');
+    }
+    expect(KINETIC_CATALOG_BLOCKING_QUESTIONS.length).toBe(4);
+    expect(
+      KINETIC_CATALOG_BLOCKING_QUESTIONS.some(
+        (q) => q.includes('JPL Evaluation No. 20') && q.includes('JPL_EVALUATION_20_ACCESS_AUDIT')
+      )
+    ).toBe(true);
   });
 });

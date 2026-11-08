@@ -62,6 +62,18 @@
  *   константы status='unknown' (no_kinetic_data), fail-closed НЕ ослаблен;
  *   контракты 4.5.1–4.5.3 (включая Radau IIA), NASA CEA, golden baseline
  *   не менялись; история Git НЕ переписывалась.
+ * Ревизия Stage 4.5.4.5 (2026-11-08, per-record аудит доступа JPL Evaluation
+ * No. 20): результат аудита доступа к табличным значениям публикации
+ * (JPL Publication 25-1, 2025, DOI 10.48577/jpl.KFQ0TZ) зафиксирован в
+ * JPL_EVALUATION_20_ACCESS_AUDIT (5 записей, 8 наблюдений доступа): табличные
+ * per-record значения НЕ доступны проверяемым автоматизированным способом
+ * (официальная страница рендерится клиентским JavaScript; DOI ведёт в JPL
+ * Dataverse, блокирующий автоматизированный доступ; NTRS и зеркала выпуск не
+ * содержат) — параметры НЕ верифицированы и НЕ импортированы: все 5 записей
+ * остаются status='unknown', вычислитель 4.5.2 обязан отказывать
+ * (no_kinetic_data); fail-closed НЕ ослаблен; контракты 4.5.1–4.5.3 (включая
+ * Radau IIA), NASA CEA и golden baseline не менялись; блокирующий вопрос JPL
+ * актуализирован со ссылкой на аудит.
  * Блокирующие вопросы: KINETIC_CATALOG_BLOCKING_QUESTIONS (4 шт.).
  */
 import type { KineticReactionRecord } from '../Core/kinetics';
@@ -110,7 +122,7 @@ export const JPL_EVALUATION_SOURCE: KineticsDataSourceDescriptor = {
     'J.B. Burkholder, R.L. Caravan, R.E. Huie, V.L. Orkin, C.J. Percival, R. Sander, S.P. Sander, D.M. Wilmouth. "Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation No. 20," JPL Publication 25-1, Pasadena, 2025, DOI 10.48577/jpl.KFQ0TZ',
   license: 'government work; условия использования проверить',
   retrievedAt: '2026-11-03',
-  note: 'публикация существует и публично предлагается: официальная страница проекта (science.jpl.nasa.gov/projects/data-evaluation/) публикует ссылку на JPL Publication 25-1 (PDF ~20 МБ, DOI 10.48577/jpl.KFQ0TZ); использованный автоматизированный способ извлечения НЕ смог обработать PDF установленного размера — per-record данные НЕ импортированы (ревизии 4.5.4–4.5.4.3), неподтверждённые коэффициенты не добавляются, статус записей не меняется на known/estimated; per-record импорт требует проверяемого доступа (ручное извлечение таблиц или разрешённый API)'
+  note: 'публикация существует и публично предлагается (официальная страница проекта science.jpl.nasa.gov/projects/data-evaluation/); per-record аудит доступа ревизии 4.5.4.5 (2026-11-08, см. JPL_EVALUATION_20_ACCESS_AUDIT) подтвердил: табличные значения публикации НЕ доступны проверяемым автоматизированным способом (страница рендерится клиентским JavaScript, DOI 10.48577/jpl.KFQ0TZ ведёт в JPL Dataverse, блокирующий автоматизированный доступ; NTRS и зеркала выпуск не содержат) — per-record данные НЕ импортированы, неподтверждённые коэффициенты не добавляются, статус записей не меняется на known/estimated; импорт требует проверяемого доступа (ручное извлечение таблиц или разрешённый API)'
 };
 
 export interface KidaTbRecordIdentity {
@@ -170,7 +182,7 @@ export function buildKidaTbReactionRecord(identity: KidaTbRecordIdentity): Kinet
     rateConstant: {
       status: 'unknown',
       note:
-        'k(T) не рассчитано: (1) полная форма уширения KIDA (смещение центра c(Fc), член d = 0.14, T-зависимый Fc(T)) НЕ представима точно в контракте 4.5.2 и требует расширения (не реализовано); (2) размерности k0/k∞ противоречивы в справке KIDA (обе cm6.molecule-2.s-1 при Pr = k0·[M]/k∞) — единицы НЕ интерпретированы; (3) JPL Evaluation No. 20 не импортирован (автоматизированный способ извлечения не смог обработать публично предлагаемый PDF ~20 МБ); (4) лицензия KIDA unverified — дословные числовые параметры и метаданные курирования удалены из репозитория; вычислитель обязан отказывать (no_kinetic_data)',
+        'k(T) не рассчитано: (1) полная форма уширения KIDA (смещение центра c(Fc), член d = 0.14, T-зависимый Fc(T)) НЕ представима точно в контракте 4.5.2 и требует расширения (не реализовано); (2) размерности k0/k∞ противоречивы в справке KIDA (обе cm6.molecule-2.s-1 при Pr = k0·[M]/k∞) — единицы НЕ интерпретированы; (3) JPL Evaluation No. 20 не импортирован (per-record аудит доступа ревизии 4.5.4.5 подтвердил: табличные значения публикации не доступны проверяемым автоматизированным способом — см. JPL_EVALUATION_20_ACCESS_AUDIT); (4) лицензия KIDA unverified — дословные числовые параметры и метаданные курирования удалены из репозитория; вычислитель обязан отказывать (no_kinetic_data)',
       provenance: kidaTbRateConstantProvenance(identity)
     },
     provenance: {
@@ -242,6 +254,56 @@ export function buildKineticsCatalog(
 export const KINETIC_CATALOG_BLOCKING_QUESTIONS: readonly string[] = [
   'Форма уширения KIDA: справка KIDA (kida.astrochem-tools.org/help) публикует общие формулы k(T), F, Fc(T) изображениями; текстом подтверждены c = −0.4 − 0.67·log10(Fc), N = 0.75 − 1.27·log10(Fc), d = 0.14, Pr = k0·[M]/k∞ и политика Fc = 0.64 (Sander et al. 2006) при отсутствии параметров Troe. Полная форма (сдвиг центра на c(Fc), член d = 0.14, T-зависимый Fc(T) из параметров a/b/c/d) НЕ представима точно в контракте 4.5.2 (симметричная форма с константными centeringFactorFc ∈ (0,1] и broadeningN > 0) — требуется решение о минимальном расширении контракта (модель уширения как discriminated union с обратной совместимостью 4.5.1–4.5.3; предложение в дорожной карте, НЕ реализовано). Per-record Fc-параметры отдельных записей экспорта НЕ воспроизводятся в репозитории (лицензия unverified, ревизия 4.5.4.2); зафиксировано только, что у части записей буквальное чтение их Fc-параметров противоречит политике KIDA «Fc = 0.64», а трактовка сентинелов формата «не задано» неоднозначна — интерпретация должна быть подтверждена командой KIDA. Реализация parseKIDA3b в PATMO@d78ec8e2 отклоняется от канонической Troe-формы литературы (произведение вместо суммы в Fc(T), y без скобок, Pr = k0/k∞ без [M]) и не может служить нормой',
   'Размерности k0/k∞: официальная справка KIDA утверждает одинаковые единицы k0 и k∞ (цитата: «Both rate constants have the following unit: cm6.molecules-2.s-1», т.е. cm6.molecule-2.s-1 для обеих), но Pr = k0·[M]/k∞ безразмерен только при [k0]/[k∞] = единица концентрации (k∞ — cm3.molecule-1.s-1 по конвенции JPL/IUPAC); readme экспорта единицы не специфицирует; копия PATMO@d78ec8e2 вычисляет Pr = k0/k∞ без [M]. Противоречие источника — блокер: единицы исходных параметров оставлены неинтерпретированными, параметры НЕ промоутируются',
-  'JPL Evaluation No. 20 (JPL Publication 25-1, 2025, DOI 10.48577/jpl.KFQ0TZ; авторы по официальной записи: Burkholder, Caravan, Huie, Orkin, Percival, R. Sander, S.P. Sander, Wilmouth): публикация существует и публично предлагается (страница проекта science.jpl.nasa.gov/projects/data-evaluation/ публикует ссылку на PDF ~20 МБ); использованный автоматизированный способ извлечения НЕ смог обработать PDF установленного размера — per-record импорт не выполнен, записи JPL не импортированы, неподтверждённые коэффициенты не добавляются; требуется проверяемый доступ (ручное извлечение таблиц, per-record ссылки на первоисточники, формы энергии, опорная температура 298→300 K, диапазоны T, температурные неопределённости)',
+  'JPL Evaluation No. 20 (JPL Publication 25-1, 2025, DOI 10.48577/jpl.KFQ0TZ; авторы по официальной записи: Burkholder, Caravan, Huie, Orkin, Percival, R. Sander, S.P. Sander, Wilmouth): публикация существует и публично предлагается (страница проекта science.jpl.nasa.gov/projects/data-evaluation/); per-record аудит доступа ревизии 4.5.4.5 (2026-11-08, см. JPL_EVALUATION_20_ACCESS_AUDIT) подтвердил, что табличные значения публикации НЕ доступны проверяемым автоматизированным способом: официальная страница рендерится клиентским JavaScript (прямая ссылка на PDF в статическом HTML отсутствует, паттерн прямых ссылок прошлых выпусков для 25-1 возвращает 404), DOI ведёт в запись JPL Dataverse (метаданные DataCite читаемы, регистрация 2026-07-28), но хост блокирует автоматизированный доступ, NTRS и зеркала выпуск не содержат — per-record импорт не выполнен, записи JPL не импортированы, неподтверждённые коэффициенты не добавляются; требуется проверяемый доступ (ручное извлечение таблиц, per-record ссылки на первоисточники, формы энергии, опорная температура 298→300 K, диапазоны T, температурные неопределённости)',
   'Лицензия KIDA: Legal Notices (kida.astrochem-tools.org/legal) — элементы сайта защищены законом об интеллектуальной собственности, несанкционированное воспроизведение, распространение и использование запрещены; лицензия на скачиваемые наборы данных не публикуется; копия SophiaAtmo/PATMO@d78ec8e2 не содержит файла LICENSE. Право на распространение содержимого экспорта НЕ подтверждено: в ревизиях 4.5.4.1/4.5.4.2 из репозитория удалены все per-record числовые параметры (коэффициенты k0/k∞, Fc-параметры, T-диапазоны, неопределённости), исходные строки CSV и метаданные курирования (networkMultiplicity, recommendation); оставлены только номера реакций KIDA (идентификаторы записей источника), состав видов (физический факт; идентичности перенесены из KIDA-экспорта и потенциально проверяемы по независимой литературе — независимая проверка в проекте НЕ задокументирована, уточнение 4.5.4.3), библиография и общие метаданные источника — оставшиеся поля НЕ объявляются автоматически лицензионно очищенными и могут быть дополнительно исключены; промоушен параметров требует ответа кураторов KIDA (контакт: kida-obsu-bordeaux.fr) и установленной цитаты экспорта: рекомендуемая библиографическая ссылка для tb-экспорта не установлена — UNRESOLVED (Wakelam et al. 2012, ApJS 199, 21 — общее библиографическое описание базы KIDA, НЕ подтверждено как рекомендуемая цитата этого экспорта; см. ревизию 4.5.4.4.1 и DATA_PROVENANCE.md §2.28)'
 ];
+
+export interface JplEvaluation20AccessAuditRecord {
+  readonly kidaReactionNumber: number;
+  readonly kidaTbRecordId: string;
+  readonly reaction: string;
+  readonly coverage: 'not_established';
+  readonly parametersVerified: false;
+  readonly statusAfterAudit: 'unknown';
+  readonly note: string;
+}
+
+export interface JplEvaluation20AccessAudit {
+  readonly auditedAt: string;
+  readonly evaluationCitation: string;
+  readonly doi: string;
+  readonly accessFindings: readonly string[];
+  readonly records: readonly JplEvaluation20AccessAuditRecord[];
+  readonly conclusion: string;
+}
+
+// Stage 4.5.4 (ревизия 4.5.4.5, 08.11.2026): per-record аудит ДОСТУПА к табличным
+// значениям JPL Evaluation No. 20 — проверяемый автоматизированный доступ не
+// установлен; параметры НЕ верифицированы и НЕ импортированы (все записи
+// остаются status='unknown', no_kinetic_data); значения полей аудита —
+// зафиксированные наблюдения доступа, НЕ импортированные данные публикации.
+export const JPL_EVALUATION_20_ACCESS_AUDIT: JplEvaluation20AccessAudit = {
+  auditedAt: '2026-11-08',
+  evaluationCitation: JPL_EVALUATION_SOURCE.citation,
+  doi: '10.48577/jpl.KFQ0TZ',
+  accessFindings: [
+    'официальная страница проекта (science.jpl.nasa.gov/projects/data-evaluation/) рендерится клиентским JavaScript: прямая ссылка на PDF Evaluation No. 20 в статическом HTML отсутствует; паттерн прямых ссылок прошлых выпусков (/documents/1487/ для 19-5) для 25-1 возвращает 404; sitemap сайта (2021) документов выпусков не содержит',
+    'DOI 10.48577/jpl.KFQ0TZ разрешается в запись JPL Dataverse (метаданные DataCite читаемы, регистрация 2026-07-28), но хост dataverse.jpl.nasa.gov блокирует автоматизированные запросы',
+    'хост jpldataeval.jpl.nasa.gov блокирует автоматизированный доступ; автоматизированно доступен только выпуск 19-5',
+    'NTRS (ntrs.nasa.gov) не содержит Evaluation No. 20 (для сравнения: запись Evaluation No. 19 — 20210006316)',
+    'зеркала полного текста не найдены (ResearchGate содержит только выпуск 19-5; поиск по коду GitHub результатов не даёт); NOAA CSL публикует только библиографическую ссылку без таблиц',
+    'для доступного выпуска 19-5 автоматизированное извлечение текста PDF обрывается (~32 тыс. символов) на вводных разделах — таблицы коэффициентов (например, Table 2.1 Rate Constants for Association Reactions) за пределами извлекаемого фрагмента; о структуре таблиц выпуска 25-1 ничего не заявляется',
+    'уведомление об авторских правах выпуска 19-5 (California Institute of Technology) — установившаяся практика серии; формулировки выпуска 25-1 НЕ цитируются и НЕ заявляются',
+    'вывод: табличные per-record значения JPL Evaluation No. 20 НЕ доступны проверяемым автоматизированным способом'
+  ],
+  records: KIDA_TB_RECORD_IDENTITIES.map((identity): JplEvaluation20AccessAuditRecord => ({
+    kidaReactionNumber: identity.kidaReactionNumber,
+    kidaTbRecordId: kidaTbRecordId(identity.kidaReactionNumber),
+    reaction: `${identity.reactants.join(' + ')} → ${identity.products.join(' + ')}`,
+    coverage: 'not_established',
+    parametersVerified: false,
+    statusAfterAudit: 'unknown',
+    note: `аудит доступа 2026-11-08: табличные значения JPL Evaluation No. 20 для реакции №${identity.kidaReactionNumber} не получены; параметры не верифицированы, запись каталога остаётся status='unknown' (no_kinetic_data)`
+  })),
+  conclusion: 'аудит доступа (ревизия 4.5.4.5, 2026-11-08) не установил проверяемого автоматизированного доступа к per-record табличным значениям JPL Evaluation No. 20: параметры не верифицированы, импорт не выполнен, все 5 записей каталога остаются status=unknown — вычислитель 4.5.2 обязан отказывать (no_kinetic_data); fail-closed сохранён, блокирующие вопросы не закрыты'
+};
