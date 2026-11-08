@@ -27,6 +27,23 @@
 // конденсированные фазы — ВНЕ объёма; контракт evaluator 4.4.4.4.1 и
 // смесевого вычислителя 4.4.4.3 НЕ меняется; статус `stable` не выдаётся
 // ни при каких условиях.
+//
+// Корректирующая ревизия Stage K (2026-11-08, branch coverage
+// бифуркации): попытка, начатая с единственного физического корня,
+// встретив по траектории более одного физического корня, помечает
+// результат branchCoverageComplete = false (§3 п. 7, §6.6): динамический
+// fork НЕ создаётся (попытка продолжает свою continuationBranch),
+// без C1-точки такой поиск обязан вернуть
+// indeterminate/branch_coverage_incomplete и НЕ может вернуть
+// no_instability_found_within_search; приоритет C1 сохранён
+// (unstable_detected даже при неполном покрытии). Промежуточный
+// физический корень НЕ является отдельной ветвью поиска:
+// searchBranchCount = min(physicalRootCount, 2) НЕ меняется. Агрегация
+// verdict вынесена в чистую экспортируемую функцию
+// aggregatePrTpdSearchVerdict (production-путь; регрессионный seam
+// §7.3 п. 32–34). JSDoc evaluatePrTpdAuditDomain синхронизирован с
+// runtime и §4.1 (count=1, D<0 — консистентно; поведение предиката
+// НЕ менялось).
 // ============================================================================
 
 import { computePengRobinsonMixture, validatePengRobinsonMixtureRequest } from './pengRobinsonMixture';
@@ -743,9 +760,13 @@ function isCompleteAuditDomainDescriptor(domain: PrTpdAuditDomainDescriptor): do
  *  - count=1: minPhysicalRootSeparation ОБЯЗАН быть null; при
  *    multiplicityModeAvailable=true дополнительно по знаку D:
  *    D>0 — консистентно (внутри, если остальное прошло); D=0 —
- *    требуется nearRootMergeCovered=true; D<0 — 'outside'
- *    (консервативно: near-merge среди нефизических корней
- *    недоказуем);
+ *    требуется nearRootMergeCovered=true; D<0 — консистентно
+ *    (внутри, если остальное прошло): near-merge определён по
+ *    ФИЗИЧЕСКИМ корням (§4.1), при единственном физическом корне
+ *    пары физических корней нет и режим near-merge неприменим;
+ *    непересекающиеся нефизические корни (Z <= B) НЕ трактуются
+ *    как пара физических корней (Stage K: синхронизация JSDoc с
+ *    runtime; поведение предиката НЕ менялось);
  *  - count=2: minPhysicalRootSeparation ОБЯЗАН быть конечным; при
  *    multiplicityModeAvailable=true по знаку D: D>0 — 'outside'
  *    (противоречие: действительный корень один); D=0 — требуется
@@ -1737,6 +1758,189 @@ function mapMixtureFailureCode(code: string): PrTangentPlaneDistanceSearchErrorC
 }
 
 /**
+ * Вход чистой агрегации verdict (§6.6). Агрегация вынесена из
+ * computePrTangentPlaneDistanceSearch в экспортируемую функцию:
+ * production-путь вызывает её напрямую, регрессионные тесты
+ * §7.3 п. 32–34 используют её как детерминированный seam
+ * (бифуркация числа физических корней внутри binary64-траектории
+ * фикстур недостижима — см. ограничения тест-плана).
+ */
+export interface PrTpdSearchAggregationInput {
+  /** Попытки всех стартов и ветвей (канонический порядок §7.2). */
+  readonly attempts: readonly PrTpdSearchAttempt[];
+  /**
+   * Покрытие ветвей ДО агрегации: main-цикл помечает false при
+   * отказе root discovery или начального PR-вызова ветви.
+   */
+  readonly branchCoverageCompleteBeforeAggregation: boolean;
+  /** Полнота перечисления граней supp(z) (§5). */
+  readonly faceEnumerationComplete: boolean;
+  /** Был ли отказ root discovery хотя бы для одного состава. */
+  readonly discoveryFailure: boolean;
+  /** Был ли отказ начального PR-вызова ветви. */
+  readonly branchInitialFailure: boolean;
+}
+
+/** Результат чистой агрегации verdict (§6.6). */
+export interface PrTpdSearchAggregation {
+  readonly searchVerdict: PrTpdSearchVerdict;
+  readonly verdictReason: PrTpdSearchVerdictReason;
+  /** Итоговое покрытие ветвей: может снизиться до false бифуркацией. */
+  readonly branchCoverageComplete: boolean;
+  /** Примечания результата (детерминированный порядок, без дубликатов). */
+  readonly notes: readonly string[];
+}
+
+/**
+ * Чистая агрегация verdict multi-start поиска (§6.6) — ЕДИНСТВЕННЫЙ
+ * production-путь формирования searchVerdict/verdictReason/notes и
+ * регрессионный seam бифуркационных сценариев §7.3 п. 32–34.
+ *
+ * Корректирующая ревизия Stage K (2026-11-08): попытка, начатая с
+ * единственного физического корня и встретившая по траектории точку
+ * с более чем одним физическим корнем, ОБЯЗАНА снижать
+ * branchCoverageComplete до false (§3 п. 7, §6.6): начатая
+ * single-root ветвь не описывает обе ветви разветвившегося
+ * состояния. Динамический fork НЕ создаётся — попытка продолжает
+ * свою continuationBranch (для single-root — feedRoot);
+ * searchBranchCount = min(physicalRootCount, 2) НЕ меняется
+ * (промежуточный физический корень — не отдельная ветвь поиска).
+ * При отсутствии C1-точки такой поиск НЕ может вернуть
+ * no_instability_found_within_search — только indeterminate с
+ * причиной branch_coverage_incomplete; приоритет C1 сохранён:
+ * посещённая C1-точка с validated bound в собственном домене даёт
+ * unstable_detected/c1_visited_point даже при неполном покрытии.
+ */
+export function aggregatePrTpdSearchVerdict(
+  input: PrTpdSearchAggregationInput
+): PrTpdSearchAggregation {
+  const attempts = input.attempts;
+  const faceEnumerationComplete = input.faceEnumerationComplete;
+  const discoveryFailure = input.discoveryFailure;
+  const branchInitialFailure = input.branchInitialFailure;
+  let branchCoverageComplete = input.branchCoverageCompleteBeforeAggregation;
+
+  let sawC1 = false;
+  let sawC2C3 = false;
+  let anyBoundUnavailable = false;
+  let anyVisitedPoint = false;
+  let allConverged = attempts.length > 0;
+  let anyNumericalFailure = false;
+  let anyMaxIterations = false;
+  let anyInvalidStart = false;
+  let anySinglePhysicalRoot = false;
+  let anyBifurcation = false;
+  let anyThreeRoots = false;
+  for (const attempt of attempts) {
+    if (attempt.outcome !== 'converged') {
+      allConverged = false;
+    }
+    if (attempt.outcome === 'numerical_failure') {
+      anyNumericalFailure = true;
+    }
+    if (attempt.outcome === 'max_iterations') {
+      anyMaxIterations = true;
+    }
+    if (attempt.outcome === 'invalid_start') {
+      anyInvalidStart = true;
+    }
+    if (attempt.singlePhysicalRoot) {
+      anySinglePhysicalRoot = true;
+    }
+    for (const point of attempt.visitedPoints) {
+      anyVisitedPoint = true;
+      if (point.physicalRootCount >= 3) {
+        anyThreeRoots = true;
+      }
+      if (attempt.singlePhysicalRoot && point.physicalRootCount > 1) {
+        // Stage K (§3 п. 7): single-root попытка встретила более
+        // одного физического корня — покрытие ветвей неполно.
+        // Динамический fork НЕ создаётся (попытка продолжает свою
+        // continuationBranch), но no_instability_found_within_search
+        // для такого поиска запрещён.
+        anyBifurcation = true;
+        branchCoverageComplete = false;
+      }
+      if (point.validatedErrorBoundStatus === 'validated_bound_in_domain') {
+        const intervalClass = classifyPrTpdInterval(
+          point.tpd,
+          point.validatedErrorBound,
+          PR_TPD_SEARCH_NEGATIVE_THRESHOLD
+        );
+        if (intervalClass === 'C1') {
+          sawC1 = true;
+        } else if (intervalClass !== 'C4') {
+          sawC2C3 = true;
+        }
+      } else {
+        anyBoundUnavailable = true;
+      }
+    }
+  }
+
+  let searchVerdict: PrTpdSearchVerdict;
+  let verdictReason: PrTpdSearchVerdictReason;
+  if (sawC1) {
+    searchVerdict = 'unstable_detected';
+    verdictReason = 'c1_visited_point';
+  } else if (
+    allConverged &&
+    branchCoverageComplete &&
+    faceEnumerationComplete &&
+    !discoveryFailure &&
+    !branchInitialFailure &&
+    !anyBoundUnavailable &&
+    !sawC2C3 &&
+    anyVisitedPoint
+  ) {
+    searchVerdict = 'no_instability_found_within_search';
+    verdictReason = 'all_attempts_converged_all_points_c4';
+  } else {
+    searchVerdict = 'indeterminate';
+    if (sawC2C3) {
+      verdictReason = 'c2_or_c3_visited_point';
+    } else if (anyNumericalFailure) {
+      verdictReason = 'numerical_failure_attempt';
+    } else if (anyMaxIterations) {
+      verdictReason = 'max_iterations_attempt';
+    } else if (anyInvalidStart) {
+      verdictReason = 'invalid_start_attempt';
+    } else if (discoveryFailure) {
+      verdictReason = 'root_discovery_failure';
+    } else if (branchInitialFailure) {
+      verdictReason = 'branch_initial_failure';
+    } else if (!branchCoverageComplete) {
+      verdictReason = 'branch_coverage_incomplete';
+    } else if (!faceEnumerationComplete) {
+      verdictReason = 'partial_face_enumeration';
+    } else if (anyBoundUnavailable) {
+      verdictReason = 'validated_bound_not_available';
+    } else if (!anyVisitedPoint) {
+      verdictReason = 'no_visited_points';
+    } else {
+      verdictReason = 'validated_bound_not_available';
+    }
+  }
+
+  // Примечания (детерминированный порядок, без дубликатов).
+  const notes: string[] = [];
+  if (anySinglePhysicalRoot) {
+    notes.push('single_physical_root');
+  }
+  if (anyBifurcation) {
+    notes.push('single_physical_root_attempt_bifurcation');
+  }
+  if (anyThreeRoots) {
+    notes.push('intermediate_physical_root_not_surveyed');
+  }
+  if (!faceEnumerationComplete) {
+    notes.push('partial_face_enumeration');
+  }
+
+  return { searchVerdict, verdictReason, branchCoverageComplete, notes };
+}
+
+/**
  * Multi-start поиск минимумов tangent-plane distance (§4, §6.6).
  *
  * Оркестрация: feed-вызов PR (бюджет 1) → канонизация состава →
@@ -2038,116 +2242,19 @@ export function computePrTangentPlaneDistanceSearch(
   }
 
   // ---------- Агрегация verdict (§6.6) ----------
-  let sawC1 = false;
-  let sawC2C3 = false;
-  let anyBoundUnavailable = false;
-  let anyVisitedPoint = false;
-  let allConverged = attempts.length > 0;
-  let anyNumericalFailure = false;
-  let anyMaxIterations = false;
-  let anyInvalidStart = false;
-  let anySinglePhysicalRoot = false;
-  let anyBifurcation = false;
-  let anyThreeRoots = false;
-  for (const attempt of attempts) {
-    if (attempt.outcome !== 'converged') {
-      allConverged = false;
-    }
-    if (attempt.outcome === 'numerical_failure') {
-      anyNumericalFailure = true;
-    }
-    if (attempt.outcome === 'max_iterations') {
-      anyMaxIterations = true;
-    }
-    if (attempt.outcome === 'invalid_start') {
-      anyInvalidStart = true;
-    }
-    if (attempt.singlePhysicalRoot) {
-      anySinglePhysicalRoot = true;
-    }
-    for (const point of attempt.visitedPoints) {
-      anyVisitedPoint = true;
-      if (point.physicalRootCount >= 3) {
-        anyThreeRoots = true;
-      }
-      if (attempt.singlePhysicalRoot && point.physicalRootCount > 1) {
-        anyBifurcation = true;
-      }
-      if (point.validatedErrorBoundStatus === 'validated_bound_in_domain') {
-        const intervalClass = classifyPrTpdInterval(
-          point.tpd,
-          point.validatedErrorBound,
-          PR_TPD_SEARCH_NEGATIVE_THRESHOLD
-        );
-        if (intervalClass === 'C1') {
-          sawC1 = true;
-        } else if (intervalClass !== 'C4') {
-          sawC2C3 = true;
-        }
-      } else {
-        anyBoundUnavailable = true;
-      }
-    }
-  }
-
-  let searchVerdict: PrTpdSearchVerdict;
-  let verdictReason: PrTpdSearchVerdictReason;
-  if (sawC1) {
-    searchVerdict = 'unstable_detected';
-    verdictReason = 'c1_visited_point';
-  } else if (
-    allConverged &&
-    branchCoverageComplete &&
-    enumeration.complete &&
-    !discoveryFailure &&
-    !branchInitialFailure &&
-    !anyBoundUnavailable &&
-    !sawC2C3 &&
-    anyVisitedPoint
-  ) {
-    searchVerdict = 'no_instability_found_within_search';
-    verdictReason = 'all_attempts_converged_all_points_c4';
-  } else {
-    searchVerdict = 'indeterminate';
-    if (sawC2C3) {
-      verdictReason = 'c2_or_c3_visited_point';
-    } else if (anyNumericalFailure) {
-      verdictReason = 'numerical_failure_attempt';
-    } else if (anyMaxIterations) {
-      verdictReason = 'max_iterations_attempt';
-    } else if (anyInvalidStart) {
-      verdictReason = 'invalid_start_attempt';
-    } else if (discoveryFailure) {
-      verdictReason = 'root_discovery_failure';
-    } else if (branchInitialFailure) {
-      verdictReason = 'branch_initial_failure';
-    } else if (!branchCoverageComplete) {
-      verdictReason = 'branch_coverage_incomplete';
-    } else if (!enumeration.complete) {
-      verdictReason = 'partial_face_enumeration';
-    } else if (anyBoundUnavailable) {
-      verdictReason = 'validated_bound_not_available';
-    } else if (!anyVisitedPoint) {
-      verdictReason = 'no_visited_points';
-    } else {
-      verdictReason = 'validated_bound_not_available';
-    }
-  }
-
-  // ---------- Примечания (детерминированный порядок, без дубликатов) ----------
-  const notes: string[] = [];
-  if (anySinglePhysicalRoot) {
-    notes.push('single_physical_root');
-  }
-  if (anyBifurcation) {
-    notes.push('single_physical_root_attempt_bifurcation');
-  }
-  if (anyThreeRoots) {
-    notes.push('intermediate_physical_root_not_surveyed');
-  }
-  if (!enumeration.complete) {
-    notes.push('partial_face_enumeration');
-  }
+  // Агрегация вынесена в чистую экспортируемую функцию
+  // aggregatePrTpdSearchVerdict (production-путь; корректирующая
+  // семантика Stage K: single-root попытка с бифуркацией снижает
+  // branchCoverageComplete — без C1 итог indeterminate с причиной
+  // branch_coverage_incomplete; no_instability_found_within_search
+  // запрещён; приоритет C1 сохранён).
+  const aggregation = aggregatePrTpdSearchVerdict({
+    attempts,
+    branchCoverageCompleteBeforeAggregation: branchCoverageComplete,
+    faceEnumerationComplete: enumeration.complete,
+    discoveryFailure,
+    branchInitialFailure
+  });
 
   // ---------- Лучшие точки по всем попыткам ----------
   let bestVisitedTpd: number | null = null;
@@ -2172,11 +2279,11 @@ export function computePrTangentPlaneDistanceSearch(
     attempts,
     bestVisitedTpd,
     bestVisitedPoint,
-    searchVerdict,
-    verdictReason,
+    searchVerdict: aggregation.searchVerdict,
+    verdictReason: aggregation.verdictReason,
     negativeThreshold: PR_TPD_SEARCH_NEGATIVE_THRESHOLD,
     negativeThresholdStatus: PR_TPD_SEARCH_NEGATIVE_THRESHOLD_STATUS,
-    branchCoverageComplete,
+    branchCoverageComplete: aggregation.branchCoverageComplete,
     observedErrorEnvelope:
       observedEnvelopeAudit === null ? null : observedEnvelopeAudit.observedErrorEnvelope,
     observedErrorEnvelopeStatus:
@@ -2196,7 +2303,7 @@ export function computePrTangentPlaneDistanceSearch(
       prEvaluations,
       maxPrEvaluations
     },
-    notes
+    notes: aggregation.notes
   };
   return success;
 }

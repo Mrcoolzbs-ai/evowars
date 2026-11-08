@@ -44,7 +44,11 @@
 //  - п. 33 (C1 при неполном branch coverage) и п. 32-подобные
 //    бифуркационные сценарии: требуют точечного прохождения
 //    поверхности смены числа корней внутри траектории — в
-//    каталожных binary64 фикстурах не воспроизводится.
+//    каталожных binary64 фикстурах не воспроизводится; семантика
+//    агрегации покрыта регрессионными тестами через чистую
+//    экспортируемую функцию aggregatePrTpdSearchVerdict
+//    (production-путь агрегации; корректирующая ревизия
+//    Stage K, 2026-11-08).
 // ============================================================================
 
 import { describe, it, expect } from 'vitest';
@@ -53,6 +57,7 @@ import {
   PR_TPD_SEARCH_MAX_ITERATIONS,
   PR_TPD_SEARCH_NEGATIVE_THRESHOLD,
   PR_TPD_SEARCH_SIGMA_STAT,
+  aggregatePrTpdSearchVerdict,
   classifyPrTpdInterval,
   canonicalPrInputFingerprint,
   computePrTangentPlaneDistanceSearch,
@@ -64,7 +69,9 @@ import type {
   PrTangentPlaneDistanceSearchResult,
   PrTangentPlaneDistanceSearchResultSuccess,
   PrTpdAuditDomainDescriptor,
-  PrTpdAuditDomainPoint
+  PrTpdAuditDomainPoint,
+  PrTpdSearchAttempt,
+  PrTpdVisitedPoint
 } from '../Core/prTangentPlaneDistanceSearch';
 import { computePengRobinsonMixture } from '../Core/pengRobinsonMixture';
 import type {
@@ -479,6 +486,11 @@ describe('Stage 4.4.4.4.2: evaluatePrTpdAuditDomain / isWithinAuditDomain', () =
     );
     // count=1, D > 0 — один различимый корень, слияние исключено.
     expect(evaluatePrTpdAuditDomain({ ...point, discriminantSign: 1 }, domain)).toBe('inside');
+    // count=1, D < 0 — единственный ФИЗИЧЕСКИЙ корень при трёх
+    // действительных (два нефизических Z <= B): near-merge по
+    // ФИЗИЧЕСКИМ корням неприменим — консистентно (inside);
+    // runtime-поведение НЕ менялось (Stage K: JSDoc-синхронизация).
+    expect(evaluatePrTpdAuditDomain({ ...point, discriminantSign: -1 }, domain)).toBe('inside');
     // count=2 при D > 0 — противоречие данных => вне домена.
     const twoRootPoint: PrTpdAuditDomainPoint = {
       ...point,
@@ -1187,5 +1199,123 @@ describe('Stage 4.4.4.4.2: валидация входа', () => {
       request: klRequest()
     });
     expect(failure.status).toBe('failure');
+  });
+});
+// ----------------------------------------------------------------------------
+// 11. Бифуркация single-root попытки — branch coverage (§7.3 п. 32–34;
+// корректирующая ревизия Stage K, 2026-11-08). Регрессионные тесты
+// через чистую функцию aggregatePrTpdSearchVerdict — ЕДИНСТВЕННЫЙ
+// production-путь агрегации verdict; бинарные фикстуры бифуркацию
+// 2 -> 1 -> 2 не воспроизводят (см. ограничения тест-плана выше).
+// ----------------------------------------------------------------------------
+
+describe('Stage 4.4.4.4.2: бифуркация single-root попытки — branch coverage (п. 32–34)', () => {
+  const bifComposition = [0.5, 0.5];
+  const bifContributions = [
+    { component: 'n2a', contribution: 0.25 },
+    { component: 'n2b', contribution: 0.25 }
+  ];
+
+  const bifPoint = (
+    iterationIndex: number,
+    physicalRootCount: number,
+    tpd: number
+  ): PrTpdVisitedPoint => ({
+    iterationIndex,
+    composition: bifComposition,
+    selectedRoot: 0.5,
+    rootLabels: physicalRootCount > 1 ? ['vapor'] : ['vapor', 'liquid'],
+    physicalRootCount,
+    tpd,
+    tpdContributions: bifContributions,
+    observedErrorEnvelope: null,
+    observedErrorEnvelopeStatus: 'pending_audit',
+    validatedErrorBound: 1e-3,
+    validatedErrorBoundStatus: 'validated_bound_in_domain'
+  });
+
+  const bifAttempt = (
+    visitedPoints: readonly PrTpdVisitedPoint[]
+  ): PrTpdSearchAttempt => ({
+    startId: 'wilson_z_times_k',
+    support: ['n2a', 'n2b'],
+    logicalLabels: ['vapor', 'liquid'],
+    initialBranch: 'single',
+    continuationBranch: 'vapor',
+    selectedRoot: 0.5,
+    singlePhysicalRoot: true,
+    startComposition: bifComposition,
+    outcome: 'converged',
+    iterations: visitedPoints.length,
+    prEvaluations: visitedPoints.length + 1,
+    stationarityResidual: 0,
+    visitedPoints,
+    bestVisitedPoint: null,
+    finalStationaryPoint: null
+  });
+
+  it('п. 32/34: бифуркация без C1 — indeterminate / branch_coverage_incomplete', () => {
+    const aggregation = aggregatePrTpdSearchVerdict({
+      attempts: [
+        bifAttempt([
+          bifPoint(0, 1, 0.1),
+          bifPoint(1, 2, 0.05),
+          bifPoint(2, 2, 0.02)
+        ])
+      ],
+      branchCoverageCompleteBeforeAggregation: true,
+      faceEnumerationComplete: true,
+      discoveryFailure: false,
+      branchInitialFailure: false
+    });
+    // Покрытие ветвей неполно: single-root попытка разветвилась.
+    expect(aggregation.branchCoverageComplete).toBe(false);
+    // Запрещённый verdict при неполном покрытии.
+    expect(aggregation.searchVerdict).not.toBe('no_instability_found_within_search');
+    expect(aggregation.searchVerdict).toBe('indeterminate');
+    expect(aggregation.verdictReason).toBe('branch_coverage_incomplete');
+    expect(aggregation.notes).toContain('single_physical_root');
+    expect(aggregation.notes).toContain('single_physical_root_attempt_bifurcation');
+  });
+
+  it('п. 33: бифуркация с C1 — приоритет C1: unstable_detected / c1_visited_point', () => {
+    const aggregation = aggregatePrTpdSearchVerdict({
+      attempts: [
+        bifAttempt([
+          bifPoint(0, 1, 0.1),
+          bifPoint(1, 2, -0.5),
+          bifPoint(2, 2, 0.02)
+        ])
+      ],
+      branchCoverageCompleteBeforeAggregation: true,
+      faceEnumerationComplete: true,
+      discoveryFailure: false,
+      branchInitialFailure: false
+    });
+    // Покрытие ветвей по-прежнему неполно, но C1 приоритетнее.
+    expect(aggregation.branchCoverageComplete).toBe(false);
+    expect(aggregation.searchVerdict).toBe('unstable_detected');
+    expect(aggregation.verdictReason).toBe('c1_visited_point');
+    expect(aggregation.notes).toContain('single_physical_root_attempt_bifurcation');
+  });
+
+  it('контроль: те же точки без single-root бифуркации — no_instability_found_within_search', () => {
+    const multiRootAttempt: PrTpdSearchAttempt = {
+      ...bifAttempt([bifPoint(0, 2, 0.1), bifPoint(1, 2, 0.05), bifPoint(2, 2, 0.02)]),
+      initialBranch: 'vapor',
+      singlePhysicalRoot: false
+    };
+    const aggregation = aggregatePrTpdSearchVerdict({
+      attempts: [multiRootAttempt],
+      branchCoverageCompleteBeforeAggregation: true,
+      faceEnumerationComplete: true,
+      discoveryFailure: false,
+      branchInitialFailure: false
+    });
+    // Тот же обход без single-root старта: покрытие полно, C4 везде.
+    expect(aggregation.branchCoverageComplete).toBe(true);
+    expect(aggregation.searchVerdict).toBe('no_instability_found_within_search');
+    expect(aggregation.verdictReason).toBe('all_attempts_converged_all_points_c4');
+    expect(aggregation.notes).not.toContain('single_physical_root_attempt_bifurcation');
   });
 });
