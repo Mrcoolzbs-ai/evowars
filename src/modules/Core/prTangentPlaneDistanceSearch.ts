@@ -1699,15 +1699,14 @@ function searchFailure(
   message: string,
   detail: string | null
 ): PrTangentPlaneDistanceSearchResultFailure {
-  const failure: PrTangentPlaneDistanceSearchResultFailure = {
-    status: 'failure',
-    code,
-    message
-  };
+  // Поле detail объявлено readonly: failure-объект собирается ОДНИМ
+  // выражением (присваивание полю после создания запрещено типом);
+  // форма результата побитово та же: detail присутствует только при
+  // ненулевом аргументе.
   if (detail !== null) {
-    failure.detail = detail;
+    return { status: 'failure', code, message, detail };
   }
-  return failure;
+  return { status: 'failure', code, message };
 }
 
 /**
