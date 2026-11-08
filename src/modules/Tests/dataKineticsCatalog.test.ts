@@ -24,6 +24,13 @@
  * (science.jpl.nasa.gov/documents/1503/, NOAA CSL) и цитату copyright-нотиса
  * издания 25-1; все записи по-прежнему unknown, fail-closed НЕ ослаблен;
  * число тестов НЕ менялось.
+ *
+ * Уточнение provenance (2026-11-08, вторая корректировка аудита доступа):
+ * зафиксированы фактические границы извлечённого текстового слоя JPL 25-1
+ * (титул с copyright-нотисом, аннотация, оглавление, введение I.1–I.9,
+ * детальное оглавление раздела 1; обрыв в начале подраздела 1.1 Introduction
+ * раздела 1, страница 1-3); цитаты I.5 Data Formats и пункта 1.7.2 — из того
+ * же слоя; число тестов НЕ менялось.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -525,6 +532,13 @@ describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No.
     }
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.conclusion).toContain('no_kinetic_data');
     expect(JPL_EVALUATION_20_ACCESS_AUDIT.conclusion).toContain('прямые PDF-ссылки');
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.conclusion).toContain('1.1 Introduction');
+    expect(JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) => f.includes('I.5 Data Formats'))).toBe(true);
+    expect(
+      JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) =>
+        f.includes('1.7.2 Termolecular Reactions (Section 2)')
+      )
+    ).toBe(true);
     expect(
       JPL_EVALUATION_20_ACCESS_AUDIT.accessFindings.some((f) =>
         f.includes('science.jpl.nasa.gov/documents/1503/NASA_Data_Evaluation_20.pdf')
