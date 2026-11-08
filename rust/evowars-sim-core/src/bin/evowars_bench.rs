@@ -94,8 +94,6 @@ struct StoichBuffers {
     out_elem_side: Vec<i32>,
 }
 
-const BENCH_ELEMENTS: [&str; 5] = ["H", "O", "C", "N", "S"];
-
 fn species_composition(index: usize) -> Vec<(usize, f64)> {
     // Детерминированный состав по слоту: 2-3 элемента из 5.
     match index % 7 {
@@ -144,7 +142,7 @@ fn build_stoich_buffers(n: usize) -> StoichBuffers {
         let n_reactants = 2 + (rng.next() * 3.0) as usize; // 2..4
         let left_start = part_species.len();
         let mut used: Vec<usize> = Vec::new();
-        for r in 0..n_reactants {
+        for _ in 0..n_reactants {
             let slot = (rng.next() * n_species as f64) as usize;
             let coeff = 1.0 + (rng.next() * 3.0) as u32 as f64;
             if used.contains(&slot) {

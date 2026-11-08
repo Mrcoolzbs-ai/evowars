@@ -307,10 +307,12 @@ mod tests {
 
     #[test]
     fn underflow_yields_numerical_failure() {
-        // E/R=300000, T=300: exp(-1000)=0 → k=0.
+        // E/R=300000, T=300: exp(-1000)=0 → k=0 → отказ.
+        // Контракт ядра: при numerical_failure выход k = NaN
+        // (адаптер игнорирует значение, важен только статус).
         let (k, _, status) = slot(&arrhenius_slots(1e-11, 0.0, 0.0, 300000.0, 300.0));
         assert_eq!(status, STATUS_NUMERICAL_FAILURE);
-        assert_eq!(k, 0.0);
+        assert!(k.is_nan());
     }
 
     #[test]

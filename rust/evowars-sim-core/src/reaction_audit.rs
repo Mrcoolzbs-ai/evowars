@@ -37,7 +37,9 @@
 //!   индекс элемента и его количество в составе); порядок записей
 //!   вида = порядок Object.entries proven-состава;
 //! - `left_offsets`/`right_offsets`: Uint32Array (n_reactions + 1)
-//!   — CSR офсеты участников по сторонам;
+//!   — CSR офсеты участников по сторонам в ОБЩЕМ массиве
+//!   участников: сегменты чередуются (L0, R0, L1, R1, ...),
+//!   офсеты глобальные, общий размер = right_offsets[n_reactions];
 //! - `part_species`/`part_coeff`: участники (слот вида, коэффициент)
 //!   в исходном порядке записей реакции;
 //! - `tolerance`: f64 (адаптер уже проверил её корректность).
@@ -238,13 +240,11 @@ pub fn stoichiometry_batch_impl(
         return -1;
     }
     let n_reactions = left_offsets.len() - 1;
-    // Массив участников общий: суммарно left + right.
-    let n_participants =
-        left_offsets[n_reactions] as usize + right_offsets[n_reactions] as usize;
+    // Общий массив участников: сегменты сторон каждой реакции
+    // чередуются (L0, R0, L1, R1, ...), оба CSR — глобальные индексы,
+    // поэтому общий размер = right_offsets[n_reactions].
+    let n_participants = right_offsets[n_reactions] as usize;
     if part_species.len() != n_participants || part_coeff.len() != n_participants {
-        return -1;
-    }
-    if right_offsets[n_reactions] as usize != n_participants {
         return -1;
     }
     // Слоты участников и CSR-офсеты обязаны быть в границах:
@@ -256,6 +256,16 @@ pub fn stoichiometry_batch_impl(
     }
     for w in species_elem_offsets.windows(2) {
         if w[0] > w[1] || w[1] as usize > elem_indices.len() {
+            return -1;
+        }
+    }
+    for w in left_offsets.windows(2) {
+        if w[0] > w[1] || w[1] as usize > n_participants {
+            return -1;
+        }
+    }
+    for w in right_offsets.windows(2) {
+        if w[0] > w[1] || w[1] as usize > n_participants {
             return -1;
         }
     }
@@ -492,8 +502,9 @@ mod tests {
             elem_indices: vec![0, 1, 0, 1],
             elem_counts: vec![2.0, 2.0, 2.0, 1.0],
             left_offsets: vec![0, 2],
-            right_offsets: vec![0, 1],
-            // Реакция: 2 H2 + O2 -> 2 H2O (участники: слоты/коэф).
+            right_offsets: vec![2, 3],
+            // Реакция: 2 H2 + O2 -> 2 H2O (участники: слоты/коэф;
+            // общий массив чередуется: [L0, R0] = [H2, O2 | H2O]).
             part_species: vec![0, 1, 2],
             part_coeff: vec![2.0, 1.0, 2.0],
             union_total: 2,
@@ -555,7 +566,7 @@ mod tests {
         let mut b = fixture();
         // Слева добавить H+ (слот 5, коэф 1): заряд 1 против 0.
         b.left_offsets = vec![0, 3];
-        b.right_offsets = vec![0, 1];
+        b.right_offsets = vec![3, 4];
         b.part_species = vec![0, 1, 5, 2];
         b.part_coeff = vec![2.0, 1.0, 1.0, 2.0];
         b.union_total = 2;
@@ -603,8 +614,6 @@ mod tests {
         let mut b = fixture();
         // 2H2 + O2 -> 2H2O + 1e-12 H2O: при tolerance=0 →
         // дисбаланс, при tolerance=1e-6 → нет.
-        b.right_offsets = vec![0, 1];
-        b.part_species = vec![0, 1, 2];
         b.part_coeff = vec![2.0, 1.0, 2.0 + 1e-12];
         let (flags, ..) = run(&b, 0.0);
         assert_eq!(flags, vec![FLAG_ELEMENT_DIFF]);
@@ -618,7 +627,7 @@ mod tests {
         // Два участника H2 (коэф 1 и 1) вместо одного с коэф 2:
         // суммирование в порядке участников даёт ту же сумму.
         b.left_offsets = vec![0, 3];
-        b.right_offsets = vec![0, 1];
+        b.right_offsets = vec![3, 4];
         b.part_species = vec![0, 0, 1, 2];
         b.part_coeff = vec![1.0, 1.0, 1.0, 2.0];
         b.union_total = 2;
