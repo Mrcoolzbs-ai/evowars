@@ -36,7 +36,7 @@
 //! хранения параметров (байты, оценка: capacity×8 + размер
 //! структуры) для отчётов по памяти.
 
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{prelude::*, JsError};
 use crate::kinetics::{
     arrhenius_value, DIAG_STRIDE, ENERGY_FORM_E_OVER_R, ENERGY_FORM_EA_J_MOL, KIND_ARRHENIUS,
     KIND_FALL_OFF, KIN_STRIDE, STATUS_INVALID_INPUT, STATUS_INVALID_THIRD_BODY,
@@ -142,9 +142,14 @@ impl KineticsPrepared {
     /// остаются на тике: невалидные параметры дают invalid_input
     /// по соответствующей реакции, а не отказ всей сессии.
     #[wasm_bindgen(constructor)]
-    pub fn new(params: &[f64]) -> Result<KineticsPrepared, JsValue> {
+    pub fn new(params: &[f64]) -> Result<KineticsPrepared, JsError> {
         if params.len() % KIN_STRIDE != 0 {
-            return Err(JsValue::from_str(
+            // JsError, а не JsValue: JsError конструируем и на native-таргетах
+            // (wasm-bindgen 0.2.83+), поэтому cargo test выполняет модульные
+            // тесты конструктора без паники «function not implemented on
+            // non-wasm32 targets» (JsValue::from_str на native — abort).
+            // На WASM поведение для JS идентично: бросается Error с текстом.
+            return Err(JsError::new(
                 "KineticsPrepared: длина params должна быть кратна 17 (17 слотов на реакцию)",
             ));
         }
