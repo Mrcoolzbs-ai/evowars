@@ -135,28 +135,39 @@ pub struct KineticsPrepared {
     n: usize,
 }
 
-#[wasm_bindgen]
 impl KineticsPrepared {
-    /// Подготовка сессии из 17-слотовой раскладки батча (слоты
-    /// T/M игнорируются). Семантические per-reaction проверки
-    /// остаются на тике: невалидные параметры дают invalid_input
-    /// по соответствующей реакции, а не отказ всей сессии.
-    #[wasm_bindgen(constructor)]
-    pub fn new(params: &[f64]) -> Result<KineticsPrepared, JsError> {
+    /// Конструктор без JS-типов: единая точка валидации длины.
+    /// Используется модульными тестами (native): JsValue и JsError
+    /// на non-wasm32 паникуют стабами «function not implemented on
+    /// non-wasm32 targets» — это контракт wasm-bindgen, не баг
+    /// (rustwasm/wasm-bindgen discussion #3572). wasm-bindgen-
+    /// конструктор `new` ниже делегирует сюда; на WASM текст ошибки
+    /// попадает в сообщение брошенного JS Error.
+    pub fn new_checked(params: &[f64]) -> Result<KineticsPrepared, String> {
         if params.len() % KIN_STRIDE != 0 {
-            // JsError, а не JsValue: JsError конструируем и на native-таргетах
-            // (wasm-bindgen 0.2.83+), поэтому cargo test выполняет модульные
-            // тесты конструктора без паники «function not implemented on
-            // non-wasm32 targets» (JsValue::from_str на native — abort).
-            // На WASM поведение для JS идентично: бросается Error с текстом.
-            return Err(JsError::new(
-                "KineticsPrepared: длина params должна быть кратна 17 (17 слотов на реакцию)",
+            return Err(format!(
+                "KineticsPrepared: длина params должна быть кратна 17 (17 слотов на реакцию), получено {}",
+                params.len()
             ));
         }
         Ok(KineticsPrepared {
             params: params.to_vec(),
             n: params.len() / KIN_STRIDE,
         })
+    }
+}
+
+#[wasm_bindgen]
+impl KineticsPrepared {
+    /// Подготовка сессии из 17-слотовой раскладки батча (слоты
+    /// T/M игнорируются). Семантические per-reaction проверки
+    /// остаются на тике: невалидные параметры дают invalid_input
+    /// по соответствующей реакции, а не отказ всей сессии.
+    /// Err-ветка (JsError → брошенный JS Error) достижима только на
+    /// wasm32; валидация проверяется native-тестами через new_checked.
+    #[wasm_bindgen(constructor)]
+    pub fn new(params: &[f64]) -> Result<KineticsPrepared, JsError> {
+        KineticsPrepared::new_checked(params).map_err(|msg| JsError::new(&msg))
     }
 
     /// Число реакций сессии.
@@ -224,7 +235,7 @@ mod tests {
 
     fn session(rows: &[Vec<f64>]) -> KineticsPrepared {
         let flat: Vec<f64> = rows.concat();
-        KineticsPrepared::new(&flat).expect("валидная раскладка")
+        KineticsPrepared::new_checked(&flat).expect("валидная раскладка")
     }
 
     fn tick_one(
@@ -373,8 +384,11 @@ mod tests {
 
     #[test]
     fn constructor_rejects_bad_length() {
-        assert!(KineticsPrepared::new(&[0.0f64; 18]).is_err());
-        assert!(KineticsPrepared::new(&[0.0f64; 34]).is_ok());
+        // Валидация проверяется через new_checked: Err-ветка
+        // wasm-bindgen-конструктора (JsError) на native паникует
+        // стабами wasm-bindgen и предназначена только для wasm32.
+        assert!(KineticsPrepared::new_checked(&[0.0f64; 18]).is_err());
+        assert!(KineticsPrepared::new_checked(&[0.0f64; 34]).is_ok());
     }
 
     #[test]
