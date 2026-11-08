@@ -1076,7 +1076,12 @@
 > ревизии 2026-11-08): математический
 > контракт и носитель, Wilson light/heavy + детерминированный
 > multi-start (один Wilson start недостаточен), successive
-> substitution со safeguarded fallback, обе ветви PR-корня с
+> substitution (исходная редакция упоминала safeguarded
+> fallback; впоследствии fallback исключён из объёма 4.4.4.4.2 —
+> TPD_SEARCH_DESIGN.md §2.5; финальный контракт и реализация
+> 4.4.4.4.2 используют только successive substitution с
+> фиксированным бюджетом; fallback, Jacobian, Newton, BFGS и
+> line-search в текущую реализацию не входят), обе ветви PR-корня с
 > дедупликацией single-root, архитектура Core/Data (Core не
 > импортирует Data; пересчёт trial-состояний теми же принятыми
 > параметрами), границы симплекса с честной маркировкой полноты
