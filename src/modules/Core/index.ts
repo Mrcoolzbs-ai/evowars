@@ -38,6 +38,12 @@
 //                      для двух уже вычисленных состояний PR-смеси (4.4.4.4.1);
 //                      ТОЛЬКО значение и вклады — без поиска минимумов и
 //                      фазовых verdicts; не пересчитывает PR, не импортирует Data;
+//   prTangentPlaneDistanceSearch — multi-start поиск минимумов TPD по граням
+//                      носителя и ветвям физических корней (4.4.4.4.2): Wilson-
+//                      старты, последовательное SS-смещение без fallback,
+//                      строгие verdicts только по validated error bound,
+//                      indeterminate с машинно-читаемой причиной иначе; не
+//                      импортирует Data;
 //   migrations        — версии схем, датасетов и миграции сохранений;
 //   adapters          — мосты к существующим модулям (этап 1–3).
 
@@ -64,6 +70,8 @@ export * from './odeSolver';
 export * from './pengRobinson';
 export * from './pengRobinsonMixture';
 export * from './prTangentPlaneDistance';
+export * from './prTangentPlaneDistanceSearch';
 export * from './migrations';
 export * from './adapters';
+
 
