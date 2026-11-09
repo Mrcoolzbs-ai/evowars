@@ -1,5 +1,5 @@
 /**
- * Stage 4.5.4 (ревизия 4.5.4.6) — тесты каталога кинетических записей KIDA/JPL.
+ * Stage 4.5.4 (ревизия 4.5.4.7) — тесты каталога кинетических записей KIDA/JPL.
  *
  * Группы: базовый набор (идентичности, unknown-константы); fail-closed интеграция
  * с вычислителем 4.5.2 и блокирующие вопросы; ЛИЦЕНЗИОННАЯ БЕЗОПАСНОСТЬ —
@@ -84,6 +84,34 @@
  * k(300 K, 1 bar N₂) и k(400 K, 1 bar N₂), fail-closed вне [300, 400] K,
  * зафиксированное (НЕ разрешённое) расхождение с N₂-серией Hsu 1987/1989,
  * отсутствие других третьих тел; четыре записи — без изменений.
+ *
+ * Ревизия Stage 4.5.4.7 (2026-11-09, реализация): запись №89
+ * (O + NO + N₂ → NO₂ + N₂) — вторая запись каталога с реализованной
+ * N₂-специфической fall-off параметризацией (контракт 4.5.2 без
+ * изменений): k0 — ОЦЕНОЧНАЯ рекомендация по Whytock, Michael, Payne
+ * (1976), DOI 10.1016/0009-2614(76)80655-0 и Schieferstein et al.
+ * (1983), DOI 10.1002/bbpc.19830870419 (НЕ построена только на
+ * N₂-экспериментах, с относительными эффективностями третьих тел);
+ * k∞ — рекомендованное температурное представление оценки по Hippler
+ * et al. (1999), Part I, DOI 10.1039/A806520I (полный текст Part I
+ * в этой сессии НЕ получен, таблицы НЕ читались; Part II — только
+ * качественная поддержка); Fc = 0.85, N — каноническая Troe/IUPAC-форма
+ * N(Fc) контракта 4.5.2; подтверждённая область — пересечение
+ * диапазонов пределов [200, 300] K. Контрольная точка IUPAC NOx1
+ * (1.5×10⁻¹²) формулой 4.5.2 НЕ воспроизводится (вычисление даёт
+ * ≈ 2.197×10⁻¹²): расхождение зафиксировано и НЕ разрешено, параметры
+ * НЕ менялись ради согласования, 1.5×10⁻¹² НЕ используется как тестовый
+ * oracle, вычисленное значение НЕ выдаётся за измерение, недоказанные
+ * гипотезы о происхождении контрольной точки НЕ воспроизводятся.
+ * Тесты обновлены с разделением по записям: unknown-инварианты трёх
+ * записей (№1, №70, №72) сохранены; тесты лицензионной безопасности
+ * допускают ключи контракта 4.5.2 в записях №89 и №106 (KIDA-ключи
+ * запрещены во всём каталоге); добавлена регрессионная группа №89
+ * (14 тестов): структура, точные параметры и знаки показателей,
+ * единицы, Fc/N, контроль формулы 4.5.2 (Pr/F/k против независимо
+ * вычисленных значений и контрольной точки), fail-closed вне
+ * [200, 300] K, provenance-тесты предупреждения о контрольной точке
+ * и научной атрибуции k0/k∞; записи №1, №70, №72, №106 — без изменений.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -265,9 +293,9 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
     expect(numbers).toEqual([...KIDA_REACTION_NUMBERS]);
   });
 
-  it('константы четырёх записей — unknown без параметров; №106 — известная fall-off параметризация', () => {
+  it('константы трёх записей — unknown без параметров; №89 и №106 — известные fall-off параметризации', () => {
     for (const record of KINETIC_CATALOG_DATA) {
-      if (record.id === 'kida-tb-2015-03-19-106') {
+      if (record.id === 'kida-tb-2015-03-19-106' || record.id === 'kida-tb-2015-03-19-89') {
         expect(record.rateConstant.status).toBe('known');
         continue;
       }
@@ -278,11 +306,13 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
     }
   });
 
-  it('kind/порядок/модель концентраций: elementary, molecule_cm3; порядок null у unknown-записей, 2 у №106', () => {
+  it('kind/порядок/модель концентраций: elementary, molecule_cm3; порядок null у unknown-записей, 2 у №89 и №106', () => {
     for (const record of KINETIC_CATALOG_DATA) {
       expect(record.kind).toBe('elementary');
       expect(record.concentrationModel).toBe('molecule_cm3');
-      expect(record.overallOrder, 'запись ' + record.id).toBe(record.id === 'kida-tb-2015-03-19-106' ? 2 : null);
+      expect(record.overallOrder, 'запись ' + record.id).toBe(
+        record.id === 'kida-tb-2015-03-19-106' || record.id === 'kida-tb-2015-03-19-89' ? 2 : null
+      );
     }
   });
 
@@ -299,7 +329,7 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
     }
   });
 
-  it('provenance каждой записи идентифицирует источник честно: KIDA unverified; №106 — параметры из первичных статей', () => {
+  it('provenance каждой записи идентифицирует источник честно: KIDA unverified; №89 и №106 — параметры из первичных статей', () => {
     for (const record of KINETIC_CATALOG_DATA) {
       const provenance = record.provenance;
       expect(provenance?.sourceName).toBe(KIDA_TB_EXPORT_SOURCE.sourceName);
@@ -309,6 +339,15 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
       expect(provenance?.retrievedAt).toBe('2026-11-03');
       expect(provenance?.license ?? '').toContain('unverified');
       expect(provenance?.license ?? '').toContain('Legal Notices');
+      if (record.id === 'kida-tb-2015-03-19-89') {
+        expect(provenance?.recordId).toBe('kida-tb-2015-03-19:reaction=89');
+        expect(provenance?.reference ?? '').toContain('10.1016/0009-2614(76)80655-0');
+        expect(provenance?.reference ?? '').toContain('10.1002/bbpc.19830870419');
+        expect(provenance?.reference ?? '').toContain('10.1039/A806520I');
+        expect(provenance?.note ?? '').toContain('оценочной рекомендации');
+        expect(provenance?.note ?? '').toContain('personal use only');
+        continue;
+      }
       if (record.id === 'kida-tb-2015-03-19-106') {
         expect(provenance?.recordId).toBe('kida-tb-2015-03-19:reaction=106');
         expect(provenance?.reference ?? '').toContain('10.1021/jp020229w');
@@ -351,10 +390,10 @@ describe('Stage 4.5.4: базовый набор каталога KIDA (иден
 });
 
 describe('Stage 4.5.4: fail-closed интеграция и блокирующие вопросы 4.5.4.1/4.5.4.2', () => {
-  it('evaluateRateConstant отклоняет четыре unknown-записи (no_kinetic_data); №106 — не no_kinetic_data', () => {
+  it('evaluateRateConstant отклоняет три unknown-записи (no_kinetic_data); №89 и №106 — не no_kinetic_data', () => {
     for (const record of KINETIC_CATALOG_DATA) {
       const error = kineticsError(() => evaluateRateConstant(record, quantity(300, 'K')));
-      if (record.id === 'kida-tb-2015-03-19-106') {
+      if (record.id === 'kida-tb-2015-03-19-106' || record.id === 'kida-tb-2015-03-19-89') {
         expect(error.code).toBe('invalid_third_body');
       } else {
         expect(error.code, 'запись ' + record.id).toBe('no_kinetic_data');
@@ -406,7 +445,7 @@ describe('Stage 4.5.4: fail-closed интеграция и блокирующи�
 });
 
 describe('Stage 4.5.4: лицензионная безопасность (структурные проверки без воспроизведения данных)', () => {
-  it('rawInput unknown-записей содержит только разрешённые ключи; №106 — без KIDA rawInput', () => {
+  it('rawInput unknown-записей содержит только разрешённые ключи; №89 и №106 — без KIDA rawInput', () => {
     const allowedKeys = [
       'kidaReactionNumber',
       'reactant1',
@@ -416,10 +455,10 @@ describe('Stage 4.5.4: лицензионная безопасность (стр
       'product2'
     ];
     for (const record of KINETIC_CATALOG_DATA) {
-      if (record.id === 'kida-tb-2015-03-19-106') {
-        // параметры записи №106 — из первичных публикаций; KIDA-rawInput не применяется
+      if (record.id === 'kida-tb-2015-03-19-106' || record.id === 'kida-tb-2015-03-19-89') {
+        // параметры записей №89 и №106 — из первичных публикаций; KIDA-rawInput не применяется
         const serialized = JSON.stringify(record);
-        expect(serialized.includes('rawInput'), 'запись №106 без rawInput').toBe(false);
+        expect(serialized.includes('rawInput'), 'запись ' + record.id + ' без rawInput').toBe(false);
         continue;
       }
       const rawInput = rateProvenanceOf(record).rawInput;
@@ -427,7 +466,7 @@ describe('Stage 4.5.4: лицензионная безопасность (стр
     }
   });
 
-  it('числа unknown-записей — только номера реакций KIDA; числа №106 — точные параметры первичных источников', () => {
+  it('числа unknown-записей — только номера реакций KIDA; числа №89 и №106 — точные параметры первичных источников', () => {
     const collectNumeric = (node: unknown, path: string, into: { path: string; value: number }[]): void => {
       if (typeof node === 'number') {
         into.push({ path, value: node });
@@ -447,6 +486,29 @@ describe('Stage 4.5.4: лицензионная безопасность (стр
       const leaves: { path: string; value: number }[] = [];
       collectNumeric(record, 'record', leaves);
       expect(leaves.length, 'запись ' + record.id).toBeGreaterThan(0);
+      if (record.id === 'kida-tb-2015-03-19-89') {
+        const byPath = new Map(leaves.map((leaf) => [leaf.path, leaf.value]));
+        const expected: ReadonlyArray<[string, number]> = [
+          ['record.overallOrder', 2],
+          ['record.rateConstant.parameters.fallOff.lowPressureLimit.preExponentialA', 1.0e-31],
+          ['record.rateConstant.parameters.fallOff.lowPressureLimit.temperatureExponentN', -1.6],
+          ['record.rateConstant.parameters.fallOff.lowPressureLimit.energy.valueK', 0],
+          ['record.rateConstant.parameters.fallOff.lowPressureLimit.temperatureRangeK.min', 200],
+          ['record.rateConstant.parameters.fallOff.lowPressureLimit.temperatureRangeK.max', 300],
+          ['record.rateConstant.parameters.fallOff.highPressureLimit.preExponentialA', 5.0e-11],
+          ['record.rateConstant.parameters.fallOff.highPressureLimit.temperatureExponentN', -0.3],
+          ['record.rateConstant.parameters.fallOff.highPressureLimit.energy.valueK', 0],
+          ['record.rateConstant.parameters.fallOff.highPressureLimit.temperatureRangeK.min', 200],
+          ['record.rateConstant.parameters.fallOff.highPressureLimit.temperatureRangeK.max', 400],
+          ['record.rateConstant.parameters.fallOff.centeringFactorFc', 0.85],
+          ['record.rateConstant.parameters.fallOff.broadeningN', 0.8396379643428482]
+        ];
+        expect(byPath.size, 'числовых листьев №89').toBe(expected.length);
+        for (const [path, value] of expected) {
+          expect(byPath.get(path), 'путь ' + path).toBe(value);
+        }
+        continue;
+      }
       if (record.id === 'kida-tb-2015-03-19-106') {
         const byPath = new Map(leaves.map((leaf) => [leaf.path, leaf.value]));
         const expected: ReadonlyArray<[string, number]> = [
@@ -487,7 +549,7 @@ describe('Stage 4.5.4: лицензионная безопасность (стр
     }
   });
 
-  it('сериализованный каталог не содержит KIDA-ключей; ключи контракта 4.5.2 — только в записи №106', () => {
+  it('сериализованный каталог не содержит KIDA-ключей; ключи контракта 4.5.2 — только в записях №89 и №106', () => {
     const kidaKeys = [
       'k0Alpha',
       'k0Beta',
@@ -530,8 +592,8 @@ describe('Stage 4.5.4: лицензионная безопасность (стр
       }
       for (const key of contractKeys) {
         const inRecord = serialized.includes('"' + key + '"');
-        if (record.id === 'kida-tb-2015-03-19-106') {
-          expect(inRecord, 'ключ ' + key + ' должен присутствовать в №106').toBe(true);
+        if (record.id === 'kida-tb-2015-03-19-106' || record.id === 'kida-tb-2015-03-19-89') {
+          expect(inRecord, 'ключ ' + key + ' должен присутствовать в ' + record.id).toBe(true);
         } else {
           expect(inRecord, 'ключ ' + key + ' в ' + record.id).toBe(false);
         }
@@ -728,12 +790,22 @@ describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No.
     }
   });
 
-  it('аудит: №1/№70/№72/№89 не верифицированы (unknown); №106 — known по первичным источникам (не по JPL)', () => {
+  it('аудит: №1/№70/№72 не верифицированы (unknown); №89 и №106 — known по первичным источникам (не по JPL)', () => {
     for (const auditRecord of JPL_EVALUATION_20_ACCESS_AUDIT.records) {
       expect(auditRecord.coverage).toBe('not_established');
       const markers = AUDIT_RECORD_PROVENANCE_MARKERS[auditRecord.kidaReactionNumber] ?? [];
       for (const marker of markers) {
         expect(auditRecord.note, 'запись ' + auditRecord.kidaTbRecordId + ', маркер ' + marker).toContain(marker);
+      }
+      if (auditRecord.kidaReactionNumber === 89) {
+        expect(auditRecord.parametersVerified).toBe(true);
+        expect(auditRecord.statusAfterAudit).toBe('known');
+        expect(auditRecord.note).toContain('10.1016/0009-2614(76)80655-0');
+        expect(auditRecord.note).toContain('10.1002/bbpc.19830870419');
+        expect(auditRecord.note).toContain('10.1039/A806520I');
+        expect(auditRecord.note).toContain('[200, 300] K');
+        expect(auditRecord.note).toContain('не верифицированы');
+        continue;
       }
       if (auditRecord.kidaReactionNumber === 106) {
         expect(auditRecord.parametersVerified).toBe(true);
@@ -792,8 +864,15 @@ describe('Stage 4.5.4.5: per-record аудит доступа JPL Evaluation No.
     }
   });
 
-  it('fail-closed сохранён: 4 записи unknown/no_kinetic_data; №106 отказывает вне [300, 400] K', () => {
+  it('fail-closed сохранён: 3 записи unknown/no_kinetic_data; №89 отказывает вне [200, 300] K; №106 — вне [300, 400] K', () => {
     for (const record of KINETIC_CATALOG_DATA) {
+      if (record.id === 'kida-tb-2015-03-19-89') {
+        const error = kineticsError(() =>
+          evaluateRateConstant(record, quantity(350, 'K'), { thirdBodyConcentration: 2.4e19 })
+        );
+        expect(error.code).toBe('temperature_out_of_range');
+        continue;
+      }
       if (record.id === 'kida-tb-2015-03-19-106') {
         const error = kineticsError(() =>
           evaluateRateConstant(record, quantity(500, 'K'), { thirdBodyConcentration: 2.4e19 })
@@ -974,10 +1053,10 @@ describe('Stage 4.5.4.6: N₂ fall-off параметризация записи
     expect(fallOff106.thirdBodyNote).toBe('M = N₂');
   });
 
-  it('другие третьи тела не появились: thirdBodyNote только у №106 и равен M = N₂', () => {
+  it('другие третьи тела не появились: thirdBodyNote только у №89 и №106 и равен M = N₂', () => {
     for (const record of KINETIC_CATALOG_DATA) {
       const serialized = JSON.stringify(record);
-      if (record.id === 'kida-tb-2015-03-19-106') {
+      if (record.id === 'kida-tb-2015-03-19-106' || record.id === 'kida-tb-2015-03-19-89') {
         expect(serialized).toContain('M = N₂');
         expect(serialized.includes('M = He')).toBe(false);
         expect(serialized.includes('M = Ar')).toBe(false);
@@ -988,8 +1067,8 @@ describe('Stage 4.5.4.6: N₂ fall-off параметризация записи
     }
   });
 
-  it('записи №1, №70, №72, №89 остаются unknown, fail-closed; числовых параметров у них нет', () => {
-    const otherIds = ['kida-tb-2015-03-19-1', 'kida-tb-2015-03-19-70', 'kida-tb-2015-03-19-72', 'kida-tb-2015-03-19-89'];
+  it('записи №1, №70, №72 остаются unknown, fail-closed; числовых параметров у них нет', () => {
+    const otherIds = ['kida-tb-2015-03-19-1', 'kida-tb-2015-03-19-70', 'kida-tb-2015-03-19-72'];
     for (const id of otherIds) {
       const record = KINETIC_CATALOG_DATA.find((r) => r.id === id);
       if (record === undefined) {
@@ -1003,5 +1082,203 @@ describe('Stage 4.5.4.6: N₂ fall-off параметризация записи
       expect(serialized.includes('preExponentialA')).toBe(false);
       expect(serialized.includes('lowPressureLimit')).toBe(false);
     }
+  });
+});
+
+describe('Stage 4.5.4.7: N₂ fall-off параметризация записи №89 (Whytock 1976 / Schieferstein 1983 / Hippler 1999)', () => {
+  const record89 = KINETIC_CATALOG_DATA.find((r) => r.id === 'kida-tb-2015-03-19-89');
+  if (record89 === undefined) {
+    throw new Error('запись kida-tb-2015-03-19-89 отсутствует в каталоге');
+  }
+  const rate89 = record89.rateConstant;
+  if (rate89.status !== 'known') {
+    throw new Error('запись №89 должна иметь known-константу');
+  }
+  const params89 = rate89.parameters;
+  if (params89.kind !== 'fall_off') {
+    throw new Error('запись №89 должна быть fall_off');
+  }
+  const fallOff89 = params89.fallOff;
+
+  it('структура: elementary, overallOrder = 2, molecule_cm3, третье тело M = N₂', () => {
+    expect(record89.kind).toBe('elementary');
+    expect(record89.overallOrder).toBe(2);
+    expect(record89.concentrationModel).toBe('molecule_cm3');
+    expect(fallOff89.thirdBodyNote).toBe('M = N₂');
+    expect(record89.reaction).toBe('O + NO + N2 → NO2 + N2');
+    expect(record89.id).toBe('kida-tb-2015-03-19-89');
+  });
+
+  it('k0 = 1.0e-31·(T/300)^-1.6 (оценочная рекомендация по Whytock 1976 / Schieferstein 1983), [200, 300] K, cm6_per_molecule2_per_s', () => {
+    const k0 = fallOff89.lowPressureLimit;
+    expect(k0.preExponentialA).toBe(1.0e-31);
+    expect(k0.temperatureExponentN).toBe(-1.6);
+    expect(k0.temperatureExponentN).toBeLessThan(0);
+    expect(k0.energy).toEqual({ form: 'E_over_R', valueK: 0 });
+    expect(k0.temperatureRangeK).toEqual({ min: 200, max: 300 });
+    expect(k0.unit).toBe('cm6_per_molecule2_per_s');
+    expect(k0.provenance.reference ?? '').toContain('10.1016/0009-2614(76)80655-0');
+    expect(k0.provenance.reference ?? '').toContain('10.1002/bbpc.19830870419');
+  });
+
+  it('k∞ = 5.0e-11·(T/300)^-0.3 (отрицательный знак показателя), [200, 400] K, cm3_per_molecule_per_s (рекомендованное представление оценки по Hippler et al. 1999)', () => {
+    const kInf = fallOff89.highPressureLimit;
+    expect(kInf.preExponentialA).toBe(5.0e-11);
+    expect(kInf.temperatureExponentN).toBe(-0.3);
+    expect(kInf.temperatureExponentN).toBeLessThan(0);
+    expect(kInf.energy).toEqual({ form: 'E_over_R', valueK: 0 });
+    expect(kInf.temperatureRangeK).toEqual({ min: 200, max: 400 });
+    expect(kInf.unit).toBe('cm3_per_molecule_per_s');
+    expect(kInf.provenance.reference ?? '').toContain('10.1039/A806520I');
+  });
+
+  it('единицы пределов различны: k0 — порядок 3 (overallOrder + 1), k∞ — порядок 2 (overallOrder)', () => {
+    expect(fallOff89.lowPressureLimit.unit).not.toBe(fallOff89.highPressureLimit.unit);
+    expect(fallOff89.lowPressureLimit.unit).toBe('cm6_per_molecule2_per_s');
+    expect(fallOff89.highPressureLimit.unit).toBe('cm3_per_molecule_per_s');
+    expect(record89.overallOrder).toBe(2);
+  });
+
+  it('Fc = 0.85; N = 0.75 − 1.27·log10(Fc) ≈ 0.8396 (каноническая Troe/IUPAC-форма контракта 4.5.2)', () => {
+    expect(fallOff89.centeringFactorFc).toBe(0.85);
+    expect(fallOff89.broadeningN).toBe(0.8396379643428482);
+    expect(fallOff89.broadeningN).toBeGreaterThan(0);
+    expect(fallOff89.broadeningN).toBeCloseTo(0.75 - 1.27 * Math.log10(0.85), 12);
+  });
+
+  it('подтверждённая область полной параметризации — пересечение диапазонов пределов [200, 300] K', () => {
+    const at200 = evaluateRateConstant(record89, quantity(200, 'K'), {
+      thirdBodyConcentration: 2.4e19
+    });
+    expect(at200.appliedRangeK).toEqual({ min: 200, max: 300 });
+    const at300 = evaluateRateConstant(record89, quantity(300, 'K'), {
+      thirdBodyConcentration: 2.4e19
+    });
+    expect(at300.appliedRangeK).toEqual({ min: 200, max: 300 });
+    expect(at300.dataStatus).toBe('known');
+    expect(at300.unit).toBe('cm3_per_molecule_per_s');
+  });
+
+  it('контроль формулы 4.5.2: k(300 K, 1 bar N₂) ≈ 2.1973532691787948e-12; Pr ≈ 0.04828647010693281; F ≈ 0.9540791435051059; контрольная точка IUPAC NOx1 (1.5e-12) НЕ воспроизводится', () => {
+    const BOLTZMANN_J_PER_K = 1.380649e-23; // точная константа СИ 2019
+    const n2At1Bar = (T: number): number => 1e5 / (BOLTZMANN_J_PER_K * T) / 1e6; // molecule/cm³
+    const at300 = evaluateRateConstant(record89, quantity(300, 'K'), {
+      thirdBodyConcentration: n2At1Bar(300)
+    });
+    // 2.1973532691787948e-12 — ВЫЧИСЛЕНИЕ по формуле 4.5.2 с каталожными
+    // параметрами (НЕ экспериментальное измерение); контрольная точка
+    // IUPAC NOx1 = 1.5×10⁻¹² формулой НЕ воспроизводится (относительное
+    // расхождение ≈ 46% > 40%) и НЕ используется как oracle
+    expect(at300.value / 2.1973532691787948e-12).toBeCloseTo(1, 9);
+    expect(at300.fallOff?.reducedPressure ?? 0).toBeCloseTo(0.04828647010693281, 10);
+    expect(at300.fallOff?.broadeningFactor ?? 0).toBeCloseTo(0.9540791435051059, 10);
+    const relDeviation = Math.abs(at300.value - 1.5e-12) / 1.5e-12;
+    expect(relDeviation).toBeGreaterThan(0.4);
+  });
+
+  it('№89 больше не отказывает как no_kinetic_data: без [M] — invalid_third_body, с [M] — значение', () => {
+    const withoutM = kineticsError(() => evaluateRateConstant(record89, quantity(300, 'K')));
+    expect(withoutM.code).not.toBe('no_kinetic_data');
+    expect(withoutM.code).toBe('invalid_third_body');
+    const withM = evaluateRateConstant(record89, quantity(300, 'K'), { thirdBodyConcentration: 2.4e19 });
+    expect(withM.value).toBeGreaterThan(0);
+  });
+
+  it('fail-closed №89: вне пересечения [200, 300] K — temperature_out_of_range (без экстраполяции)', () => {
+    const below = kineticsError(() =>
+      evaluateRateConstant(record89, quantity(150, 'K'), { thirdBodyConcentration: 2.4e19 })
+    );
+    expect(below.code).toBe('temperature_out_of_range');
+    const mid = kineticsError(() =>
+      evaluateRateConstant(record89, quantity(350, 'K'), { thirdBodyConcentration: 2.4e19 })
+    );
+    expect(mid.code).toBe('temperature_out_of_range');
+    const above = kineticsError(() =>
+      evaluateRateConstant(record89, quantity(500, 'K'), { thirdBodyConcentration: 2.4e19 })
+    );
+    expect(above.code).toBe('temperature_out_of_range');
+  });
+
+  it('ПРЕДУПРЕЖДЕНИЕ о контрольной точке зафиксировано в provenance fall-off параметров: 1.5×10⁻¹² формулой НЕ воспроизводится, расхождение НЕ разрешено', () => {
+    const limitations = fallOff89.provenance.limitations ?? '';
+    expect(limitations).toContain('ПРЕДУПРЕЖДЕНИЕ');
+    expect(limitations).toContain('1.5×10⁻¹²');
+    expect(limitations).toContain('2.197×10⁻¹²');
+    expect(limitations).toContain('НЕ воспроизводится');
+    expect(limitations).toContain('НЕ разрешено');
+    expect(limitations).toContain('НЕ менялись ради согласования');
+    expect(limitations).toContain('НЕ используется как тестовый oracle');
+    expect(limitations).toContain('недоказанные гипотезы НЕ воспроизводятся');
+  });
+
+  it('provenance k0: оценочная рекомендация, НЕ построена ТОЛЬКО на N₂-экспериментах; относительные эффективности; JPL C1 (воздух) не использована', () => {
+    const k0 = fallOff89.lowPressureLimit;
+    expect(k0.provenance.sourceName ?? '').toContain('Оценочная');
+    expect(k0.provenance.limitations ?? '').toContain('ОЦЕНОЧНАЯ рекомендация');
+    expect(k0.provenance.limitations ?? '').toContain('НЕ построена ТОЛЬКО на N₂-экспериментах');
+    expect(k0.provenance.limitations ?? '').toContain('относительных эффективностей');
+    expect(k0.provenance.limitations ?? '').toContain('ДЛЯ ВОЗДУХА');
+    expect(k0.provenance.limitations ?? '').toContain('personal use only');
+    expect(k0.provenance.reference ?? '').toContain('10.1016/0009-2614(76)80655-0');
+    expect(k0.provenance.reference ?? '').toContain('10.1002/bbpc.19830870419');
+  });
+
+  it('научная атрибуция k∞: рекомендованное температурное представление оценки по Hippler et al. (1999) Part I; полный текст НЕ получен; Part II — только качественная поддержка', () => {
+    const kInf = fallOff89.highPressureLimit;
+    expect(kInf.provenance.reference ?? '').toContain('O + NO + N₂');
+    expect(kInf.provenance.reference ?? '').toContain('200–400 K, 2–200 bar N₂');
+    expect(kInf.provenance.reference ?? '').toContain('5±1×10⁻¹¹');
+    expect(kInf.provenance.reference ?? '').toContain('diffusion control');
+    expect(kInf.provenance.reference ?? '').toContain('63–72');
+    expect(kInf.provenance.limitations ?? '').toContain('рекомендованное температурное представление оценки');
+    expect(kInf.provenance.limitations ?? '').toContain('полный текст Part I в этой сессии НЕ получен');
+    expect(kInf.provenance.limitations ?? '').toContain('только КАЧЕСТВЕННАЯ');
+    expect(kInf.provenance.limitations ?? '').toContain('НЕ выдаётся за экспериментальные измерения');
+  });
+
+  it('ограничение по третьему телу в provenance №89: параметры применимы для M = N₂; thirdBodyNote — описательная метка; идентичность третьего тела вычислителем НЕ проверяется', () => {
+    const fo = fallOff89.provenance;
+    expect(fo.applicability ?? '').toContain('научные параметры применимы для третьего тела M = N₂');
+    expect(fo.applicability ?? '').toContain('[200, 300] K');
+    expect(fo.limitations ?? '').toContain('только описательная метка');
+    expect(fo.limitations ?? '').toContain('именно N₂');
+    expect(fo.limitations ?? '').toContain('воздуха');
+    expect(fo.limitations ?? '').toContain('personal use only');
+    // контракт вычислителя НЕ расширялся: thirdBodyNote остаётся единственной N₂-меткой,
+    // runtime-проверки химической идентичности третьего тела НЕ появилось и НЕ утверждается
+    expect(fallOff89.thirdBodyNote).toBe('M = N₂');
+  });
+
+  it('записи №1, №70, №72 остаются unknown/no_kinetic_data; параметры №106 не изменились', () => {
+    const unknownIds = ['kida-tb-2015-03-19-1', 'kida-tb-2015-03-19-70', 'kida-tb-2015-03-19-72'];
+    for (const id of unknownIds) {
+      const record = KINETIC_CATALOG_DATA.find((r) => r.id === id);
+      if (record === undefined) {
+        throw new Error('запись ' + id + ' отсутствует');
+      }
+      expect(record.rateConstant.status, 'запись ' + id).toBe('unknown');
+      const error = kineticsError(() => evaluateRateConstant(record, quantity(300, 'K')));
+      expect(error.code, 'запись ' + id).toBe('no_kinetic_data');
+    }
+    const record106 = KINETIC_CATALOG_DATA.find((r) => r.id === 'kida-tb-2015-03-19-106');
+    if (record106 === undefined) {
+      throw new Error('запись kida-tb-2015-03-19-106 отсутствует');
+    }
+    const rate106 = record106.rateConstant;
+    if (rate106.status !== 'known') {
+      throw new Error('запись №106 должна иметь known-константу');
+    }
+    const params106 = rate106.parameters;
+    if (params106.kind !== 'fall_off') {
+      throw new Error('запись №106 должна быть fall_off');
+    }
+    const fallOff106 = params106.fallOff;
+    expect(fallOff106.lowPressureLimit.preExponentialA).toBe(4.3e-32);
+    expect(fallOff106.lowPressureLimit.temperatureExponentN).toBe(-1.2);
+    expect(fallOff106.highPressureLimit.preExponentialA).toBe(9.5e-11);
+    expect(fallOff106.highPressureLimit.temperatureExponentN).toBe(0.44);
+    expect(fallOff106.centeringFactorFc).toBe(0.5);
+    expect(fallOff106.broadeningN).toBe(1.1323080944932562);
+    expect(fallOff106.thirdBodyNote).toBe('M = N₂');
   });
 });
