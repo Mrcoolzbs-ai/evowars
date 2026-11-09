@@ -1,5 +1,5 @@
 /**
- * Stage 4.5.4 (ревизия 4.5.4.3) — типизированный каталог кинетических записей JPL/KIDA
+ * Stage 4.5.4 (ревизия 4.5.4.6) — типизированный каталог кинетических записей JPL/KIDA
  * для вычислителя k(T) (Core/kinetics, 4.5.1/4.5.2) и будущего интегрирования ODE (4.5.5).
  *
  * Ревизия 4.5.4.2 (2026-11-03, завершение корректирующей ревизии после независимого
@@ -199,6 +199,38 @@
  *   Evaluation No. 20; данным JPL НЕ приписывается статус
  *   перепроверенных в этой сессии. Числовые кинетические параметры в
  *   каталог НЕ переносились; все записи остаются status='unknown'.
+ * Ревизия Stage 4.5.4.6 (2026-11-09, реализация N₂ fall-off параметризации
+ * записи №106 — по явному разрешению задания 4.5.4; единственная запись
+ * каталога с числовыми параметрами): для записи KIDA №106
+ * (H + O₂ + N₂ → HO₂ + N₂, id kida-tb-2015-03-19-106) реализована
+ * N₂-специфическая fall-off параметризация контракта 4.5.2 по первичным
+ * источникам (НЕ KIDA-экспорт, НЕ JPL B1 — рекомендация для воздуха, НЕ
+ * копия датасета IUPAC HOx2 — personal use only): low-pressure limit
+ * k0 = 4.3e-32·(T/300)^-1.2 (cm6 molecule-2 s-1, 300–900 K) — Michael et al.
+ * (2002), DOI 10.1021/jp020229w (прямые независимые измерения в N₂;
+ * поддержка диапазона до 900 K — N₂-серия Fernandes et al. 2008);
+ * high-pressure limit k∞ = 9.5e-11·(T/300)^+0.44 (cm3 molecule-1 s-1,
+ * 200–400 K) и fall-off — Fernandes, Luther, Troe, Ushakov (2008),
+ * DOI 10.1039/b804553d (прямой эксперимент в N₂, 300–900 K, 1.5–950 bar);
+ * Fc = 0.5 (T-независимый центрирующий фактор по анализу N₂-данных
+ * Fernandes et al.), N = 0.75 − 1.27·log10(0.5) ≈ 1.1323 (каноническая
+ * Troe/IUPAC-форма N(Fc) контракта 4.5.2); thirdBodyNote «M = N₂»;
+ * overallOrder = 2; статус записи known (параметры подтверждены
+ * независимыми первичными источниками). Общая подтверждённая область
+ * применимости — пересечение диапазонов k0/k∞ = [300, 400] K, НЕ
+ * расширяется до 900 K: вне пересечения вычислитель отказывает
+ * (temperature_out_of_range, fail-closed). Альтернативная прямая N₂-серия
+ * Hsu et al. (1987, DOI 10.1021/j100291a043: k0(298 K) =
+ * 6.09e-32 ± 9.1e-33; 1989, DOI 10.1021/j100340a003:
+ * k0 = 6.2e-32·(T/300)^-1.66, 298–639 K) даёт более высокие значения
+ * low-pressure limit (расхождение примерно в 1.4–1.5 раза): серии
+ * НЕ смешиваются, расхождение зафиксировано в provenance записи и НЕ
+ * объявляется разрешённым. JPL B1 — рекомендация ДЛЯ ВОЗДУХА — НЕ
+ * использована как источник N₂-параметров. Записи №1, №70, №72, №89 —
+ * БЕЗ изменений (unknown, no_kinetic_data, fail-closed); блокирующие
+ * вопросы KIDA/JPL НЕ закрыты и НЕ объявляются закрытыми реализацией №106
+ * (параметры №106 — из первичных публикаций, не из KIDA/JPL); контракты
+ * 4.5.1–4.5.3 НЕ менялись; история Git НЕ переписывалась.
  * Блокирующие вопросы: KINETIC_CATALOG_BLOCKING_QUESTIONS (4 шт.).
  */
 import type { KineticReactionRecord } from '../Core/kinetics';
@@ -329,8 +361,118 @@ export function buildKidaTbReactionRecord(identity: KidaTbRecordIdentity): Kinet
   };
 }
 
-export const KINETIC_CATALOG_DATA: readonly KineticReactionRecord[] =
-  KIDA_TB_RECORD_IDENTITIES.map((identity) => buildKidaTbReactionRecord(identity));
+// Stage 4.5.4 (ревизия 4.5.4.6, 09.11.2026): N₂-специфическая fall-off
+// параметризация записи KIDA №106 (H + O₂ + N₂ → HO₂ + N₂) — реализована
+// по явному разрешению задания 4.5.4 по первичным источникам (НЕ KIDA-
+// экспорт, НЕ JPL B1 — рекомендация для воздуха, НЕ копия датасета
+// IUPAC HOx2 — personal use only): low-pressure limit — Michael et al.
+// (2002), DOI 10.1021/jp020229w (поддержка диапазона до 900 K — N₂-серия
+// Fernandes et al. 2008, 300–900 K); high-pressure limit, Fc и fall-off —
+// Fernandes, Luther, Troe, Ushakov (2008), DOI 10.1039/b804553d. Общая
+// подтверждённая область применимости — пересечение диапазонов
+// k0 [300, 900] K и k∞ [200, 400] K = [300, 400] K: вне пересечения
+// вычислитель 4.5.2 отказывает (temperature_out_of_range, fail-closed).
+// Единицы пределов контракта: k0 — cm6 molecule⁻² s⁻¹ (порядок
+// overallOrder + 1 = 3), k∞ — cm³ molecule⁻¹ s⁻¹ (порядок 2). Знак
+// показателя k∞ — ПОЛОЖИТЕЛЬНЫЙ (+0.44). Расхождение с альтернативной
+// прямой N₂-серией Hsu et al. 1987/1989 (более высокие значения k0)
+// зафиксировано в provenance, НЕ объявлено разрешённым, серии НЕ смешиваются.
+export function buildKidaTb106N2Record(): KineticReactionRecord {
+  return {
+    id: kidaTbRecordId(106),
+    kind: 'elementary',
+    overallOrder: 2,
+    concentrationModel: 'molecule_cm3',
+    rateConstant: {
+      status: 'known',
+      parameters: {
+        kind: 'fall_off',
+        fallOff: {
+          lowPressureLimit: {
+            preExponentialA: 4.3e-32,
+            temperatureExponentN: -1.2,
+            energy: { form: 'E_over_R', valueK: 0 },
+            temperatureRangeK: { min: 300, max: 900 },
+            unit: 'cm6_per_molecule2_per_s',
+            provenance: {
+              sourceName:
+                'Michael, J. V. et al. (2002), J. Phys. Chem. A — прямое независимое измерение трёхтельной рекомбинации H + O₂ (+N₂), low-pressure limit',
+              reference:
+                'DOI 10.1021/jp020229w (M = N₂, 296–698 K); поддержка диапазона до 900 K: Fernandes, R., Luther, K., Troe, J., Ushakov, V. G. (2008), Phys. Chem. Chem. Phys. 10, 4313, DOI 10.1039/b804553d (M = N₂, 300–900 K)',
+              retrievedAt: '2026-11-09',
+              applicability:
+                'low-pressure limit k0 = 4.3e-32·(T/300)^-1.2, единица cm6 molecule-2 s-1 (порядок 3 = overallOrder 2 + 1); диапазон предела 300–900 K; M = N₂',
+              limitations:
+                'альтернативная прямая N₂-серия Hsu et al. даёт БОЛЕЕ ВЫСОКИЕ значения low-pressure limit и НЕ смешивается с выбранной серией Michael/Fernandes: Hsu, Durant, Kaufman (1987), DOI 10.1021/j100291a043, NIST 1987HSU/DUR1895:1 — k0(298 K) = 6.09e-32 ± 9.1e-33 см6 molecule-2 s-1 (одна точка 298 K); Hsu, Anderson, Durant, Kaufman (1989), DOI 10.1021/j100340a003 — k0 = 6.2e-32·(T/300)^-1.66 (298–639 K); расхождение серий (примерно в 1.4–1.5 раза при 300 K) зафиксировано, НЕ объявляется разрешённым и НЕ усредняется; строка JPL Table 2.1 B1 — рекомендация ДЛЯ ВОЗДУХА (по §2.1) — НЕ использована как N₂-источник',
+              license:
+                'публичная научная публикация; числовые параметры воспроизводятся с библиографической атрибуцией первоисточника; НЕ данные KIDA (лицензия unverified) и НЕ копия датасета IUPAC HOx2 (personal use only, содержимое НЕ воспроизводится)'
+            }
+          },
+          highPressureLimit: {
+            preExponentialA: 9.5e-11,
+            temperatureExponentN: 0.44,
+            energy: { form: 'E_over_R', valueK: 0 },
+            temperatureRangeK: { min: 200, max: 400 },
+            unit: 'cm3_per_molecule_per_s',
+            provenance: {
+              sourceName:
+                'Fernandes, R., Luther, K., Troe, J., Ushakov, V. G. (2008), Phys. Chem. Chem. Phys. 10, 4313 — прямое измерение high-pressure limit и fall-off кривой в N₂',
+              reference:
+                'DOI 10.1039/b804553d',
+              retrievedAt: '2026-11-09',
+              applicability:
+                'high-pressure limit k∞ = 9.5e-11·(T/300)^+0.44, единица cm3 molecule-1 s-1 (порядок 2); диапазон предела 200–400 K; M = N₂; знак показателя +0.44 (положительный)',
+              limitations:
+                'эксперимент Fernandes et al. покрывает 300–900 K в N₂ (давления 1.5–950 bar); заявленный диапазон k∞ 200–400 K НЕ расширяется; общая подтверждённая область полной fall-off параметризации — пересечение с диапазоном k0: [300, 400] K',
+              license:
+                'публичная научная публикация; числовые параметры воспроизводятся с библиографической атрибуцией первоисточника; НЕ данные KIDA (лицензия unverified) и НЕ копия датасета IUPAC HOx2 (personal use only, содержимое НЕ воспроизводится)'
+            }
+          },
+          centeringFactorFc: 0.5,
+          broadeningN: 1.1323080944932562,
+          thirdBodyNote: 'M = N₂',
+          provenance: {
+            sourceName:
+              'Fall-off параметры записи №106 (Fc, N): Fernandes, R., Luther, K., Troe, J., Ushakov, V. G. (2008) и каноническая Troe/IUPAC-форма N(Fc) контракта 4.5.2',
+            reference:
+              'Fc = 0.5 — T-независимый центрирующий фактор по fall-off анализу N₂-данных Fernandes et al. (2008), DOI 10.1039/b804553d; N = 0.75 − 1.27·log10(Fc) — каноническая Troe/IUPAC-форма (см. контракт 4.5.2, Core/kinetics), при Fc = 0.5: N ≈ 1.1323',
+            retrievedAt: '2026-11-09',
+            applicability:
+              'k([M],T) = (k0·[M]/(1 + Pr))·Fc^(1/(1+(log10(Pr)/N)²)), Pr = k0·[M]/k∞; применимо при M = N₂ в пересечении диапазонов пределов [300, 400] K; [M] — molecule/cm³ (модель концентраций записи)',
+            limitations:
+              'используется упрощённое Troe-уширение контракта 4.5.2 с КОНСТАНТНЫМИ Fc/N (полная форма уширения KIDA со сдвигом центра c(Fc), членом d = 0.14 и T-зависимым Fc(T) контрактом НЕ представима и НЕ используется); параметры НЕ из KIDA-экспорта и НЕ из строки JPL B1 (рекомендация для воздуха); копия датасета IUPAC HOx2 (personal use only) НЕ воспроизводится; комбинирование неопределённостей пределов в неопределённость эффективной константы контрактом 4.5.2 НЕ моделируется и НЕ выдумывается',
+            license:
+              'публичные научные публикации и общая математическая форма; числовые параметры воспроизводятся с библиографической атрибуцией'
+          }
+        }
+      }
+    },
+    provenance: {
+      sourceName: KIDA_TB_EXPORT_SOURCE.sourceName,
+      sourceId: KIDA_TB_EXPORT_SOURCE.sourceId,
+      datasetId: 'kida_reac_tb_2015-03-19_1.csv',
+      datasetVersion:
+        'экспорт 2015-03-19; копия SophiaAtmo/PATMO@d78ec8e2bcabc2c4071e71f12a9f817873ebd5dd, директория data/kida/',
+      recordId: 'kida-tb-2015-03-19:reaction=106',
+      reference:
+        'идентичность записи — KIDA tb-экспорт (только номер реакции и состав видов, числовые параметры строки НЕ воспроизводятся); числовые параметры — первичные источники: Michael et al. (2002), DOI 10.1021/jp020229w; Fernandes et al. (2008), DOI 10.1039/b804553d',
+      retrievedAt: '2026-11-03',
+      license: KIDA_TB_EXPORT_SOURCE.license,
+      note:
+        'реакционная идентичность записи KIDA №106 (состав видов; числовые параметры KIDA-строки НЕ воспроизводятся); N₂-специфическая fall-off параметризация реализована в ревизии 4.5.4.6 (2026-11-09) по первичным публикациям с самостоятельной библиографической атрибуцией: параметры НЕ из KIDA (лицензия unverified), НЕ из JPL B1 (рекомендация для воздуха), НЕ копия IUPAC HOx2 (personal use only)'
+    },
+    reaction: 'H + O2 + N2 → O2H + N2',
+    note:
+      'имена видов — номенклатура KIDA (O2H — HO2 в нотации KIDA); поле reaction человекочитаемо и НЕ является стехиометрией сети (сопряжение со стехиометрией видов — этап 4.5.5); первая запись каталога с реализованной N₂-специфической fall-off параметризацией (M = N₂, НЕ воздух): подтверждённая область применимости [300, 400] K, вне её вычислитель 4.5.2 отказывает (temperature_out_of_range, fail-closed); расхождение low-pressure limit с альтернативной N₂-серией Hsu et al. 1987/1989 зафиксировано в provenance k0 и НЕ объявлено разрешённым'
+  };
+}
+
+export const KINETIC_CATALOG_DATA: readonly KineticReactionRecord[] = KIDA_TB_RECORD_IDENTITIES.map(
+  (identity) =>
+    identity.kidaReactionNumber === 106
+      ? buildKidaTb106N2Record()
+      : buildKidaTbReactionRecord(identity)
+);
 
 export class KineticsCatalogError extends Error {
   constructor(message: string) {
@@ -389,8 +531,8 @@ export interface JplEvaluation20AccessAuditRecord {
   readonly kidaTbRecordId: string;
   readonly reaction: string;
   readonly coverage: 'not_established';
-  readonly parametersVerified: false;
-  readonly statusAfterAudit: 'unknown';
+  readonly parametersVerified: boolean;
+  readonly statusAfterAudit: 'unknown' | 'known';
   readonly note: string;
 }
 
@@ -418,6 +560,15 @@ export interface JplEvaluation20AccessAudit {
 // аннотация, оглавление, введение I.1–I.9 (включая I.5 Data Formats и
 // пункт 1.7.2) и детальное оглавление раздела 1; обрыв — в начале
 // подраздела 1.1 Introduction раздела 1 (страница 1-3).
+// Ревизия 4.5.4.6 (2026-11-09): запись №106 каталога реализована N₂-специфической
+// fall-off параметризацией по ПЕРВИЧНЫМ источникам (Michael et al. 2002,
+// DOI 10.1021/jp020229w; Fernandes et al. 2008, DOI 10.1039/b804553d) — это
+// НЕ импорт и НЕ верификация по JPL: табличные значения JPL Evaluation No. 20
+// по-прежнему НЕ извлечены; параметры записи НЕ из KIDA-экспорта (лицензия
+// unverified) и НЕ из строки JPL B1 (рекомендация для воздуха); поля
+// parametersVerified/statusAfterAudit записи №106 отражают состояние записи
+// каталога (known по первичным источникам), а не верификацию по JPL;
+// coverage остаётся 'not_established' — планетарное покрытие НЕ заявляется.
 const JPL20_PER_RECORD_PROVENANCE_NOTES: Readonly<Record<number, string>> = {
   1: 'H + H + N₂ → H₂ + N₂: (a) Cohen, Westberg (1983), J. Phys. Chem. Ref. Data 12, NIST-запись 1983COH/WES531:43 — evaluated review (обзорная оценка, НЕ прямое измерение), N₂-специфические данные, 77–2000 K, uncertainty factor 3.16; (b) Getzinger, Blair (1969), Combustion and Flame, DOI 10.1016/0010-2180(69)90005-4 — прямое шокотрубное измерение с N₂, 1259–1912 K, 1.1–3.7 atm; по абстракту N₂-значения ≈ в 1.5 раза выше ранее опубликованных для Ar — отношение третьих тел, а не абсолютный N₂-коэффициент; соответствующей строки JPL Table 2.1 не установлено',
   70: 'H + O + N₂ → OH + N₂: (a) Tsang, Hampson (1986), J. Phys. Chem. Ref. Data 15, 1087–1279, DOI 10.1063/1.555759, §5.4 O + H + M — обзор: определённых измерений не сообщается, приведены грубые оценки, uncertainty factor 10; рекомендация по общему M, НЕ N₂-специфическая; (b) Morris, «Numerical Modeling of Pulse Detonation Rocket Engine Gasdynamics and Performance», AIAA 2004-0463 (NASA NTRS accession 20040016354), Table 1 (O + H + M) — модельная кинетическая запись, вторичное воспроизведение механизма Petersen, Hanson (1999), «Reduced Kinetics Mechanisms for Ram Accelerator Combustion», J. Propulsion and Power 15(4), 591–600, DOI 10.2514/2.5468; примечание к строке задаёт collision efficiencies H₂ = 2.0, H₂O = 6.0, остальные виды = 1.0 — N₂ входит в список рассматриваемых видов, единичная эффективность для него есть базовая модельная конвенция, НЕ отдельное экспериментальное измерение; Table 1 — вторичное воспроизведение механизма, НЕ независимый эксперимент; библиографическая идентификация подтверждена (уточнение 2026-11-08, четвёртая корректировка; прежняя формулировка «идентификация в этой сессии НЕ подтверждена» superseded); N₂-специфического экспериментального источника НЕ установлено — запись остаётся unresolved',
@@ -441,14 +592,35 @@ export const JPL_EVALUATION_20_ACCESS_AUDIT: JplEvaluation20AccessAudit = {
     'per-record provenance 2026-11-08 (третья корректировка): доступ к предшествующему изданию Evaluation No. 19 (Pub 19-5) проверен — зеркало science.jpl.nasa.gov/documents/1487/NASA-JPL_Evaluation_19-5.pdf отвечает автоматизированным запросам (основной маршрут jpldataeval.jpl.nasa.gov/pdf/NASA-JPL%20Evaluation%2019-5.pdf в этой сессии блокирует; зеркало ResearchGate отдаёт идентичный слой): извлечённый текстовый слой — 32 793 символа, покрывает титул, оглавление и введение I.1–I.9, обрыв в середине библиографии введения (страница xiv); §2.1, Table 2.1 (Rate Coefficients for Association Reactions; страница 2-5 по заданию) и примечания B1/C1 вне автоматически извлекаемого фрагмента — непосредственное чтение таблиц НЕ выполнялось; в слое 19-5 дословно присутствуют цитата I.5 Data Formats о Table 2.1 и собственный пункт 1.7.2 издания 19-5 (обновления Table 2; CA-механизм перенесён в Table 2.2); наследование раздела 2 Evaluation No. 20 из Evaluation No. 19 подтверждается пунктом 1.7.2 «No change» слоя 25-1; per-record источники пяти записей каталога зафиксированы качественно в records[].note (прямое N₂-измерение / evaluated review / теория / модель; числовые параметры НЕ переносились); уточнение (2026-11-08, четвёртая корректировка): модельный источник №70 библиографически идентифицирован — Morris, AIAA 2004-0463 (NASA NTRS accession 20040016354), Table 1 — вторичное воспроизведение механизма Petersen–Hanson (1999, DOI 10.2514/2.5468), единичная collision efficiency N₂ — базовая модельная конвенция; для №72/№89/№106/№1 зафиксированы NIST-суффиксы записей (1977ZEL/ERL939:2, 1988GOO/HAY745:2, 1983SCH/KOH361:4, 1987HSU/DUR1895:1, 1983COH/WES531:43) и опубликованные диапазоны давлений/неопределённости измерений (библиографическое описание, числовые кинетические параметры НЕ переносились)',
     'вывод: прямой доступ к публикации существует (публичные PDF-ссылки), однако per-record табличные значения НЕ доступны автоматически — требуется ручное извлечение таблиц или разрешённый API; параметры НЕ верифицированы и НЕ импортированы; наличие ссылок не является доказательством извлечения коэффициентов и не является разрешением на воспроизведение данных'
   ],
-  records: KIDA_TB_RECORD_IDENTITIES.map((identity): JplEvaluation20AccessAuditRecord => ({
-    kidaReactionNumber: identity.kidaReactionNumber,
-    kidaTbRecordId: kidaTbRecordId(identity.kidaReactionNumber),
-    reaction: `${identity.reactants.join(' + ')} → ${identity.products.join(' + ')}`,
-    coverage: 'not_established',
-    parametersVerified: false,
-    statusAfterAudit: 'unknown',
-    note: `аудит доступа 2026-11-08 (корректировка): прямые ссылки на публикацию установлены и отвечают, но таблицы коэффициентов вне автоматически извлекаемого фрагмента — табличные значения JPL Evaluation No. 20 для реакции №${identity.kidaReactionNumber} не получены; параметры не верифицированы, запись каталога остаётся status='unknown' (no_kinetic_data); per-record provenance (2026-11-08, качественная классификация без импорта): ${JPL20_PER_RECORD_PROVENANCE_NOTES[identity.kidaReactionNumber] ?? ''}`
-  })),
-  conclusion: 'корректировка аудита доступа (ревизия 4.5.4.5, 2026-11-08): прямые PDF-ссылки на JPL Evaluation No. 20 установлены и отвечают автоматизированным запросам (science.jpl.nasa.gov/documents/1503/NASA_Data_Evaluation_20.pdf; csl.noaa.gov/groups/csl5/datasets/NASAJPLDataEvaluation20.pdf; извлечённые текстовые слои идентичны, 32 793 символа); уточнение provenance 2026-11-08: слой покрывает титул, аннотацию, оглавление, введение I.1–I.9 (включая I.5 Data Formats и пункт 1.7.2 «Termolecular Reactions (Section 2) — No change») и детальное оглавление раздела 1, обрываясь в начале подраздела 1.1 Introduction раздела 1 (страница 1-3), до таблиц коэффициентов: per-record табличные значения не верифицированы, импорт не выполнен, все 5 записей каталога остаются status=unknown — вычислитель 4.5.2 обязан отказывать (no_kinetic_data); per-record provenance (третья корректировка 2026-11-08): прямое N₂-экспериментальное свидетельство зафиксировано для №89 (Schieferstein et al. 1983, 200–370 K) и №106 (Hsu et al. 1987, 298 K), для №72 — независимые температурно раздельные источники (Zellner et al. 1977 — 300 K; Goodings/Hayhurst 1988 — 1600–2200 K; Sellevåg et al. 2008 — теория, 300–3000 K), для №1 — evaluated N₂-обзор (Cohen/Westberg 1983) при отличии от прямых измерений, для №70 N₂-специфический экспериментальный источник не установлен; строки JPL B1/C1 (Table 2.1) — рекомендации для воздуха, унаследованные из раздела 2 Evaluation No. 19 по §1.7.2 «No change»; таблицы 19-5 автоматизированным извлечением не читались (слой обрывается в библиографии введения); параметры по-прежнему не верифицированы и не импортированы; fail-closed сохранён, блокирующие вопросы не закрыты; наличие прямых ссылок не является доказательством извлечения коэффициентов и не является разрешением на воспроизведение данных'
+  records: KIDA_TB_RECORD_IDENTITIES.map((identity): JplEvaluation20AccessAuditRecord => {
+    const n = identity.kidaReactionNumber;
+    const base = {
+      kidaReactionNumber: n,
+      kidaTbRecordId: kidaTbRecordId(n),
+      reaction: identity.reactants.join(' + ') + ' → ' + identity.products.join(' + ')
+    };
+    if (n === 106) {
+      return {
+        ...base,
+        coverage: 'not_established',
+        parametersVerified: true,
+        statusAfterAudit: 'known',
+        note:
+          'аудит доступа 2026-11-08 (корректировка): прямые ссылки на публикацию установлены и отвечают, но таблицы коэффициентов вне автоматически извлекаемого фрагмента — табличные значения JPL Evaluation No. 20 для реакции №106 не получены; JPL-параметры не верифицированы и не импортированы из JPL; независимо от аудита JPL (ревизия 4.5.4.6, 2026-11-09) запись каталога реализована N₂-специфической fall-off параметризацией по ПЕРВИЧНЫМ источникам (Michael et al. 2002, DOI 10.1021/jp020229w; Fernandes et al. 2008, DOI 10.1039/b804553d): статус known, подтверждённая область применимости M = N₂, [300, 400] K; планетарное покрытие НЕ заявляется (coverage остаётся not_established); per-record provenance (2026-11-08, качественная классификация без импорта): ' +
+          (JPL20_PER_RECORD_PROVENANCE_NOTES[106] ?? '')
+      };
+    }
+    return {
+      ...base,
+      coverage: 'not_established',
+      parametersVerified: false,
+      statusAfterAudit: 'unknown',
+      note:
+        'аудит доступа 2026-11-08 (корректировка): прямые ссылки на публикацию установлены и отвечают, но таблицы коэффициентов вне автоматически извлекаемого фрагмента — табличные значения JPL Evaluation No. 20 для реакции №' +
+        n +
+        ' не получены; параметры не верифицированы, запись каталога остаётся status=\'unknown\' (no_kinetic_data); per-record provenance (2026-11-08, качественная классификация без импорта): ' +
+        (JPL20_PER_RECORD_PROVENANCE_NOTES[n] ?? '')
+    };
+  }),
+  conclusion: 'корректировка аудита доступа (ревизия 4.5.4.5, 2026-11-08): прямые PDF-ссылки на JPL Evaluation No. 20 установлены и отвечают автоматизированным запросам (science.jpl.nasa.gov/documents/1503/NASA_Data_Evaluation_20.pdf; csl.noaa.gov/groups/csl5/datasets/NASAJPLDataEvaluation20.pdf; извлечённые текстовые слои идентичны, 32 793 символа); уточнение provenance 2026-11-08: слой покрывает титул, аннотацию, оглавление, введение I.1–I.9 (включая I.5 Data Formats и пункт 1.7.2 «Termolecular Reactions (Section 2) — No change») и детальное оглавление раздела 1, обрываясь в начале подраздела 1.1 Introduction раздела 1 (страница 1-3), до таблиц коэффициентов: per-record табличные значения не верифицированы, импорт не выполнен, записи №1, №70, №72, №89 каталога остаются status=unknown — вычислитель 4.5.2 обязан отказывать для них (no_kinetic_data); запись №106 (ревизия 4.5.4.6, 2026-11-09) независимо от JPL реализована N₂-специфической fall-off параметризацией по первичным источникам (Michael et al. 2002; Fernandes et al. 2008), подтверждённая область M = N₂, [300, 400] K; per-record provenance (третья корректировка 2026-11-08): прямое N₂-экспериментальное свидетельство зафиксировано для №89 (Schieferstein et al. 1983, 200–370 K) и №106 (Hsu et al. 1987, 298 K), для №72 — независимые температурно раздельные источники (Zellner et al. 1977 — 300 K; Goodings/Hayhurst 1988 — 1600–2200 K; Sellevåg et al. 2008 — теория, 300–3000 K), для №1 — evaluated N₂-обзор (Cohen/Westberg 1983) при отличии от прямых измерений, для №70 N₂-специфический экспериментальный источник не установлен; строки JPL B1/C1 (Table 2.1) — рекомендации для воздуха, унаследованные из раздела 2 Evaluation No. 19 по §1.7.2 «No change»; таблицы 19-5 автоматизированным извлечением не читались (слой обрывается в библиографии введения); параметры JPL по-прежнему не верифицированы и не импортированы (ревизия 4.5.4.6: запись №106 реализована по первичным источникам независимо от JPL); fail-closed сохранён (записи №1/№70/№72/№89 — unknown; №106 — отказ вне [300, 400] K), блокирующие вопросы не закрыты; наличие прямых ссылок не является доказательством извлечения коэффициентов и не является разрешением на воспроизведение данных'
 };
