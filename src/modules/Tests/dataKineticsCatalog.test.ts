@@ -58,9 +58,24 @@
  * Ревизия Stage 4.5.4.6 (2026-11-09, реализация): запись №106
  * (H + O₂ + N₂ → HO₂ + N₂) — первая запись каталога с реализованной
  * N₂-специфической fall-off параметризацией (контракт 4.5.2 без
- * изменений): k0 — Michael et al. (2002), DOI 10.1021/jp020229w;
- * k∞, Fc, N — Fernandes et al. (2008), DOI 10.1039/b804553d;
+ * изменений): k0 — Michael et al. (2002), DOI 10.1021/jp020229w
+ * (каталог использует округлённую форму, НЕ дословное уравнение);
+ * k∞, Fc — Fernandes et al. (2008), DOI 10.1039/b804553d; N —
+ * каноническая Troe/IUPAC-форма N(Fc) контракта 4.5.2;
  * подтверждённая область — пересечение диапазонов пределов [300, 400] K.
+ * Корректировка научной атрибуции (2026-11-09, та же ревизия 4.5.4.6):
+ * high-pressure limit — интерпретация/представление экспериментальных
+ * fall-off данных Fernandes et al. (M = N₂, 300–900 K, 1.5–950 bar)
+ * совместно с теоретическим моделированием (Troe, Ushakov (2008),
+ * J. Chem. Phys. 128, 204307, DOI 10.1063/1.2917201), а НЕ единоличное
+ * прямое измерение асимптотического предела; используемая форма k0 —
+ * округление (опорная 300 K, показатель −1.2; опубликованы (T/298)^-1.232
+ * у Michael et al. и (T/298)^-1.23 у Fernandes et al.); научные параметры
+ * применимы для M = N₂, thirdBodyNote «M = N₂» — только описательная
+ * метка: вычислитель 4.5.2 получает числовую [M] и НЕ проверяет химическую
+ * идентичность третьего тела, обязанность передавать концентрацию именно
+ * N₂ (не воздуха и не смеси) лежит на вызывающем коде; добавлены
+ * регрессионные тесты атрибуции k∞/k0 и ограничения по третьему телу.
  * Тесты обновлены с разделением по записям: unknown-инварианты четырёх
  * записей сохранены; тесты лицензионной безопасности допускают ключи
  * контракта 4.5.2 ТОЛЬКО в записи №106 (KIDA-ключи запрещены во всём
@@ -823,7 +838,7 @@ describe('Stage 4.5.4.6: N₂ fall-off параметризация записи
     expect(record106.reaction).toBe('H + O2 + N2 → O2H + N2');
   });
 
-  it('k0 = 4.3e-32·(T/300)^-1.2, [300, 900] K, cm6_per_molecule2_per_s (Michael et al. 2002)', () => {
+  it('k0 = 4.3e-32·(T/300)^-1.2 (округлённая каталожная форма по Michael et al. 2002), [300, 900] K, cm6_per_molecule2_per_s', () => {
     const k0 = fallOff106.lowPressureLimit;
     expect(k0.preExponentialA).toBe(4.3e-32);
     expect(k0.temperatureExponentN).toBe(-1.2);
@@ -834,7 +849,7 @@ describe('Stage 4.5.4.6: N₂ fall-off параметризация записи
     expect(k0.provenance.reference ?? '').toContain('10.1021/jp020229w');
   });
 
-  it('k∞ = 9.5e-11·(T/300)^+0.44 (положительный знак показателя), [200, 400] K, cm3_per_molecule_per_s (Fernandes et al. 2008)', () => {
+  it('k∞ = 9.5e-11·(T/300)^+0.44 (положительный знак показателя), [200, 400] K, cm3_per_molecule_per_s (интерпретация fall-off данных Fernandes et al. 2008)', () => {
     const kInf = fallOff106.highPressureLimit;
     expect(kInf.preExponentialA).toBe(9.5e-11);
     expect(kInf.temperatureExponentN).toBe(0.44);
@@ -920,6 +935,43 @@ describe('Stage 4.5.4.6: N₂ fall-off параметризация записи
     expect(serialized106.includes('10.48577/jpl.KFQ0TZ')).toBe(false);
     // IUPAC HOx2 (personal use only) не копируется
     expect(fallOff106.provenance.limitations ?? '').toContain('personal use only');
+  });
+
+  it('научная атрибуция k∞: интерпретация fall-off данных Fernandes et al. совместно с Troe, Ushakov (2008); изолированное прямое измерение асимптотического предела НЕ заявляется', () => {
+    const kInf = fallOff106.highPressureLimit;
+    expect(kInf.provenance.reference ?? '').toContain('10.1039/b804553d');
+    expect(kInf.provenance.reference ?? '').toContain('10.1063/1.2917201');
+    expect(kInf.provenance.sourceName ?? '').toContain('fall-off');
+    // прямое измерение асимптотического предела НЕ заявляется
+    expect(kInf.provenance.sourceName ?? '').not.toContain('прямое измерение high-pressure limit');
+    expect(kInf.provenance.limitations ?? '').toContain('интерпретация/представление');
+    expect(kInf.provenance.limitations ?? '').toContain('1.5–950 bar');
+    expect(kInf.provenance.limitations ?? '').toContain('10.1063/1.2917201');
+    expect(kInf.provenance.limitations ?? '').toContain('совместно обосновывают');
+    expect(kInf.provenance.limitations ?? '').toContain('НЕ заявляется');
+  });
+
+  it('используемая форма k0 — округление: опубликованные уравнения Michael/Fernandes с опорной 298 K зафиксированы, дословность НЕ заявляется', () => {
+    const k0 = fallOff106.lowPressureLimit;
+    expect(k0.provenance.limitations ?? '').toContain('округление');
+    expect(k0.provenance.applicability ?? '').toContain('НЕ дословное опубликованное уравнение');
+    expect(k0.provenance.applicability ?? '').toContain('(T/298)^-1.232');
+    expect(k0.provenance.applicability ?? '').toContain('(T/298)^-1.23');
+    expect(k0.preExponentialA).toBe(4.3e-32);
+    expect(k0.temperatureExponentN).toBe(-1.2);
+  });
+
+  it('ограничение по третьему телу в provenance №106: параметры применимы для M = N₂; thirdBodyNote — описательная метка; идентичность третьего тела вычислителем НЕ проверяется', () => {
+    const fo = fallOff106.provenance;
+    expect(fo.applicability ?? '').toContain('научные параметры применимы для третьего тела M = N₂');
+    expect(fo.limitations ?? '').toContain('только описательная метка');
+    expect(fo.limitations ?? '').toContain('НЕ проверяет химическую идентичность третьего тела');
+    expect(fo.limitations ?? '').toContain('именно N₂');
+    expect(fo.limitations ?? '').toContain('воздуха');
+    expect(fo.limitations ?? '').toContain('personal use only');
+    // контракт вычислителя НЕ расширялся: thirdBodyNote остаётся единственной N₂-меткой,
+    // runtime-проверки химической идентичности третьего тела НЕ появилось и НЕ утверждается
+    expect(fallOff106.thirdBodyNote).toBe('M = N₂');
   });
 
   it('другие третьи тела не появились: thirdBodyNote только у №106 и равен M = N₂', () => {
