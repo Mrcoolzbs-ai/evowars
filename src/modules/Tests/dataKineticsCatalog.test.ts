@@ -88,14 +88,18 @@
  * Ревизия Stage 4.5.4.7 (2026-11-09, реализация): запись №89
  * (O + NO + N₂ → NO₂ + N₂) — вторая запись каталога с реализованной
  * N₂-специфической fall-off параметризацией (контракт 4.5.2 без
- * изменений): k0 — ОЦЕНОЧНАЯ рекомендация по Whytock, Michael, Payne
+ * изменений): k0 — ОЦЕНОЧНАЯ N₂-effective рекомендация IUPAC NOx1
+ * (источник рекомендованной формы, а НЕ первичных измерений),
+ * основанная на совокупности измерений: Whytock, Michael, Payne
  * (1976), DOI 10.1016/0009-2614(76)80655-0 и Schieferstein et al.
  * (1983), DOI 10.1002/bbpc.19830870419 (НЕ построена только на
  * N₂-экспериментах, с относительными эффективностями третьих тел);
- * k∞ — рекомендованное температурное представление оценки по Hippler
- * et al. (1999), Part I, DOI 10.1039/A806520I (полный текст Part I
- * в этой сессии НЕ получен, таблицы НЕ читались; Part II — только
- * качественная поддержка); Fc = 0.85, N — каноническая Troe/IUPAC-форма
+ * k∞ — значение при 300 K по Hippler
+ * et al. (1999), Part I, DOI 10.1039/A806520I, а рекомендованное
+ * температурное представление параметра следует оценке IUPAC NOx1
+ * (полный текст Part I в этой сессии НЕ получен, таблицы НЕ читались,
+ * показатель −0.3 прочитанной таблице Hippler НЕ приписывается;
+ * Part II — только качественная поддержка); Fc = 0.85, N — каноническая Troe/IUPAC-форма
  * N(Fc) контракта 4.5.2; подтверждённая область — пересечение
  * диапазонов пределов [200, 300] K. Контрольная точка IUPAC NOx1
  * (1.5×10⁻¹²) формулой 4.5.2 НЕ воспроизводится (вычисление даёт
@@ -112,6 +116,21 @@
  * вычисленных значений и контрольной точки), fail-closed вне
  * [200, 300] K, provenance-тесты предупреждения о контрольной точке
  * и научной атрибуции k0/k∞; записи №1, №70, №72, №106 — без изменений.
+ *
+ * Корректировка научной атрибуции (2026-11-09, та же ревизия 4.5.4.7):
+ * IUPAC NOx1 явно обозначен в provenance источником оценочной
+ * рекомендованной формы параметров k0/k∞, а НЕ источником первичных
+ * экспериментальных измерений; в reference k0/k∞ добавлена минимальная
+ * библиографическая ссылка на официальный даташит NOx1
+ * (https://iupac-aeris.ipsl.fr/datasheets/pdf/NOx1.pdf; оценка
+ * датирована ноябрём 2017, preferred values последний раз изменены
+ * в июне 2012); ограничения доступа сохранены: ссылка и
+ * библиографическая атрибуция НЕ означают разрешения на распространение
+ * содержимого даташита, таблицы, текст, фрагменты PDF и числовая
+ * таблица NOx1 в репозиторий НЕ копируются, предупреждение
+ * personal use only сохранено, правовые выводы НЕ делаются;
+ * числовые параметры, единицы, диапазоны, статусы, fail-closed
+ * и записи №1/№70/№72/№106 не менялись.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -1211,29 +1230,85 @@ describe('Stage 4.5.4.7: N₂ fall-off параметризация записи
     expect(limitations).toContain('недоказанные гипотезы НЕ воспроизводятся');
   });
 
-  it('provenance k0: оценочная рекомендация, НЕ построена ТОЛЬКО на N₂-экспериментах; относительные эффективности; JPL C1 (воздух) не использована', () => {
+  it('provenance k0: оценочная N₂-effective рекомендация IUPAC NOx1 (источник рекомендованной формы, НЕ первичных измерений); совокупность измерений и относительных эффективностей; JPL C1 (воздух) не использована', () => {
     const k0 = fallOff89.lowPressureLimit;
     expect(k0.provenance.sourceName ?? '').toContain('Оценочная');
+    expect(k0.provenance.sourceName ?? '').toContain('IUPAC NOx1');
     expect(k0.provenance.limitations ?? '').toContain('ОЦЕНОЧНАЯ рекомендация');
+    expect(k0.provenance.limitations ?? '').toContain('N₂-effective рекомендация IUPAC NOx1');
+    expect(k0.provenance.limitations ?? '').toContain('совокупности измерений и относительных эффективностей');
+    expect(k0.provenance.limitations ?? '').toContain('источник рекомендованной формы, а НЕ первичных экспериментальных измерений');
     expect(k0.provenance.limitations ?? '').toContain('НЕ построена ТОЛЬКО на N₂-экспериментах');
+    expect(k0.provenance.limitations ?? '').toContain('дословным результатом только N₂-экспериментов');
     expect(k0.provenance.limitations ?? '').toContain('относительных эффективностей');
     expect(k0.provenance.limitations ?? '').toContain('ДЛЯ ВОЗДУХА');
     expect(k0.provenance.license ?? '').toContain('personal use only');
     expect(k0.provenance.reference ?? '').toContain('10.1016/0009-2614(76)80655-0');
     expect(k0.provenance.reference ?? '').toContain('10.1002/bbpc.19830870419');
+    // библиографическая ссылка на официальный даташит IUPAC NOx1 с датировкой
+    expect(k0.provenance.reference ?? '').toContain('https://iupac-aeris.ipsl.fr/datasheets/pdf/NOx1.pdf');
+    expect(k0.provenance.reference ?? '').toContain('ноябрём 2017');
+    expect(k0.provenance.reference ?? '').toContain('июне 2012');
   });
 
-  it('научная атрибуция k∞: рекомендованное температурное представление оценки по Hippler et al. (1999) Part I; полный текст НЕ получен; Part II — только качественная поддержка', () => {
+  it('научная атрибуция k∞: значение при 300 K — Hippler et al. (1999) Part I; температурное представление следует оценке IUPAC NOx1; полный текст НЕ получен; Part II — только качественная поддержка', () => {
     const kInf = fallOff89.highPressureLimit;
     expect(kInf.provenance.reference ?? '').toContain('O + NO + N₂');
     expect(kInf.provenance.reference ?? '').toContain('200–400 K, 2–200 bar N₂');
     expect(kInf.provenance.reference ?? '').toContain('5±1×10⁻¹¹');
     expect(kInf.provenance.reference ?? '').toContain('diffusion control');
     expect(kInf.provenance.reference ?? '').toContain('63–72');
+    expect(kInf.provenance.reference ?? '').toContain('10.1039/A806520I');
+    // значение при 300 K опирается на Hippler Part I; представление — по оценке IUPAC NOx1
+    expect(kInf.provenance.reference ?? '').toContain('значение k∞ при 300 K опирается на Hippler et al. (1999) Part I');
+    expect(kInf.provenance.reference ?? '').toContain('рекомендованное температурное представление параметра следует оценке IUPAC NOx1');
+    expect(kInf.provenance.reference ?? '').toContain('https://iupac-aeris.ipsl.fr/datasheets/pdf/NOx1.pdf');
+    expect(kInf.provenance.reference ?? '').toContain('ноябрём 2017');
+    expect(kInf.provenance.reference ?? '').toContain('июне 2012');
     expect(kInf.provenance.limitations ?? '').toContain('рекомендованное температурное представление оценки');
+    expect(kInf.provenance.limitations ?? '').toContain('следующее оценке IUPAC NOx1');
+    // точный показатель −0.3 НЕ приписывается непосредственно прочитанной таблице Hippler
+    expect(kInf.provenance.limitations ?? '').toContain('НЕ приписывается непосредственно прочитанной таблице Hippler');
     expect(kInf.provenance.limitations ?? '').toContain('полный текст Part I в этой сессии НЕ получен');
     expect(kInf.provenance.limitations ?? '').toContain('только КАЧЕСТВЕННАЯ');
     expect(kInf.provenance.limitations ?? '').toContain('НЕ выдаётся за экспериментальные измерения');
+  });
+
+  it('права на даташит IUPAC NOx1: ссылка НЕ означает разрешения на распространение; таблицы, текст и фрагменты PDF НЕ копируются; personal use only сохранён', () => {
+    const k0 = fallOff89.lowPressureLimit;
+    const kInf = fallOff89.highPressureLimit;
+    for (const provenance of [k0.provenance, kInf.provenance]) {
+      expect(provenance.license ?? '').toContain('personal use only');
+      expect(provenance.license ?? '').toContain('НЕ означает разрешения на распространение его содержимого');
+      expect(provenance.license ?? '').toContain('правовые выводы о разрешении НЕ делаются');
+      expect(provenance.license ?? '').toContain('таблицы, текст, фрагменты PDF и числовая таблица NOx1 в репозиторий НЕ копируются');
+    }
+    // полный даташит NOx1 не получался, его таблицы не читались — зафиксировано в limitations
+    expect(k0.provenance.limitations ?? '').toContain('полный даташит IUPAC NOx1 НЕ получен, его таблицы НЕ читались');
+    expect(kInf.provenance.limitations ?? '').toContain('полный даташит IUPAC NOx1 НЕ получен, его таблицы НЕ читались');
+  });
+
+  it('числовые параметры №89 не изменились после корректировки атрибуции: k0, k∞, Fc, N, единицы и диапазоны — те же', () => {
+    const k0 = fallOff89.lowPressureLimit;
+    const kInf = fallOff89.highPressureLimit;
+    expect(k0.preExponentialA).toBe(1.0e-31);
+    expect(k0.temperatureExponentN).toBe(-1.6);
+    expect(k0.unit).toBe('cm6_per_molecule2_per_s');
+    expect(k0.temperatureRangeK).toEqual({ min: 200, max: 300 });
+    expect(kInf.preExponentialA).toBe(5.0e-11);
+    expect(kInf.temperatureExponentN).toBe(-0.3);
+    expect(kInf.unit).toBe('cm3_per_molecule_per_s');
+    expect(kInf.temperatureRangeK).toEqual({ min: 200, max: 400 });
+    expect(fallOff89.centeringFactorFc).toBe(0.85);
+    expect(fallOff89.broadeningN).toBe(0.8396379643428482);
+    expect(fallOff89.thirdBodyNote).toBe('M = N₂');
+    const rate = record89.rateConstant;
+    if (rate.status !== 'known') {
+      throw new Error('запись №89 должна иметь known-константу');
+    }
+    if (rate.parameters.kind !== 'fall_off') {
+      throw new Error('запись №89 должна быть fall_off');
+    }
   });
 
   it('ограничение по третьему телу в provenance №89: параметры применимы для M = N₂; thirdBodyNote — описательная метка; идентичность третьего тела вычислителем НЕ проверяется', () => {
@@ -1282,3 +1357,4 @@ describe('Stage 4.5.4.7: N₂ fall-off параметризация записи
     expect(fallOff106.thirdBodyNote).toBe('M = N₂');
   });
 });
+
