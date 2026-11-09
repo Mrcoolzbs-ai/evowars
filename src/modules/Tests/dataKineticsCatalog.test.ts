@@ -1218,7 +1218,7 @@ describe('Stage 4.5.4.7: N₂ fall-off параметризация записи
     expect(k0.provenance.limitations ?? '').toContain('НЕ построена ТОЛЬКО на N₂-экспериментах');
     expect(k0.provenance.limitations ?? '').toContain('относительных эффективностей');
     expect(k0.provenance.limitations ?? '').toContain('ДЛЯ ВОЗДУХА');
-    expect(k0.provenance.limitations ?? '').toContain('personal use only');
+    expect(k0.provenance.license ?? '').toContain('personal use only');
     expect(k0.provenance.reference ?? '').toContain('10.1016/0009-2614(76)80655-0');
     expect(k0.provenance.reference ?? '').toContain('10.1002/bbpc.19830870419');
   });
