@@ -375,21 +375,25 @@ function segmentAuditProblems(
       if (typeof rc.value !== 'number' || !Number.isFinite(rc.value) || rc.value <= 0) {
         problems.push(entryLabel + '.rateConstant.value: ожидается конечная положительная фактически вычисленная константа');
       }
-      if (typeof rc.unit !== 'string' || !(RATE_CONSTANT_UNITS as readonly string[]).includes(rc.unit)) {
+      const unitIsRegistered = typeof rc.unit === 'string' && (RATE_CONSTANT_UNITS as readonly string[]).includes(rc.unit);
+      if (!unitIsRegistered) {
         problems.push(entryLabel + '.rateConstant.unit: единица должна быть из кинетического реестра, получено: ' + String(rc.unit));
-      } else if (
+      }
+      // Строгая размерность (проверяется независимо от реестра): общая
+      // принадлежность реестру единиц недостаточна — единица обязана
+      // соответствовать фактическому механизму (№89/№106,
+      // molecule_cm3) и его эффективной размерности. Реестр единиц не
+      // сужается, вычислитель не вызывается: сверяется сохранённый
+      // факт, а не расчёт.
+      if (
+        typeof rc.unit === 'string' &&
         auditRecord.concentrationModel === 'molecule_cm3' &&
         typeof reaction.reactionId === 'string' &&
         (MECHANISM_REACTION_IDS as readonly string[]).includes(reaction.reactionId) &&
         rc.unit !== MECHANISM_RATE_CONSTANT_UNIT
       ) {
-        // Строгая размерность: общая принадлежность реестру единиц
-        // недостаточна — единица обязана соответствовать фактическому
-        // механизму (№89/№106, molecule_cm3) и его эффективной
-        // размерности. Реестр единиц не сужается, вычислитель не
-        // вызывается: сверяется сохранённый факт, а не расчёт.
         problems.push(
-          entryLabel + '.rateConstant.unit: фактическая единица константы механизма №89/№106 при модели концентраций molecule_cm3 обязана быть ' + MECHANISM_RATE_CONSTANT_UNIT + ', получено: ' + rc.unit + ' (зарегистрированная, но физически несовместимая с этим механизмом размерность не принимается)'
+          entryLabel + '.rateConstant.unit: фактическая единица константы механизма №89/№106 при модели концентраций molecule_cm3 обязана быть ' + MECHANISM_RATE_CONSTANT_UNIT + ', получено: ' + rc.unit + ' (несовместимая с этим механизмом размерность не принимается)'
         );
       }
     }
