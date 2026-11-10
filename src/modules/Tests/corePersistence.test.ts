@@ -1775,8 +1775,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     const md = exportWorldToMarkdown(worldWithExperiment('w-md', experiment));
     expect(md).toContain('Кинетический эксперимент №89/№106 (этап 4.5.5)');
     // явный дисклеймер: это НЕ рассчитанная эволюция атмосферы
-    expect(md).toContain('НЕ');
-    expect(md).toContain('эволюции атмосферы планеты');
+    expect(md).toContain('НЕ рассчитанная эволюция атмосферы планеты');
     // толщина, время, запуски, инвентарь
     expect(md).toContain('Толщина реакционного слоя:');
     expect(md).toContain('Накопленное физическое время:');
