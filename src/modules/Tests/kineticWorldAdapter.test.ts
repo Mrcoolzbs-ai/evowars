@@ -573,3 +573,147 @@ describe('Stage 4.5.5 world adapter: валидатор состояния эк�
     expect(problems.some((p) => p.includes('schemaVersion'))).toBe(true);
   });
 });
+
+// ============================================
+// 6. СТРОГИЕ ИНВАРИАНТЫ ЦЕЛОСТНОСТИ (пакетное усиление валидатора)
+// ============================================
+
+describe('Stage 4.5.5 world adapter: строгие инварианты целостности состояния', () => {
+  /**
+   * Валидное начальное состояние: пустая история, нулевое накопленное
+   * время, явно заданный первоначальный инвентарь (синтетические
+   * тестовые величины).
+   */
+  function freshExperimentState(): KineticExperimentState {
+    return {
+      schemaVersion: KINETIC_EXPERIMENT_SCHEMA_VERSION,
+      layerThicknessM: THICKNESS_M,
+      currentInventoriesMolM2: { ...INITIAL_INVENTORY },
+      elapsedSeconds: 0,
+      completedRuns: 0,
+      history: []
+    };
+  }
+
+  it('валидное начальное состояние с нулевым временем и пустой историей принимается', () => {
+    expect(kineticExperimentStateProblems(freshExperimentState())).toEqual([]);
+  });
+
+  it('пустая история с положительным elapsedSeconds отклоняется', () => {
+    const broken = freshExperimentState();
+    broken.elapsedSeconds = 50;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('пустой истории'))).toBe(true);
+  });
+
+  it('пустая история с ненулевым completedRuns отклоняется', () => {
+    const broken = freshExperimentState();
+    broken.completedRuns = 1;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('completedRuns'))).toBe(true);
+  });
+
+  it('dtSeconds = 100 при интервале сегмента 50 с отклоняется', () => {
+    const broken = validExperimentState();
+    broken.history[0].segments[0].endTimeSeconds = 50;
+    broken.history[0].endElapsedSeconds = 50;
+    broken.elapsedSeconds = 50;
+    const problems = kineticExperimentStateProblems(broken);
+    // конец сегмента обязан в точности равняться 0 + 100
+    expect(problems.some((p) => p.includes('в точности равняться началу плюс длительности'))).toBe(true);
+    expect(problems.some((p) => p.includes('100'))).toBe(true);
+  });
+
+  it('конец сегмента не совпадает с суммой начала и длительности: отклоняется', () => {
+    const broken = validExperimentState();
+    broken.history[0].segments.push({
+      index: 1,
+      temperatureK: 350,
+      dtSeconds: 50,
+      reactionIds: [R106],
+      startTimeSeconds: 100,
+      endTimeSeconds: 200
+    });
+    broken.history[0].endElapsedSeconds = 200;
+    broken.elapsedSeconds = 200;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('segments[1].endTimeSeconds'))).toBe(true);
+    expect(problems.some((p) => p.includes('в точности равняться началу плюс длительности'))).toBe(true);
+  });
+
+  it('индекс сегмента обязан соответствовать позиции в расписании', () => {
+    const broken = validExperimentState();
+    broken.history[0].segments[0].index = 7;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('segments[0].index'))).toBe(true);
+  });
+
+  it('пустой список сегментов успешного запуска отклоняется', () => {
+    const broken = validExperimentState();
+    broken.history[0].segments = [];
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('пустого массива сегментов'))).toBe(true);
+  });
+
+  it('переполнение накопления времени сегментов обнаруживается', () => {
+    const broken = validExperimentState();
+    broken.history[0].segments.push({
+      index: 1,
+      temperatureK: 350,
+      dtSeconds: Number.MAX_VALUE,
+      reactionIds: [R106],
+      startTimeSeconds: 100,
+      endTimeSeconds: 100
+    });
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('переполняет Number'))).toBe(true);
+  });
+
+  it('начальный инвентарь второго запуска обязан совпадать с конечным инвентарём первого', () => {
+    const first = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    const second = runWorldKineticTrajectory(first, { segments: SINGLE_SEGMENT });
+    // глубокая копия: повреждение НЕ должно просачиваться через общие ссылки
+    const state2 = JSON.parse(JSON.stringify(second.kineticExperiment)) as KineticExperimentState;
+    // до повреждения состояние строго валидно
+    expect(kineticExperimentStateProblems(state2)).toEqual([]);
+    state2.history[1].startInventoriesMolM2.O = 999;
+    const problems = kineticExperimentStateProblems(state2);
+    expect(problems.some((p) => p.includes('history[1].startInventoriesMolM2.O'))).toBe(true);
+    expect(problems.some((p) => p.includes('конечным запасом предыдущего запуска'))).toBe(true);
+  });
+
+  it('текущий инвентарь обязан совпадать с конечным инвентарём последнего запуска', () => {
+    const broken = validExperimentState();
+    broken.currentInventoriesMolM2.H = 5;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('currentInventoriesMolM2.H'))).toBe(true);
+    expect(problems.some((p) => p.includes('последнего завершённого запуска'))).toBe(true);
+  });
+
+  it('корректная многосегментная история и корректное продолжение принимаются', () => {
+    const first = runWorldKineticTrajectory(makeWorld(), {
+      segments: TWO_SEGMENTS,
+      setup: setupInput()
+    });
+    expect(kineticExperimentStateProblems(first.kineticExperiment)).toEqual([]);
+    const second = runWorldKineticTrajectory(first, { segments: TWO_SEGMENTS });
+    const state2 = second.kineticExperiment!;
+    expect(kineticExperimentStateProblems(state2)).toEqual([]);
+    expect(state2.history.length).toBe(2);
+    expect(state2.history[1].startElapsedSeconds).toBe(150);
+    expect(state2.elapsedSeconds).toBe(300);
+  });
+
+  it('продолжение из валидного состояния с пустой историей выполняется и даёт строго валидное состояние', () => {
+    const world = makeWorld({ kineticExperiment: freshExperimentState() });
+    const after = runWorldKineticTrajectory(world, { segments: SINGLE_SEGMENT });
+    const state = after.kineticExperiment!;
+    expect(state.completedRuns).toBe(1);
+    expect(state.elapsedSeconds).toBe(100);
+    expect(state.history[0].startElapsedSeconds).toBe(0);
+    expect(kineticExperimentStateProblems(state)).toEqual([]);
+  });
+});

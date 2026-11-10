@@ -1790,4 +1790,67 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     const mdWithout = exportWorldToMarkdown({ ...makeGeneratedWorld('w-plain') } as unknown as SavedWorld);
     expect(mdWithout).not.toContain('Кинетический эксперимент №89/№106');
   });
+
+  // --- Пакетное усиление целостности: повреждённые состояния строгих
+  // инвариантов отклоняются всеми путями загрузки ---
+
+  /** Повреждённый вариант строгого инварианта: имя, способ повреждения, маркер диагностики. */
+  const integrityViolations: Array<{
+    name: string;
+    damage: (state: KineticExperimentState) => void;
+    marker: string;
+  }> = [
+    {
+      name: 'пустая история с положительным накопленным временем',
+      damage: (state) => {
+        state.history = [];
+        state.completedRuns = 0;
+        state.elapsedSeconds = 100;
+      },
+      marker: 'пустой истории'
+    },
+    {
+      name: 'интервал сегмента не совпадает с dtSeconds',
+      damage: (state) => {
+        state.history[0].segments[0].endTimeSeconds = 50;
+        state.history[0].endElapsedSeconds = 50;
+        state.elapsedSeconds = 50;
+      },
+      marker: 'в точности равняться началу плюс длительности'
+    },
+    {
+      name: 'текущий инвентарь не совпадает с конечным инвентарём последнего запуска',
+      damage: (state) => {
+        state.currentInventoriesMolM2.H = 5;
+      },
+      marker: 'последнего завершённого запуска'
+    }
+  ];
+
+  for (const violation of integrityViolations) {
+    it('повреждённое состояние (' + violation.name + ') отклоняется при импорте и загрузке, raw нетронут, соседний мир грузится', () => {
+      const damaged = validKineticExperiment();
+      violation.damage(damaged);
+
+      // JSON-импорт отклоняет с понятной причиной
+      const json = JSON.stringify(worldWithExperiment('w-integrity', damaged));
+      const imported = importWorldFromJSONDetailed(json);
+      expect(imported.world).toBeNull();
+      expect(imported.reason).toContain('kineticExperiment');
+      expect(imported.reason).toContain(violation.marker);
+
+      // localStorage: повреждённый мир не загружается как валидный,
+      // соседний корректный мир загружается без помех
+      const neighbor = { ...rawEntry('w-ok', '1.4'), atmosphere: { totalPressure: null } };
+      writeRawEntries([worldWithExperiment('w-broken-integrity', damaged), neighbor]);
+      expect(getAllWorlds().map((w) => w.id)).toEqual(['w-ok']);
+
+      // raw-запись повреждённого мира осталась в хранилище без изменений
+      const raw = readRawEntries();
+      expect(raw.length).toBe(2);
+      const still = raw[0] as { id?: string; kineticExperiment?: KineticExperimentState };
+      expect(still.id).toBe('w-broken-integrity');
+      expect(still.kineticExperiment).toEqual(damaged);
+    });
+  }
 });

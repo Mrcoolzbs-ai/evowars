@@ -136,6 +136,19 @@ function inventoryProblems(inventory: unknown, label: string): string[] {
  * состояние НЕ «чинится» молча и не подменяется пустым — проблемы
  * возвращаются диагностикой. undefined — отсутствие эксперимента,
  * не ошибка; явный null — некорректная форма.
+ *
+ * Пакетное усиление целостности (этап 4.5.5): строгие инварианты
+ * согласованности. Пустая история обязана иметь нулевое
+ * накопленное время и нулевой счётчик запусков; индекс сегмента
+ * обязан соответствовать позиции; конец каждого сегмента обязан
+ * в точности совпадать с результатом той же операции накопления,
+ * которая используется при построении расписания (expectedEnd =
+ * expectedStart + dtSeconds, без допусков), с явным обнаружением
+ * переполнения; успешный запуск обязан иметь непустой список
+ * сегментов; начальный инвентарь запуска N равен конечному
+ * инвентарю запуска N−1 по всем семи видам; текущий инвентарь
+ * равен конечному инвентарю последнего завершённого запуска.
+ * Никаких автоисправлений, нормализации и подстановок нулей.
  */
 export function kineticExperimentStateProblems(state: unknown): string[] {
   if (state === undefined) {
@@ -176,6 +189,14 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
   ) {
     problems.push('history: длина истории (' + record.history.length + ') не совпадает с completedRuns (' + record.completedRuns + ')');
   }
+  if (record.history.length === 0) {
+    // Пустая история: ни одного успешного запуска не завершено,
+    // поэтому накопленное физическое время обязано быть ровно нулём
+    // (никаких скрытых секунд без записей запусков).
+    if (typeof record.elapsedSeconds === 'number' && Number.isFinite(record.elapsedSeconds) && record.elapsedSeconds !== 0) {
+      problems.push('elapsedSeconds: при пустой истории накопленное физическое время обязано быть 0, получено: ' + record.elapsedSeconds);
+    }
+  }
   record.history.forEach((run, index) => {
     const label = 'history[' + index + ']';
     if (typeof run !== 'object' || run === null || Array.isArray(run)) {
@@ -203,6 +224,10 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
     }
     if (!Array.isArray(runRecord.segments)) {
       problems.push(label + '.segments: ожидается массив записей сегментов расписания');
+    } else if (runRecord.segments.length === 0) {
+      // Успешный запуск обязан содержать хотя бы один сегмент:
+      // пустая запись не изображает выполненную работу.
+      problems.push(label + '.segments: у записи успешного запуска не может быть пустого массива сегментов');
     } else {
       let expectedStart = 0;
       runRecord.segments.forEach((segment, segmentIndex) => {
@@ -212,6 +237,9 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
           return;
         }
         const seg = segment as Record<string, unknown>;
+        if (seg.index !== segmentIndex) {
+          problems.push(segLabel + '.index: ожидался ' + segmentIndex + ' (позиция сегмента в расписании запуска)');
+        }
         if (typeof seg.temperatureK !== 'number' || !Number.isFinite(seg.temperatureK) || seg.temperatureK <= 0) {
           problems.push(segLabel + '.temperatureK: ожидается конечная строго положительная температура, K');
         }
@@ -230,9 +258,23 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
         } else if (seg.startTimeSeconds !== expectedStart) {
           problems.push(segLabel + '.startTimeSeconds: ожидалось ' + expectedStart + ' (цепочка сегментов запуска нарушена)');
         }
-        if (typeof seg.endTimeSeconds !== 'number' || !Number.isFinite(seg.endTimeSeconds)) {
+        // Точный временной контракт сегмента: конец обязан в точности
+        // совпадать с результатом той же операции накопления, которая
+        // используется при построении расписания траектории:
+        // expectedEnd = expectedStart + dtSeconds (без допусков).
+        if (typeof seg.dtSeconds === 'number' && Number.isFinite(seg.dtSeconds)) {
+          const expectedEnd = expectedStart + seg.dtSeconds;
+          if (!Number.isFinite(expectedEnd)) {
+            problems.push(segLabel + ': накопление времени сегмента переполняет Number (начало ' + expectedStart + ' с + длительность ' + seg.dtSeconds + ' с)');
+          } else if (typeof seg.endTimeSeconds !== 'number' || !Number.isFinite(seg.endTimeSeconds)) {
+            problems.push(segLabel + '.endTimeSeconds: ожидается конечное время конца сегмента, с');
+          } else if (seg.endTimeSeconds !== expectedEnd) {
+            problems.push(segLabel + '.endTimeSeconds: конец сегмента обязан в точности равняться началу плюс длительности: ожидалось ' + expectedEnd + ', получено: ' + seg.endTimeSeconds);
+          }
+        } else if (typeof seg.endTimeSeconds !== 'number' || !Number.isFinite(seg.endTimeSeconds)) {
           problems.push(segLabel + '.endTimeSeconds: ожидается конечное время конца сегмента, с');
-        } else {
+        }
+        if (typeof seg.endTimeSeconds === 'number' && Number.isFinite(seg.endTimeSeconds)) {
           expectedStart = seg.endTimeSeconds;
         }
       });
@@ -248,12 +290,18 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
           if (
             typeof lastEnd === 'number' && Number.isFinite(lastEnd) &&
             typeof runStart === 'number' && Number.isFinite(runStart) &&
-            typeof runEnd === 'number' && Number.isFinite(runEnd) &&
-            runEnd !== runStart + lastEnd
+            typeof runEnd === 'number' && Number.isFinite(runEnd)
           ) {
-            problems.push(
-              label + ': конечное накопленное время запуска не совпадает с концом его последнего сегмента (цепочка времени нарушена)'
-            );
+            const expectedRunEnd = runStart + lastEnd;
+            if (!Number.isFinite(expectedRunEnd)) {
+              problems.push(
+                label + ': конечное накопленное время запуска переполняет Number (начало ' + runStart + ' с + конец последнего сегмента ' + lastEnd + ' с)'
+              );
+            } else if (runEnd !== expectedRunEnd) {
+              problems.push(
+                label + ': конечное накопленное время запуска не совпадает с концом его последнего сегмента (цепочка времени нарушена)'
+              );
+            }
           }
         }
       }
@@ -283,6 +331,58 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
     });
     if (typeof record.elapsedSeconds === 'number' && Number.isFinite(record.elapsedSeconds) && expectedElapsed !== record.elapsedSeconds) {
       problems.push('elapsedSeconds (' + record.elapsedSeconds + ') не совпадает с конечным накопленным временем последнего запуска (' + expectedElapsed + ')');
+    }
+  }
+  // Цепочка инвентарей: начальный инвентарь запуска N равен конечному
+  // инвентарю запуска N−1 по всем семи видам (точное равенство, без
+  // допусков); текущий инвентарь равен конечному инвентарю последнего
+  // завершённого запуска. Никаких автоисправлений: расхождения
+  // возвращаются диагностикой. Состоянию с пустой историей текущий
+  // инвентарь остаётся явно заданным первоначальным инвентарём.
+  const history = record.history;
+  const asInventory = (value: unknown): Record<string, unknown> | null => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return null;
+    }
+    return value as Record<string, unknown>;
+  };
+  history.forEach((run, index) => {
+    if (index === 0 || typeof run !== 'object' || run === null || Array.isArray(run)) {
+      return;
+    }
+    const previous = history[index - 1];
+    if (typeof previous !== 'object' || previous === null || Array.isArray(previous)) {
+      return;
+    }
+    const startInv = asInventory((run as Record<string, unknown>).startInventoriesMolM2);
+    const previousEndInv = asInventory((previous as Record<string, unknown>).endInventoriesMolM2);
+    if (startInv === null || previousEndInv === null) {
+      return; // форма инвентарей уже диагностирована выше
+    }
+    for (const species of KINETIC_EXPERIMENT_SPECIES) {
+      if (startInv[species] !== previousEndInv[species]) {
+        problems.push(
+          'history[' + index + '].startInventoriesMolM2.' + species +
+          ': начальный запас не совпадает с конечным запасом предыдущего запуска (ожидалось: ' + previousEndInv[species] + ', получено: ' + startInv[species] + ')'
+        );
+      }
+    }
+  });
+  if (history.length > 0) {
+    const lastRun = history[history.length - 1];
+    if (typeof lastRun === 'object' && lastRun !== null && !Array.isArray(lastRun)) {
+      const lastEndInv = asInventory((lastRun as Record<string, unknown>).endInventoriesMolM2);
+      const currentInv = asInventory(record.currentInventoriesMolM2);
+      if (lastEndInv !== null && currentInv !== null) {
+        for (const species of KINETIC_EXPERIMENT_SPECIES) {
+          if (currentInv[species] !== lastEndInv[species]) {
+            problems.push(
+              'currentInventoriesMolM2.' + species +
+              ': текущий запас не совпадает с конечным запасом последнего завершённого запуска (ожидалось: ' + lastEndInv[species] + ', получено: ' + currentInv[species] + ')'
+            );
+          }
+        }
+      }
     }
   }
   return problems;
