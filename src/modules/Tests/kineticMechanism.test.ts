@@ -458,7 +458,13 @@ describe('элементные инварианты и неотрицатель�
     const built = buildConcentrationKineticProblem(input89(250));
     expect(built.problem.nonNegativeIndices).toEqual([0, 1, 2]);
     expect(built.problem.linearInvariants).toHaveLength(2);
-    const [invN, invO] = built.problem.linearInvariants;
+    // linearInvariants в OdeSolverProblem — optional-поле: перед
+    // деструктуризацией обязательна явная проверка (TS2488 в CI на 4ce3b976).
+    const invariants = built.problem.linearInvariants;
+    if (invariants === undefined) {
+      throw new Error('линейные инварианты не заданы в собранной задаче');
+    }
+    const [invN, invO] = invariants;
     expect(invN.coefficients).toEqual([0, 1, 1]);
     expect(invN.expected).toBe(5e11 + 2e10);
     expect(invO.coefficients).toEqual([1, 1, 2]);
