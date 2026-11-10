@@ -46,6 +46,18 @@ import { runConcentrationKineticStep } from './kineticMechanism';
 
 export * from './kineticMechanism';
 
+// Stage 4.5.5 (второй реализационный срез, 2026-11-10): физически явный
+// реакционный слой (компартмент) поверх концентрационного механизма —
+// stateless-адаптер runKineticCompartmentStep между ЯВНЫМ столбовым
+// инвентарём (моль/м²) и ЯВНО заданной толщиной однородного слоя (м);
+// толщина слоя НЕ выводится из параметров мира, N₂ передаётся явно.
+// К состоянию мира (GeneratedWorld/ChemicalEvolutionState/
+// runChemicalEvolutionStep) НЕ подключён; режим A и заглушка runKineticStep
+// НЕ меняются.
+import { runKineticCompartmentStep } from './kineticCompartment';
+
+export * from './kineticCompartment';
+
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
 // ============================================
@@ -692,5 +704,6 @@ export default {
   elementTotalsOf,
   substanceTotalsOf,
   runChemicalEvolutionStep,
-  runConcentrationKineticStep
+  runConcentrationKineticStep,
+  runKineticCompartmentStep
 };

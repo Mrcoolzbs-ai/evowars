@@ -603,3 +603,104 @@ describe('диагностика результата', () => {
     expect(result.dtSeconds).toBe(DT_FIXTURE_S);
   });
 });
+
+// --------------------------------------------
+// 13. Компонентная трассируемость параметров fall-off
+// --------------------------------------------
+
+describe('компонентная трассируемость параметров fall-off', () => {
+  it('№89: provenance k0, k∞ и параметров уширения совпадают с полями записи каталога', () => {
+    const catalog = buildKineticsCatalog();
+    const record = catalog.get(ID89);
+    if (record === null || record.rateConstant.status !== 'known') {
+      throw new Error('запись №89 недоступна или не known');
+    }
+    const params = record.rateConstant.parameters;
+    if (params.kind !== 'fall_off') {
+      throw new Error('запись №89 не является fall-off');
+    }
+    const applied = runConcentrationKineticStep(input89(250)).reactions[0];
+    // Источники берутся непосредственно из полей записи каталога:
+    expect(applied.parameterProvenance.lowPressureLimit).toBe(params.fallOff.lowPressureLimit.provenance);
+    expect(applied.parameterProvenance.highPressureLimit).toBe(params.fallOff.highPressureLimit.provenance);
+    expect(applied.parameterProvenance.broadening).toBe(params.fallOff.provenance);
+  });
+
+  it('№106: provenance k0, k∞ и параметров уширения совпадают с полями записи каталога', () => {
+    const catalog = buildKineticsCatalog();
+    const record = catalog.get(ID106);
+    if (record === null || record.rateConstant.status !== 'known') {
+      throw new Error('запись №106 недоступна или не known');
+    }
+    const params = record.rateConstant.parameters;
+    if (params.kind !== 'fall_off') {
+      throw new Error('запись №106 не является fall-off');
+    }
+    const applied = runConcentrationKineticStep(input106(350)).reactions[0];
+    expect(applied.parameterProvenance.lowPressureLimit).toBe(params.fallOff.lowPressureLimit.provenance);
+    expect(applied.parameterProvenance.highPressureLimit).toBe(params.fallOff.highPressureLimit.provenance);
+    expect(applied.parameterProvenance.broadening).toBe(params.fallOff.provenance);
+  });
+
+  it('существующее поле provenance (из RateEvaluation) не ломается: для fall-off оно совпадает с broadening', () => {
+    const applied = runConcentrationKineticStep(input89(250)).reactions[0];
+    // Контракт 4.5.2 для fall-off возвращает provenance параметров
+    // уширения: поле provenance сводки сохраняется и остаётся
+    // согласованным с компонентой broadening; k0/k∞ прослеживаются
+    // независимо (НЕ из RateEvaluation.provenance).
+    expect(applied.provenance).toBe(applied.parameterProvenance.broadening);
+    expect(applied.fallOff.lowPressureLimit).toBeGreaterThan(0);
+    expect(applied.fallOff.highPressureLimit).toBeGreaterThan(0);
+  });
+});
+
+// --------------------------------------------
+// 14. Независимая аналитическая проверка второго порядка (№89)
+// --------------------------------------------
+
+describe('независимая аналитическая проверка второго порядка (№89)', () => {
+  it('численное решение совпадает с точным решением dA/dt = −k_eff·A²', () => {
+    // СИНТЕТИЧЕСКИЕ концентрации: это проверка МАТЕМАТИКИ численного
+    // интегрирования, а НЕ утверждение о составе какой-либо
+    // планетарной атмосферы.
+    const T = 250;
+    const A0 = 1e12; // [O]₀ = [NO]₀ = A₀
+    const NO2_0 = 2e10;
+    const dt = 0.1;
+    const catalog = buildKineticsCatalog();
+    const record = catalog.get(ID89);
+    if (record === null) {
+      throw new Error('запись №89 отсутствует в каталоге');
+    }
+    // k_eff — НЕЗАВИСИМЫЙ прямой вызов существующего вычислителя 4.5.2
+    // (не значение из результата интегратора); при постоянных T и [N₂]
+    // эффективная константа постоянна в течение шага.
+    const kEff = evaluateRateConstant(record, quantity(T, 'K'), {
+      thirdBodyConcentration: N2_FIXTURE
+    }).value;
+    expect(kEff).toBeGreaterThan(0);
+
+    const result = runConcentrationKineticStep({
+      temperatureK: T,
+      dtSeconds: dt,
+      reactionIds: [ID89],
+      concentrations: { O: A0, NO: A0, NO2: NO2_0, N2: N2_FIXTURE }
+    });
+
+    // Точное решение: A(t) = A₀/(1 + k_eff·A₀·t);
+    // [NO₂](t) = [NO₂]₀ + A₀ − A(t).
+    const analyticA = A0 / (1 + kEff * A0 * dt);
+    const analyticNO2 = NO2_0 + A0 - analyticA;
+    // Эталон осмыслен и НЕ подменён численным результатом:
+    expect(analyticA).toBeGreaterThan(0);
+    expect(analyticA).toBeLessThan(A0);
+    expect(analyticNO2).toBeGreaterThan(NO2_0);
+
+    // Допуск согласован с допуском интегратора (rtol = 1e-6, метод
+    // порядка 5): относительное расхождение — порядок нескольких
+    // rtol; заявленный запас — 1e-4.
+    expect(Math.abs(result.concentrations.O - analyticA) / analyticA).toBeLessThan(1e-4);
+    expect(Math.abs(result.concentrations.NO - analyticA) / analyticA).toBeLessThan(1e-4);
+    expect(Math.abs(result.concentrations.NO2 - analyticNO2) / analyticNO2).toBeLessThan(1e-4);
+  });
+});

@@ -54,6 +54,7 @@ import type { KineticsCatalog } from '../Data/kineticsCatalog';
 import { quantity } from '../Core/physicalQuantity';
 import { solveOdeWithRadauIia, OdeSolverError } from '../Core/odeSolver';
 import type { OdeSolverProblem, OdeSolverResult, OdeSolverStats, LinearInvariant } from '../Core/solverBackend';
+import type { DataProvenance } from '../Core/scientificValue';
 
 /** Результат вычислителя k(T) (контракт 4.5.2), без дублирования его полей. */
 type RateEvaluation = ReturnType<typeof evaluateRateConstant>;
@@ -297,6 +298,22 @@ export interface ConcentrationKineticStepInput {
   readonly concentrations: Readonly<Record<string, number>>;
 }
 
+/**
+ * Компонентная трассируемость параметров fall-off: provenance каждого
+ * компонента берётся НЕПОСРЕДСТВЕННО из полей записи каталога
+ * (lowPressureLimit/highPressureLimit/параметры уширения), а НЕ из
+ * единого provenance вычислителя 4.5.2. Существующее поле provenance
+ * сводки и контракт RateEvaluation НЕ меняются.
+ */
+export interface FallOffParameterProvenance {
+  /** Provenance каталожного k0 (параметры низкоплотностного предела). */
+  readonly lowPressureLimit: DataProvenance;
+  /** Provenance каталожного k∞ (параметры высокоплотностного предела). */
+  readonly highPressureLimit: DataProvenance;
+  /** Provenance параметров уширения fall-off (Fc, N; поле fallOff.provenance записи каталога). */
+  readonly broadening: DataProvenance;
+}
+
 /** Применённая запись: вычисленная константа и provenance (БЕЗ дублирования параметров). */
 export interface AppliedReactionSummary {
   readonly reactionId: string;
@@ -306,6 +323,8 @@ export interface AppliedReactionSummary {
   /** Диапазон применимости, фактически применённый вычислителем 4.5.2. */
   readonly appliedRangeK: RateAppliedRangeK;
   readonly provenance: RateProvenance;
+  /** Компонентная трассируемость параметров fall-off (непосредственно из полей записи каталога). */
+  readonly parameterProvenance: FallOffParameterProvenance;
   readonly fallOff: RateFallOff;
 }
 
@@ -501,6 +520,19 @@ export function buildConcentrationKineticProblem(
         { reactionId: def.reactionId }
       );
     }
+    // Компонентная трассируемость: параметры записи обязаны быть
+    // fall-off (механизм — третий-тельный, N₂); provenance компонентов
+    // (k0, k∞, уширение) берётся непосредственно из полей записи
+    // каталога, а НЕ из единого provenance вычислителя 4.5.2.
+    const parameters = record.rateConstant.parameters;
+    if (parameters.kind !== 'fall_off') {
+      throw new KineticMechanismError(
+        'invalid_input',
+        'запись ' + def.reactionId + ': контракт механизма требует fall-off параметризацию (третье тело N₂), получена параметризация ' + parameters.kind,
+        { reactionId: def.reactionId }
+      );
+    }
+    const fallOffParameters = parameters.fallOff;
     let evaluation: RateEvaluation;
     try {
       evaluation = evaluateRateConstant(record, temperature, { thirdBodyConcentration: thirdBodyN2 });
@@ -560,6 +592,11 @@ export function buildConcentrationKineticProblem(
       rateConstant: { value: evaluation.value, unit: evaluation.unit },
       appliedRangeK: evaluation.appliedRangeK,
       provenance,
+      parameterProvenance: {
+        lowPressureLimit: fallOffParameters.lowPressureLimit.provenance,
+        highPressureLimit: fallOffParameters.highPressureLimit.provenance,
+        broadening: fallOffParameters.provenance
+      },
       fallOff
     });
     rates.push(evaluation.value);
