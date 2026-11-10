@@ -58,6 +58,20 @@ import { runKineticCompartmentStep } from './kineticCompartment';
 
 export * from './kineticCompartment';
 
+// Stage 4.5.5 (третий реализационный срез, 2026-11-10): последовательная
+// кинетическая траектория одного компартмента — stateless API
+// runKineticCompartmentTrajectory поверх существующего
+// runKineticCompartmentStep: явное расписание сегментов (своя температура/
+// dt/реакции каждого сегмента), общая постоянная толщина слоя, строгая
+// последовательная передача инвентаря между сегментами, накопление
+// физического времени и атомарный отказ всей траектории с диагностикой
+// (segmentIndex, elapsedSecondsBeforeSegment). К состоянию мира НЕ
+// подключён; режим A, Radau IIA и каталог НЕ меняются; конвертеры слоя
+// укреплены (переполнение/underflow запрещены).
+import { runKineticCompartmentTrajectory } from './kineticTrajectory';
+
+export * from './kineticTrajectory';
+
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
 // ============================================
@@ -705,5 +719,6 @@ export default {
   substanceTotalsOf,
   runChemicalEvolutionStep,
   runConcentrationKineticStep,
-  runKineticCompartmentStep
+  runKineticCompartmentStep,
+  runKineticCompartmentTrajectory
 };

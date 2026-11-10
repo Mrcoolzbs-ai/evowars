@@ -37,3 +37,6 @@ export * from './kineticMechanism.test';
 
 // --- Физически явный реакционный слой поверх механизма №89/№106 (Stage 4.5.5, второй срез) ---
 export * from './kineticCompartment.test';
+
+// --- Последовательная кинетическая траектория компартмента (Stage 4.5.5, третий срез) ---
+export * from './kineticTrajectory.test';

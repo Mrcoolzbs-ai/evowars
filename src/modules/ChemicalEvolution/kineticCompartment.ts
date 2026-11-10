@@ -110,6 +110,9 @@ function requireFiniteNonNegative(name: string, value: number): void {
  * Чистая функция: толщина обязана быть конечной строго положительной;
  * запас — конечным неотрицательным числом (отрицательный столбовый
  * запас физически не интерпретируется, а не «переворачивается»).
+ * Переполнение (неконечный результат арифметики) и underflow строго
+ * положительного входа в ноль — отказ invalid_input (третий срез 4.5.5);
+ * явный ноль входа остаётся допустимым (0 → 0).
  */
 export function columnInventoryMolM2ToConcentrationMoleculeCm3(
   inventoryMolM2: number,
@@ -117,7 +120,36 @@ export function columnInventoryMolM2ToConcentrationMoleculeCm3(
 ): number {
   requireFiniteNonNegative('столбовый запас, моль/м²', inventoryMolM2);
   requireFinitePositive('layerThicknessM', layerThicknessM);
-  return (inventoryMolM2 * AVOGADRO_NUMBER_PER_MOL) / (layerThicknessM * 1e6);
+  const concentration = (inventoryMolM2 * AVOGADRO_NUMBER_PER_MOL) / (layerThicknessM * 1e6);
+  if (!Number.isFinite(concentration)) {
+    // Переполнение double: результат арифметики не конечен — молчаливый
+    // Infinity НЕ возвращается.
+    throw new KineticMechanismError(
+      'invalid_input',
+      'переполнение преобразования столбового запаса в концентрацию: результат не конечен; вход ' +
+        String(inventoryMolM2) + ' моль/м², толщина слоя ' + String(layerThicknessM) + ' м',
+      {
+        operation: 'column_to_concentration',
+        inventoryMolM2: String(inventoryMolM2),
+        layerThicknessM: String(layerThicknessM)
+      }
+    );
+  }
+  if (inventoryMolM2 > 0 && concentration === 0) {
+    // Underflow: строго положительный вход округлился в ноль — молчаливая
+    // потеря вещества НЕ допускается (явный ноль входа остаётся допустимым).
+    throw new KineticMechanismError(
+      'invalid_input',
+      'underflow преобразования столбового запаса в концентрацию: строго положительный вход даёт ноль; вход ' +
+        String(inventoryMolM2) + ' моль/м², толщина слоя ' + String(layerThicknessM) + ' м',
+      {
+        operation: 'column_to_concentration',
+        inventoryMolM2: String(inventoryMolM2),
+        layerThicknessM: String(layerThicknessM)
+      }
+    );
+  }
+  return concentration;
 }
 
 /**
@@ -125,6 +157,9 @@ export function columnInventoryMolM2ToConcentrationMoleculeCm3(
  * слоя толщиной layerThicknessM:
  *   C = [X]·L·10⁶/N_A.
  * Чистая функция, обратная к columnInventoryMolM2ToConcentrationMoleculeCm3.
+ * Переполнение (неконечный результат арифметики) и underflow строго
+ * положительного входа в ноль — отказ invalid_input (третий срез 4.5.5);
+ * явный ноль входа остаётся допустимым (0 → 0).
  */
 export function concentrationMoleculeCm3ToColumnInventoryMolM2(
   concentrationMoleculeCm3: number,
@@ -132,7 +167,36 @@ export function concentrationMoleculeCm3ToColumnInventoryMolM2(
 ): number {
   requireFiniteNonNegative('концентрация, molecule/cm³', concentrationMoleculeCm3);
   requireFinitePositive('layerThicknessM', layerThicknessM);
-  return (concentrationMoleculeCm3 * layerThicknessM * 1e6) / AVOGADRO_NUMBER_PER_MOL;
+  const inventory = (concentrationMoleculeCm3 * layerThicknessM * 1e6) / AVOGADRO_NUMBER_PER_MOL;
+  if (!Number.isFinite(inventory)) {
+    // Переполнение double: результат арифметики не конечен — молчаливый
+    // Infinity НЕ возвращается.
+    throw new KineticMechanismError(
+      'invalid_input',
+      'переполнение преобразования концентрации в столбовый запас: результат не конечен; вход ' +
+        String(concentrationMoleculeCm3) + ' molecule/cm³, толщина слоя ' + String(layerThicknessM) + ' м',
+      {
+        operation: 'concentration_to_column',
+        concentrationMoleculeCm3: String(concentrationMoleculeCm3),
+        layerThicknessM: String(layerThicknessM)
+      }
+    );
+  }
+  if (concentrationMoleculeCm3 > 0 && inventory === 0) {
+    // Underflow: строго положительный вход округлился в ноль — молчаливая
+    // потеря вещества НЕ допускается (явный ноль входа остаётся допустимым).
+    throw new KineticMechanismError(
+      'invalid_input',
+      'underflow преобразования концентрации в столбовый запас: строго положительный вход даёт ноль; вход ' +
+        String(concentrationMoleculeCm3) + ' molecule/cm³, толщина слоя ' + String(layerThicknessM) + ' м',
+      {
+        operation: 'concentration_to_column',
+        concentrationMoleculeCm3: String(concentrationMoleculeCm3),
+        layerThicknessM: String(layerThicknessM)
+      }
+    );
+  }
+  return inventory;
 }
 
 // ============================================

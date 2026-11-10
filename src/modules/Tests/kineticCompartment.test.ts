@@ -473,3 +473,77 @@ describe('диагностика результата слоя', () => {
     expect(applied.parameterProvenance.broadening).toBe(params.fallOff.provenance);
   });
 });
+
+// --------------------------------------------
+// 7. Устойчивость преобразований: переполнение и underflow (третий срез)
+// --------------------------------------------
+//
+// Величины в проверках переполнения/underflow — СИНТЕТИЧЕСКИЕ
+// граничные значения арифметики double: это проверка МАТЕМАТИКИ
+// конвертеров, а НЕ утверждение о физических столбовых запасах.
+
+describe('устойчивые конвертеры: переполнение и underflow запрещены', () => {
+  it('прямое преобразование отвергает переполнение результата (Infinity)', () => {
+    // 1e300 моль/м² · N_A ≈ 6e323 — за пределами double → Infinity.
+    const error = mechanismError(() =>
+      columnInventoryMolM2ToConcentrationMoleculeCm3(1e300, 1)
+    );
+    expect(error.code).toBe('invalid_input');
+    expect(error.message).toContain('переполнение');
+  });
+
+  it('прямое преобразование отвергает underflow строго положительного входа в ноль', () => {
+    // Number.MIN_VALUE · N_A / (1e20 · 1e6) ≈ 3e-326 — ниже минимального
+    // субнормального числа double, округляется в ноль.
+    const error = mechanismError(() =>
+      columnInventoryMolM2ToConcentrationMoleculeCm3(Number.MIN_VALUE, 1e20)
+    );
+    expect(error.code).toBe('invalid_input');
+    expect(error.message).toContain('underflow');
+  });
+
+  it('обратное преобразование отвергает переполнение результата (Infinity)', () => {
+    // 1e300 molecule/cm³ · 1e10 м · 1e6 = 1e316 — за пределами double.
+    const error = mechanismError(() =>
+      concentrationMoleculeCm3ToColumnInventoryMolM2(1e300, 1e10)
+    );
+    expect(error.code).toBe('invalid_input');
+    expect(error.message).toContain('переполнение');
+  });
+
+  it('обратное преобразование отвергает underflow строго положительного входа в ноль', () => {
+    // Number.MIN_VALUE · 1e6 / N_A ≈ 8e-342 — округляется в ноль.
+    const error = mechanismError(() =>
+      concentrationMoleculeCm3ToColumnInventoryMolM2(Number.MIN_VALUE, 1)
+    );
+    expect(error.code).toBe('invalid_input');
+    expect(error.message).toContain('underflow');
+  });
+
+  it('явный ноль остаётся допустимым в обоих направлениях (0 → 0 без отказа)', () => {
+    expect(columnInventoryMolM2ToConcentrationMoleculeCm3(0, LAYER_M)).toBe(0);
+    expect(concentrationMoleculeCm3ToColumnInventoryMolM2(0, LAYER_M)).toBe(0);
+  });
+
+  it('чрезмерная толщина слоя: положительный запас не может молча обратиться в ноль', () => {
+    // L = 1e305 м: L·10⁶ переполняет double (Infinity), 6e20/Infinity → 0.
+    const error = mechanismError(() =>
+      columnInventoryMolM2ToConcentrationMoleculeCm3(1e-3, 1e305)
+    );
+    expect(error.code).toBe('invalid_input');
+    expect(error.message).toContain('underflow');
+  });
+
+  it('шаг компартмента атомарно отказывает при переполнении преобразования запаса', () => {
+    const input = {
+      temperatureK: T89_K,
+      dtSeconds: DT_FIXTURE_S,
+      layerThicknessM: LAYER_M,
+      reactionIds: [ID89],
+      columnInventoriesMolM2: { O: 1e300, NO: 5e-6, NO2: 2e-7, N2: N2_COLUMN_MOL_M2 }
+    };
+    const snapshot = JSON.stringify(input);
+    expect(mechanismError(() => runKineticCompartmentStep(input)).code).toBe('invalid_input');
+    expect(JSON.stringify(input)).toBe(snapshot);
+  });
+});
