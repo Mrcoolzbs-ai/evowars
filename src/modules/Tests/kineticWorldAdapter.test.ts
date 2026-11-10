@@ -657,14 +657,20 @@ describe('Stage 4.5.5 world adapter: строгие инварианты цел�
 
   it('переполнение накопления времени сегментов обнаруживается', () => {
     const broken = validExperimentState();
+    // сегмент 0 корректен: 0 + MAX_VALUE = MAX_VALUE (конечно);
+    // сегмент 1: MAX_VALUE + MAX_VALUE переполняет Number
+    broken.history[0].segments[0].dtSeconds = Number.MAX_VALUE;
+    broken.history[0].segments[0].endTimeSeconds = Number.MAX_VALUE;
     broken.history[0].segments.push({
       index: 1,
       temperatureK: 350,
       dtSeconds: Number.MAX_VALUE,
       reactionIds: [R106],
-      startTimeSeconds: 100,
-      endTimeSeconds: 100
+      startTimeSeconds: Number.MAX_VALUE,
+      endTimeSeconds: Number.MAX_VALUE
     });
+    broken.history[0].endElapsedSeconds = Number.MAX_VALUE;
+    broken.elapsedSeconds = Number.MAX_VALUE;
     const problems = kineticExperimentStateProblems(broken);
     expect(problems.some((p) => p.includes('переполняет Number'))).toBe(true);
   });
