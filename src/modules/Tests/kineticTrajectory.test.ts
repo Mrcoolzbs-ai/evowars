@@ -7,8 +7,10 @@
 // положительность, реакции, индекс сегмента в диагностике);
 // одно- и многосегментные траектории; СТРОГО последовательная
 // передача конечного инвентаря сегмента в начальный инвентарь
-// следующего; накопление времени и конечность суммы dtSeconds
-// расписания; атомарный отказ всей траектории
+// следующего; накопление времени, конечность суммы dtSeconds
+// расписания и заранее рассчитанные времена начала/конца
+// сегментов (точные значения, стыки сегментов, итоговая сумма);
+// атомарный отказ всей траектории
 // с segmentIndex и elapsedSecondsBeforeSegment; неизменность N₂
 // на всей траектории; сохранение запасов невыбранных реакций;
 // отсутствие мутации входа; диагностика результата (предпосылки,
@@ -318,23 +320,44 @@ describe('многосегментная траектория с последо�
     expect(result.finalInventoriesMolM2).toEqual(step3.updatedColumnInventoriesMolM2);
   });
 
-  it('время накапливается: totalTimeSeconds — сумма dtSeconds, времена начала/конца последовательны', () => {
+  it('время накапливается: точные начала/окончания сегментов, стыки сегментов и totalTimeSeconds', () => {
     const result = runKineticCompartmentTrajectory(trajectoryInput(SEGMENTS));
     expect(result.totalTimeSeconds).toBeCloseTo(0.4, 12);
     // totalTimeSeconds гарантированно конечен: конечность суммы
     // проверяется валидацией расписания заранее.
     expect(Number.isFinite(result.totalTimeSeconds)).toBe(true);
+    // Точные значения начал и окончаний всех трёх сегментов.
     expect(result.segments[0].startTimeSeconds).toBe(0);
     expect(result.segments[0].endTimeSeconds).toBeCloseTo(0.1, 12);
     expect(result.segments[1].startTimeSeconds).toBeCloseTo(0.1, 12);
     expect(result.segments[1].endTimeSeconds).toBeCloseTo(0.3, 12);
     expect(result.segments[2].startTimeSeconds).toBeCloseTo(0.3, 12);
     expect(result.segments[2].endTimeSeconds).toBeCloseTo(0.4, 12);
+    // Времена начала и конца заранее рассчитаны валидацией и
+    // переиспользуются без пересчёта: окончание каждого сегмента
+    // РОВНО совпадает с началом следующего (строгое равенство
+    // значений double, а не приближение).
+    for (let index = 0; index + 1 < result.segments.length; index += 1) {
+      expect(result.segments[index].endTimeSeconds).toBe(
+        result.segments[index + 1].startTimeSeconds
+      );
+    }
+    // Окончание последнего сегмента РОВНО совпадает с totalTimeSeconds.
+    expect(result.segments[result.segments.length - 1].endTimeSeconds).toBe(
+      result.totalTimeSeconds
+    );
 
+    // Двоично-представимая пара 0.25 + 1.75 = 2: все времена равны
+    // ожидаемым значениям строго, без toBeCloseTo.
     const uneven = runKineticCompartmentTrajectory(
       trajectoryInput([segment(250, 0.25, [ID89]), segment(350, 1.75, [ID106])])
     );
+    expect(uneven.segments[0].startTimeSeconds).toBe(0);
+    expect(uneven.segments[0].endTimeSeconds).toBe(0.25);
+    expect(uneven.segments[1].startTimeSeconds).toBe(0.25);
+    expect(uneven.segments[1].endTimeSeconds).toBe(2);
     expect(uneven.totalTimeSeconds).toBe(2);
+    expect(uneven.totalTimeSeconds).toBe(uneven.segments[1].endTimeSeconds);
   });
 
   it('обновляемые виды собираются в порядке первого появления по сегментам', () => {

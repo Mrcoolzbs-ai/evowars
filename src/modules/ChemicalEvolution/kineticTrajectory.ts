@@ -203,10 +203,11 @@ export function runKineticCompartmentTrajectory(
   // сегмента: атомарность начинается с валидного расписания.
   // Включая конечность СУММЫ dtSeconds: каждый отдельный dtSeconds
   // конечен, но накопленная сумма может переполнить Number. Времена
-  // начала сегментов вычисляются здесь же и переиспользуются в
-  // цикле исполнения без пересчёта.
+  // начала И конца каждого сегмента вычисляются здесь же заранее
+  // (конец — именно nextElapsed, уже прошедший Number.isFinite) и
+  // переиспользуются в цикле исполнения без пересчёта.
   let scheduledElapsed = 0;
-  const startTimes: number[] = [];
+  const scheduledTimes: Array<{ startTimeSeconds: number; endTimeSeconds: number }> = [];
   for (let index = 0; index < schedule.length; index += 1) {
     const segment = schedule[index];
     if (segment === null || typeof segment !== 'object') {
@@ -270,7 +271,7 @@ export function runKineticCompartmentTrajectory(
         }
       );
     }
-    startTimes.push(scheduledElapsed);
+    scheduledTimes.push({ startTimeSeconds: scheduledElapsed, endTimeSeconds: nextElapsed });
     scheduledElapsed = nextElapsed;
   }
 
@@ -284,7 +285,7 @@ export function runKineticCompartmentTrajectory(
 
   for (let index = 0; index < schedule.length; index += 1) {
     const segment = schedule[index];
-    const startTimeSeconds = startTimes[index];
+    const { startTimeSeconds, endTimeSeconds } = scheduledTimes[index];
     let step: KineticCompartmentStepResult;
     try {
       step = runKineticCompartmentStep({
@@ -322,7 +323,7 @@ export function runKineticCompartmentTrajectory(
     steps.push({
       index,
       startTimeSeconds,
-      endTimeSeconds: startTimeSeconds + segment.dtSeconds,
+      endTimeSeconds,
       temperatureK: segment.temperatureK,
       dtSeconds: segment.dtSeconds,
       reactionIds: [...segment.reactionIds],
