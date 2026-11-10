@@ -5,13 +5,15 @@
 import type {
   GeneratedWorld,
   KineticExperimentInventoryMolM2,
+  KineticExperimentSegmentRecord,
   SavedWorld,
   GenerationSettings,
   Seed
 } from '../../types';
+import type { DataProvenance } from '../Core/scientificValue';
 
 // Миграции сохранений ведутся реестром научного ядра
-// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 → 1.3 → 1.4 → 1.5
+// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6
 // детерминирована, «нет поля» остаётся «неизвестно», provenance
 // не теряется.
 import {
@@ -60,7 +62,19 @@ const SETTINGS_KEY = 'evowars_settings';
  *   состояния проверяется при загрузке и импорте (некорректное
  *   значение получает диагностику и не возвращается как
  *   валидный мир), raw-запись повреждённого сохранения не
- *   удаляется и не «лечится».
+ *   удаляется и не «лечится»;
+ * - 1.6 (этап 4.5.5, срез кинетической трассируемости) — подъём
+ *   версии схемы состояния kineticExperiment 1.0.0 → 1.1.0: каждый
+ *   прежний сегмент истории получает явный маркер недоступного
+ *   снимка unavailable_legacy (снимок фактических параметров в
+ *   момент старого расчёта не записывался; численные значения
+ *   задним числом не восстанавливаются), инвентари/время/
+ *   расписание/предупреждения/предпосылки не пересчитываются;
+ *   сегменты новых запусков схемы 1.1.0 обязаны содержать снимок
+ *   recorded (фактический результат вычислителя: константа,
+ *   единица, диапазон, provenance, fall-off-диагностика,
+ *   концентрация N₂) и проверяются валидатором при загрузке и
+ *   импорте; отсутствующий эксперимент остаётся отсутствующим.
  */
 export const STORAGE_FORMAT_VERSION: string = CURRENT_SAVE_SCHEMA_VERSION;
 
@@ -558,6 +572,116 @@ function kineticReactionLabel(reactionId: string): string {
 }
 
 /**
+ * Человекочитаемая единица константы скорости (срез кинетической
+ * трассируемости 4.5.5): идентификаторы кинетического реестра
+ * показываются физической записью; единицы НЕ преобразуются,
+ * незнакомый идентификатор показывается как есть.
+ */
+function kineticRateConstantUnitLabel(unit: string): string {
+  switch (unit) {
+    case 'per_s':
+      return 's⁻¹';
+    case 'cm3_per_molecule_per_s':
+      return 'cm³ molecule⁻¹ s⁻¹';
+    case 'cm6_per_molecule2_per_s':
+      return 'cm⁶ molecule⁻² s⁻¹';
+    case 'm3_per_mol_per_s':
+      return 'm³ mol⁻¹ s⁻¹';
+    case 'm6_per_mol2_per_s':
+      return 'm⁶ mol⁻² s⁻¹';
+    default:
+      return unit;
+  }
+}
+
+/**
+ * Источник параметров provenance одной строкой (срез трассируемости
+ * 4.5.5): первый непустой идентификатор из sourceName/sourceId/
+ * datasetId/reference; значения НЕ подменяются, отсутствие
+ * показывается честно.
+ */
+function kineticProvenanceSourceLine(provenance: DataProvenance): string {
+  const parts: string[] = [];
+  const source =
+    provenance.sourceName ??
+    provenance.sourceId ??
+    provenance.datasetId ??
+    provenance.reference ??
+    'источник не идентифицирован';
+  parts.push(String(source));
+  if (provenance.datasetVersion) {
+    parts.push('версия данных: ' + provenance.datasetVersion);
+  }
+  if (provenance.reference) {
+    parts.push('ссылка: ' + provenance.reference);
+  }
+  return parts.join('; ');
+}
+
+/**
+ * Блок Markdown аудита фактического расчёта одного сегмента
+ * (срез кинетической трассируемости 4.5.5). recorded показывает
+ * фактические константы, единицы, диапазоны, fall-off-диагностику,
+ * provenance и концентрацию N₂ вычислителя; unavailable_legacy
+ * честно обозначает отсутствие исторического снимка без
+ * реконструкции; отсутствующий audit (сегменты старой схемы
+ * 1.0.0, экспорт as-is) обозначается явно.
+ */
+function formatKineticSegmentAuditMarkdown(segment: KineticExperimentSegmentRecord): string[] {
+  const lines: string[] = [];
+  lines.push(`#### Сегмент №${segment.index + 1}: аудит фактического расчёта`);
+  const audit = segment.audit;
+  if (audit === undefined) {
+    lines.push(
+      '- **Статус снимка:** отсутствует: сегмент выполнен до введения снимков аудита ' +
+      '(схема состояния 1.0.0); фактические параметры старого расчёта не записывались ' +
+      'и задним числом не восстанавливаются'
+    );
+    return lines;
+  }
+  if (audit.kind === 'unavailable_legacy') {
+    lines.push('- **Статус снимка:** исторический снимок отсутствует: ' + audit.reason);
+    return lines;
+  }
+  lines.push('- **Статус снимка:** recorded (фактический результат вычислителя)');
+  lines.push(`- **Модель концентраций:** ${audit.concentrationModel}`);
+  lines.push(`- **Фактическая концентрация третьего тела N₂:** ${formatKineticExperimentAmount(audit.thirdBodyN2MoleculeCm3)} molecule/cm³`);
+  if (audit.integration) {
+    lines.push(
+      `- **Интегратор:** ${audit.integration.method} ` +
+      `(малых отрицательных компонент: ${audit.integration.minorNegativeCount}, ` +
+      `проверок инвариантов: ${audit.integration.invariantChecks})`
+    );
+  }
+  for (const reaction of audit.reactions) {
+    lines.push('');
+    lines.push(`- **${kineticReactionLabel(reaction.reactionId)}** (${reaction.label}); статус данных: ${reaction.dataStatus}`);
+    lines.push(
+      `  - эффективная константа k = ${formatKineticExperimentAmount(reaction.rateConstant.value)} ` +
+      `${kineticRateConstantUnitLabel(reaction.rateConstant.unit)} (точная единица: ${reaction.rateConstant.unit})`
+    );
+    lines.push(
+      `  - применённый диапазон применимости: ${formatKineticExperimentAmount(reaction.appliedRangeK.min)}…` +
+      `${formatKineticExperimentAmount(reaction.appliedRangeK.max)} K (температура сегмента: ${segment.temperatureK} K)`
+    );
+    lines.push(
+      `  - fall-off: k₀ = ${formatKineticExperimentAmount(reaction.fallOff.lowPressureLimit)}, ` +
+      `k∞ = ${formatKineticExperimentAmount(reaction.fallOff.highPressureLimit)}, ` +
+      `Pr = ${formatKineticExperimentAmount(reaction.fallOff.reducedPressure)}, ` +
+      `log10(Pr) = ${formatKineticExperimentAmount(reaction.fallOff.log10ReducedPressure)}, ` +
+      `F = ${formatKineticExperimentAmount(reaction.fallOff.broadeningFactor)}`
+    );
+    lines.push(`  - источник параметров: ${kineticProvenanceSourceLine(reaction.provenance)}`);
+    lines.push(
+      `  - компонентный provenance: k₀ — ${kineticProvenanceSourceLine(reaction.parameterProvenance.lowPressureLimit)}; ` +
+      `k∞ — ${kineticProvenanceSourceLine(reaction.parameterProvenance.highPressureLimit)}; ` +
+      `уширение — ${kineticProvenanceSourceLine(reaction.parameterProvenance.broadening)}`
+    );
+  }
+  return lines;
+}
+
+/**
  * Инвентарь эксперимента одной строкой в фиксированном порядке
  * видов механизма: «O: …; NO: …; NO2: …; H: …; O2: …; HO2: …; N2: …».
  */
@@ -813,7 +937,14 @@ export function exportWorldToMarkdown(world: SavedWorld): string {
           `${formatKineticExperimentAmount(segment.endTimeSeconds)} |`
         );
       }
+      // Срез кинетической трассируемости: аудит фактического расчёта
+      // каждого сегмента (recorded — фактический снимок вычислителя;
+      // unavailable_legacy — честное отсутствие исторического снимка).
       lines.push('');
+      for (const segment of run.segments) {
+        lines.push(...formatKineticSegmentAuditMarkdown(segment));
+        lines.push('');
+      }
       if (run.warnings.length > 0) {
         lines.push(`- **Предупреждения:** ${run.warnings.join('; ')}`);
       } else {

@@ -10,7 +10,7 @@
 // Файл содержит только типы — без runtime-значений.
 
 // Stage 4.2.2: типизированная температура фазового скрининга.
-import type { ScientificValue } from '../modules/Core/scientificValue';
+import type { DataProvenance, ScientificValue } from '../modules/Core/scientificValue';
 
 // ============================================
 // 1. СИСТЕМА НАУЧНОЙ ДОСТОВЕРНОСТИ
@@ -537,6 +537,77 @@ export type KineticExperimentInventoryMolM2 = {
  * расписание (температура, длительность, реакции) и проверенные
  * границы времени сегмента относительно старта этого запуска, с.
  */
+/**
+ * Снимок аудита одной фактически применённой реакции сегмента
+ * (срез кинетической трассируемости этапа 4.5.5). Каждое поле
+ * копируется из фактического результата вычислителя сегмента
+ * (AppliedReactionSummary шага концентрационного механизма):
+ * значения НЕ пересчитываются и НЕ реконструируются по каталогу
+ * после завершения расчёта.
+ */
+export interface KineticExperimentReactionAudit {
+  /** Идентификатор записи каталога (№89/№106), в порядке расписания сегмента. */
+  reactionId: string;
+  /** Человекочитаемая метка из фактического результата. */
+  label: string;
+  /** Статус данных фактически применённой параметризации (known | estimated). */
+  dataStatus: 'known' | 'estimated';
+  /** Фактически вычисленная эффективная константа скорости и её точная единица. */
+  rateConstant: { value: number; unit: string };
+  /** Диапазон применимости, фактически применённый вычислителем, K. */
+  appliedRangeK: { min: number; max: number };
+  /** Provenance применённой параметризации (из фактического результата). */
+  provenance: DataProvenance;
+  /** Компонентный provenance параметров fall-off (k0, k∞, уширение). */
+  parameterProvenance: {
+    lowPressureLimit: DataProvenance;
+    highPressureLimit: DataProvenance;
+    broadening: DataProvenance;
+  };
+  /** Фактическая диагностика fall-off вычисления. */
+  fallOff: {
+    lowPressureLimit: number;
+    highPressureLimit: number;
+    reducedPressure: number;
+    log10ReducedPressure: number;
+    broadeningFactor: number;
+  };
+}
+
+/**
+ * Снимок кинетической трассируемости сегмента истории. Явный
+ * дискриминатор kind:
+ * - 'recorded' — сегмент выполнен с сохранением аудита: фактические
+ *   оценки констант, provenance и fall-off-диагностика каждого
+ *   применённого результата, модель концентраций и концентрация
+ *   третьего тела N₂ из того же результата;
+ * - 'unavailable_legacy' — сегмент создан до появления снимков
+ *   (схема состояния 1.0.0): исторический снимок не записывался,
+ *   численные значения задним числом НЕ восстанавливаются и НЕ
+ *   выдумываются; хранится только явный статус и причина.
+ */
+export type KineticExperimentSegmentAudit =
+  | {
+      kind: 'recorded';
+      /** Модель концентраций фактического результата (контракт механизма: molecule_cm3). */
+      concentrationModel: string;
+      /** Фактическая концентрация третьего тела N₂, molecule/cm³. */
+      thirdBodyN2MoleculeCm3: number;
+      /** Аудиозаписи реакций: порядок и идентификаторы обязаны точно соответствовать reactionIds сегмента. */
+      reactions: KineticExperimentReactionAudit[];
+      /** Диагностика интегратора фактического результата (если результат её содержит). */
+      integration?: {
+        method: string;
+        minorNegativeCount: number;
+        invariantChecks: number;
+      };
+    }
+  | {
+      kind: 'unavailable_legacy';
+      /** Явная причина отсутствия исторического снимка. */
+      reason: string;
+    };
+
 export interface KineticExperimentSegmentRecord {
   index: number;
   temperatureK: number;
@@ -544,6 +615,15 @@ export interface KineticExperimentSegmentRecord {
   reactionIds: string[];
   startTimeSeconds: number;
   endTimeSeconds: number;
+  /**
+   * Снимок кинетической трассируемости сегмента (схема состояния
+   * 1.1.0): 'recorded' у новых запусков (фактический результат
+   * вычислителя), 'unavailable_legacy' у сегментов, созданных до
+   * введения снимков (миграция сохранений 1.5 → 1.6). Обязателен
+   * для сегментов схемы 1.1.0; отсутствует только у сегментов
+   * старой схемы 1.0.0.
+   */
+  audit?: KineticExperimentSegmentAudit;
 }
 
 /**

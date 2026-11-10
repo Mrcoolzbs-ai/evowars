@@ -835,3 +835,32 @@ button.danger:hover {
     align-items: stretch;
   }
 }
+
+/* Stage 4.5.5, срез кинетической трассируемости: аудит фактического
+   расчёта сегмента (снимки recorded / честное unavailable_legacy). */
+.kinetic-audit {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+.kinetic-audit h5 {
+  margin: 0 0 8px;
+  color: #b388ff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.kinetic-audit-note {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 6px 0;
+}
+
+.kinetic-audit-table {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}

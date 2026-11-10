@@ -8,7 +8,7 @@ import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, get
 import { createShortDescription } from './modules/WorldModel';
 import { getAllPresets } from './modules/Atmosphere';
 import { runChemicalEvolutionStep, runWorldKineticTrajectory, resetWorldKineticExperiment } from './modules/ChemicalEvolution';
-import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence } from './types';
+import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit } from './types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
 
 import './App.css';
@@ -265,6 +265,93 @@ function formatKineticAmount(value: number): string {
   return value.toExponential(4);
 }
 
+/**
+ * Источник provenance для блока аудита (срез трассируемости 4.5.5):
+ * первый непустой идентификатор, без подстановки фиктивных значений.
+ */
+function kineticProvenanceSource(p: {
+  sourceName?: string;
+  sourceId?: string;
+  datasetId?: string;
+  reference?: string;
+  datasetVersion?: string;
+}): string {
+  const source = p.sourceName ?? p.sourceId ?? p.datasetId ?? p.reference ?? 'источник не идентифицирован';
+  return p.datasetVersion ? `${source} (версия данных: ${p.datasetVersion})` : source;
+}
+
+/**
+ * Аудит фактического расчёта одного сегмента (срез кинетической
+ * трассируемости 4.5.5). recorded показывает фактическую константу,
+ * единицу, диапазон, fall-off-диагностику, provenance и концентрацию
+ * N₂ из результата вычислителя; unavailable_legacy честно обозначает
+ * отсутствие исторического снимка; сегмент старой схемы 1.0.0 без
+ * audit обозначается явно. Реконструкция старых значений не
+ * выполняется.
+ */
+function KineticSegmentAuditView({ audit }: { audit: KineticExperimentSegmentAudit | undefined }) {
+  if (audit === undefined) {
+    return (
+      <p className="kinetic-audit-note">
+        Исторический снимок аудита отсутствует: сегмент выполнен до введения снимков аудита
+        (схема состояния 1.0.0); фактические параметры старого расчёта не записывались и задним
+        числом не восстанавливаются.
+      </p>
+    );
+  }
+  if (audit.kind === 'unavailable_legacy') {
+    return <p className="kinetic-audit-note">Исторический снимок аудита отсутствует: {audit.reason}</p>;
+  }
+  return (
+    <div>
+      <p className="kinetic-audit-note">
+        Модель концентраций: {audit.concentrationModel}; концентрация третьего тела N₂:{' '}
+        {formatKineticAmount(audit.thirdBodyN2MoleculeCm3)} molecule/cm³
+        {audit.integration &&
+          `; интегратор: ${audit.integration.method} (малых отрицательных компонент: ${audit.integration.minorNegativeCount}, проверок инвариантов: ${audit.integration.invariantChecks})`}
+      </p>
+      <table className="atmosphere-table kinetic-audit-table">
+        <thead>
+          <tr>
+            <th>Реакция</th>
+            <th>k (фактически)</th>
+            <th>Диапазон, K</th>
+            <th>fall-off</th>
+            <th>Источник и provenance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {audit.reactions.map((reaction) => (
+            <tr key={reaction.reactionId}>
+              <td>{reaction.label}</td>
+              <td>
+                {formatKineticAmount(reaction.rateConstant.value)} {reaction.rateConstant.unit} (статус
+                данных: {reaction.dataStatus})
+              </td>
+              <td>
+                [{reaction.appliedRangeK.min}, {reaction.appliedRangeK.max}]
+              </td>
+              <td>
+                k₀ = {formatKineticAmount(reaction.fallOff.lowPressureLimit)}; k∞ ={' '}
+                {formatKineticAmount(reaction.fallOff.highPressureLimit)}; Pr ={' '}
+                {formatKineticAmount(reaction.fallOff.reducedPressure)}; log10(Pr) ={' '}
+                {formatKineticAmount(reaction.fallOff.log10ReducedPressure)}; F ={' '}
+                {formatKineticAmount(reaction.fallOff.broadeningFactor)}
+              </td>
+              <td>
+                {kineticProvenanceSource(reaction.provenance)}; k₀ —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.lowPressureLimit)}; k∞ —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.highPressureLimit)}; уширение —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.broadening)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function KineticExperimentSection(props: {
   world: GeneratedWorld;
   onWorldReplace: (world: GeneratedWorld) => void;
@@ -487,6 +574,12 @@ function KineticExperimentSection(props: {
                   ))}
                 </tbody>
               </table>
+              {lastRun.segments.map((segment) => (
+                <div className="kinetic-audit" key={'audit-' + segment.index}>
+                  <h5>Аудит сегмента №{segment.index + 1}: фактический расчёт</h5>
+                  <KineticSegmentAuditView audit={segment.audit} />
+                </div>
+              ))}
               {lastRun.warnings.length > 0 && (
                 <p className="kinetic-warnings">Предупреждения: {lastRun.warnings.join('; ')}</p>
               )}

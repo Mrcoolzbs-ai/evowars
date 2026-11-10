@@ -24,6 +24,12 @@
 // 1. НАУЧНЫЕ НАБОРЫ ДАННЫХ
 // ============================================
 
+import {
+  KINETIC_EXPERIMENT_LEGACY_AUDIT_REASON,
+  KINETIC_EXPERIMENT_LEGACY_SCHEMA_VERSION,
+  KINETIC_EXPERIMENT_SCHEMA_VERSION
+} from '../ChemicalEvolution/kineticWorldAdapter';
+
 /**
  * Дескриптор набора научных данных. Поля не выдумываются:
  * если лицензия/контрольная сумма не определены, они остаются
@@ -119,11 +125,22 @@ export function createDatasetRegistry(): DatasetRegistry {
  *         уже присутствующее значение сохраняется БЕЗ изменений
  *         (валидация формы выполняется при загрузке/импорте, а не
  *         миграцией), остальные поля мира не пересчитываются и не
- *         переписываются.
+ *         переписываются;
+ * - 1.6 — этап 4.5.5 (срез кинетической трассируемости): подъём
+ *         версии схемы состояния kineticExperiment 1.0.0 → 1.1.0 и
+ *         маркировка старых сегментов истории недоступным снимком
+ *         unavailable_legacy (снимок параметров в момент старого
+ *         расчёта не записывался; численные значения задним числом
+ *         не восстанавливаются и не выдумываются). Отсутствие
+ *         kineticExperiment остаётся отсутствием; инвентари, время,
+ *         расписание, предупреждения и предпосылки не пересчитываются;
+ *         состояния с неизвестной или повреждённой формой миграцией
+ *         не «лечатся» (fail-closed остаётся за валидацией
+ *         загрузки/импорта).
  */
-export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5'] as const;
+export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6'] as const;
 export type SaveSchemaVersion = (typeof SAVE_SCHEMA_VERSIONS)[number];
-export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.5';
+export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.6';
 
 export function isKnownSchemaVersion(version: string): boolean {
   return (SAVE_SCHEMA_VERSIONS as readonly string[]).includes(version);
@@ -379,7 +396,88 @@ const migrate14to15: SaveMigration<any> = {
   }
 };
 
-const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15];
+/**
+ * Миграция 1.5 → 1.6 (этап 4.5.5, срез кинетической трассируемости).
+ *
+ * Отсутствующее kineticExperiment остаётся отсутствующим: пустой
+ * эксперимент не создаётся. Состояние эксперимента с версией схемы
+ * 1.1.0 не изменяется. Валидное состояние старой схемы 1.0.0
+ * поднимается до 1.1.0, и каждый прежний сегмент истории получает
+ * ЯВНЫЙ маркер unavailable_legacy: снимок фактических параметров в
+ * момент старого расчёта не записывался, численные значения задним
+ * числом не восстанавливаются и не выдумываются. Инвентари, время,
+ * расписание, предупреждения и предпосылки сохраняются без
+ * пересчёта. Состояния с неизвестной версией схемы или повреждённой
+ * формой (история не массив, сегмент не объект) миграцией не
+ * изменяются и не становятся валидными: политика fail-closed
+ * выполняется валидацией при загрузке/импорте.
+ */
+const migrate15to16: SaveMigration<any> = {
+  from: '1.5',
+  to: '1.6',
+  migrate(world: any): SaveMigrationResult<any> {
+    if (world.kineticExperiment === undefined) {
+      return {
+        world: { ...world, version: '1.6' },
+        notes: [
+          'версия схемы сохранений поднята до 1.6: поле kineticExperiment отсутствует и остаётся отсутствующим, пустой кинетический эксперимент не создаётся'
+        ]
+      };
+    }
+    const experiment = world.kineticExperiment;
+    // Неизвестная версия или повреждённая форма не «лечатся»
+    // миграцией: только подъём версии формата, остальное —
+    // fail-closed валидация при загрузке/импорте.
+    if (
+      typeof experiment !== 'object' ||
+      experiment === null ||
+      Array.isArray(experiment) ||
+      experiment.schemaVersion !== KINETIC_EXPERIMENT_LEGACY_SCHEMA_VERSION ||
+      !Array.isArray(experiment.history)
+    ) {
+      return { world: { ...world, version: '1.6' }, notes: [] };
+    }
+    // Валидное состояние 1.0.0: подъём схемы до 1.1.0 и явные
+    // маркеры unavailable_legacy у каждого сегмента истории.
+    const legacySegments = experiment.history.every(
+      (run: any) =>
+        typeof run === 'object' &&
+        run !== null &&
+        !Array.isArray(run) &&
+        Array.isArray(run.segments) &&
+        run.segments.every((segment: any) => typeof segment === 'object' && segment !== null && !Array.isArray(segment))
+    );
+    if (!legacySegments) {
+      return { world: { ...world, version: '1.6' }, notes: [] };
+    }
+    return {
+      world: {
+        ...world,
+        version: '1.6',
+        kineticExperiment: {
+          ...experiment,
+          schemaVersion: KINETIC_EXPERIMENT_SCHEMA_VERSION,
+          history: experiment.history.map((run: any) => ({
+            ...run,
+            segments: run.segments.map((segment: any) => ({
+              ...segment,
+              audit: {
+                kind: 'unavailable_legacy',
+                reason: KINETIC_EXPERIMENT_LEGACY_AUDIT_REASON
+              }
+            }))
+          }))
+        }
+      },
+      notes: [
+        'версия схемы состояния кинетического эксперимента поднята с 1.0.0 до 1.1.0: сегменты истории получают явный маркер недоступного снимка unavailable_legacy (снимок фактических параметров в момент старого расчёта не записывался)',
+        'численные значения снимков старых запусков задним числом не восстанавливаются и не выдумываются: инвентари, время, расписание, предупреждения и предпосылки сохранены без пересчёта'
+      ]
+    };
+  }
+};
+
+const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15, migrate15to16];
 
 /**
  * Полная цепочка миграций. Детерминирована: одна и та же входная

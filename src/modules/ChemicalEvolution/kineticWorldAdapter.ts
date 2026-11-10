@@ -33,19 +33,53 @@
 // Результаты эксперимента НЕ выдаются за рассчитанную эволюцию
 // атмосферы планеты: перенос, диффузия, конвекция и пополнение
 // вещества не моделируются.
+//
+// Срез кинетической трассируемости (2026-11-10, схема состояния
+// 1.1.0): каждый новый успешно выполненный сегмент получает audit —
+// снимок ФАКТИЧЕСКОГО результата вычислителя (AppliedReactionSummary
+// каждого применённого результата: константа, единица, диапазон,
+// provenance, компонентный provenance, fall-off-диагностика; модель
+// концентраций и фактическая концентрация N₂ того же результата).
+// Снимок берётся напрямую из результата runKineticCompartmentTrajectory:
+// значения НЕ пересчитываются (evaluateRateConstant повторно НЕ
+// вызывается) и НЕ реконструируются по каталогу после расчёта.
+// Сегменты старой схемы 1.0.0 помечаются миграцией сохранений
+// 1.5 → 1.6 как unavailable_legacy: исторический снимок не
+// записывался, численные значения задним числом НЕ выдумываются.
 
 import type {
   GeneratedWorld,
   KineticExperimentInventoryMolM2,
   KineticExperimentRunRecord,
+  KineticExperimentSegmentAudit,
   KineticExperimentState
 } from '../../types';
+import type { DataProvenance } from '../Core/scientificValue';
+import { RATE_CONSTANT_UNITS } from '../Core/kinetics';
 import { KineticMechanismError } from './kineticMechanism';
 import { runKineticCompartmentTrajectory } from './kineticTrajectory';
-import type { KineticCompartmentTrajectorySegmentInput } from './kineticTrajectory';
+import type {
+  KineticCompartmentTrajectorySegmentInput,
+  KineticCompartmentTrajectorySegmentResult
+} from './kineticTrajectory';
 
 /** Версия схемы состояния эксперимента (KineticExperimentState.schemaVersion). */
-export const KINETIC_EXPERIMENT_SCHEMA_VERSION = '1.0.0';
+export const KINETIC_EXPERIMENT_SCHEMA_VERSION = '1.1.0';
+
+/**
+ * Прежняя версия схемы состояния эксперимента: сегменты истории без
+ * снимков аудита. Миграция сохранений 1.5 → 1.6 помечает такие
+ * сегменты unavailable_legacy и поднимает схему до 1.1.0.
+ */
+export const KINETIC_EXPERIMENT_LEGACY_SCHEMA_VERSION = '1.0.0';
+
+/**
+ * Явная причина отсутствия исторического снимка у сегментов,
+ * созданных до введения снимков аудита. Численные значения
+ * задним числом не восстанавливаются и не выдумываются.
+ */
+export const KINETIC_EXPERIMENT_LEGACY_AUDIT_REASON =
+  'сегмент выполнен до введения снимков аудита (схема состояния 1.0.0): фактические параметры расчёта в момент выполнения не записывались; численные значения задним числом не восстанавливаются и не выдумываются';
 
 /** Виды ограниченного механизма (в каноническом порядке каталога). */
 export const KINETIC_EXPERIMENT_SPECIES = ['O', 'NO', 'NO2', 'H', 'O2', 'HO2', 'N2'] as const;
@@ -149,7 +183,245 @@ function inventoryProblems(inventory: unknown, label: string): string[] {
  * инвентарю запуска N−1 по всем семи видам; текущий инвентарь
  * равен конечному инвентарю последнего завершённого запуска.
  * Никаких автоисправлений, нормализации и подстановок нулей.
+ *
+ * Срез трассируемости (схема 1.1.0): сегмент состояния 1.1.0
+ * обязан иметь audit; recorded-снимок проверяется на полноту
+ * фактических численных значений, корректность диапазона
+ * (температура сегмента внутри фактически применённой
+ * применимости), структуру provenance, точное соответствие
+ * идентификаторов и числа записей аудита расписанию; дубликаты
+ * и неизвестные реакции запрещены; unavailable_legacy не может
+ * содержать численные результаты.
  */
+/** Строковые поля DataProvenance (все опциональны). */
+const AUDIT_PROVENANCE_STRING_FIELDS: readonly string[] = [
+  'sourceName',
+  'sourceId',
+  'datasetId',
+  'datasetVersion',
+  'recordId',
+  'reference',
+  'retrievedAt',
+  'method',
+  'applicability',
+  'limitations',
+  'conditions',
+  'modelVersion',
+  'license',
+  'note'
+];
+
+/** Поля, идентифицирующие источник (минимум один непустой обязателен). */
+const AUDIT_PROVENANCE_IDENTIFICATION_FIELDS: readonly string[] = ['sourceName', 'sourceId', 'datasetId', 'reference'];
+
+/**
+ * Структурная проверка provenance снимка (по образцу provenanceIssues
+ * вычислителя): объект, строковые поля при наличии — строки,
+ * идентификация источника минимум одним непустым полем, rawInput —
+ * объект скалярных значений. Никаких подстановок фиктивных источников.
+ */
+function auditProvenanceProblems(value: unknown, label: string): string[] {
+  const problems: string[] = [];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return [label + ': ожидается объект provenance'];
+  }
+  const provenance = value as Record<string, unknown>;
+  for (const field of AUDIT_PROVENANCE_STRING_FIELDS) {
+    const fieldValue = provenance[field];
+    if (fieldValue === undefined) {
+      continue;
+    }
+    if (typeof fieldValue !== 'string') {
+      problems.push(label + '.' + field + ': ожидается строка provenance, получено ' + typeof fieldValue);
+    } else if ((AUDIT_PROVENANCE_IDENTIFICATION_FIELDS as readonly string[]).includes(field) && fieldValue.trim() === '') {
+      problems.push(label + '.' + field + ': пустая строка не идентифицирует источник');
+    }
+  }
+  const identified = (AUDIT_PROVENANCE_IDENTIFICATION_FIELDS as readonly string[]).some(
+    (field) => typeof provenance[field] === 'string' && (provenance[field] as string).trim() !== ''
+  );
+  if (!identified) {
+    problems.push(label + ': provenance не идентифицирует источник (нужен непустой sourceName, sourceId, datasetId или reference); фиктивный источник не подставляется');
+  }
+  const raw = provenance.rawInput;
+  if (raw !== undefined) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      problems.push(label + '.rawInput: ожидается объект скалярных значений (number | string | boolean | null)');
+    } else {
+      for (const [key, rawValue] of Object.entries(raw as Record<string, unknown>)) {
+        if (typeof rawValue === 'number') {
+          if (!Number.isFinite(rawValue)) {
+            problems.push(label + '.rawInput.' + key + ': ожидается конечное число');
+          }
+        } else if (typeof rawValue !== 'string' && typeof rawValue !== 'boolean' && rawValue !== null) {
+          problems.push(label + '.rawInput.' + key + ': недопустимый тип значения (' + typeof rawValue + ')');
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * Проверка снимка кинетической трассируемости сегмента схемы 1.1.0:
+ * recorded обязан содержать все обязательные конечные численные
+ * значения, корректный диапазон (включая температуру сегмента),
+ * структурно корректный provenance и точное соответствие
+ * идентификаторов/числа записей расписанию; дубликаты и неизвестные
+ * реакции запрещены; unavailable_legacy обязан иметь явную причину
+ * и не может содержать численные результаты.
+ */
+function segmentAuditProblems(
+  audit: unknown,
+  segLabel: string,
+  reactionIds: unknown,
+  temperatureK: unknown
+): string[] {
+  const problems: string[] = [];
+  if (audit === undefined) {
+    return [
+      segLabel + '.audit: снимок кинетической трассируемости обязателен для сегмента схемы ' + KINETIC_EXPERIMENT_SCHEMA_VERSION + ': recorded (фактический результат вычислителя) или unavailable_legacy (явная причина)'
+    ];
+  }
+  if (typeof audit !== 'object' || audit === null || Array.isArray(audit)) {
+    return [segLabel + '.audit: снимок аудита должен быть объектом с явным kind (recorded | unavailable_legacy)'];
+  }
+  const auditRecord = audit as Record<string, unknown>;
+  if (auditRecord.kind === 'unavailable_legacy') {
+    if (typeof auditRecord.reason !== 'string' || auditRecord.reason.trim() === '') {
+      problems.push(segLabel + '.audit.reason: ожидается непустая причина отсутствия исторического снимка');
+    }
+    for (const forbidden of ['reactions', 'thirdBodyN2MoleculeCm3', 'concentrationModel', 'integration'] as const) {
+      if (auditRecord[forbidden] !== undefined) {
+        problems.push(segLabel + '.audit.' + forbidden + ': снимок unavailable_legacy не может содержать численные результаты: исторические значения не записывались и задним числом не восстанавливаются');
+      }
+    }
+    return problems;
+  }
+  if (auditRecord.kind !== 'recorded') {
+    return [segLabel + '.audit.kind: ожидается recorded | unavailable_legacy, получено: ' + String(auditRecord.kind)];
+  }
+  if (auditRecord.concentrationModel !== 'molecule_cm3') {
+    problems.push(segLabel + '.audit.concentrationModel: контракт механизма — molecule_cm3, получено: ' + String(auditRecord.concentrationModel));
+  }
+  const n2 = auditRecord.thirdBodyN2MoleculeCm3;
+  if (typeof n2 !== 'number' || !Number.isFinite(n2) || n2 <= 0) {
+    problems.push(segLabel + '.audit.thirdBodyN2MoleculeCm3: ожидается конечная строго положительная фактическая концентрация N₂, molecule/cm³');
+  }
+  const reactions = auditRecord.reactions;
+  if (!Array.isArray(reactions) || reactions.length === 0) {
+    problems.push(segLabel + '.audit.reactions: ожидается непустой массив аудиозаписей применённых реакций');
+    return problems;
+  }
+  if (Array.isArray(reactionIds) && reactions.length !== reactionIds.length) {
+    problems.push(segLabel + '.audit.reactions: число записей аудита (' + reactions.length + ') не совпадает с расписанием сегмента (' + reactionIds.length + ')');
+  }
+  reactions.forEach((entry, entryIndex) => {
+    const entryLabel = segLabel + '.audit.reactions[' + entryIndex + ']';
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      problems.push(entryLabel + ': аудиозапись должна быть объектом');
+      return;
+    }
+    const reaction = entry as Record<string, unknown>;
+    if (Array.isArray(reactionIds) && reaction.reactionId !== reactionIds[entryIndex]) {
+      problems.push(entryLabel + '.reactionId: не совпадает с расписанием сегмента (ожидалось: ' + String(reactionIds[entryIndex]) + ', получено: ' + String(reaction.reactionId) + ')');
+    }
+    if (typeof reaction.reactionId !== 'string' || !(MECHANISM_REACTION_IDS as readonly string[]).includes(reaction.reactionId)) {
+      problems.push(entryLabel + '.reactionId: неизвестная реакция (механизм ограничен №89/№106)');
+    }
+    if (typeof reaction.label !== 'string' || reaction.label.trim() === '') {
+      problems.push(entryLabel + '.label: ожидается непустая метка реакции');
+    }
+    if (reaction.dataStatus !== 'known' && reaction.dataStatus !== 'estimated') {
+      problems.push(entryLabel + '.dataStatus: ожидается known | estimated, получено: ' + String(reaction.dataStatus));
+    }
+    const rateConstant = reaction.rateConstant;
+    if (typeof rateConstant !== 'object' || rateConstant === null || Array.isArray(rateConstant)) {
+      problems.push(entryLabel + '.rateConstant: ожидается объект {value, unit} фактической константы');
+    } else {
+      const rc = rateConstant as Record<string, unknown>;
+      if (typeof rc.value !== 'number' || !Number.isFinite(rc.value) || rc.value <= 0) {
+        problems.push(entryLabel + '.rateConstant.value: ожидается конечная положительная фактически вычисленная константа');
+      }
+      if (typeof rc.unit !== 'string' || !(RATE_CONSTANT_UNITS as readonly string[]).includes(rc.unit)) {
+        problems.push(entryLabel + '.rateConstant.unit: единица должна быть из кинетического реестра, получено: ' + String(rc.unit));
+      }
+    }
+    const range = reaction.appliedRangeK;
+    if (typeof range !== 'object' || range === null || Array.isArray(range)) {
+      problems.push(entryLabel + '.appliedRangeK: ожидается объект {min, max} фактически применённого диапазона, K');
+    } else {
+      const appliedRange = range as Record<string, unknown>;
+      if (
+        typeof appliedRange.min !== 'number' ||
+        !Number.isFinite(appliedRange.min) ||
+        typeof appliedRange.max !== 'number' ||
+        !Number.isFinite(appliedRange.max) ||
+        appliedRange.min <= 0 ||
+        appliedRange.min > appliedRange.max
+      ) {
+        problems.push(entryLabel + '.appliedRangeK: ожидается корректный диапазон фактически применённой применимости 0 < min <= max, K');
+      } else if (
+        typeof temperatureK === 'number' &&
+        Number.isFinite(temperatureK) &&
+        (temperatureK < appliedRange.min || temperatureK > appliedRange.max)
+      ) {
+        problems.push(entryLabel + '.appliedRangeK: температура сегмента (' + temperatureK + ' K) вне диапазона фактически применённой применимости [' + appliedRange.min + ', ' + appliedRange.max + '] K');
+      }
+    }
+    problems.push(...auditProvenanceProblems(reaction.provenance, entryLabel + '.provenance'));
+    const parameterProvenance = reaction.parameterProvenance;
+    if (typeof parameterProvenance !== 'object' || parameterProvenance === null || Array.isArray(parameterProvenance)) {
+      problems.push(entryLabel + '.parameterProvenance: ожидается объект компонентного provenance параметров fall-off');
+    } else {
+      const pp = parameterProvenance as Record<string, unknown>;
+      problems.push(...auditProvenanceProblems(pp.lowPressureLimit, entryLabel + '.parameterProvenance.lowPressureLimit'));
+      problems.push(...auditProvenanceProblems(pp.highPressureLimit, entryLabel + '.parameterProvenance.highPressureLimit'));
+      problems.push(...auditProvenanceProblems(pp.broadening, entryLabel + '.parameterProvenance.broadening'));
+    }
+    const fallOff = reaction.fallOff;
+    if (typeof fallOff !== 'object' || fallOff === null || Array.isArray(fallOff)) {
+      problems.push(entryLabel + '.fallOff: ожидается фактическая диагностика fall-off вычисления');
+    } else {
+      const fo = fallOff as Record<string, unknown>;
+      for (const field of ['lowPressureLimit', 'highPressureLimit'] as const) {
+        if (typeof fo[field] !== 'number' || !Number.isFinite(fo[field]) || (fo[field] as number) <= 0) {
+          problems.push(entryLabel + '.fallOff.' + field + ': ожидается конечный положительный предел fall-off');
+        }
+      }
+      for (const field of ['reducedPressure', 'log10ReducedPressure'] as const) {
+        if (typeof fo[field] !== 'number' || !Number.isFinite(fo[field])) {
+          problems.push(entryLabel + '.fallOff.' + field + ': ожидается конечное число диагностики fall-off');
+        }
+      }
+      if (
+        typeof fo.broadeningFactor !== 'number' ||
+        !Number.isFinite(fo.broadeningFactor) ||
+        fo.broadeningFactor <= 0 ||
+        fo.broadeningFactor > 1
+      ) {
+        problems.push(entryLabel + '.fallOff.broadeningFactor: ожидается конечный фактор уширения в (0, 1]');
+      }
+    }
+  });
+  if (auditRecord.integration !== undefined) {
+    if (typeof auditRecord.integration !== 'object' || auditRecord.integration === null || Array.isArray(auditRecord.integration)) {
+      problems.push(segLabel + '.audit.integration: ожидается объект диагностики интегратора из фактического результата');
+    } else {
+      const integration = auditRecord.integration as Record<string, unknown>;
+      if (typeof integration.method !== 'string' || integration.method.trim() === '') {
+        problems.push(segLabel + '.audit.integration.method: ожидается непустой идентификатор метода из фактического результата');
+      }
+      for (const field of ['minorNegativeCount', 'invariantChecks'] as const) {
+        if (typeof integration[field] !== 'number' || !Number.isInteger(integration[field]) || (integration[field] as number) < 0) {
+          problems.push(segLabel + '.audit.integration.' + field + ': ожидается неотрицательное целое из фактического результата');
+        }
+      }
+    }
+  }
+  return problems;
+}
+
 export function kineticExperimentStateProblems(state: unknown): string[] {
   if (state === undefined) {
     return [];
@@ -253,6 +525,12 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
         ) {
           problems.push(segLabel + '.reactionIds: ожидается непустой список реакций №89/№106 без дублей');
         }
+        if (Array.isArray(seg.reactionIds)) {
+          const uniqueIds = new Set(seg.reactionIds.filter((id) => typeof id === 'string'));
+          if (uniqueIds.size !== seg.reactionIds.length) {
+            problems.push(segLabel + '.reactionIds: дубликаты реакций в расписании сегмента запрещены');
+          }
+        }
         if (typeof seg.startTimeSeconds !== 'number' || !Number.isFinite(seg.startTimeSeconds)) {
           problems.push(segLabel + '.startTimeSeconds: ожидается конечное время начала сегмента, с');
         } else if (seg.startTimeSeconds !== expectedStart) {
@@ -276,6 +554,13 @@ export function kineticExperimentStateProblems(state: unknown): string[] {
         }
         if (typeof seg.endTimeSeconds === 'number' && Number.isFinite(seg.endTimeSeconds)) {
           expectedStart = seg.endTimeSeconds;
+        }
+        // Срез трассируемости: у сегмента состояния схемы 1.1.0
+        // снимок аудита обязателен и проверяется целиком. Состояниям
+        // иных версий требование не навязывается: их версия уже
+        // отмечена отдельной проблемой, автоисправлений нет.
+        if (record.schemaVersion === KINETIC_EXPERIMENT_SCHEMA_VERSION) {
+          problems.push(...segmentAuditProblems(seg.audit, segLabel, seg.reactionIds, seg.temperatureK));
         }
       });
       // Перекрёстная сверка: накопленное время запуска обязано
@@ -440,6 +725,70 @@ function parseSetup(setup: KineticExperimentSetupInput): { inventories: KineticE
     problems.push('initialInventoriesMolM2: неизвестные ключи ' + unknownKeys.join(', ') + ' (механизм ограничен видами O, NO, NO2, H, O2, HO2, N2)');
   }
   return { inventories: problems.length === 0 ? inventories : null, problems };
+}
+
+// ============================================
+// 2b. СНИМОК КИНЕТИЧЕСКОЙ ТРАССИРУЕМОСТИ СЕГМЕНТА
+// ============================================
+
+/**
+ * Поверхностная копия provenance для снимка аудита: снимок обязан
+ * быть сериализуемым и не разделять изменяемые вложенные объекты
+ * с каталогом или результатом вычислителя. Значения копируются
+ * как есть: пересчёт и подмена запрещены.
+ */
+function cloneSnapshotProvenance(provenance: DataProvenance): DataProvenance {
+  const clone: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(provenance)) {
+    clone[key] =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? { ...(value as Record<string, unknown>) }
+        : value;
+  }
+  return clone as DataProvenance;
+}
+
+/**
+ * Снимок кинетической трассируемости одного сегмента. Источник —
+ * ИСКЛЮЧИТЕЛЬНО фактически полученный результат сегмента
+ * (segment.compartment.concentrationStep): фактические
+ * AppliedReactionSummary в порядке расписания, фактическая
+ * концентрация третьего тела N₂, модель концентраций и диагностика
+ * интегратора того же результата. evaluateRateConstant повторно НЕ
+ * вызывается, значения из каталога НЕ подставляются.
+ */
+function buildSegmentAuditRecord(segment: KineticCompartmentTrajectorySegmentResult): KineticExperimentSegmentAudit {
+  const step = segment.compartment.concentrationStep;
+  return {
+    kind: 'recorded',
+    concentrationModel: step.concentrationModel,
+    thirdBodyN2MoleculeCm3: step.thirdBodyN2MoleculeCm3,
+    reactions: step.reactions.map((applied) => ({
+      reactionId: applied.reactionId,
+      label: applied.label,
+      dataStatus: applied.dataStatus,
+      rateConstant: { value: applied.rateConstant.value, unit: applied.rateConstant.unit },
+      appliedRangeK: { min: applied.appliedRangeK.min, max: applied.appliedRangeK.max },
+      provenance: cloneSnapshotProvenance(applied.provenance),
+      parameterProvenance: {
+        lowPressureLimit: cloneSnapshotProvenance(applied.parameterProvenance.lowPressureLimit),
+        highPressureLimit: cloneSnapshotProvenance(applied.parameterProvenance.highPressureLimit),
+        broadening: cloneSnapshotProvenance(applied.parameterProvenance.broadening)
+      },
+      fallOff: {
+        lowPressureLimit: applied.fallOff.lowPressureLimit,
+        highPressureLimit: applied.fallOff.highPressureLimit,
+        reducedPressure: applied.fallOff.reducedPressure,
+        log10ReducedPressure: applied.fallOff.log10ReducedPressure,
+        broadeningFactor: applied.fallOff.broadeningFactor
+      }
+    })),
+    integration: {
+      method: step.integration.method,
+      minorNegativeCount: step.integration.minorNegativeCount,
+      invariantChecks: step.integration.invariantChecks
+    }
+  };
 }
 
 // ============================================
@@ -611,7 +960,8 @@ export function runWorldKineticTrajectory(
       dtSeconds: segment.dtSeconds,
       reactionIds: [...segment.reactionIds],
       startTimeSeconds: segment.startTimeSeconds,
-      endTimeSeconds: segment.endTimeSeconds
+      endTimeSeconds: segment.endTimeSeconds,
+      audit: buildSegmentAuditRecord(segment)
     })),
     warnings: [...result.warnings],
     assumptions: [...result.assumptions]

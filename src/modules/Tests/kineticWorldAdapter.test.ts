@@ -26,7 +26,8 @@ import {
 import type {
   GeneratedWorld,
   KineticExperimentState,
-  KineticExperimentInventoryMolM2
+  KineticExperimentInventoryMolM2,
+  KineticExperimentSegmentAudit
 } from '../../types';
 
 // ============================================
@@ -103,6 +104,18 @@ function chemicalStateFixture(mode: 'column_inventory' | 'game_normalized'): Rec
   };
 }
 
+/**
+ * Снимок аудита синтетического тестового сегмента: сегменты старой
+ * схемы 1.0.0 получают при миграции явный маркер недоступного
+ * исторического снимка, численные значения не выдумываются.
+ */
+function legacySegmentAudit(): KineticExperimentSegmentAudit {
+  return {
+    kind: 'unavailable_legacy',
+    reason: 'синтетический тестовый сегмент: исторический снимок параметров не записывался'
+  };
+}
+
 /** Валидное состояние эксперимента (один завершённый запуск, 100 с). */
 function validExperimentState(): KineticExperimentState {
   return {
@@ -125,7 +138,8 @@ function validExperimentState(): KineticExperimentState {
             dtSeconds: 100,
             reactionIds: [R89],
             startTimeSeconds: 0,
-            endTimeSeconds: 100
+            endTimeSeconds: 100,
+            audit: legacySegmentAudit()
           }
         ],
         warnings: [],
@@ -721,5 +735,239 @@ describe('Stage 4.5.5 world adapter: строгие инварианты цел�
     expect(state.elapsedSeconds).toBe(100);
     expect(state.history[0].startElapsedSeconds).toBe(0);
     expect(kineticExperimentStateProblems(state)).toEqual([]);
+  });
+});
+
+// ============================================
+// 7. СНИМКИ КИНЕТИЧЕСКОЙ ТРАССИРУЕМОСТИ СЕГМЕНТОВ
+// ============================================
+
+describe('Stage 4.5.5 world adapter: снимки кинетической трассируемости сегментов', () => {
+  /** Прямой прогон вычислителя с теми же входами (эталон фактического результата). */
+  function directRun(segments: readonly { temperatureK: number; dtSeconds: number; reactionIds: string[] }[]) {
+    return runKineticCompartmentTrajectory({
+      layerThicknessM: THICKNESS_M,
+      initialInventoriesMolM2: { ...INITIAL_INVENTORY },
+      segments
+    });
+  }
+
+  /** Реальное состояние с recorded-снимками (один запуск №89, 250 K), глубоко отсоединённое. */
+  function recordedState(): KineticExperimentState {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    return JSON.parse(JSON.stringify(world.kineticExperiment)) as KineticExperimentState;
+  }
+
+  it('снимок №89 в точности совпадает с фактическим результатом вычислителя', () => {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    const audit = world.kineticExperiment!.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    const step = directRun(SINGLE_SEGMENT).segments[0].compartment.concentrationStep;
+    const applied = step.reactions[0];
+    expect(audit.reactions.length).toBe(1);
+    const snapshot = audit.reactions[0];
+    expect(snapshot.reactionId).toBe(applied.reactionId);
+    expect(snapshot.label).toBe(applied.label);
+    expect(snapshot.dataStatus).toBe(applied.dataStatus);
+    // точное равенство фактически вычисленной константы и её единицы,
+    // без преобразования и подмены
+    expect(snapshot.rateConstant.value).toBe(applied.rateConstant.value);
+    expect(snapshot.rateConstant.unit).toBe(applied.rateConstant.unit);
+    expect(snapshot.rateConstant.unit).toBe('cm3_per_molecule_per_s');
+    expect(snapshot.appliedRangeK).toEqual(applied.appliedRangeK);
+    expect(snapshot.provenance).toEqual(applied.provenance);
+    expect(snapshot.parameterProvenance).toEqual(applied.parameterProvenance);
+    expect(snapshot.fallOff).toEqual(applied.fallOff);
+    expect(audit.concentrationModel).toBe('molecule_cm3');
+    // фактическая концентрация N₂ из того же результата, без пересчёта
+    expect(audit.thirdBodyN2MoleculeCm3).toBe(step.thirdBodyN2MoleculeCm3);
+    // состояние с фактическими снимками строго валидно
+    expect(kineticExperimentStateProblems(world.kineticExperiment)).toEqual([]);
+  });
+
+  it('снимок №106 в точности совпадает с фактическим результатом вычислителя', () => {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: TWO_SEGMENTS,
+      setup: setupInput()
+    });
+    const audit = world.kineticExperiment!.history[0].segments[1].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    const step = directRun(TWO_SEGMENTS).segments[1].compartment.concentrationStep;
+    const applied = step.reactions[0];
+    expect(applied.reactionId).toBe(R106);
+    const snapshot = audit.reactions[0];
+    expect(snapshot.reactionId).toBe(R106);
+    expect(snapshot.rateConstant.value).toBe(applied.rateConstant.value);
+    expect(snapshot.rateConstant.unit).toBe(applied.rateConstant.unit);
+    expect(snapshot.fallOff).toEqual(applied.fallOff);
+    expect(snapshot.provenance).toEqual(applied.provenance);
+    expect(audit.thirdBodyN2MoleculeCm3).toBe(step.thirdBodyN2MoleculeCm3);
+    expect(kineticExperimentStateProblems(world.kineticExperiment)).toEqual([]);
+  });
+
+  it('совместный сегмент №89+№106 при 300 K сохраняет оба снимка в порядке расписания', () => {
+    const schedule = [{ temperatureK: 300, dtSeconds: 100, reactionIds: [R89, R106] }];
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: schedule,
+      setup: setupInput()
+    });
+    const audit = world.kineticExperiment!.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    expect(audit.reactions.map((r) => r.reactionId)).toEqual([R89, R106]);
+    const step = directRun(schedule).segments[0].compartment.concentrationStep;
+    expect(audit.reactions[0].rateConstant.value).toBe(step.reactions[0].rateConstant.value);
+    expect(audit.reactions[1].rateConstant.value).toBe(step.reactions[1].rateConstant.value);
+    // оба диапазона фактически применённой применимости включают 300 K
+    expect(audit.reactions[0].appliedRangeK).toEqual(step.reactions[0].appliedRangeK);
+    expect(audit.reactions[1].appliedRangeK).toEqual(step.reactions[1].appliedRangeK);
+    expect(audit.thirdBodyN2MoleculeCm3).toBe(step.thirdBodyN2MoleculeCm3);
+    expect(kineticExperimentStateProblems(world.kineticExperiment)).toEqual([]);
+  });
+
+  it('отказ траектории не сохраняет ни мир, ни частичный снимок', () => {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    const before = JSON.parse(JSON.stringify(world));
+    // 500 K вне диапазона №89: отказ до публикации нового состояния
+    expect(() =>
+      runWorldKineticTrajectory(world, {
+        segments: [{ temperatureK: 500, dtSeconds: 50, reactionIds: [R89] }]
+      })
+    ).toThrow(KineticMechanismError);
+    expect(JSON.parse(JSON.stringify(world))).toEqual(before);
+    // ошибка во втором сегменте многосегментной траектории: частично
+    // выполненные сегменты и частичные снимки не сохраняются
+    expect(() =>
+      runWorldKineticTrajectory(world, {
+        segments: [
+          { temperatureK: 250, dtSeconds: 100, reactionIds: [R89] },
+          { temperatureK: 500, dtSeconds: 50, reactionIds: [R89] }
+        ]
+      })
+    ).toThrow(KineticMechanismError);
+    expect(JSON.parse(JSON.stringify(world))).toEqual(before);
+    expect(kineticExperimentStateProblems(world.kineticExperiment)).toEqual([]);
+  });
+
+  it('отсутствие снимка у сегмента схемы 1.1.0 отклоняется', () => {
+    const broken = recordedState();
+    delete broken.history[0].segments[0].audit;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('.audit'))).toBe(true);
+    expect(problems.some((p) => p.includes('снимок кинетической трассируемости обязателен'))).toBe(true);
+  });
+
+  it('несогласованность записей аудита с расписанием отклоняется', () => {
+    const broken = recordedState();
+    const segment = broken.history[0].segments[0];
+    (segment.audit as { reactions: unknown }).reactions = [];
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('непустой массив аудиозаписей'))).toBe(true);
+  });
+
+  it('порядок и идентификаторы аудита обязаны точно соответствовать расписанию', () => {
+    const schedule = [{ temperatureK: 300, dtSeconds: 100, reactionIds: [R89, R106] }];
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: schedule,
+      setup: setupInput()
+    });
+    const broken = JSON.parse(JSON.stringify(world.kineticExperiment)) as KineticExperimentState;
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    // перестановка записей аудита: идентификаторы больше не совпадают
+    // с расписанием по позициям
+    audit.reactions.reverse();
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('не совпадает с расписанием сегмента'))).toBe(true);
+  });
+
+  it('дубликаты реакций в расписании сегмента отклоняются', () => {
+    const broken = recordedState();
+    const segment = broken.history[0].segments[0];
+    segment.reactionIds = [R89, R89];
+    const audit = segment.audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    audit.reactions = [audit.reactions[0], { ...audit.reactions[0] }];
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('дубликаты реакций в расписании сегмента запрещены'))).toBe(true);
+  });
+
+  it('неконечная константа в снимке отклоняется', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    audit.reactions[0].rateConstant.value = Infinity;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('конечная положительная фактически вычисленная константа'))).toBe(true);
+  });
+
+  it('диапазон снимка обязан включать температуру сегмента', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    audit.reactions[0].appliedRangeK = { min: 400, max: 500 };
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('вне диапазона фактически применённой применимости'))).toBe(true);
+  });
+
+  it('provenance снимка обязан идентифицировать источник', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    (audit.reactions[0].provenance as unknown) = {};
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('не идентифицирует источник'))).toBe(true);
+  });
+
+  it('снимок unavailable_legacy не может содержать выдуманные численные результаты', () => {
+    const broken = recordedState();
+    const segment = broken.history[0].segments[0];
+    (segment.audit as unknown) = {
+      kind: 'unavailable_legacy',
+      reason: 'тестовая причина',
+      reactions: [{ reactionId: R89 }],
+      thirdBodyN2MoleculeCm3: 1e19,
+      concentrationModel: 'molecule_cm3'
+    };
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('не может содержать численные результаты'))).toBe(true);
+  });
+
+  it('снимок unavailable_legacy требует явную непустую причину', () => {
+    const broken = recordedState();
+    (broken.history[0].segments[0].audit as unknown) = { kind: 'unavailable_legacy', reason: '' };
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('непустая причина отсутствия исторического снимка'))).toBe(true);
+  });
+
+  it('неизвестный kind снимка отклоняется', () => {
+    const broken = recordedState();
+    (broken.history[0].segments[0].audit as unknown) = { kind: 'other' };
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('recorded | unavailable_legacy'))).toBe(true);
   });
 });
