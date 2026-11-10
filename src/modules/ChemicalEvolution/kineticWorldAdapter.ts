@@ -886,21 +886,13 @@ export interface KineticRunHistoryEntry {
 export function kineticRunHistoryViewModel(
   history: readonly KineticExperimentRunRecord[]
 ): readonly KineticRunHistoryEntry[] {
-  if (!Array.isArray(history)) {
-    return [];
-  }
   const lastPosition = history.length - 1;
-  return history.map((run, position) => {
-    const segments = run !== null && typeof run === 'object' && Array.isArray(run.segments) ? run.segments : [];
-    return {
-      runIndex: typeof run?.runIndex === 'number' ? run.runIndex : position,
-      defaultExpanded: position === lastPosition,
-      segmentCount: segments.length,
-      segmentAuditKinds: segments.map((segment) =>
-        segment !== null && typeof segment === 'object' && segment.audit !== undefined ? segment.audit.kind : 'absent'
-      )
-    };
-  });
+  return history.map((run, position) => ({
+    runIndex: run.runIndex,
+    defaultExpanded: position === lastPosition,
+    segmentCount: run.segments.length,
+    segmentAuditKinds: run.segments.map((segment) => (segment.audit !== undefined ? segment.audit.kind : 'absent'))
+  }));
 }
 
 // ============================================
