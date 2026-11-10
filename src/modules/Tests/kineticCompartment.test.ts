@@ -311,9 +311,21 @@ describe('применение шага слоя', () => {
     };
     const result = runKineticCompartmentStep(input);
     expect(result.status).toBe('applied');
-    expect(result.updatedColumnInventoriesMolM2.O).toBe(1e-5);
+    // Реакция не идёт (скорость = 0): обновлённые запасы в точности
+    // равны round-trip исходных запасов через преобразования единиц;
+    // единственное возможное расхождение — машинное округление
+    // round-trip моль/м² → molecule/cm³ → моль/м², а НЕ химическое
+    // изменение состава.
+    const roundTrip = (c: number): number =>
+      concentrationMoleculeCm3ToColumnInventoryMolM2(
+        columnInventoryMolM2ToConcentrationMoleculeCm3(c, LAYER_M),
+        LAYER_M
+      );
+    expect(result.updatedColumnInventoriesMolM2.O).toBe(roundTrip(1e-5));
+    expect(result.updatedColumnInventoriesMolM2.O / 1e-5).toBeCloseTo(1, 12);
     expect(result.updatedColumnInventoriesMolM2.NO).toBe(0);
-    expect(result.updatedColumnInventoriesMolM2.NO2).toBe(2e-7);
+    expect(result.updatedColumnInventoriesMolM2.NO2).toBe(roundTrip(2e-7));
+    expect(result.updatedColumnInventoriesMolM2.NO2 / 2e-7).toBeCloseTo(1, 12);
   });
 });
 
