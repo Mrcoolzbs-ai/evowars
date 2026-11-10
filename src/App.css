@@ -743,8 +743,15 @@ button.danger:hover {
   margin-top: 10px;
 }
 
-.kinetic-run-details {
+.kinetic-run-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 12px;
+}
+
+.kinetic-run-details {
+  margin-top: 0;
 }
 
 .kinetic-run-details summary {

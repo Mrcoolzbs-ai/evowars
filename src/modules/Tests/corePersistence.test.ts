@@ -1829,6 +1829,49 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(strangerImport.reason).toContain('schemaVersion');
   });
 
+  it('конфликтное поле audit в сегменте состояния 1.0.0 не перезаписывается миграцией (fail-closed)', () => {
+    // В схеме 1.0.0 поля audit у сегментов быть не могло: это
+    // неизвестные ранее данные, которые миграция обязана сохранить.
+    const conflicted = validKineticExperiment();
+    const foreignAudit = { kind: 'recorded', note: 'неизвестное происхождение' };
+    (conflicted.history[0].segments[0] as unknown as { audit: unknown }).audit = foreignAudit;
+    const save = makeLegacySave('1.4', { kineticExperiment: conflicted });
+    const result = migrateSavedWorld(save);
+    expect(result.from).toBe('1.4');
+    expect(result.to).toBe('1.6');
+    // эксперимент НЕ поднят до 1.1.0, маркеры НЕ добавлены:
+    // чужое поле не затирается и не нормализуется
+    const migrated = (result.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment;
+    expect(migrated?.schemaVersion).toBe('1.0.0');
+    expect((migrated?.history[0].segments[0] as unknown as { audit?: unknown }).audit).toEqual(foreignAudit);
+    // диагностируемая причина конфликта в следе миграции
+    expect(result.notes.some((n) => n.includes('audit'))).toBe(true);
+    expect(result.notes.some((n) => n.includes('не перезаписываются'))).toBe(true);
+    // повторная миграция идемпотентна: конфликтное состояние не меняется
+    const again = migrateSavedWorld(result.world as unknown as SavedWorld);
+    expect(again.to).toBe('1.6');
+    expect(again.notes).toEqual([]);
+    const stillExperiment = (again.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment;
+    expect(stillExperiment?.schemaVersion).toBe('1.0.0');
+    expect((stillExperiment?.history[0].segments[0] as unknown as { audit?: unknown }).audit).toEqual(foreignAudit);
+    // JSON-импорт отклоняет: состояние не стало валидным
+    const imported = importWorldFromJSONDetailed(JSON.stringify(worldWithExperiment('w-audit-conflict', conflicted)));
+    expect(imported.world).toBeNull();
+    expect(imported.reason).toContain('kineticExperiment');
+    expect(imported.reason).toContain('schemaVersion');
+    // localStorage: повреждённый конфликтом мир не загружается,
+    // соседний грузится, raw-запись сохранена как есть
+    const neighbor = { ...rawEntry('w-ok', '1.4'), atmosphere: { totalPressure: null } };
+    writeRawEntries([worldWithExperiment('w-audit-conflict-store', conflicted), neighbor]);
+    expect(getAllWorlds().map((w) => w.id)).toEqual(['w-ok']);
+    const raw = readRawEntries();
+    expect(raw.length).toBe(2);
+    const still = raw[0] as { id?: string; kineticExperiment?: KineticExperimentState };
+    expect(still.id).toBe('w-audit-conflict-store');
+    expect(still.kineticExperiment?.schemaVersion).toBe('1.0.0');
+    expect((still.kineticExperiment?.history[0].segments[0] as unknown as { audit?: unknown }).audit).toEqual(foreignAudit);
+  });
+
   it('повреждённый эксперимент (N2 = 0) не проходит загрузку: причина в health, raw нетронут', () => {
     const broken = validKineticExperiment();
     broken.currentInventoriesMolM2.N2 = 0;
@@ -2088,6 +2131,17 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
         };
       },
       marker: 'не может содержать численные результаты'
+    },
+    {
+      name: 'снимок unavailable_legacy с посторонним ключом (нарушение строгой формы)',
+      damage: (state) => {
+        (state.history[0].segments[0] as unknown as { audit: unknown }).audit = {
+          kind: 'unavailable_legacy',
+          reason: 'тестовая причина',
+          customNote: 'неизвестное содержимое'
+        };
+      },
+      marker: 'кроме kind и reason'
     }
   ];
 

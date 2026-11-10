@@ -46,6 +46,20 @@
 // Сегменты старой схемы 1.0.0 помечаются миграцией сохранений
 // 1.5 → 1.6 как unavailable_legacy: исторический снимок не
 // записывался, численные значения задним числом НЕ выдумываются.
+//
+// Корректирующий пакет целостности снимков (2026-11-10): контракт
+// снимков СТРОГИЙ. unavailable_legacy допускает РОВНО два ключа —
+// kind и reason: любое постороннее поле (численные результаты,
+// provenance или неизвестное содержимое) запрещено и
+// диагностируется, а не отбрасывается и не нормализуется.
+// Единица константы recorded-снимка сверяется с механизмом:
+// для №89/№106 при модели концентраций molecule_cm3 фактическая
+// единица обязана быть cm3_per_molecule_per_s (общий реестр единиц
+// не сужается, вычислитель не меняется). fall-off-диагностика
+// согласована внутренне: приведённое давление конечное строго
+// положительное, логарифм равен фактической операции вычислителя
+// Math.log10(reducedPressure) — сверка сохранённых чисел с самими
+// собой, повторный кинетический расчёт НЕ выполняется.
 
 import type {
   GeneratedWorld,
@@ -86,6 +100,17 @@ export const KINETIC_EXPERIMENT_SPECIES = ['O', 'NO', 'NO2', 'H', 'O2', 'HO2', '
 
 /** Идентификаторы реакций механизма №89/№106 (другие запрещены). */
 const MECHANISM_REACTION_IDS = ['kida-tb-2015-03-19-89', 'kida-tb-2015-03-19-106'] as const;
+
+/**
+ * Единственная фактическая единица эффективной константы механизма
+ * №89/№106 при модели концентраций molecule_cm3: обе записи —
+ * fall-off второго порядка, эффективная единица равна единице k∞.
+ * Это СТРОГОЕ соответствие фактического снимка механизму:
+ * зарегистрированная, но физически несовместимая единица (например
+ * m3_per_mol_per_s или per_s) не принимается. Общий реестр единиц
+ * RATE_CONSTANT_UNITS не сужается, вычислитель не меняется.
+ */
+const MECHANISM_RATE_CONSTANT_UNIT = 'cm3_per_molecule_per_s';
 
 /**
  * Явные начальные запасы при первичной настройке. Все семь полей
@@ -291,9 +316,16 @@ function segmentAuditProblems(
     if (typeof auditRecord.reason !== 'string' || auditRecord.reason.trim() === '') {
       problems.push(segLabel + '.audit.reason: ожидается непустая причина отсутствия исторического снимка');
     }
-    for (const forbidden of ['reactions', 'thirdBodyN2MoleculeCm3', 'concentrationModel', 'integration'] as const) {
-      if (auditRecord[forbidden] !== undefined) {
-        problems.push(segLabel + '.audit.' + forbidden + ': снимок unavailable_legacy не может содержать численные результаты: исторические значения не записывались и задним числом не восстанавливаются');
+    // Строгая форма: unavailable_legacy допускает РОВНО два ключа —
+    // kind и reason. Любое постороннее поле (численные результаты,
+    // provenance или произвольное неизвестное содержимое) запрещено:
+    // неизвестное не отбрасывается и не нормализуется, а
+    // диагностируется.
+    for (const key of Object.keys(auditRecord)) {
+      if (key !== 'kind' && key !== 'reason') {
+        problems.push(
+          segLabel + '.audit.' + key + ': снимок unavailable_legacy не может содержать численные результаты или какие-либо поля кроме kind и reason: исторические значения не записывались и задним числом не восстанавливаются; постороннее содержимое не отбрасывается и не нормализуется, а диагностируется'
+        );
       }
     }
     return problems;
@@ -345,6 +377,20 @@ function segmentAuditProblems(
       }
       if (typeof rc.unit !== 'string' || !(RATE_CONSTANT_UNITS as readonly string[]).includes(rc.unit)) {
         problems.push(entryLabel + '.rateConstant.unit: единица должна быть из кинетического реестра, получено: ' + String(rc.unit));
+      } else if (
+        auditRecord.concentrationModel === 'molecule_cm3' &&
+        typeof reaction.reactionId === 'string' &&
+        (MECHANISM_REACTION_IDS as readonly string[]).includes(reaction.reactionId) &&
+        rc.unit !== MECHANISM_RATE_CONSTANT_UNIT
+      ) {
+        // Строгая размерность: общая принадлежность реестру единиц
+        // недостаточна — единица обязана соответствовать фактическому
+        // механизму (№89/№106, molecule_cm3) и его эффективной
+        // размерности. Реестр единиц не сужается, вычислитель не
+        // вызывается: сверяется сохранённый факт, а не расчёт.
+        problems.push(
+          entryLabel + '.rateConstant.unit: фактическая единица константы механизма №89/№106 при модели концентраций molecule_cm3 обязана быть ' + MECHANISM_RATE_CONSTANT_UNIT + ', получено: ' + rc.unit + ' (зарегистрированная, но физически несовместимая с этим механизмом размерность не принимается)'
+        );
       }
     }
     const range = reaction.appliedRangeK;
@@ -389,10 +435,28 @@ function segmentAuditProblems(
           problems.push(entryLabel + '.fallOff.' + field + ': ожидается конечный положительный предел fall-off');
         }
       }
-      for (const field of ['reducedPressure', 'log10ReducedPressure'] as const) {
-        if (typeof fo[field] !== 'number' || !Number.isFinite(fo[field])) {
-          problems.push(entryLabel + '.fallOff.' + field + ': ожидается конечное число диагностики fall-off');
-        }
+      // Приведённое давление: конечное строго положительное (нулевое
+      // или отрицательное Pr — неинтерпретируемая диагностика, а не
+      // «маленькое давление»).
+      if (typeof fo.reducedPressure !== 'number' || !Number.isFinite(fo.reducedPressure) || fo.reducedPressure <= 0) {
+        problems.push(entryLabel + '.fallOff.reducedPressure: ожидается конечное строго положительное приведённое давление fall-off');
+      }
+      if (typeof fo.log10ReducedPressure !== 'number' || !Number.isFinite(fo.log10ReducedPressure)) {
+        problems.push(entryLabel + '.fallOff.log10ReducedPressure: ожидается конечное число диагностики fall-off');
+      }
+      // Внутренняя согласованность уже сохранённых фактических чисел:
+      // логарифм обязан совпадать с фактической операцией вычислителя
+      // Math.log10(reducedPressure). Это сверка снимка с самим собой,
+      // а НЕ повторный кинетический расчёт: параметры из каталога не
+      // загружаются, evaluateRateConstant не вызывается.
+      if (
+        typeof fo.reducedPressure === 'number' && Number.isFinite(fo.reducedPressure) && fo.reducedPressure > 0 &&
+        typeof fo.log10ReducedPressure === 'number' && Number.isFinite(fo.log10ReducedPressure) &&
+        fo.log10ReducedPressure !== Math.log10(fo.reducedPressure)
+      ) {
+        problems.push(
+          entryLabel + '.fallOff.log10ReducedPressure: логарифм не согласован с приведённым давлением: Math.log10(' + fo.reducedPressure + ') = ' + Math.log10(fo.reducedPressure) + ', получено: ' + fo.log10ReducedPressure + ' (сверяется фактическая операция вычислителя, повторный расчёт не выполняется)'
+        );
       }
       if (
         typeof fo.broadeningFactor !== 'number' ||
@@ -789,6 +853,54 @@ function buildSegmentAuditRecord(segment: KineticCompartmentTrajectorySegmentRes
       invariantChecks: step.integration.invariantChecks
     }
   };
+}
+
+// ============================================
+// 2.1. МОДЕЛЬ ПРЕДСТАВЛЕНИЯ ПОЛНОЙ ИСТОРИИ ЗАПУСКОВ (UI)
+// ============================================
+
+/** Вид снимка аудита сегмента для представления: recorded, unavailable_legacy или явное отсутствие. */
+export type KineticSegmentAuditViewKind = 'recorded' | 'unavailable_legacy' | 'absent';
+
+/** Элемент модели представления одного запуска истории эксперимента. */
+export interface KineticRunHistoryEntry {
+  /** Индекс запуска (позиция в history; валидатор требует runIndex === позиции). */
+  readonly runIndex: number;
+  /** Раскрыт ли запуск по умолчанию: последний — да, предыдущие — нет. */
+  readonly defaultExpanded: boolean;
+  /** Число сегментов запуска (расписание доступно целиком при раскрытии). */
+  readonly segmentCount: number;
+  /** Виды снимков аудита сегментов запуска в порядке сегментов. */
+  readonly segmentAuditKinds: readonly KineticSegmentAuditViewKind[];
+}
+
+/**
+ * Модель представления ПОЛНОЙ истории запусков эксперимента для
+ * интерфейса паспорта мира (корректирующий пакет трассируемости):
+ * ВСЕ запуски в хронологическом порядке, последний раскрыт по
+ * умолчанию, предыдущие свёрнуты. Никаких пересчётов и
+ * реконструкций: модель отражает уже сохранённые записи как есть.
+ * Тестируется явно — защита от регрессии «отображается только
+ * последний запуск».
+ */
+export function kineticRunHistoryViewModel(
+  history: readonly KineticExperimentRunRecord[]
+): readonly KineticRunHistoryEntry[] {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+  const lastPosition = history.length - 1;
+  return history.map((run, position) => {
+    const segments = run !== null && typeof run === 'object' && Array.isArray(run.segments) ? run.segments : [];
+    return {
+      runIndex: typeof run?.runIndex === 'number' ? run.runIndex : position,
+      defaultExpanded: position === lastPosition,
+      segmentCount: segments.length,
+      segmentAuditKinds: segments.map((segment) =>
+        segment !== null && typeof segment === 'object' && segment.audit !== undefined ? segment.audit.kind : 'absent'
+      )
+    };
+  });
 }
 
 // ============================================

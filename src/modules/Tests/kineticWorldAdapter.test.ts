@@ -20,6 +20,7 @@ import {
   resetWorldKineticExperiment,
   kineticExperimentStateProblems,
   runKineticCompartmentTrajectory,
+  kineticRunHistoryViewModel,
   KineticMechanismError,
   KINETIC_EXPERIMENT_SCHEMA_VERSION
 } from '../ChemicalEvolution';
@@ -27,7 +28,8 @@ import type {
   GeneratedWorld,
   KineticExperimentState,
   KineticExperimentInventoryMolM2,
-  KineticExperimentSegmentAudit
+  KineticExperimentSegmentAudit,
+  KineticExperimentRunRecord
 } from '../../types';
 
 // ============================================
@@ -809,6 +811,8 @@ describe('Stage 4.5.5 world adapter: снимки кинетической тр�
     expect(snapshot.reactionId).toBe(R106);
     expect(snapshot.rateConstant.value).toBe(applied.rateConstant.value);
     expect(snapshot.rateConstant.unit).toBe(applied.rateConstant.unit);
+    // фактическая единица механизма №106 подтверждается явно
+    expect(snapshot.rateConstant.unit).toBe('cm3_per_molecule_per_s');
     expect(snapshot.fallOff).toEqual(applied.fallOff);
     expect(snapshot.provenance).toEqual(applied.provenance);
     expect(audit.thirdBodyN2MoleculeCm3).toBe(step.thirdBodyN2MoleculeCm3);
@@ -829,6 +833,9 @@ describe('Stage 4.5.5 world adapter: снимки кинетической тр�
     const step = directRun(schedule).segments[0].compartment.concentrationStep;
     expect(audit.reactions[0].rateConstant.value).toBe(step.reactions[0].rateConstant.value);
     expect(audit.reactions[1].rateConstant.value).toBe(step.reactions[1].rateConstant.value);
+    // обе фактические единицы совместного сегмента подтверждаются явно
+    expect(audit.reactions[0].rateConstant.unit).toBe('cm3_per_molecule_per_s');
+    expect(audit.reactions[1].rateConstant.unit).toBe('cm3_per_molecule_per_s');
     // оба диапазона фактически применённой применимости включают 300 K
     expect(audit.reactions[0].appliedRangeK).toEqual(step.reactions[0].appliedRangeK);
     expect(audit.reactions[1].appliedRangeK).toEqual(step.reactions[1].appliedRangeK);
@@ -969,5 +976,262 @@ describe('Stage 4.5.5 world adapter: снимки кинетической тр�
     (broken.history[0].segments[0].audit as unknown) = { kind: 'other' };
     const problems = kineticExperimentStateProblems(broken);
     expect(problems.some((p) => p.includes('recorded | unavailable_legacy'))).toBe(true);
+  });
+});
+
+// ============================================
+// 8. СТРОГАЯ ФОРМА И СОГЛАСОВАННОСТЬ СНИМКОВ АУДИТА
+// ============================================
+
+describe('Stage 4.5.5 world adapter: строгая форма unavailable_legacy', () => {
+  /** Реальное состояние с recorded-снимками (один запуск №89, 250 K), глубоко отсоединённое. */
+  function recordedState(): KineticExperimentState {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    return JSON.parse(JSON.stringify(world.kineticExperiment)) as KineticExperimentState;
+  }
+
+  it('каждое постороннее поле unavailable_legacy отклоняется', () => {
+    const forbiddenKeys = [
+      'reactions',
+      'rateConstant',
+      'provenance',
+      'parameterProvenance',
+      'fallOff',
+      'thirdBodyN2MoleculeCm3',
+      'concentrationModel',
+      'integration'
+    ] as const;
+    for (const key of forbiddenKeys) {
+      const broken = recordedState();
+      (broken.history[0].segments[0].audit as unknown) = {
+        kind: 'unavailable_legacy',
+        reason: 'тестовая причина',
+        [key]: key === 'reactions' ? [] : key === 'fallOff' ? { reducedPressure: 1 } : 1
+      };
+      const problems = kineticExperimentStateProblems(broken);
+      // посторонний ключ назван точно и отклонён строгой формой
+      expect(problems.some((p) => p.includes('.audit.' + key + ':'))).toBe(true);
+      expect(problems.some((p) => p.includes('кроме kind и reason'))).toBe(true);
+    }
+  });
+
+  it('произвольный неизвестный дополнительный ключ unavailable_legacy отклоняется', () => {
+    const broken = recordedState();
+    (broken.history[0].segments[0].audit as unknown) = {
+      kind: 'unavailable_legacy',
+      reason: 'тестовая причина',
+      customNote: 'неизвестное содержимое'
+    };
+    const problems = kineticExperimentStateProblems(broken);
+    // неизвестное содержимое не отбрасывается и не нормализуется, а диагностируется
+    expect(problems.some((p) => p.includes('.audit.customNote:'))).toBe(true);
+    expect(problems.some((p) => p.includes('постороннее содержимое не отбрасывается и не нормализуется'))).toBe(true);
+  });
+
+  it('чистый объект kind + непустой reason принимается', () => {
+    const state = recordedState();
+    (state.history[0].segments[0].audit as unknown) = {
+      kind: 'unavailable_legacy',
+      reason: 'сегмент выполнен до введения снимков аудита (схема состояния 1.0.0)'
+    };
+    expect(kineticExperimentStateProblems(state)).toEqual([]);
+  });
+
+  it('JSON round-trip чистого legacy-маркера остаётся валидным', () => {
+    const state = recordedState();
+    (state.history[0].segments[0].audit as unknown) = {
+      kind: 'unavailable_legacy',
+      reason: 'сегмент выполнен до введения снимков аудита (схема состояния 1.0.0)'
+    };
+    const restored = JSON.parse(JSON.stringify(state)) as KineticExperimentState;
+    expect(restored.history[0].segments[0].audit).toEqual({
+      kind: 'unavailable_legacy',
+      reason: 'сегмент выполнен до введения снимков аудита (схема состояния 1.0.0)'
+    });
+    expect(kineticExperimentStateProblems(restored)).toEqual([]);
+  });
+});
+
+describe('Stage 4.5.5 world adapter: строгая размерность единицы константы', () => {
+  /** Реальное состояние с recorded-снимками (один запуск №89, 250 K), глубоко отсоединённое. */
+  function recordedState(): KineticExperimentState {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    return JSON.parse(JSON.stringify(world.kineticExperiment)) as KineticExperimentState;
+  }
+
+  it('зарегистрированные, но физически несовместимые единицы отклоняются', () => {
+    const incompatibleUnits = ['m3_per_mol_per_s', 'cm6_per_molecule2_per_s', 'per_s'] as const;
+    for (const unit of incompatibleUnits) {
+      const broken = recordedState();
+      const audit = broken.history[0].segments[0].audit;
+      if (audit === undefined || audit.kind !== 'recorded') {
+        throw new Error('ожидался recorded-снимок сегмента');
+      }
+      audit.reactions[0].rateConstant.unit = unit;
+      const problems = kineticExperimentStateProblems(broken);
+      // единица из общего реестра недостаточна: она обязана
+      // соответствовать механизму №89/№106 и модели molecule_cm3
+      expect(problems.some((p) => p.includes('обязана быть cm3_per_molecule_per_s'))).toBe(true);
+      expect(problems.some((p) => p.includes('несовместимая с этим механизмом размерность'))).toBe(true);
+    }
+  });
+
+  it('неизвестная строка единицы отклоняется и реестром, и механизмом', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    audit.reactions[0].rateConstant.unit = 'parsec_per_kg_per_s';
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('единица должна быть из кинетического реестра'))).toBe(true);
+    expect(problems.some((p) => p.includes('обязана быть cm3_per_molecule_per_s'))).toBe(true);
+  });
+
+  it('фактическая единица реальных снимков №89/№106 равна cm3_per_molecule_per_s', () => {
+    const world89 = runWorldKineticTrajectory(makeWorld(), { segments: SINGLE_SEGMENT, setup: setupInput() });
+    const worldBoth = runWorldKineticTrajectory(makeWorld(), {
+      segments: [{ temperatureK: 300, dtSeconds: 100, reactionIds: [R89, R106] }],
+      setup: setupInput()
+    });
+    const audit89 = world89.kineticExperiment!.history[0].segments[0].audit;
+    if (audit89 === undefined || audit89.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    expect(audit89.reactions[0].rateConstant.unit).toBe('cm3_per_molecule_per_s');
+    const auditBoth = worldBoth.kineticExperiment!.history[0].segments[0].audit;
+    if (auditBoth === undefined || auditBoth.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    expect(auditBoth.reactions.map((r) => r.rateConstant.unit)).toEqual([
+      'cm3_per_molecule_per_s',
+      'cm3_per_molecule_per_s'
+    ]);
+  });
+});
+
+describe('Stage 4.5.5 world adapter: внутренняя согласованность fall-off', () => {
+  /** Реальное состояние с recorded-снимками (один запуск №89, 250 K), глубоко отсоединённое. */
+  function recordedState(): KineticExperimentState {
+    const world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    return JSON.parse(JSON.stringify(world.kineticExperiment)) as KineticExperimentState;
+  }
+
+  it('нулевое приведённое давление отклоняется', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    audit.reactions[0].fallOff.reducedPressure = 0;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('конечное строго положительное приведённое давление'))).toBe(true);
+  });
+
+  it('отрицательное приведённое давление отклоняется', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    audit.reactions[0].fallOff.reducedPressure = -1.5;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('конечное строго положительное приведённое давление'))).toBe(true);
+  });
+
+  it('несогласованный log10ReducedPressure отклоняется', () => {
+    const broken = recordedState();
+    const audit = broken.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    // рассинхрон логарифма с фактической операцией Math.log10(Pr)
+    audit.reactions[0].fallOff.log10ReducedPressure += 0.25;
+    const problems = kineticExperimentStateProblems(broken);
+    expect(problems.some((p) => p.includes('логарифм не согласован с приведённым давлением'))).toBe(true);
+  });
+
+  it('корректная фактическая fall-off-диагностика продолжает приниматься', () => {
+    const state = recordedState();
+    const audit = state.history[0].segments[0].audit;
+    if (audit === undefined || audit.kind !== 'recorded') {
+      throw new Error('ожидался recorded-снимок сегмента');
+    }
+    const fallOff = audit.reactions[0].fallOff;
+    // фактические числа согласованы внутренне: Pr строго положителен,
+    // логарифм равен фактической операции вычислителя Math.log10(Pr)
+    expect(fallOff.reducedPressure).toBeGreaterThan(0);
+    expect(fallOff.log10ReducedPressure).toBe(Math.log10(fallOff.reducedPressure));
+    expect(fallOff.lowPressureLimit).toBeGreaterThan(0);
+    expect(fallOff.highPressureLimit).toBeGreaterThan(0);
+    expect(fallOff.broadeningFactor).toBeGreaterThan(0);
+    expect(fallOff.broadeningFactor).toBeLessThanOrEqual(1);
+    // реальное состояние без повреждений проходит валидатор целиком
+    expect(kineticExperimentStateProblems(state)).toEqual([]);
+  });
+});
+
+// ============================================
+// 9. МОДЕЛЬ ПРЕДСТАВЛЕНИЯ ПОЛНОЙ ИСТОРИИ ЗАПУСКОВ
+// ============================================
+
+describe('Stage 4.5.5 world adapter: модель представления полной истории запусков', () => {
+  it('возвращает ВСЕ запуски в хронологическом порядке, а не только последний', () => {
+    let world = runWorldKineticTrajectory(makeWorld(), {
+      segments: SINGLE_SEGMENT,
+      setup: setupInput()
+    });
+    world = runWorldKineticTrajectory(world, {
+      segments: [{ temperatureK: 350, dtSeconds: 50, reactionIds: [R106] }]
+    });
+    world = runWorldKineticTrajectory(world, { segments: SINGLE_SEGMENT });
+    const experiment = world.kineticExperiment;
+    if (experiment === undefined) {
+      throw new Error('ожидался настроенный эксперимент');
+    }
+    expect(experiment.history.length).toBe(3);
+    const model = kineticRunHistoryViewModel(experiment.history);
+    // все три запуска представлены, в хронологическом порядке
+    expect(model.length).toBe(3);
+    expect(model.map((entry) => entry.runIndex)).toEqual([0, 1, 2]);
+    expect(model.map((entry) => entry.segmentCount)).toEqual([1, 1, 1]);
+    // последний раскрыт по умолчанию, предыдущие свёрнуты
+    expect(model.map((entry) => entry.defaultExpanded)).toEqual([false, false, true]);
+    // все сегменты всех запусков дают recorded-снимки (никаких реконструкций)
+    expect(model.map((entry) => entry.segmentAuditKinds.join(','))).toEqual([
+      'recorded',
+      'recorded',
+      'recorded'
+    ]);
+    // накопленное состояние трёх запусков строго валидно
+    expect(kineticExperimentStateProblems(experiment)).toEqual([]);
+  });
+
+  it('снимки unavailable_legacy и отсутствующие снимки обозначаются честно', () => {
+    const history = [
+      {
+        runIndex: 0,
+        segments: [
+          { index: 0, audit: { kind: 'unavailable_legacy', reason: 'сегмент выполнен до введения снимков аудита' } }
+        ]
+      },
+      { runIndex: 1, segments: [{ index: 0 }, { index: 1, audit: undefined }] }
+    ] as unknown as KineticExperimentRunRecord[];
+    const model = kineticRunHistoryViewModel(history);
+    expect(model.length).toBe(2);
+    expect(model[0].defaultExpanded).toBe(false);
+    expect(model[1].defaultExpanded).toBe(true);
+    expect(model[0].segmentAuditKinds).toEqual(['unavailable_legacy']);
+    // сегмент старой схемы 1.0.0 без поля audit — явное отсутствие, а не выдуманный снимок
+    expect(model[1].segmentAuditKinds).toEqual(['absent', 'absent']);
   });
 });

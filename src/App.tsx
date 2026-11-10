@@ -7,8 +7,8 @@ import { generateWorld, generateRandomSeed, generateMultipleWorlds } from './mod
 import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
 import { createShortDescription } from './modules/WorldModel';
 import { getAllPresets } from './modules/Atmosphere';
-import { runChemicalEvolutionStep, runWorldKineticTrajectory, resetWorldKineticExperiment } from './modules/ChemicalEvolution';
-import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit } from './types';
+import { runChemicalEvolutionStep, runWorldKineticTrajectory, resetWorldKineticExperiment, kineticRunHistoryViewModel } from './modules/ChemicalEvolution';
+import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit, KineticExperimentRunRecord } from './types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
 
 import './App.css';
@@ -352,6 +352,95 @@ function KineticSegmentAuditView({ audit }: { audit: KineticExperimentSegmentAud
   );
 }
 
+/**
+ * Полная история запусков эксперимента (корректирующий пакет
+ * трассируемости): ВСЕ запуски в хронологическом порядке, последний
+ * раскрыт по умолчанию, предыдущие свёрнуты. При раскрытии доступны
+ * расписание и аудит каждого сегмента; unavailable_legacy
+ * показывается с исходной причиной. Раскрытие — только
+ * переключение видимости уже сохранённых данных: повторные расчёты,
+ * реконструкции и обращения к каталогу не выполняются.
+ */
+function KineticRunHistoryView({ history }: { history: KineticExperimentRunRecord[] }) {
+  const entries = kineticRunHistoryViewModel(history);
+  const [expandedOverrides, setExpandedOverrides] = useState<Record<number, boolean>>({});
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="kinetic-run-history">
+      {entries.map((entry) => {
+        const run = history[entry.runIndex];
+        if (run === undefined) {
+          return null;
+        }
+        const expanded =
+          entry.runIndex in expandedOverrides ? expandedOverrides[entry.runIndex] === true : entry.defaultExpanded;
+        return (
+          <details key={entry.runIndex} className="kinetic-run-details" open={expanded}>
+            <summary
+              onClick={(event) => {
+                event.preventDefault();
+                setExpandedOverrides((prev) => ({ ...prev, [entry.runIndex]: !expanded }));
+              }}
+            >
+              Запуск №{run.runIndex + 1}
+              {entry.defaultExpanded ? ' (последний)' : ''}
+            </summary>
+            <p>
+              Физическое время:{' '}
+              {formatKineticAmount(run.startElapsedSeconds)} с → {formatKineticAmount(run.endElapsedSeconds)} с
+            </p>
+            <table className="atmosphere-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>T, K</th>
+                  <th>dt, с</th>
+                  <th>Реакции</th>
+                  <th>Начало, с</th>
+                  <th>Конец, с</th>
+                </tr>
+              </thead>
+              <tbody>
+                {run.segments.map((segment) => (
+                  <tr key={segment.index}>
+                    <td>{segment.index + 1}</td>
+                    <td>{segment.temperatureK}</td>
+                    <td>{formatKineticAmount(segment.dtSeconds)}</td>
+                    <td>
+                      {segment.reactionIds
+                        .map(
+                          (id) =>
+                            KINETIC_EXPERIMENT_REACTIONS.find((r) => r.id === id)?.label ?? id
+                        )
+                        .join(', ')}
+                    </td>
+                    <td>{formatKineticAmount(segment.startTimeSeconds)}</td>
+                    <td>{formatKineticAmount(segment.endTimeSeconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {run.segments.map((segment) => (
+              <div className="kinetic-audit" key={'audit-' + segment.index}>
+                <h5>Аудит сегмента №{segment.index + 1}: фактический расчёт</h5>
+                <KineticSegmentAuditView audit={segment.audit} />
+              </div>
+            ))}
+            {run.warnings.length > 0 && (
+              <p className="kinetic-warnings">Предупреждения: {run.warnings.join('; ')}</p>
+            )}
+            {run.assumptions.length > 0 && (
+              <p className="model-note">Предпосылки результата: {run.assumptions.join('; ')}</p>
+            )}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
 function KineticExperimentSection(props: {
   world: GeneratedWorld;
   onWorldReplace: (world: GeneratedWorld) => void;
@@ -464,8 +553,6 @@ function KineticExperimentSection(props: {
     }
   };
 
-  const lastRun = experiment ? experiment.history[experiment.history.length - 1] ?? null : null;
-
   return (
     <div className="kinetic-experiment">
       <h3>Кинетический эксперимент — ограниченный механизм №89/№106</h3>
@@ -536,58 +623,7 @@ function KineticExperimentSection(props: {
               </tr>
             </tbody>
           </table>
-          {lastRun && (
-            <details className="kinetic-run-details">
-              <summary>Последний запуск (№{lastRun.runIndex + 1})</summary>
-              <p>
-                Физическое время:{' '}
-                {formatKineticAmount(lastRun.startElapsedSeconds)} с → {formatKineticAmount(lastRun.endElapsedSeconds)} с
-              </p>
-              <table className="atmosphere-table">
-                <thead>
-                  <tr>
-                    <th>№</th>
-                    <th>T, K</th>
-                    <th>dt, с</th>
-                    <th>Реакции</th>
-                    <th>Начало, с</th>
-                    <th>Конец, с</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lastRun.segments.map((segment) => (
-                    <tr key={segment.index}>
-                      <td>{segment.index + 1}</td>
-                      <td>{segment.temperatureK}</td>
-                      <td>{formatKineticAmount(segment.dtSeconds)}</td>
-                      <td>
-                        {segment.reactionIds
-                          .map(
-                            (id) =>
-                              KINETIC_EXPERIMENT_REACTIONS.find((r) => r.id === id)?.label ?? id
-                          )
-                          .join(', ')}
-                      </td>
-                      <td>{formatKineticAmount(segment.startTimeSeconds)}</td>
-                      <td>{formatKineticAmount(segment.endTimeSeconds)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {lastRun.segments.map((segment) => (
-                <div className="kinetic-audit" key={'audit-' + segment.index}>
-                  <h5>Аудит сегмента №{segment.index + 1}: фактический расчёт</h5>
-                  <KineticSegmentAuditView audit={segment.audit} />
-                </div>
-              ))}
-              {lastRun.warnings.length > 0 && (
-                <p className="kinetic-warnings">Предупреждения: {lastRun.warnings.join('; ')}</p>
-              )}
-              {lastRun.assumptions.length > 0 && (
-                <p className="model-note">Предпосылки результата: {lastRun.assumptions.join('; ')}</p>
-              )}
-            </details>
-          )}
+          {experiment.history.length > 0 && <KineticRunHistoryView history={experiment.history} />}
         </div>
       )}
 
