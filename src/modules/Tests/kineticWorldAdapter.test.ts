@@ -436,7 +436,9 @@ describe('Stage 4.5.5 world adapter: сброс и контракт продол
     const world = makeWorld({ customMarker: 'keep-me' });
     const reset = resetWorldKineticExperiment(world);
     expect(reset.kineticExperiment).toBeUndefined();
-    expect((reset as Record<string, unknown>)['customMarker']).toBe('keep-me');
+    // явное двойное приведение: GeneratedWorld (interface) не имеет
+    // индексной сигнатуры, прямое сведение к Record не компилируется
+    expect((reset as unknown as Record<string, unknown>)['customMarker']).toBe('keep-me');
   });
 
   it('сброс повреждённого состояния работает как явное действие пользователя', () => {

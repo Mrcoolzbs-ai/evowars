@@ -516,8 +516,13 @@ export interface GeologicalAnalysis {
  * (отсутствующее) поле — отсутствие значения, а НЕ ноль; для
  * реакционных видов допустим явный ноль; N₂ обязан быть конечным
  * и строго положительным (третье тело механизма).
+ *
+ * Объявлен как type-псевдоним (не interface): объектные
+ * type-псевдонимы получают неявную индексную сигнатуру и
+ * присваиваются контракту траектории (Readonly<Record<string, number>>),
+ * интерфейсы в TypeScript такой сигнатуры не получают.
  */
-export interface KineticExperimentInventoryMolM2 {
+export type KineticExperimentInventoryMolM2 = {
   O: number;
   NO: number;
   NO2: number;
@@ -525,7 +530,7 @@ export interface KineticExperimentInventoryMolM2 {
   O2: number;
   HO2: number;
   N2: number;
-}
+};
 
 /**
  * Запись одного сегмента расписания в истории запуска: точное
