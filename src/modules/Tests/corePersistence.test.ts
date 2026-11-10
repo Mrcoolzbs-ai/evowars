@@ -1796,7 +1796,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(result.notes.some((n) => n.includes('1.0.0 до 1.1.0'))).toBe(true);
     expect(result.notes.some((n) => n.includes('unavailable_legacy'))).toBe(true);
     // повторная миграция идемпотентна
-    const again = migrateSavedWorld(result.world as SavedWorld);
+    const again = migrateSavedWorld(result.world as unknown as SavedWorld);
     expect(again.to).toBe('1.6');
     expect(again.notes).toEqual([]);
     expect((again.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment).toEqual(migrated);
