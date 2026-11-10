@@ -4,14 +4,16 @@
 
 import type {
   GeneratedWorld,
+  KineticExperimentInventoryMolM2,
   SavedWorld,
   GenerationSettings,
   Seed
 } from '../../types';
 
 // Миграции сохранений ведутся реестром научного ядра
-// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 → 1.3 детерминирована,
-// «нет поля» остаётся «неизвестно», provenance не теряется.
+// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 → 1.3 → 1.4 → 1.5
+// детерминирована, «нет поля» остаётся «неизвестно», provenance
+// не теряется.
 import {
   CURRENT_SAVE_SCHEMA_VERSION,
   MigrationError,
@@ -19,6 +21,7 @@ import {
   SAVE_SCHEMA_VERSIONS
 } from '../Core/migrations';
 import { validateReactionLedger } from '../Core/reactionLedger';
+import { kineticExperimentStateProblems } from '../ChemicalEvolution/kineticWorldAdapter';
 
 const STORAGE_KEY = 'evowars_worlds';
 const SETTINGS_KEY = 'evowars_settings';
@@ -47,7 +50,17 @@ const SETTINGS_KEY = 'evowars_settings';
  *   1.3.0; существующий журнал не перезаписывается; при
  *   неизвестной схеме ядра coreWorldState не изменяется вообще;
  *   некорректный журнал отклоняется при загрузке и импорте
- *   (4.2.3.3.1), а не «чинится» молча; значения не пересчитываются.
+ *   (4.2.3.3.1), а не «чинится» молча; значения не пересчитываются;
+ * - 1.5 (этап 4.5.5) — опциональное поле kineticExperiment
+ *   (состояние пользовательского кинетического эксперимента
+ *   №89/№106 — отдельный расчётный сценарий, НЕ часть
+ *   ChemicalEvolutionState): сохранение без этого поля остаётся
+ *   без него (пустой эксперимент не создаётся), уже
+ *   присутствующее значение миграцией не меняется; форма
+ *   состояния проверяется при загрузке и импорте (некорректное
+ *   значение получает диагностику и не возвращается как
+ *   валидный мир), raw-запись повреждённого сохранения не
+ *   удаляется и не «лечится».
  */
 export const STORAGE_FORMAT_VERSION: string = CURRENT_SAVE_SCHEMA_VERSION;
 
@@ -134,18 +147,44 @@ function reactionLedgerProblemsOfWorld(world: SavedWorld): string[] {
 }
 
 /**
- * Миграция + проверка журнала реакций (Stage 4.2.3.3.1): некорректный
- * reactionLedger не может незаметно попасть в приложение как успешно
- * загруженное состояние. Бросает Error с диагностикой; вызывается из
- * loadSingleEntry (запись становится несовместимой с точной причиной
- * отказа, но НЕ удаляется из хранилища) и из saveWorld (повреждённая
- * запись сохраняется как raw, без «лечения» и перезаписи).
+ * Проблемы состояния кинетического эксперимента в сохранении
+ * (Stage 4.5.5). Граница проверки — как у журнала реакций
+ * (4.2.3.3.1): валидируется ТОЛЬКО явно заданное
+ * kineticExperiment (версия схемы состояния, толщина слоя, форма
+ * инвентарей всех запусков, положительность N₂, накопленное
+ * время, структура истории). Отсутствие поля (undefined) —
+ * честное «эксперимент не настроен», не ошибка; явный null и
+ * прочие некорректные формы — проблема с точной причиной.
+ * Некорректное состояние не «чинится» и не подменяется пустым:
+ * сохранение не возвращается как валидно загруженный мир.
+ */
+function kineticExperimentProblemsOfWorld(world: SavedWorld): string[] {
+  const experiment: unknown = (world as { kineticExperiment?: unknown }).kineticExperiment;
+  if (experiment === undefined) {
+    return [];
+  }
+  return kineticExperimentStateProblems(experiment).map((problem) => 'kineticExperiment: ' + problem);
+}
+
+/**
+ * Миграция + проверка журнала реакций (Stage 4.2.3.3.1) и
+ * кинетического эксперимента (Stage 4.5.5): некорректный
+ * reactionLedger или kineticExperiment не может незаметно
+ * попасть в приложение как успешно загруженное состояние.
+ * Бросает Error с диагностикой; вызывается из loadSingleEntry
+ * (запись становится несовместимой с точной причиной
+ * отказа, но НЕ удаляется из хранилища) и из saveWorld
+ * (повреждённая запись сохраняется как raw, без «лечения»
+ * и перезаписи).
  */
 function migrateAndCheckWorld(entry: Record<string, unknown>): SavedWorld {
   const migrated = migrateWorld(entry as unknown as SavedWorld);
-  const problems = reactionLedgerProblemsOfWorld(migrated);
+  const problems = [
+    ...reactionLedgerProblemsOfWorld(migrated),
+    ...kineticExperimentProblemsOfWorld(migrated)
+  ];
   if (problems.length > 0) {
-    throw new Error('некорректный журнал реакций: ' + problems.join('; '));
+    throw new Error('некорректное состояние мира: ' + problems.join('; '));
   }
   return migrated;
 }
@@ -493,6 +532,55 @@ export function exportWorldToJSON(world: SavedWorld): string {
 }
 
 /**
+ * Формат запаса вида кинетического эксперимента, моль/м²
+ * (Stage 4.5.5): ноль показывается честным нулём, прочие
+ * значения — экспоненциальная запись.
+ */
+function formatKineticExperimentAmount(value: number): string {
+  if (value === 0) {
+    return '0';
+  }
+  return value.toExponential(4);
+}
+
+/**
+ * Строковая метка реакции ограниченного механизма №89/№106
+ * (Stage 4.5.5): идентификатор каталога показывается формулой.
+ */
+function kineticReactionLabel(reactionId: string): string {
+  if (reactionId.endsWith('-89')) {
+    return '№89 (O + NO + N₂ → NO₂ + N₂)';
+  }
+  if (reactionId.endsWith('-106')) {
+    return '№106 (H + O₂ + N₂ → HO₂ + N₂)';
+  }
+  return reactionId;
+}
+
+/**
+ * Инвентарь эксперимента одной строкой в фиксированном порядке
+ * видов механизма: «O: …; NO: …; NO2: …; H: …; O2: …; HO2: …; N2: …».
+ */
+function formatKineticExperimentInventory(
+  inventory: KineticExperimentInventoryMolM2
+): string {
+  const speciesOrder: Array<keyof KineticExperimentInventoryMolM2> = [
+    'O',
+    'NO',
+    'NO2',
+    'H',
+    'O2',
+    'HO2',
+    'N2'
+  ];
+  return (
+    speciesOrder
+      .map((species) => `${species}: ${formatKineticExperimentAmount(inventory[species])}`)
+      .join('; ') + ' моль/м²'
+  );
+}
+
+/**
  * Экспорт мира в Markdown
  */
 export function exportWorldToMarkdown(world: SavedWorld): string {
@@ -685,6 +773,61 @@ export function exportWorldToMarkdown(world: SavedWorld): string {
     lines.push('');
   }
 
+  // --- Stage 4.5.5: кинетический эксперимент (опциональное поле) ---
+  if (world.kineticExperiment) {
+    const ke = world.kineticExperiment;
+    lines.push('## Кинетический эксперимент №89/№106 (этап 4.5.5)');
+    lines.push('');
+    lines.push(
+      'Отдельный пользовательский расчётный сценарий ограниченного кинетического ' +
+      'механизма (записи №89/№106) в однородном слое постоянной толщины. Это НЕ ' +
+      'рассчитанная эволюция атмосферы планеты и НЕ режим A: начальные запасы ' +
+      'заданы пользователем явно, перенос, диффузия, конвекция и пополнение ' +
+      'вещества не моделируются, игровые часы не участвуют.'
+    );
+    lines.push('');
+    lines.push(`- **Схема состояния эксперимента:** ${ke.schemaVersion}`);
+    lines.push(`- **Толщина реакционного слоя:** ${formatKineticExperimentAmount(ke.layerThicknessM)} м`);
+    lines.push(`- **Накопленное физическое время:** ${formatKineticExperimentAmount(ke.elapsedSeconds)} с`);
+    lines.push(`- **Успешно завершённых запусков:** ${ke.completedRuns}`);
+    lines.push(`- **Текущий инвентарь:** ${formatKineticExperimentInventory(ke.currentInventoriesMolM2)}`);
+    for (const run of ke.history) {
+      lines.push('');
+      lines.push(`### Запуск №${run.runIndex + 1}`);
+      lines.push('');
+      lines.push(
+        `- **Физическое время:** с ${formatKineticExperimentAmount(run.startElapsedSeconds)} с ` +
+        `до ${formatKineticExperimentAmount(run.endElapsedSeconds)} с`
+      );
+      lines.push(`- **Начальный инвентарь:** ${formatKineticExperimentInventory(run.startInventoriesMolM2)}`);
+      lines.push(`- **Конечный инвентарь:** ${formatKineticExperimentInventory(run.endInventoriesMolM2)}`);
+      lines.push(`- **Сегментов:** ${run.segments.length}`);
+      lines.push('');
+      lines.push('| № | T, K | dt, с | Реакции | Начало, с | Конец, с |');
+      lines.push('|---|------|-------|---------|-----------|----------|');
+      for (const segment of run.segments) {
+        const reactions = segment.reactionIds.map(kineticReactionLabel).join(', ');
+        lines.push(
+          `| ${segment.index + 1} | ${segment.temperatureK} | ${formatKineticExperimentAmount(segment.dtSeconds)} | ` +
+          `${reactions} | ${formatKineticExperimentAmount(segment.startTimeSeconds)} | ` +
+          `${formatKineticExperimentAmount(segment.endTimeSeconds)} |`
+        );
+      }
+      lines.push('');
+      if (run.warnings.length > 0) {
+        lines.push(`- **Предупреждения:** ${run.warnings.join('; ')}`);
+      } else {
+        lines.push('- **Предупреждения:** нет');
+      }
+      if (run.assumptions.length > 0) {
+        lines.push(`- **Предпосылки результата:** ${run.assumptions.join('; ')}`);
+      } else {
+        lines.push('- **Предпосылки результата:** нет');
+      }
+    }
+    lines.push('');
+  }
+
   // --- Этап 4.1: научное ядро (опциональное поле) ---
   if (world.coreWorldState) {
     lines.push('## Научное ядро (этап 4.1)');
@@ -798,9 +941,15 @@ export function importWorldFromJSONDetailed(json: string): WorldImportResult {
     // Stage 4.2.3.3.1: некорректный журнал реакций не возвращается
     // как валидно загруженный мир — причина отказа возвращается
     // диагностикой, оригинальный JSON остаётся у вызывающей стороны.
-    const problems = reactionLedgerProblemsOfWorld(migrated);
+    // Stage 4.5.5: то же для явно заданного кинетического эксперимента
+    // (версия схемы состояния, толщина слоя, инвентари, N₂, накопленное
+    // время, история запусков); отсутствующее поле проходит насквозь.
+    const problems = [
+      ...reactionLedgerProblemsOfWorld(migrated),
+      ...kineticExperimentProblemsOfWorld(migrated)
+    ];
     if (problems.length > 0) {
-      return { world: null, reason: 'некорректный журнал реакций: ' + problems.join('; ') };
+      return { world: null, reason: 'некорректное состояние мира: ' + problems.join('; ') };
     }
     return { world: migrated, reason: null };
   } catch (error) {

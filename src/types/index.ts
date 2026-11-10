@@ -10,7 +10,8 @@ import type {
   AtmospherePhaseAnalysis,
   GeologicalAnalysis,
   EnergyBudgetModel,
-  ChemicalEvolutionState
+  ChemicalEvolutionState,
+  KineticExperimentState
 } from './physics';
 
 import type { CoreWorldState } from '../modules/Core/worldState';
@@ -472,6 +473,17 @@ export interface GeneratedWorld {
    * остаются источниками генерационных данных и не дублируются.
    */
   coreWorldState?: CoreWorldState;
+  // ===== Кинетический эксперимент (этап 4.5.5; опционально) =====
+  /**
+   * Состояние пользовательского кинетического эксперимента
+   * ограниченного механизма №89/№106. Это отдельный расчётный
+   * сценарий: НЕ часть ChemicalEvolutionState, НЕ рассчитанная
+   * эволюция атмосферы планеты, НЕ подключён к игровым часам.
+   * Отсутствие поля означает «эксперимент не настроен», а не
+   * нулевое состояние: пустой эксперимент автоматически не
+   * создаётся ни при генерации мира, ни при миграции сохранений.
+   */
+  kineticExperiment?: KineticExperimentState;
   // Правила и предупреждения
   appliedRules: ID[];
   warnings: GenerationWarning[];

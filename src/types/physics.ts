@@ -493,3 +493,89 @@ export interface GeologicalAnalysis {
   geochemicalGradients: string[];
   notes: string[];
 }
+
+// ============================================
+// 10. КИНЕТИЧЕСКИЙ ЭКСПЕРИМЕНТ №89/№106 (ЭТАП 4.5.5)
+// ============================================
+//
+// Пользовательский расчётный сценарий ограниченного кинетического
+// механизма (записи каталога №89/№106), прикреплённый к паспорту
+// мира как ОТДЕЛЬНОЕ опциональное состояние. Это НЕ часть
+// ChemicalEvolutionState и НЕ рассчитанная эволюция атмосферы
+// планеты: начальные запасы задаёт пользователь явно (они не
+// извлекаются из atmospheric состава), толщина реакционного слоя
+// не выводится из давления/гравитации/масштаба высоты, физическое
+// время — сумма dtSeconds сегментов (игровые часы и
+// gameSpeedCoefficient не участвуют). Отсутствие поля
+// kineticExperiment у мира означает «эксперимент не настроен»:
+// пустой эксперимент автоматически не создаётся.
+
+/**
+ * Явный столбовый инвентарь ограниченного механизма, моль/м².
+ * Все семь видов задаются явно при первичной настройке: пустое
+ * (отсутствующее) поле — отсутствие значения, а НЕ ноль; для
+ * реакционных видов допустим явный ноль; N₂ обязан быть конечным
+ * и строго положительным (третье тело механизма).
+ */
+export interface KineticExperimentInventoryMolM2 {
+  O: number;
+  NO: number;
+  NO2: number;
+  H: number;
+  O2: number;
+  HO2: number;
+  N2: number;
+}
+
+/**
+ * Запись одного сегмента расписания в истории запуска: точное
+ * расписание (температура, длительность, реакции) и проверенные
+ * границы времени сегмента относительно старта этого запуска, с.
+ */
+export interface KineticExperimentSegmentRecord {
+  index: number;
+  temperatureK: number;
+  dtSeconds: number;
+  reactionIds: string[];
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+}
+
+/**
+ * Запись одного успешно завершённого запуска траектории.
+ * Обеспечивает воспроизводимость: индекс запуска, начальный и
+ * конечный инвентарь, начальное и конечное накопленное физическое
+ * время, точное расписание сегментов, предупреждения и предпосылки
+ * результата.
+ */
+export interface KineticExperimentRunRecord {
+  runIndex: number;
+  startInventoriesMolM2: KineticExperimentInventoryMolM2;
+  endInventoriesMolM2: KineticExperimentInventoryMolM2;
+  startElapsedSeconds: number;
+  endElapsedSeconds: number;
+  segments: KineticExperimentSegmentRecord[];
+  warnings: string[];
+  assumptions: string[];
+}
+
+/**
+ * Состояние кинетического эксперимента в паспорте мира
+ * (GeneratedWorld.kineticExperiment). История успешно завершённых
+ * запусков не обрезается молча; текущий инвентарь обновляется
+ * только после полного успешного завершения траектории.
+ */
+export interface KineticExperimentState {
+  /** Версия схемы состояния эксперимента. */
+  schemaVersion: string;
+  /** Постоянная толщина однородного реакционного слоя, м. */
+  layerThicknessM: number;
+  /** Текущий полный инвентарь, моль/м². */
+  currentInventoriesMolM2: KineticExperimentInventoryMolM2;
+  /** Суммарное накопленное физическое время, с (гарантированно конечное). */
+  elapsedSeconds: number;
+  /** Количество успешно завершённых запусков. */
+  completedRuns: number;
+  /** История успешно завершённых запусков (по порядку выполнения). */
+  history: KineticExperimentRunRecord[];
+}

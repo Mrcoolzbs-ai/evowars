@@ -668,3 +668,170 @@ button.danger:hover {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent-primary);
 }
+
+/* ============================================
+   Stage 4.5.5: кинетический эксперимент №89/№106
+   Отдельный расчётный сценарий в паспорте мира:
+   собственный акцент (фиолетовый), чтобы раздел не
+   выглядел очередным шагом режима A.
+   ============================================ */
+
+.kinetic-experiment {
+  margin: 25px 0;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid #b388ff;
+  border-radius: var(--border-radius);
+}
+
+.kinetic-experiment h3 {
+  margin-bottom: 10px;
+  color: #b388ff;
+}
+
+.kinetic-experiment h4 {
+  margin: 15px 0 10px;
+  color: #b388ff;
+  font-size: 1rem;
+}
+
+.kinetic-experiment-note {
+  padding: 10px 12px;
+  margin-bottom: 15px;
+  background: rgba(179, 136, 255, 0.08);
+  border: 1px solid rgba(179, 136, 255, 0.35);
+  border-radius: var(--border-radius);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.kinetic-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.kinetic-setup-grid label,
+.kinetic-segment label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.kinetic-setup-grid input,
+.kinetic-segment input[type='text'] {
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.kinetic-setup-grid input:focus,
+.kinetic-segment input[type='text']:focus {
+  outline: none;
+  border-color: #b388ff;
+}
+
+.kinetic-status .atmosphere-table {
+  margin-top: 10px;
+}
+
+.kinetic-run-details {
+  margin-top: 12px;
+}
+
+.kinetic-run-details summary {
+  cursor: pointer;
+  color: #b388ff;
+  margin-bottom: 10px;
+}
+
+.kinetic-schedule {
+  margin-top: 15px;
+}
+
+.kinetic-segment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+.kinetic-segment-title {
+  align-self: center;
+  color: #b388ff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kinetic-reaction-option {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  align-self: center;
+}
+
+.kinetic-reaction-option input[type='checkbox'] {
+  accent-color: #b388ff;
+}
+
+.kinetic-error {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: rgba(255, 51, 102, 0.08);
+  border: 1px solid var(--accent-error);
+  border-radius: var(--border-radius);
+  color: var(--accent-error);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.kinetic-warnings {
+  color: var(--accent-warning);
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.kinetic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+@media (max-width: 768px) {
+  .kinetic-experiment {
+    padding: 15px;
+  }
+
+  .kinetic-setup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kinetic-segment {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .kinetic-reaction-option {
+    align-self: flex-start;
+  }
+
+  .kinetic-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -7,7 +7,7 @@ import { generateWorld, generateRandomSeed, generateMultipleWorlds } from './mod
 import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
 import { createShortDescription } from './modules/WorldModel';
 import { getAllPresets } from './modules/Atmosphere';
-import { runChemicalEvolutionStep } from './modules/ChemicalEvolution';
+import { runChemicalEvolutionStep, runWorldKineticTrajectory, resetWorldKineticExperiment } from './modules/ChemicalEvolution';
 import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence } from './types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
 
@@ -221,12 +221,358 @@ function CategorySelector<T extends { id: ID; name: string }>(props: {
   );
 }
 
+// ============================================
+// Stage 4.5.5: кинетический эксперимент №89/№106
+// ============================================
+// Отдельный пользовательский расчётный сценарий в паспорте мира:
+// пользователь явно настраивает толщину слоя и начальные запасы
+// (они НЕ извлекаются из атмосферного состава), строит расписание
+// сегментов и выполняет последовательную траекторию. Это НЕ шаг
+// режима A и НЕ рассчитанная эволюция атмосферы планеты.
+
+type KineticSpeciesKey = 'O' | 'NO' | 'NO2' | 'H' | 'O2' | 'HO2' | 'N2';
+
+const KINETIC_EXPERIMENT_SPECIES_FIELDS: Array<{ key: KineticSpeciesKey; formula: string }> = [
+  { key: 'O', formula: 'O' },
+  { key: 'NO', formula: 'NO' },
+  { key: 'NO2', formula: 'NO₂' },
+  { key: 'H', formula: 'H' },
+  { key: 'O2', formula: 'O₂' },
+  { key: 'HO2', formula: 'HO₂' },
+  { key: 'N2', formula: 'N₂' }
+];
+
+const KINETIC_EXPERIMENT_REACTIONS: Array<{ id: string; label: string }> = [
+  { id: 'kida-tb-2015-03-19-89', label: '№89: O + NO + N₂ → NO₂ + N₂ (200–300 K)' },
+  { id: 'kida-tb-2015-03-19-106', label: '№106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)' }
+];
+
+/** Черновик сегмента расписания в редакторе UI (строки, не числа). */
+interface KineticSegmentDraft {
+  temperatureK: string;
+  dtSeconds: string;
+  reactionIds: string[];
+}
+
+function emptyKineticInventoryDraft(): Record<KineticSpeciesKey, string> {
+  return { O: '', NO: '', NO2: '', H: '', O2: '', HO2: '', N2: '' };
+}
+
+function formatKineticAmount(value: number): string {
+  if (value === 0) {
+    return '0';
+  }
+  return value.toExponential(4);
+}
+
+function KineticExperimentSection(props: {
+  world: GeneratedWorld;
+  onWorldReplace: (world: GeneratedWorld) => void;
+}) {
+  const world = props.world;
+  const experiment = world.kineticExperiment;
+
+  const [layerThicknessDraft, setLayerThicknessDraft] = useState('');
+  const [inventoryDraft, setInventoryDraft] = useState<Record<KineticSpeciesKey, string>>(
+    emptyKineticInventoryDraft()
+  );
+  const [scheduleDraft, setScheduleDraft] = useState<KineticSegmentDraft[]>([
+    { temperatureK: '', dtSeconds: '', reactionIds: [] }
+  ]);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const setSegmentField = (index: number, field: 'temperatureK' | 'dtSeconds', value: string) => {
+    setScheduleDraft((drafts) =>
+      drafts.map((draft, i) => (i === index ? { ...draft, [field]: value } : draft))
+    );
+  };
+
+  const toggleSegmentReaction = (index: number, reactionId: string) => {
+    setScheduleDraft((drafts) =>
+      drafts.map((draft, i) =>
+        i === index
+          ? {
+              ...draft,
+              reactionIds: draft.reactionIds.includes(reactionId)
+                ? draft.reactionIds.filter((id) => id !== reactionId)
+                : [...draft.reactionIds, reactionId]
+            }
+          : draft
+      )
+    );
+  };
+
+  const addSegment = () => {
+    setScheduleDraft((drafts) => [...drafts, { temperatureK: '', dtSeconds: '', reactionIds: [] }]);
+  };
+
+  const removeSegment = (index: number) => {
+    setScheduleDraft((drafts) =>
+      drafts.length <= 1 ? drafts : drafts.filter((_, i) => i !== index)
+    );
+  };
+
+  // Явный сброс эксперимента: только по действию пользователя,
+  // форма первичной настройки возвращается в пустое состояние.
+  const handleReset = () => {
+    props.onWorldReplace(resetWorldKineticExperiment(world));
+    setLayerThicknessDraft('');
+    setInventoryDraft(emptyKineticInventoryDraft());
+    setScheduleDraft([{ temperatureK: '', dtSeconds: '', reactionIds: [] }]);
+    setRunError(null);
+  };
+
+  const handleRun = () => {
+    setRunError(null);
+    const segments: Array<{ temperatureK: number; dtSeconds: number; reactionIds: string[] }> = [];
+    for (let i = 0; i < scheduleDraft.length; i++) {
+      const draft = scheduleDraft[i];
+      const temperatureRaw = draft.temperatureK.trim();
+      const dtRaw = draft.dtSeconds.trim();
+      if (temperatureRaw === '' || dtRaw === '') {
+        setRunError(`сегмент ${i + 1}: заполните температуру (K) и длительность (с)`);
+        return;
+      }
+      if (draft.reactionIds.length === 0) {
+        setRunError(`сегмент ${i + 1}: выберите хотя бы одну реакцию (№89 и/или №106)`);
+        return;
+      }
+      segments.push({
+        temperatureK: Number(temperatureRaw),
+        dtSeconds: Number(dtRaw),
+        reactionIds: [...draft.reactionIds]
+      });
+    }
+
+    // Первичная настройка передаётся ТОЛЬКО пока эксперимент не настроен:
+    // пустое поле не превращается в ноль (ключ просто не передаётся,
+    // адаптер назовёт отсутствующий вид), толщина пустая → NaN → явный
+    // отказ адаптера, а не молчаливый ноль.
+    let setup: { layerThicknessM: number; initialInventoriesMolM2: Partial<Record<KineticSpeciesKey, number>> } | undefined;
+    if (!experiment) {
+      const thicknessRaw = layerThicknessDraft.trim();
+      const initialInventoriesMolM2: Partial<Record<KineticSpeciesKey, number>> = {};
+      for (const field of KINETIC_EXPERIMENT_SPECIES_FIELDS) {
+        const raw = inventoryDraft[field.key].trim();
+        if (raw !== '') {
+          initialInventoriesMolM2[field.key] = Number(raw);
+        }
+      }
+      setup = {
+        layerThicknessM: thicknessRaw === '' ? NaN : Number(thicknessRaw),
+        initialInventoriesMolM2
+      };
+    }
+
+    try {
+      const nextWorld = runWorldKineticTrajectory(
+        world,
+        experiment ? { segments } : { segments, setup }
+      );
+      // Ошибка запуска не изменяет отображаемый мир: мир заменяется
+      // только при полном успешном завершении траектории.
+      props.onWorldReplace(nextWorld);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const lastRun = experiment ? experiment.history[experiment.history.length - 1] ?? null : null;
+
+  return (
+    <div className="kinetic-experiment">
+      <h3>Кинетический эксперимент — ограниченный механизм №89/№106</h3>
+      <p className="kinetic-experiment-note">
+        ⚠ Отдельный пользовательский расчётный сценарий в паспорте мира. Он не изменяет
+        основной атмосферный ChemicalEvolutionState, не подключён к игровым часам и не
+        моделирует перенос, диффузию, конвекцию или пополнение вещества. Начальные
+        запасы вводятся пользователем явно и не извлекаются автоматически из
+        атмосферного состава: радикалов O, NO, NO₂, H и HO₂ в атмосферном каталоге нет.
+      </p>
+
+      {!experiment && (
+        <div className="kinetic-setup">
+          <h4>Первичная настройка</h4>
+          <p className="model-note">
+            Все поля пустые по умолчанию: пустое поле не превращается в ноль. Для
+            реакционных видов (O, NO, NO₂, H, O₂, HO₂) допустим явный 0; N₂ обязан быть
+            конечным и строго положительным (третье тело механизма).
+          </p>
+          <div className="kinetic-setup-grid">
+            <label>
+              Толщина слоя, м
+              <input
+                type="text"
+                value={layerThicknessDraft}
+                onChange={(e) => setLayerThicknessDraft(e.target.value)}
+                placeholder="например, 1000"
+              />
+            </label>
+            {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+              <label key={field.key}>
+                Начальный запас {field.formula}, моль/м²
+                <input
+                  type="text"
+                  value={inventoryDraft[field.key]}
+                  onChange={(e) =>
+                    setInventoryDraft((draft) => ({ ...draft, [field.key]: e.target.value }))
+                  }
+                  placeholder="число или 0"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {experiment && (
+        <div className="kinetic-status">
+          <h4>Состояние эксперимента</h4>
+          <div className="physics-grid">
+            <div><span>Толщина слоя:</span> {formatKineticAmount(experiment.layerThicknessM)} м</div>
+            <div><span>Накопленное физическое время:</span> {formatKineticAmount(experiment.elapsedSeconds)} с</div>
+            <div><span>Успешных запусков:</span> {experiment.completedRuns}</div>
+          </div>
+          <table className="atmosphere-table">
+            <thead>
+              <tr>
+                {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+                  <th key={field.key}>{field.formula}, моль/м²</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+                  <td key={field.key}>{formatKineticAmount(experiment.currentInventoriesMolM2[field.key])}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+          {lastRun && (
+            <details className="kinetic-run-details">
+              <summary>Последний запуск (№{lastRun.runIndex + 1})</summary>
+              <p>
+                Физическое время:{' '}
+                {formatKineticAmount(lastRun.startElapsedSeconds)} с → {formatKineticAmount(lastRun.endElapsedSeconds)} с
+              </p>
+              <table className="atmosphere-table">
+                <thead>
+                  <tr>
+                    <th>№</th>
+                    <th>T, K</th>
+                    <th>dt, с</th>
+                    <th>Реакции</th>
+                    <th>Начало, с</th>
+                    <th>Конец, с</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lastRun.segments.map((segment) => (
+                    <tr key={segment.index}>
+                      <td>{segment.index + 1}</td>
+                      <td>{segment.temperatureK}</td>
+                      <td>{formatKineticAmount(segment.dtSeconds)}</td>
+                      <td>
+                        {segment.reactionIds
+                          .map(
+                            (id) =>
+                              KINETIC_EXPERIMENT_REACTIONS.find((r) => r.id === id)?.label ?? id
+                          )
+                          .join(', ')}
+                      </td>
+                      <td>{formatKineticAmount(segment.startTimeSeconds)}</td>
+                      <td>{formatKineticAmount(segment.endTimeSeconds)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {lastRun.warnings.length > 0 && (
+                <p className="kinetic-warnings">Предупреждения: {lastRun.warnings.join('; ')}</p>
+              )}
+              {lastRun.assumptions.length > 0 && (
+                <p className="model-note">Предпосылки результата: {lastRun.assumptions.join('; ')}</p>
+              )}
+            </details>
+          )}
+        </div>
+      )}
+
+      <div className="kinetic-schedule">
+        <h4>Расписание сегментов</h4>
+        <p className="model-note">
+          Температурные диапазоны: №89: 200–300 K; №106: 300–400 K; совместный выбор
+          №89+№106 допустим только при 300 K. Ничего не исправляется и не отключается
+          автоматически: ошибка запуска будет показана с причиной из механизма.
+        </p>
+        {scheduleDraft.map((draft, i) => (
+          <div className="kinetic-segment" key={i}>
+            <span className="kinetic-segment-title">Сегмент {i + 1}</span>
+            <label>
+              T, K
+              <input
+                type="text"
+                value={draft.temperatureK}
+                onChange={(e) => setSegmentField(i, 'temperatureK', e.target.value)}
+                placeholder="например, 250"
+              />
+            </label>
+            <label>
+              dt, с
+              <input
+                type="text"
+                value={draft.dtSeconds}
+                onChange={(e) => setSegmentField(i, 'dtSeconds', e.target.value)}
+                placeholder="например, 100"
+              />
+            </label>
+            {KINETIC_EXPERIMENT_REACTIONS.map((reaction) => (
+              <label className="kinetic-reaction-option" key={reaction.id}>
+                <input
+                  type="checkbox"
+                  checked={draft.reactionIds.includes(reaction.id)}
+                  onChange={() => toggleSegmentReaction(i, reaction.id)}
+                />
+                {reaction.label}
+              </label>
+            ))}
+            <button
+              className="secondary"
+              onClick={() => removeSegment(i)}
+              disabled={scheduleDraft.length <= 1}
+            >
+              Удалить сегмент
+            </button>
+          </div>
+        ))}
+        <button className="secondary" onClick={addSegment}>
+          Добавить сегмент
+        </button>
+      </div>
+
+      {runError && <div className="kinetic-error">✖ {runError}</div>}
+
+      <div className="kinetic-actions">
+        <button className="primary" onClick={handleRun}>
+          {experiment ? 'Выполнить запуск' : 'Настроить и выполнить запуск'}
+        </button>
+        {experiment && (
+          <button className="danger" onClick={handleReset}>
+            Сбросить эксперимент
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Компонент для отображения мира
 function WorldDisplay(props: {
   world: GeneratedWorld | null;
   onSave: () => void;
   onClose: () => void;
   onChemicalStep?: () => void;
+  onWorldReplace: (world: GeneratedWorld) => void;
 }) {
   if (!props.world) return null;
 
@@ -524,6 +870,8 @@ function WorldDisplay(props: {
           )}
         </div>
       )}
+
+      <KineticExperimentSection world={world} onWorldReplace={props.onWorldReplace} />
 
       {world.warnings.length > 0 && (
         <div className="world-warnings">
@@ -935,6 +1283,7 @@ function App() {
                 onSave={handleSaveWorld}
                 onClose={() => setCurrentWorld(null)}
                 onChemicalStep={handleChemicalStep}
+                onWorldReplace={setCurrentWorld}
               />
             )}
           </>

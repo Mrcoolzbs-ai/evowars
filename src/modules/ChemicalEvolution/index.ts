@@ -72,6 +72,32 @@ import { runKineticCompartmentTrajectory } from './kineticTrajectory';
 
 export * from './kineticTrajectory';
 
+// Stage 4.5.5 (интеграционный срез, 2026-11-10): пользовательский
+// кинетический эксперимент №89/№106 в паспорте мира — world adapter
+// runWorldKineticTrajectory поверх существующей траектории
+// компартмента. Эксперимент — отдельное ОПЦИОНАЛЬНОЕ состояние мира
+// (GeneratedWorld.kineticExperiment): начальные запасы и толщина
+// слоя задаются пользователем ЯВНО (не извлекаются из атмосферного
+// состава и параметров мира), физическое время — сумма dtSeconds
+// сегментов (игровые часы/gameSpeedCoefficient не участвуют),
+// состояние обновляется только после полного успешного завершения
+// траектории, ошибки — существующая KineticMechanismError без
+// мутации исходного мира; сброс — отдельная явная операция
+// (resetWorldKineticExperiment). Режим A, ChemicalEvolutionState и
+// runChemicalEvolutionStep НЕ меняются: эксперимент к ним не
+// подключён, результаты НЕ выдаются за рассчитанную эволюцию
+// атмосферы планеты (перенос/диффузия/конвекция/пополнение не
+// моделируются).
+import {
+  KINETIC_EXPERIMENT_SCHEMA_VERSION,
+  KINETIC_EXPERIMENT_SPECIES,
+  kineticExperimentStateProblems,
+  resetWorldKineticExperiment,
+  runWorldKineticTrajectory
+} from './kineticWorldAdapter';
+
+export * from './kineticWorldAdapter';
+
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
 // ============================================
@@ -720,5 +746,10 @@ export default {
   runChemicalEvolutionStep,
   runConcentrationKineticStep,
   runKineticCompartmentStep,
-  runKineticCompartmentTrajectory
+  runKineticCompartmentTrajectory,
+  runWorldKineticTrajectory,
+  resetWorldKineticExperiment,
+  kineticExperimentStateProblems,
+  KINETIC_EXPERIMENT_SCHEMA_VERSION,
+  KINETIC_EXPERIMENT_SPECIES
 };

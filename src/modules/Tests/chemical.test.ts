@@ -12,12 +12,15 @@ import {
   createDefaultProcessRegistry,
   elementTotalsOf,
   substanceTotalsOf,
-  runChemicalEvolutionStep
+  runChemicalEvolutionStep,
+  runWorldKineticTrajectory,
+  runKineticCompartmentTrajectory,
+  KINETIC_EXPERIMENT_SCHEMA_VERSION
 } from '../ChemicalEvolution';
 import chemicalReactions from '../Data/chemicalReactions';
 import { computeAtmospherePhysicalModel, getAllPresets } from '../Atmosphere';
 import { G_EARTH_MS2 } from '../Units';
-import type { AtmospherePhysicalModel, GeneratedWorld, ChemicalStepRecord } from '../../types';
+import type { AtmospherePhysicalModel, GeneratedWorld, ChemicalStepRecord, KineticExperimentInventoryMolM2 } from '../../types';
 import type { ChemicalReaction } from '../../types';
 
 // ============================================
@@ -649,6 +652,107 @@ describe('ChemicalEvolution (химическая эволюция, этап 3)'
       // только с учётом стехиометрии: проверяем по элементам.
       const totals = substanceTotalsOf(next);
       expect(totals['co2']).toBeCloseTo(2, 10);
+    });
+  });
+
+  describe('изоляция кинетического эксперимента (этап 4.5.5)', () => {
+    // Кинетический эксперимент — отдельное опциональное состояние мира,
+    // НЕ часть ChemicalEvolutionState: радикалы не заимствуются из
+    // стехиометрического инвентаря, игровое время и gameSpeedCoefficient
+    // не участвуют. Значения инвентарей ниже — СИНТЕТИЧЕСКИЕ тестовые
+    // величины, не претендующие на физическую реальность планеты.
+    const KINETIC_R89 = 'kida-tb-2015-03-19-89';
+    const KINETIC_THICKNESS_M = 1000;
+    const KINETIC_INVENTORY: KineticExperimentInventoryMolM2 = {
+      O: 1e-3,
+      NO: 1e-3,
+      NO2: 1e-3,
+      H: 1e-4,
+      O2: 1e-1,
+      HO2: 0,
+      N2: 10
+    };
+    const KINETIC_SEGMENTS = [
+      { temperatureK: 250, dtSeconds: 100, reactionIds: [KINETIC_R89] }
+    ];
+
+    /** Мир со стехиометрическим химическим состоянием (синтетическая модель). */
+    function makeIsolationWorld(): GeneratedWorld {
+      const model = makeModel({ ch4: 0.6, o2: 0.4 });
+      return {
+        chemicalState: createChemicalState({ atmospherePhysicalModel: model }),
+        atmospherePhysics: model,
+        atmosphere: { temperature: 600 },
+        energySources: { primary: [], secondary: [] }
+      } as unknown as GeneratedWorld;
+    }
+
+    /** Мир с уже настроенным валидным кинетическим экспериментом. */
+    function makeWorldWithExperiment(): GeneratedWorld {
+      return runWorldKineticTrajectory(makeIsolationWorld(), {
+        segments: KINETIC_SEGMENTS,
+        setup: {
+          layerThicknessM: KINETIC_THICKNESS_M,
+          initialInventoriesMolM2: { ...KINETIC_INVENTORY }
+        }
+      });
+    }
+
+    it('runChemicalEvolutionStep не меняет содержимое kineticExperiment', () => {
+      const world = makeWorldWithExperiment();
+      const experimentSnapshot = JSON.parse(JSON.stringify(world.kineticExperiment));
+      const result = runChemicalEvolutionStep(world);
+      // эксперимент пережил шаг режима A без изменений: это отдельные состояния
+      expect(result.world.kineticExperiment).toEqual(experimentSnapshot);
+      expect(world.kineticExperiment).toEqual(experimentSnapshot);
+    });
+
+    it('кинетический запуск не изменяет chemicalState', () => {
+      const world = makeIsolationWorld();
+      const chemicalSnapshot = JSON.parse(JSON.stringify(world.chemicalState));
+      const result = runWorldKineticTrajectory(world, {
+        segments: KINETIC_SEGMENTS,
+        setup: {
+          layerThicknessM: KINETIC_THICKNESS_M,
+          initialInventoriesMolM2: { ...KINETIC_INVENTORY }
+        }
+      });
+      expect(result.chemicalState).toEqual(chemicalSnapshot);
+      expect(world.chemicalState).toEqual(chemicalSnapshot);
+      // игровое модельное время режима A не двигается кинетическим запуском
+      expect((result.chemicalState as { modelTimeYears: number }).modelTimeYears).toBe(0);
+    });
+
+    it('стехиометрический и кинетический инвентари не смешиваются', () => {
+      const world = makeWorldWithExperiment();
+      const experiment = world.kineticExperiment!;
+      // инвентарь эксперимента содержит ровно семь видов механизма
+      expect(Object.keys(experiment.currentInventoriesMolM2).sort()).toEqual(
+        ['H', 'HO2', 'N2', 'NO', 'NO2', 'O', 'O2']
+      );
+      // стехиометрический инвентарь режима A не получил ключей механизма
+      const chemInventory = (world.chemicalState as { inventory: Record<string, number> }).inventory;
+      for (const key of ['O', 'NO', 'NO2', 'H', 'HO2']) {
+        expect(chemInventory[key]).toBeUndefined();
+      }
+    });
+
+    it('gameSpeedCoefficient не участвует во времени или кинетике эксперимента', () => {
+      const world = makeWorldWithExperiment();
+      const experiment = world.kineticExperiment!;
+      // физическое время эксперимента — точная сумма dtSeconds сегментов
+      expect(experiment.elapsedSeconds).toBe(100);
+      // и оно совпадает с прямой траекторией компартмента без каких-либо
+      // игровых коэффициентов
+      const direct = runKineticCompartmentTrajectory({
+        layerThicknessM: KINETIC_THICKNESS_M,
+        initialInventoriesMolM2: { ...KINETIC_INVENTORY },
+        segments: KINETIC_SEGMENTS
+      });
+      expect(experiment.elapsedSeconds).toBe(direct.totalTimeSeconds);
+      expect(experiment.schemaVersion).toBe(KINETIC_EXPERIMENT_SCHEMA_VERSION);
+      // игровое модельное время режима A осталось нетронутым
+      expect((world.chemicalState as { modelTimeYears: number }).modelTimeYears).toBe(0);
     });
   });
 });

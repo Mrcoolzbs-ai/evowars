@@ -40,3 +40,6 @@ export * from './kineticCompartment.test';
 
 // --- Последовательная кинетическая траектория компартмента (Stage 4.5.5, третий срез) ---
 export * from './kineticTrajectory.test';
+
+// --- Пользовательский кинетический эксперимент №89/№106 в паспорте мира (Stage 4.5.5, интеграционный срез) ---
+export * from './kineticWorldAdapter.test';

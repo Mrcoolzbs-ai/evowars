@@ -109,11 +109,21 @@ export function createDatasetRegistry(): DatasetRegistry {
  *         отсутствия реакций — незнание не подменяется пустым
  *         журналом); отсутствие coreWorldState остаётся отсутствием
  *         (ядро не инициализировано), научные значения не
- *         пересчитываются.
+ *         пересчитываются;
+ * - 1.5 — этап 4.5.5: опциональное поле kineticExperiment
+ *         (состояние пользовательского кинетического эксперимента
+ *         №89/№106 — отдельный расчётный сценарий, НЕ часть
+ *         ChemicalEvolutionState): миграция 1.4 → 1.5 только
+ *         поднимает версию формата; сохранение без kineticExperiment
+ *         остаётся без этого поля (пустой эксперимент НЕ создаётся),
+ *         уже присутствующее значение сохраняется БЕЗ изменений
+ *         (валидация формы выполняется при загрузке/импорте, а не
+ *         миграцией), остальные поля мира не пересчитываются и не
+ *         переписываются.
  */
-export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4'] as const;
+export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5'] as const;
 export type SaveSchemaVersion = (typeof SAVE_SCHEMA_VERSIONS)[number];
-export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.4';
+export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.5';
 
 export function isKnownSchemaVersion(version: string): boolean {
   return (SAVE_SCHEMA_VERSIONS as readonly string[]).includes(version);
@@ -340,7 +350,36 @@ const migrate13to14: SaveMigration<any> = {
   }
 };
 
-const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14];
+/**
+ * Миграция 1.4 → 1.5 (этап 4.5.5).
+ * Поле kineticExperiment НЕ создаётся: отсутствие поля означает
+ * «кинетический эксперимент не настроен», пустой эксперимент не
+ * выдумывается. Уже присутствующее значение kineticExperiment
+ * сохраняется БЕЗ изменений: миграция не валидирует и не «чинит»
+ * форму состояния (runtime-проверка выполняется Storage при
+ * загрузке и импорте — некорректное состояние получает
+ * диагностику, а не молчаливое исправление). Остальные поля мира
+ * не пересчитываются и не переписываются.
+ */
+const migrate14to15: SaveMigration<any> = {
+  from: '1.4',
+  to: '1.5',
+  migrate(world: any): SaveMigrationResult<any> {
+    if (world.kineticExperiment !== undefined) {
+      // Поле уже есть — чужие данные не перезаписываются и не
+      // валидируются миграцией (это задача загрузки/импорта).
+      return { world: { ...world, version: '1.5' }, notes: [] };
+    }
+    return {
+      world: { ...world, version: '1.5' },
+      notes: [
+        'добавлено опциональное поле kineticExperiment (состояние пользовательского кинетического эксперимента №89/№106): его отсутствие означает «эксперимент не настроен», пустой эксперимент не создаётся, значения не пересчитываются'
+      ]
+    };
+  }
+};
+
+const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15];
 
 /**
  * Полная цепочка миграций. Детерминирована: одна и та же входная
