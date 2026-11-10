@@ -483,9 +483,14 @@ describe('элементные инварианты и неотрицатель�
 
   it('решатель реально проверяет неотрицательность: отрицательное y0 даёт nonneg_violation (без clipping)', () => {
     const built = buildConcentrationKineticProblem(input89(250));
+    // Решатель проверяет линейные инварианты на y0 ДО неотрицательности:
+    // вектор-фикстура обязан сохранять оба инварианта точно, чтобы отказ
+    // изолированно демонстрировал именно nonneg-проверку.
+    // N: [NO]+[NO₂] = −5.1e11 + 1.03e12 = 5.2e11;
+    // O: [O]+[NO]+2·[NO₂] = −1e10 − 5.1e11 + 2·1.03e12 = 1.54e12.
     const corrupted: OdeSolverProblem = {
       ...built.problem,
-      y0: [-1e10, 5e11, 2e10]
+      y0: [-1e10, -5.1e11, 1.03e12]
     };
     const e = solverError(() => solveOdeWithRadauIia(corrupted));
     expect(e.code).toBe('nonneg_violation');
