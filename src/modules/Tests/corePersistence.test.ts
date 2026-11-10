@@ -1942,7 +1942,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     // аудит старого сегмента (схема 1.0.0, экспорт as-is): честное
     // отсутствие исторического снимка, без реконструкции
     expect(md).toContain('аудит фактического расчёта');
-    expect(md).toContain('Статус снимка: отсутствует');
+    expect(md).toContain('**Статус снимка:** отсутствует');
     expect(md).toContain('задним числом не восстанавливаются');
     // у мира без эксперимента секции нет: отсутствие не изображается
     const mdWithout = exportWorldToMarkdown({ ...makeGeneratedWorld('w-plain') } as unknown as SavedWorld);
@@ -1968,8 +1968,8 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     // диапазон, fall-off, provenance
     expect(md).toContain('аудит фактического расчёта');
     expect(md).toContain('recorded (фактический результат вычислителя)');
-    expect(md).toContain('Модель концентраций: molecule_cm3');
-    expect(md).toContain('Концентрация третьего тела N₂:');
+    expect(md).toContain('**Модель концентраций:** molecule_cm3');
+    expect(md).toContain('**Фактическая концентрация третьего тела N₂:**');
     expect(md).toContain('cm³ molecule⁻¹ s⁻¹');
     expect(md).toContain('применённый диапазон применимости');
     expect(md).toContain('температура сегмента: 250 K');

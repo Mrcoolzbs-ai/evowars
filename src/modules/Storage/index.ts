@@ -640,7 +640,7 @@ function formatKineticSegmentAuditMarkdown(segment: KineticExperimentSegmentReco
     return lines;
   }
   if (audit.kind === 'unavailable_legacy') {
-    lines.push('- **Статус снимка:** исторический снимок отсутствует: ' + audit.reason);
+    lines.push('- **Статус снимка:** unavailable_legacy: исторический снимок отсутствует: ' + audit.reason);
     return lines;
   }
   lines.push('- **Статус снимка:** recorded (фактический результат вычислителя)');
