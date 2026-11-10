@@ -110,9 +110,14 @@ function requireFiniteNonNegative(name: string, value: number): void {
  * Чистая функция: толщина обязана быть конечной строго положительной;
  * запас — конечным неотрицательным числом (отрицательный столбовый
  * запас физически не интерпретируется, а не «переворачивается»).
- * Переполнение (неконечный результат арифметики) и underflow строго
- * положительного входа в ноль — отказ invalid_input (третий срез 4.5.5);
- * явный ноль входа остаётся допустимым (0 → 0).
+ * Численно устойчивое вычисление (корректирующий срез 2026-11-10):
+ * переполнение ПРОМЕЖУТОЧНЫХ произведений НЕ считается отказом,
+ * если математически конечный итог представим в Number (проверяется
+ * несколькими порядками операций; первый — исходная арифметика,
+ * прежняя точность обычного диапазона сохраняется). Отказ
+ * invalid_input дают только непредставимые итоги: переполнение
+ * конечного результата или underflow строго положительного входа
+ * в ноль. Явный ноль входа остаётся допустимым (0 → 0).
  */
 export function columnInventoryMolM2ToConcentrationMoleculeCm3(
   inventoryMolM2: number,
@@ -120,13 +125,36 @@ export function columnInventoryMolM2ToConcentrationMoleculeCm3(
 ): number {
   requireFiniteNonNegative('столбовый запас, моль/м²', inventoryMolM2);
   requireFinitePositive('layerThicknessM', layerThicknessM);
-  const concentration = (inventoryMolM2 * AVOGADRO_NUMBER_PER_MOL) / (layerThicknessM * 1e6);
-  if (!Number.isFinite(concentration)) {
-    // Переполнение double: результат арифметики не конечен — молчаливый
-    // Infinity НЕ возвращается.
+  // Численно устойчивое вычисление: [X] = C·N_A/(L·10⁶) в нескольких
+  // порядках операций. Первый порядок — исходная арифметика (результат
+  // для обычного диапазона совпадает с прежним байт-в-байт, точность
+  // всех ранее проходивших преобразований сохраняется); дополнительные
+  // порядки покрывают случаи, когда ПРОМЕЖУТОЧНОЕ произведение
+  // переполняется или исчезает, хотя математически конечный итог
+  // представим в Number (например, C = 1e-3 при L = 1e305:
+  // итог ≈ 6.02214076e-291 представим, но L·10⁶ = Infinity).
+  const candidates = [
+    (inventoryMolM2 * AVOGADRO_NUMBER_PER_MOL) / (layerThicknessM * 1e6),
+    (inventoryMolM2 / layerThicknessM) * (AVOGADRO_NUMBER_PER_MOL / 1e6),
+    (inventoryMolM2 * (AVOGADRO_NUMBER_PER_MOL / 1e6)) / layerThicknessM
+  ];
+  // Представимый кандидат: конечен и либо равен нулю для нулевого
+  // входа (0 → 0), либо строго положителен для положительного входа.
+  const isRepresentable = (candidate: number): boolean =>
+    Number.isFinite(candidate) && (inventoryMolM2 === 0 ? candidate === 0 : candidate > 0);
+  for (const candidate of candidates) {
+    if (isRepresentable(candidate)) {
+      return candidate;
+    }
+  }
+  // Ни один порядок операций не дал представимого итога: результат
+  // либо не конечен (переполнение итога), либо строго положительный
+  // вход округляется в ноль (underflow итога). Молчаливый Infinity
+  // и молчаливая потеря вещества НЕ допускаются.
+  if (candidates.some((candidate) => !Number.isFinite(candidate))) {
     throw new KineticMechanismError(
       'invalid_input',
-      'переполнение преобразования столбового запаса в концентрацию: результат не конечен; вход ' +
+      'переполнение преобразования столбового запаса в концентрацию: конечный результат не представим в Number; вход ' +
         String(inventoryMolM2) + ' моль/м², толщина слоя ' + String(layerThicknessM) + ' м',
       {
         operation: 'column_to_concentration',
@@ -135,21 +163,16 @@ export function columnInventoryMolM2ToConcentrationMoleculeCm3(
       }
     );
   }
-  if (inventoryMolM2 > 0 && concentration === 0) {
-    // Underflow: строго положительный вход округлился в ноль — молчаливая
-    // потеря вещества НЕ допускается (явный ноль входа остаётся допустимым).
-    throw new KineticMechanismError(
-      'invalid_input',
-      'underflow преобразования столбового запаса в концентрацию: строго положительный вход даёт ноль; вход ' +
-        String(inventoryMolM2) + ' моль/м², толщина слоя ' + String(layerThicknessM) + ' м',
-      {
-        operation: 'column_to_concentration',
-        inventoryMolM2: String(inventoryMolM2),
-        layerThicknessM: String(layerThicknessM)
-      }
-    );
-  }
-  return concentration;
+  throw new KineticMechanismError(
+    'invalid_input',
+    'underflow преобразования столбового запаса в концентрацию: строго положительный вход даёт ноль; вход ' +
+      String(inventoryMolM2) + ' моль/м², толщина слоя ' + String(layerThicknessM) + ' м',
+    {
+      operation: 'column_to_concentration',
+      inventoryMolM2: String(inventoryMolM2),
+      layerThicknessM: String(layerThicknessM)
+    }
+  );
 }
 
 /**
@@ -157,9 +180,14 @@ export function columnInventoryMolM2ToConcentrationMoleculeCm3(
  * слоя толщиной layerThicknessM:
  *   C = [X]·L·10⁶/N_A.
  * Чистая функция, обратная к columnInventoryMolM2ToConcentrationMoleculeCm3.
- * Переполнение (неконечный результат арифметики) и underflow строго
- * положительного входа в ноль — отказ invalid_input (третий срез 4.5.5);
- * явный ноль входа остаётся допустимым (0 → 0).
+ * Численно устойчивое вычисление (корректирующий срез 2026-11-10):
+ * переполнение ПРОМЕЖУТОЧНЫХ произведений НЕ считается отказом,
+ * если математически конечный итог представим в Number (проверяется
+ * несколькими порядками операций; первый — исходная арифметика,
+ * прежняя точность обычного диапазона сохраняется). Отказ
+ * invalid_input дают только непредставимые итоги: переполнение
+ * конечного результата или underflow строго положительного входа
+ * в ноль. Явный ноль входа остаётся допустимым (0 → 0).
  */
 export function concentrationMoleculeCm3ToColumnInventoryMolM2(
   concentrationMoleculeCm3: number,
@@ -167,13 +195,34 @@ export function concentrationMoleculeCm3ToColumnInventoryMolM2(
 ): number {
   requireFiniteNonNegative('концентрация, molecule/cm³', concentrationMoleculeCm3);
   requireFinitePositive('layerThicknessM', layerThicknessM);
-  const inventory = (concentrationMoleculeCm3 * layerThicknessM * 1e6) / AVOGADRO_NUMBER_PER_MOL;
-  if (!Number.isFinite(inventory)) {
-    // Переполнение double: результат арифметики не конечен — молчаливый
-    // Infinity НЕ возвращается.
+  // Численно устойчивое вычисление: C = [X]·L·10⁶/N_A в нескольких
+  // порядках операций (первый — исходная арифметика: результат для
+  // обычного диапазона совпадает с прежним байт-в-байт). Промежуточное
+  // переполнение произведения НЕ считается отказом, если итог
+  // представим в Number (например, [X] = 1e300 при L = 1e10:
+  // итог ≈ 1.660539067e292 представим, но [X]·L·10⁶ = Infinity
+  // в исходном порядке операций).
+  const candidates = [
+    (concentrationMoleculeCm3 * layerThicknessM * 1e6) / AVOGADRO_NUMBER_PER_MOL,
+    (concentrationMoleculeCm3 / AVOGADRO_NUMBER_PER_MOL) * (layerThicknessM * 1e6),
+    (concentrationMoleculeCm3 * (1e6 / AVOGADRO_NUMBER_PER_MOL)) * layerThicknessM
+  ];
+  // Представимый кандидат: конечен и либо равен нулю для нулевого
+  // входа (0 → 0), либо строго положителен для положительного входа.
+  const isRepresentable = (candidate: number): boolean =>
+    Number.isFinite(candidate) &&
+    (concentrationMoleculeCm3 === 0 ? candidate === 0 : candidate > 0);
+  for (const candidate of candidates) {
+    if (isRepresentable(candidate)) {
+      return candidate;
+    }
+  }
+  // Ни один порядок операций не дал представимого итога: переполнение
+  // итога или underflow строго положительного входа в ноль.
+  if (candidates.some((candidate) => !Number.isFinite(candidate))) {
     throw new KineticMechanismError(
       'invalid_input',
-      'переполнение преобразования концентрации в столбовый запас: результат не конечен; вход ' +
+      'переполнение преобразования концентрации в столбовый запас: конечный результат не представим в Number; вход ' +
         String(concentrationMoleculeCm3) + ' molecule/cm³, толщина слоя ' + String(layerThicknessM) + ' м',
       {
         operation: 'concentration_to_column',
@@ -182,21 +231,16 @@ export function concentrationMoleculeCm3ToColumnInventoryMolM2(
       }
     );
   }
-  if (concentrationMoleculeCm3 > 0 && inventory === 0) {
-    // Underflow: строго положительный вход округлился в ноль — молчаливая
-    // потеря вещества НЕ допускается (явный ноль входа остаётся допустимым).
-    throw new KineticMechanismError(
-      'invalid_input',
-      'underflow преобразования концентрации в столбовый запас: строго положительный вход даёт ноль; вход ' +
-        String(concentrationMoleculeCm3) + ' molecule/cm³, толщина слоя ' + String(layerThicknessM) + ' м',
-      {
-        operation: 'concentration_to_column',
-        concentrationMoleculeCm3: String(concentrationMoleculeCm3),
-        layerThicknessM: String(layerThicknessM)
-      }
-    );
-  }
-  return inventory;
+  throw new KineticMechanismError(
+    'invalid_input',
+    'underflow преобразования концентрации в столбовый запас: строго положительный вход даёт ноль; вход ' +
+      String(concentrationMoleculeCm3) + ' molecule/cm³, толщина слоя ' + String(layerThicknessM) + ' м',
+    {
+      operation: 'concentration_to_column',
+      concentrationMoleculeCm3: String(concentrationMoleculeCm3),
+      layerThicknessM: String(layerThicknessM)
+    }
+  );
 }
 
 // ============================================

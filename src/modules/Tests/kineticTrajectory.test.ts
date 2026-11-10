@@ -7,7 +7,8 @@
 // положительность, реакции, индекс сегмента в диагностике);
 // одно- и многосегментные траектории; СТРОГО последовательная
 // передача конечного инвентаря сегмента в начальный инвентарь
-// следующего; накопление времени; атомарный отказ всей траектории
+// следующего; накопление времени и конечность суммы dtSeconds
+// расписания; атомарный отказ всей траектории
 // с segmentIndex и elapsedSecondsBeforeSegment; неизменность N₂
 // на всей траектории; сохранение запасов невыбранных реакций;
 // отсутствие мутации входа; диагностика результата (предпосылки,
@@ -21,7 +22,16 @@
 
 import { describe, expect, it } from 'vitest';
 import { runKineticCompartmentTrajectory } from '../ChemicalEvolution/kineticTrajectory';
-import type { KineticTrajectoryInput, KineticTrajectorySegment } from '../ChemicalEvolution/kineticTrajectory';
+import type {
+  KineticCompartmentTrajectoryInput,
+  KineticCompartmentTrajectoryResult,
+  KineticCompartmentTrajectorySegmentInput,
+  KineticCompartmentTrajectorySegmentResult,
+  KineticTrajectoryInput,
+  KineticTrajectoryResult,
+  KineticTrajectorySegment,
+  KineticTrajectorySegmentSummary
+} from '../ChemicalEvolution/kineticTrajectory';
 import { runKineticCompartmentStep } from '../ChemicalEvolution/kineticCompartment';
 import type { KineticCompartmentStepInput } from '../ChemicalEvolution/kineticCompartment';
 import { KineticMechanismError } from '../ChemicalEvolution/kineticMechanism';
@@ -45,15 +55,15 @@ function segment(
   temperatureK: number,
   dtSeconds: number,
   reactionIds: string[]
-): KineticTrajectorySegment {
+): KineticCompartmentTrajectorySegmentInput {
   return { temperatureK, dtSeconds, reactionIds };
 }
 
 function trajectoryInput(
-  segments: KineticTrajectorySegment[],
+  segments: KineticCompartmentTrajectorySegmentInput[],
   initialInventoriesMolM2: Readonly<Record<string, number>> = BASE_INVENTORIES,
   layerThicknessM: number = LAYER_M
-): KineticTrajectoryInput {
+): KineticCompartmentTrajectoryInput {
   return { layerThicknessM, initialInventoriesMolM2, segments };
 }
 
@@ -216,6 +226,26 @@ describe('fail-closed расписание траектории', () => {
     expect(noN2.code).toBe('invalid_input');
     expect((noN2.details as { segmentIndex?: number } | undefined)?.segmentIndex).toBe(0);
   });
+
+  it('сумма dtSeconds переполняет Number — invalid_input с индексом сегмента переполнения ДО выполнения любого шага', () => {
+    // Каждый dtSeconds конечен и строго положителен, но сумма двух
+    // Number.MAX_VALUE переполняет double: отказ обязан произойти
+    // на этапе валидации расписания, а не позднего вычисления шага.
+    const max = Number.MAX_VALUE;
+    const input = trajectoryInput([segment(250, max, [ID89]), segment(300, max, [ID89])]);
+    const snapshot = JSON.stringify(input);
+    const error = mechanismError(() => runKineticCompartmentTrajectory(input));
+    expect(error.code).toBe('invalid_input');
+    expect(error.message).toContain('сегмент 1');
+    expect(error.message).toContain('dtSeconds');
+    expect((error.details as { segmentIndex?: number } | undefined)?.segmentIndex).toBe(1);
+    expect(
+      (error.details as { elapsedSecondsBeforeSegment?: number } | undefined)
+        ?.elapsedSecondsBeforeSegment
+    ).toBe(max);
+    // Отказ произошёл до выполнения любого сегмента: вход не мутирован.
+    expect(JSON.stringify(input)).toBe(snapshot);
+  });
 });
 
 // --------------------------------------------
@@ -262,7 +292,7 @@ describe('односегментная траектория', () => {
 // --------------------------------------------
 
 describe('многосегментная траектория с последовательной передачей состояния', () => {
-  const SEGMENTS: KineticTrajectorySegment[] = [
+  const SEGMENTS: KineticCompartmentTrajectorySegmentInput[] = [
     segment(250, 0.1, [ID89]),
     segment(350, 0.2, [ID106]),
     segment(300, 0.1, [ID89, ID106])
@@ -291,6 +321,9 @@ describe('многосегментная траектория с последо�
   it('время накапливается: totalTimeSeconds — сумма dtSeconds, времена начала/конца последовательны', () => {
     const result = runKineticCompartmentTrajectory(trajectoryInput(SEGMENTS));
     expect(result.totalTimeSeconds).toBeCloseTo(0.4, 12);
+    // totalTimeSeconds гарантированно конечен: конечность суммы
+    // проверяется валидацией расписания заранее.
+    expect(Number.isFinite(result.totalTimeSeconds)).toBe(true);
     expect(result.segments[0].startTimeSeconds).toBe(0);
     expect(result.segments[0].endTimeSeconds).toBeCloseTo(0.1, 12);
     expect(result.segments[1].startTimeSeconds).toBeCloseTo(0.1, 12);
@@ -408,7 +441,7 @@ describe('атомарный отказ всей траектории', () => {
 // --------------------------------------------
 
 describe('N₂ и иммутабельность входа траектории', () => {
-  const SEGMENTS: KineticTrajectorySegment[] = [
+  const SEGMENTS: KineticCompartmentTrajectorySegmentInput[] = [
     segment(250, 0.1, [ID89]),
     segment(350, 0.2, [ID106]),
     segment(300, 0.1, [ID89, ID106])
@@ -468,5 +501,32 @@ describe('диагностика результата траектории', () 
     expect(result.notes.some((n) => n.includes('НЕ подключён'))).toBe(true);
     expect(result.notes.some((n) => n.includes('dtSeconds'))).toBe(true);
     expect(result.notes.some((n) => n.includes('segmentIndex'))).toBe(true);
+  });
+});
+
+// --------------------------------------------
+// 7. Совместимость имён публичных типов
+// --------------------------------------------
+
+describe('совместимость имён публичных типов траектории', () => {
+  it('новый контракт задания и прежние имена (третий срез) ссылаются на один публичный контракт', () => {
+    // Оба набора имён импортируемы и взаимно совместимы по
+    // присваиванию (проверяется компилятором TypeScript в CI):
+    // прежние имена — экспортируемые алиасы нового контракта.
+    const legacySegment: KineticTrajectorySegment = segment(250, DT_FIXTURE_S, [ID89]);
+    const freshSegment: KineticCompartmentTrajectorySegmentInput = legacySegment;
+    const legacyInput: KineticTrajectoryInput = trajectoryInput([legacySegment]);
+    const freshInput: KineticCompartmentTrajectoryInput = legacyInput;
+
+    expect(freshSegment.reactionIds).toEqual(freshInput.segments[0].reactionIds);
+
+    const result: KineticCompartmentTrajectoryResult = runKineticCompartmentTrajectory(freshInput);
+    const legacyResult: KineticTrajectoryResult = result;
+    expect(legacyResult.status).toBe('completed');
+
+    const legacySummaryKey: keyof KineticTrajectorySegmentSummary = 'startTimeSeconds';
+    const freshSummaryKey: keyof KineticCompartmentTrajectorySegmentResult = 'startTimeSeconds';
+    expect(result.segments[0][legacySummaryKey]).toBe(0);
+    expect(result.segments[0][freshSummaryKey]).toBe(0);
   });
 });

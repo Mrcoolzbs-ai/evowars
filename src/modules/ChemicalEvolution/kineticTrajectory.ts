@@ -23,8 +23,10 @@
 //   инвентарь сегмента — начальный инвентарь следующего сегмента
 //   (никакого параллельного ветвления и переиспользования начального
 //   инвентаря);
-// - время накапливается как сумма физических dtSeconds сегментов:
-//   gameTime/extentFraction/gameSpeedCoefficient НЕ участвуют;
+// - время накапливается как сумма физических dtSeconds сегментов
+//   (конечность СУММЫ проверяется заранее, до выполнения любого
+//   сегмента): gameTime/extentFraction/gameSpeedCoefficient
+//   НЕ участвуют;
 // - отказ ЛЮБОГО сегмента — атомарный отказ ВСЕЙ траектории:
 //   частично обновлённый инвентарь НЕ возвращается, диагностика
 //   содержит индекс ошибочного сегмента (segmentIndex) и время,
@@ -42,7 +44,9 @@
 // Кинетические коэффициенты, RHS, якобиан, решатель Radau IIA,
 // преобразования единиц и fail-closed правила НЕ дублируются:
 // каждый сегмент делегируется существующему runKineticCompartmentStep,
-// включая укреплённые конвертеры (переполнение/underflow запрещены).
+// включая численно устойчивые конвертеры (отказ дают только
+// непредставимые итоги: переполнение итога или underflow
+// положительного входа в ноль).
 // Отказы используют существующую семантику KineticMechanismError:
 // вторая иерархия ошибок НЕ вводится.
 
@@ -55,7 +59,7 @@ import type { KineticCompartmentStepResult } from './kineticCompartment';
 // ============================================
 
 /** Один сегмент расписания: своя температура, длительность и реакции. */
-export interface KineticTrajectorySegment {
+export interface KineticCompartmentTrajectorySegmentInput {
   /** Постоянная температура слоя на всём сегменте, K (конечная, строго положительная, в диапазоне выбранных реакций). */
   readonly temperatureK: number;
   /** Длительность сегмента, физические секунды (конечная, строго положительная). */
@@ -64,22 +68,36 @@ export interface KineticTrajectorySegment {
   readonly reactionIds: readonly string[];
 }
 
+/**
+ * Обратная совместимость (прежнее имя третьего среза): сегмент
+ * расписания траектории. Публичный контракт задания —
+ * KineticCompartmentTrajectorySegmentInput.
+ */
+export type KineticTrajectorySegment = KineticCompartmentTrajectorySegmentInput;
+
 /** Вход stateless-траектории одного реакционного слоя. */
-export interface KineticTrajectoryInput {
+export interface KineticCompartmentTrajectoryInput {
   /** Общая постоянная толщина однородного реакционного слоя на ВСЕЙ траектории, м (конечная, строго положительная; НЕ выводится из параметров мира). */
   readonly layerThicknessM: number;
   /** Явные начальные столбовые запасы, моль/м² (все обязательные виды реакций первого сегмента и N₂ — как в контракте слоя). */
   readonly initialInventoriesMolM2: Readonly<Record<string, number>>;
   /** Непустое расписание сегментов: выполняются строго по порядку. */
-  readonly segments: readonly KineticTrajectorySegment[];
+  readonly segments: readonly KineticCompartmentTrajectorySegmentInput[];
 }
+
+/**
+ * Обратная совместимость (прежнее имя третьего среза): вход
+ * траектории. Публичный контракт задания —
+ * KineticCompartmentTrajectoryInput.
+ */
+export type KineticTrajectoryInput = KineticCompartmentTrajectoryInput;
 
 // ============================================
 // 2. РЕЗУЛЬТАТ ТРАЕКТОРИИ
 // ============================================
 
 /** Итог одного выполненного сегмента траектории. */
-export interface KineticTrajectorySegmentSummary {
+export interface KineticCompartmentTrajectorySegmentResult {
   /** Индекс сегмента в расписании (с нуля). */
   readonly index: number;
   /** Время начала сегмента от старта траектории, физические секунды. */
@@ -93,26 +111,35 @@ export interface KineticTrajectorySegmentSummary {
   readonly compartment: KineticCompartmentStepResult;
 }
 
-export interface KineticTrajectoryResult {
+export interface KineticCompartmentTrajectoryResult {
   readonly status: 'completed';
   /** Общая постоянная толщина слоя, м. */
   readonly layerThicknessM: number;
   /** Число выполненных сегментов. */
   readonly segmentCount: number;
-  /** Сумма dtSeconds всех сегментов, физические секунды. */
+  /** Сумма dtSeconds всех сегментов, физические секунды (конечность суммы проверена заранее: гарантированно конечна). */
   readonly totalTimeSeconds: number;
   /** Столбовый инвентарь после последнего сегмента, моль/м² (новый объект; вход НЕ мутируется). */
   readonly finalInventoriesMolM2: Readonly<Record<string, number>>;
   /** Изменяемые виды механизма, участвовавшие хотя бы в одном сегменте (порядок первого появления). */
   readonly updatedSpecies: readonly string[];
   /** Итоги всех сегментов по порядку выполнения. */
-  readonly segments: readonly KineticTrajectorySegmentSummary[];
+  readonly segments: readonly KineticCompartmentTrajectorySegmentResult[];
   /** Явные предпосылки физической модели траектории. */
   readonly assumptions: readonly string[];
   /** Предупреждения всех сегментов с префиксом «[сегмент N]» + предупреждения траектории. */
   readonly warnings: readonly string[];
   readonly notes: readonly string[];
 }
+
+/**
+ * Обратная совместимость (прежние имена третьего среза): результат
+ * траектории и итог сегмента. Публичный контракт задания —
+ * KineticCompartmentTrajectoryResult и
+ * KineticCompartmentTrajectorySegmentResult.
+ */
+export type KineticTrajectoryResult = KineticCompartmentTrajectoryResult;
+export type KineticTrajectorySegmentSummary = KineticCompartmentTrajectorySegmentResult;
 
 // ============================================
 // 3. ТРАЕКТОРИЯ ОДНОГО КОМПАРТМЕНТА
@@ -125,7 +152,8 @@ export interface KineticTrajectoryResult {
  * сегмента становится начальным инвентарём следующего.
  *
  * Fail-closed: всё расписание проверяется ДО выполнения любого
- * сегмента (структура, конечность, положительность, реакции);
+ * сегмента (структура, конечность, положительность, реакции и
+ * конечность СУММЫ dtSeconds всех сегментов);
  * инвентарные правила (обязательные виды, N₂ > 0, запрет
  * NaN/Infinity/отрицательных, unknown-ключи) проверяются слоем
  * внутри каждого сегмента. Отказ любого сегмента — атомарный отказ
@@ -136,13 +164,13 @@ export interface KineticTrajectoryResult {
  * (пересечение диапазонов применимости).
  */
 export function runKineticCompartmentTrajectory(
-  input: KineticTrajectoryInput
-): KineticTrajectoryResult {
+  input: KineticCompartmentTrajectoryInput
+): KineticCompartmentTrajectoryResult {
   // 1. Форма входа и общая толщина слоя.
   if (input === null || typeof input !== 'object') {
     throw new KineticMechanismError(
       'invalid_input',
-      'вход траектории должен быть объектом KineticTrajectoryInput'
+      'вход траектории должен быть объектом KineticCompartmentTrajectoryInput'
     );
   }
   if (
@@ -173,12 +201,18 @@ export function runKineticCompartmentTrajectory(
 
   // 2. Полная структурная проверка расписания ДО выполнения любого
   // сегмента: атомарность начинается с валидного расписания.
+  // Включая конечность СУММЫ dtSeconds: каждый отдельный dtSeconds
+  // конечен, но накопленная сумма может переполнить Number. Времена
+  // начала сегментов вычисляются здесь же и переиспользуются в
+  // цикле исполнения без пересчёта.
+  let scheduledElapsed = 0;
+  const startTimes: number[] = [];
   for (let index = 0; index < schedule.length; index += 1) {
     const segment = schedule[index];
     if (segment === null || typeof segment !== 'object') {
       throw new KineticMechanismError(
         'invalid_input',
-        'сегмент ' + index + ' расписания должен быть объектом KineticTrajectorySegment',
+        'сегмент ' + index + ' расписания должен быть объектом KineticCompartmentTrajectorySegmentInput',
         { segmentIndex: index }
       );
     }
@@ -220,17 +254,37 @@ export function runKineticCompartmentTrajectory(
         );
       }
     }
+    // Конечность накопленной суммы: переполнение суммы dtSeconds
+    // отказывает ДО выполнения любого сегмента; время до сегмента
+    // (elapsedSecondsBeforeSegment) конечно по построению, так как
+    // все предыдущие суммы уже проверены.
+    const nextElapsed = scheduledElapsed + segment.dtSeconds;
+    if (!Number.isFinite(nextElapsed)) {
+      throw new KineticMechanismError(
+        'invalid_input',
+        'сегмент ' + index + ': сумма dtSeconds расписания переполняет Number (время до сегмента ' + scheduledElapsed + ' c); ни один сегмент НЕ выполнен',
+        {
+          segmentIndex: index,
+          elapsedSecondsBeforeSegment: scheduledElapsed,
+          field: 'dtSeconds'
+        }
+      );
+    }
+    startTimes.push(scheduledElapsed);
+    scheduledElapsed = nextElapsed;
   }
 
   // 3. Строгая последовательная передача состояния: конечный
-  // инвентарь сегмента — начальный инвентарь следующего.
-  const steps: KineticTrajectorySegmentSummary[] = [];
+  // инвентарь сегмента — начальный инвентарь следующего. Времена
+  // начала/конца берутся из заранее рассчитанных на этапе
+  // валидации конечных значений и НЕ пересчитываются в цикле.
+  const steps: KineticCompartmentTrajectorySegmentResult[] = [];
   const updatedSpecies: string[] = [];
   let current: Readonly<Record<string, number>> = initial;
-  let elapsed = 0;
 
   for (let index = 0; index < schedule.length; index += 1) {
     const segment = schedule[index];
+    const startTimeSeconds = startTimes[index];
     let step: KineticCompartmentStepResult;
     try {
       step = runKineticCompartmentStep({
@@ -251,10 +305,10 @@ export function runKineticCompartmentTrajectory(
           }
         }
         details.segmentIndex = index;
-        details.elapsedSecondsBeforeSegment = elapsed;
+        details.elapsedSecondsBeforeSegment = startTimeSeconds;
         throw new KineticMechanismError(
           caught.code,
-          'сегмент ' + index + ' (начало t=' + elapsed + ' c) отказал: ' + caught.message,
+          'сегмент ' + index + ' (начало t=' + startTimeSeconds + ' c) отказал: ' + caught.message,
           details
         );
       }
@@ -267,14 +321,13 @@ export function runKineticCompartmentTrajectory(
     }
     steps.push({
       index,
-      startTimeSeconds: elapsed,
-      endTimeSeconds: elapsed + segment.dtSeconds,
+      startTimeSeconds,
+      endTimeSeconds: startTimeSeconds + segment.dtSeconds,
       temperatureK: segment.temperatureK,
       dtSeconds: segment.dtSeconds,
       reactionIds: [...segment.reactionIds],
       compartment: step
     });
-    elapsed += segment.dtSeconds;
     current = step.updatedColumnInventoriesMolM2;
   }
 
@@ -293,7 +346,7 @@ export function runKineticCompartmentTrajectory(
     status: 'completed',
     layerThicknessM: input.layerThicknessM,
     segmentCount: steps.length,
-    totalTimeSeconds: elapsed,
+    totalTimeSeconds: scheduledElapsed,
     finalInventoriesMolM2: current,
     updatedSpecies,
     segments: steps,
@@ -308,7 +361,7 @@ export function runKineticCompartmentTrajectory(
     warnings,
     notes: [
       'stateless API траектории: к GeneratedWorld/ChemicalEvolutionState/runChemicalEvolutionStep НЕ подключён; состояние мира не читается и не пишется; этап 4.5.5 этим срезом НЕ завершён',
-      'время траектории — сумма физических dtSeconds сегментов; gameTime/extentFraction/gameSpeedCoefficient НЕ участвуют',
+      'время траектории — сумма физических dtSeconds сегментов (конечность суммы проверяется ДО выполнения любого сегмента: totalTimeSeconds гарантированно конечен); gameTime/extentFraction/gameSpeedCoefficient НЕ участвуют',
       'отказ любого сегмента — атомарный отказ всей траектории: частично обновлённый инвентарь НЕ возвращается; диагностика содержит segmentIndex и elapsedSecondsBeforeSegment',
       'N₂ — третье тело: запас передан явно в начальном инвентаре, стехиометрически не расходуется и сохраняется на всей траектории',
       'записи №1/№70/№72 остаются unknown (no_kinetic_data) и в механизм не входят; совместный сегмент №89+№106 допустим только при 300 K (пересечение диапазонов применимости, общий диапазон 200–400 K НЕ заявляется)',
