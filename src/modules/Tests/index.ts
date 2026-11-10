@@ -31,3 +31,6 @@ export * from './coreNasaPolynomialForm.test';
 
 // --- Термодинамика видов: каталог первой партии NASA CEA (Stage 4.3.2) ---
 export * from './dataThermodynamicCatalog.test';
+
+// --- Ограниченный концентрационный кинетический механизм №89/№106 (Stage 4.5.5, первый срез) ---
+export * from './kineticMechanism.test';

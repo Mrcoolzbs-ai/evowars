@@ -35,6 +35,17 @@ import { getElementComposition } from '../Data/elementCompositions';
 import { paToAtm } from '../Units';
 import { createEmptyReservoirs, totalSubstanceAmount } from '../PhaseEquilibrium';
 
+// Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
+// кинетический механизм ограниченного состава (записи каталога №89/№106,
+// known) — отдельный STATELESS API поверх явного вектора концентраций
+// molecule/cm³. Режим A (applyReaction/runChemicalEvolutionStep) и
+// заглушка runKineticStep НЕ меняются: механизм НЕ подключён к состоянию
+// мира (конверсия inventory в концентрации невозможна без физического
+// контракта атмосферного столба, которого в проекте нет).
+import { runConcentrationKineticStep } from './kineticMechanism';
+
+export * from './kineticMechanism';
+
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
 // ============================================
@@ -680,5 +691,6 @@ export default {
   createDefaultProcessRegistry,
   elementTotalsOf,
   substanceTotalsOf,
-  runChemicalEvolutionStep
+  runChemicalEvolutionStep,
+  runConcentrationKineticStep
 };
