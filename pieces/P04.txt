@@ -1,0 +1,131 @@
++      let working = workingBase;
++      const applied: Array<{ reaction: ChemicalReaction; extent: number; record: ChemicalStepRecord }> = [];
++      for (const reaction of chemicalReactions) {
++        const result = applyReaction(working, reaction, {
++          extentFraction: options.extentFraction ?? 0.1,
++          temperatureK,
++          pressureAtm,
++          radiationAvailable
++        });
++        working = result.state;
++        log.push('[' + reaction.id + '] ' + result.record.reason);
++        if (result.record.applied && result.record.extent !== null) {
++          applied.push({ reaction, extent: result.record.extent, record: result.record });
++        }
++      }
++
++      // Модельное время — ровно на один шаг; кислородный баланс —
++      // только по записям ЭТОГО шага (семантика legacy-шага).
++      working = {
++        ...working,
++        modelTimeYears: working.modelTimeYears + working.stepDurationYears
++      };
++      const stepRecords = working.history.slice(stepStartRecordIndex);
++      working = { ...working, oxygenBalance: computeOxygenBalance(stepRecords, working.mode) };
++      log.push(
++        'кислородный баланс: производство ' + working.oxygenBalance.production.toFixed(6) +
++        ', потребление ' + working.oxygenBalance.consumption.toFixed(6) +
++        ', итог ' + working.oxygenBalance.net.toFixed(6)
++      );
++
++      // Проекция состояния ядра для существующего UI.
++      box.chemical = working;
++
++      // Атмосферный резервуар ядра — результат шага.
++      const atmosphereEntries = Object.fromEntries(
++        Object.entries(working.inventory).filter(([, v]) => Number.isFinite(v) && v > 0)
++      );
++      // ReactionLedger: только ФАКТИЧЕСКИ применённые реакции;
++      // id уникальны по (stepIndex, reactionId).
++      let ledger = coreWorld.reactionLedger ?? { records: [] };
++      const reactionTime = {
++        segmentIndex: coreWorld.clock.segmentIndex,
++        localTimeS: coreWorld.clock.localTimeS
++      };
++      for (const { reaction, extent } of applied) {
++        ledger = registerReaction(ledger, {
++          id: 'chemical-evolution-step:' + String(stepIndex) + ':' + reaction.id,
++          reactionId: reaction.id,
++          reactants: reaction.reactants.map((p) => ({
++            reservoirId: CHEMICAL_RESERVOIR_IDS.atmospheric,
++            speciesId: p.gasId,
++            coefficient: p.coefficient
++          })),
++          products: reaction.products.map((p) => ({
++            reservoirId: CHEMICAL_RESERVOIR_IDS.atmospheric,
++            speciesId: p.gasId,
++            coefficient: p.coefficient
++          })),
++          extent,
++          extentBasis: basis,
++          time: reactionTime,
++          processId: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
++          note:
++            'режим A (стехиометрический): степень превращения — игровое допущение (extentFraction), не кинетический расчёт' +
++            (basis === 'arbitrary_units'
++              ? '; основание arbitrary_units — нормированные игровые единицы, НЕ моли'
++              : '')
++        });
++      }
++      const reservoirs: ReservoirRecord[] = coreWorld.reservoirs.map((res) => {
++        if (res.id !== CHEMICAL_RESERVOIR_IDS.atmospheric) return res;
++        return setMaterialInventory(res, basisWide, atmosphereEntries);
++      });
++      return { ...coreWorld, reservoirs, reactionLedger: ledger };
++    }
++  };
++
++  // Один явный оператор — один runMacroStep (повторный запуск химии
++  // внутри одного macro-шага невозможен по построению).
++  let result: MacroStepResult;
++  try {
++    result = runMacroStep(core, createChemicalEvolutionStepRegistry(), [operator], {
++      durationS,
++      splitting: 'lie',
++      processIds: [CHEMICAL_EVOLUTION_STEP_PROCESS_ID],
++      explicit: { processId: CHEMICAL_EVOLUTION_STEP_PROCESS_ID },
++      audit: {
++        speciesCatalog: buildSpeciesCatalogFromLegacy(gases, elementCompositions),
++        boundary: 'complete'
++      }
++    });
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    return reject('шаг химической эволюции отклонён планировщиком: ' + reason);
++  }
++  if (result.status !== 'committed') {
++    return reject('шаг химической эволюции отклонён: ' + result.diagnostics.join('; '));
++  }
++
++  // Commit: мир обновляется; chemicalState — актуальная совместимая
++  // проекция состояния ядра (а не независимый источник).
++  const chemicalAfter = box.chemical ?? chemical;
++  return {
++    world: { ...world, coreWorldState: result.world, chemicalState: chemicalAfter },
++    status: 'committed',
++    log,
++    reason: null
++  };
++}
++
+ // Все функции экспортированы непосредственно в своих определениях.
+ 
+ export default {
+@@ -744,6 +1074,9 @@
+   elementTotalsOf,
+   substanceTotalsOf,
+   runChemicalEvolutionStep,
++  runChemicalEvolutionSchedulerStep,
++  createChemicalEvolutionStepRegistry,
++  CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
+   runConcentrationKineticStep,
+   runKineticCompartmentStep,
+   runKineticCompartmentTrajectory,
+--- remote-baseline/src/modules/Core/adapters.ts
++++ evowars/src/modules/Core/adapters.ts
+@@ -28,7 +28,7 @@
+ import type { DataProvenance, ScientificValue } from './scientificValue';
+ import { estimatedValue, invalidValue, knownValue, notApplicable, unknownValue } from './scientificValue';
+ import type { ProcessDescriptor } from './processRegistry';
+-import type { MaterialInventory } from './reservoir';
++import type { MaterialInventory, ReservoirRecord } from './reservoir';

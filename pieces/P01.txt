@@ -1,0 +1,91 @@
+--- remote-baseline/src/App.tsx
++++ evowars/src/App.tsx
+@@ -7,7 +7,7 @@
+ import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
+ import { createShortDescription } from './modules/WorldModel';
+ import { getAllPresets } from './modules/Atmosphere';
+-import { runChemicalEvolutionStep, runWorldKineticTrajectory, resetWorldKineticExperiment, kineticRunHistoryViewModel } from './modules/ChemicalEvolution';
++import { runChemicalEvolutionSchedulerStep, runWorldKineticTrajectory, resetWorldKineticExperiment, kineticRunHistoryViewModel } from './modules/ChemicalEvolution';
+ import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit, KineticExperimentRunRecord } from './types';
+ import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
+ 
+@@ -701,6 +701,8 @@
+   onSave: () => void;
+   onClose: () => void;
+   onChemicalStep?: () => void;
++  /** Причина отклонённого шага химии (Stage 4.2.3.3); null/undefined — шаг успешен. */
++  chemicalStepNotice?: string | null;
+   onWorldReplace: (world: GeneratedWorld) => void;
+ }) {
+   if (!props.world) return null;
+@@ -997,6 +999,11 @@
+               Сделать шаг химической эволюции
+             </button>
+           )}
++          {props.chemicalStepNotice && (
++            <p className="model-note">
++              ⚠ Шаг химической эволюции НЕ выполнен: {props.chemicalStepNotice}
++            </p>
++          )}
+         </div>
+       )}
+ 
+@@ -1279,6 +1286,9 @@
+   });
+   const [activeTab, setActiveTab] = useState<'generator' | 'history' | 'export'>('generator');
+   const [multipleWorlds, setMultipleWorlds] = useState<GeneratedWorld[]>([]);
++  // Причина последнего отклонённого шага химической эволюции
++  // (Stage 4.2.3.3): null — последний шаг зафиксирован.
++  const [chemicalStepNotice, setChemicalStepNotice] = useState<string | null>(null);
+ 
+   // Загрузка сохраненных миров и настроек
+   useEffect(() => {
+@@ -1307,6 +1317,7 @@
+   // Загрузка мира из истории
+   const handleLoadWorld = (world: SavedWorld) => {
+     setCurrentWorld(world);
++    setChemicalStepNotice(null);
+     setActiveTab('generator');
+   };
+ 
+@@ -1327,6 +1338,7 @@
+   // Генерация мира
+   const handleGenerate = (world: GeneratedWorld) => {
+     setCurrentWorld(world);
++    setChemicalStepNotice(null);
+     setMultipleWorlds([]);
+   };
+ 
+@@ -1336,13 +1348,19 @@
+     setCurrentWorld(null);
+   };
+ 
+-  // Шаг химической эволюции (этап 3): стехиометрический движок
+-  // применяет реакции каталога с контролем элементного баланса
+-  // и лимитирующего реагента.
++  // Шаг химической эволюции (Stage 4.2.3.3): выполняется через
++  // атомарный macro-шаг Scheduler научного ядра (runMacroStep), а не
++  // напрямую через легаси-функцию. При отказе Scheduler мир остаётся
++  // неизменным, пользователю показывается причина.
+   const handleChemicalStep = () => {
+     if (!currentWorld) return;
+-    const result = runChemicalEvolutionStep(currentWorld);
+-    setCurrentWorld(result.world);
++    const result = runChemicalEvolutionSchedulerStep(currentWorld);
++    if (result.status === 'committed') {
++      setChemicalStepNotice(null);
++      setCurrentWorld(result.world);
++    } else {
++      setChemicalStepNotice(result.reason ?? 'шаг химической эволюции отклонён планировщиком');
++    }
+   };
+ 
+   return (
+@@ -1412,6 +1430,7 @@
+                 onSave={handleSaveWorld}
+                 onClose={() => setCurrentWorld(null)}
+                 onChemicalStep={handleChemicalStep}
++                chemicalStepNotice={chemicalStepNotice}
+                 onWorldReplace={setCurrentWorld}
+               />
+             )}
