@@ -1,13 +1,16 @@
 # PEER_ENGINEERING_REVIEW: сравнительное инженерное исследование зрелых open-source проектов
 
 > Тип документа: исследовательский отчёт. Дата: 2026-11-10, корректирующая редакция 2026-11-11.
-> Ветка: `stage-3-planetary-physics`, база: `4ce7a3c` (fast-forward поверх цепочки `9e2b7b7c` →
-> `c572399b` → `5b8f525b` → `a886c31d`).
-> Корректирующая редакция исправляет: трактовку выбора интеграторов в PHREEQC (выбор задаётся
+> Ветка: `stage-3-planetary-physics`, база: `e8a10eb` (fast-forward поверх `4ce7a3c` и цепочки
+> `9e2b7b7c` → `c572399b` → `5b8f525b` → `a886c31d`).
+> Корректирующие редакции исправили: трактовку выбора интеграторов в PHREEQC (выбор задаётся
 > пользователем параметром `-cvode`, автоматической смены метода нет), версию и лицензию REBOUND
 > (исследована 5.2.2, GPL-3.0-only по pyproject.toml), разграничение версий PHREEQC
 > (3.8.6-17100 USGS downloads и 3.9.0-17591 upstream), Alpha-статус PROTEUS, привязку всех
-> исследованных исходников к точным commit SHA.
+> исследованных исходников к точным commit SHA. Финальная коррекция 2026-11-11: разделены
+> документационный и кодовый репозитории PHREEQC (a4b1596 / be755855), прочитан User Rights
+> Notice (doc/NOTICE.TXT), исправлен SHA тега v2.5.36 VPLanet (996173dc), удалён дублирующий
+> абзац о SimulationArchive.
 > Документ исследовательский: он не является разрешением менять код, тесты, научные данные,
 > этапы 4.5.4/4.5.5 или какие-либо иные незакрытые этапы. Все действующие ограничения EvoWars
 > (NASA CEA, gameSpeedCoefficient, Radau IIA, PURE PR, статусы unknown/no_kinetic_data,
@@ -52,8 +55,13 @@
 4. **PHREEQC применим как офлайн-оракул водной геохимии** (этап 4.9) и как образец границы
    интеграции (IPhreeqc/PhreeqcRM: модуль с начальными/граничными условиями, прогон реакции
    во всех ячейках, MPI/OpenMP). Граница применимости: водные растворы; силикатные расплавы
-   и недра не входят в его предметную область. Юридический текст прав USGS в этой сессии не
-   открыт полностью: **(непроверено)**. Категория: **REFERENCE** + **STUDY** (граница
+   и недра не входят в его предметную область. Правовой режим: файла LICENSE нет, README
+   содержит USGS-дисклеймер preliminary/provisional; User Rights Notice (doc/NOTICE.TXT
+   кодового репозитория) прочитан: безвозмездное использование, копирование, изменение и
+   распространение разрешены при условиях уведомления получателей, явного описания
+   изменений, запрета endorsement от имени USGS без письменного разрешения и упоминания
+   авторов; SPDX/OSI-обозначение не подтверждено, юридического заключения документ не
+   делает. Категория: **REFERENCE** + **STUDY** (граница
    интеграции), для недр: **REJECT**.
 5. **REBOUND исследован в актуальной версии 5.2.2** (5 октября 2026): SimulationArchive даёт
    бинарные снапшоты с побитовым воспроизведением рестарта, машинно-независимые между
@@ -77,9 +85,11 @@
 
 Сводка лицензий (все проверены по официальным файлам лицензий в репозиториях):
 PROTEUS Apache-2.0; CoolProp MIT; Cantera BSD-3 (Caltech/Sandia/Cantera Developers);
-PHREEQC: файла LICENSE в репозитории нет, README релиза 3.9.0-17591 содержит USGS-дисклеймер
-«preliminary or provisional... No warranty...» (текст ниже), полный текст User Rights Notice
-**(непроверено)**; REBOUND 5.2.2: GPL-3.0-only (pyproject.toml); VPLanet MIT.
+PHREEQC: файла LICENSE нет; README содержит USGS-дисклеймер «preliminary or provisional...
+No warranty...»; User Rights Notice (doc/NOTICE.TXT кодового репозитория) прочитан:
+безвозмездное использование и распространение с условиями (текст в §6.7);
+SPDX/OSI-обозначение не подтверждено; REBOUND 5.2.2: GPL-3.0-only (pyproject.toml);
+VPLanet MIT.
 
 ## 2. Методология исследования и версии проектов
 
@@ -88,7 +98,9 @@ PHREEQC: файла LICENSE в репозитории нет, README релиз�
 релизов и библиография. Исходные файлы читались напрямую (raw-версии GitHub), страницы
 документации открывались целиком. Дата обращения к первичным источникам: 2026-11-10;
 корректирующая редакция (точные версии, commit SHA, лицензии, PHREEQC KINETICS, REBOUND 5.2.2):
-2026-11-11. Исследование ведётся по релизным версиям; все исходники, тесты и файлы лицензий
+2026-11-11; финальная коррекция 2026-11-11: разделение документационного и кодового
+репозиториев PHREEQC, чтение User Rights Notice (doc/NOTICE.TXT), исправление SHA тега
+v2.5.36 VPLanet. Исследование ведётся по релизным версиям; все исходники, тесты и файлы лицензий
 привязаны к неизменяемым commit SHA (таблица ниже). Ссылки на изменяемые ветки main/master не
 используются как доказательные: там, где дерево репозитория читалось через веб-интерфейс ветки,
 это помечено. Код ветки разработки не смешивается со стабильным релизом: анализ Cantera
@@ -104,15 +116,20 @@ PHREEQC: файла LICENSE в репозитории нет, README релиз�
 | PROTEUS | 26.10.16 | e6c872f6205f2d3aa213a83136fc02e5fdace2d6 (тег 26.10.16) | proteus-framework.org, обращение 2026-11-10 | дерево tests/ читалось через ветку main 2026-11-10; сверка с тегом не выполнялась **(непроверено)** | Apache-2.0, LICENSE.txt тега 26.10.16 (проверен) |
 | CoolProp | 8.0.0 | ae81610e7d23efc57f9d051c8e70a4d66e87537f (тег v8.0.0) | coolprop.org, страница Mixtures 8.0.0 | CI-workflow каталог читался через ветку master; сверка с тегом не выполнялась **(непроверено)** | MIT, LICENSE тега v8.0.0 (проверен) |
 | Cantera | 3.2.0 | 4a8358eb80cfeb50474386b5f9ec0b3a83519889 (тег v3.2.0) | cantera.org /stable (3.2.0), заметки релиза 3.2.0 | test/kinetics по тегу v3.2.0 (kineticsFromScratch, kineticsFromYaml, pdep, rates) | BSD-3, License.txt тега v3.2.0 (проверен) |
-| PHREEQC | 3.9.0-17591 (upstream, 13.05.2026); USGS downloads: 3.8.6-17100 | a4b1596bc0d4ec479a2493541f275af37e9f7349 (тег v3.9.0) | глава KINETICS: water.usgs.gov phreeqc3-24.htm + совпадающий по ключевым фрагментам файл HTMLversion/HTML/phreeqc3-24.htm в теге v3.9.0 | ctest.cmake, ctest.regression.cmake по тегу v3.9.0 | файла LICENSE нет; USGS provisional, дисклеймер README тега v3.9.0 (проверен); User Rights Notice **(непроверено)** |
+| PHREEQC | релиз 3.9.0-17591 (13.05.2026); USGS downloads: 3.8.6-17100 | документационная ревизия a4b1596bc0d4ec479a2493541f275af37e9f7349 (тег v3.9.0, phreeqc-dev/phreeqc3) + кодовый snapshot be755855fcc8c564f4d337cedacb599c5361b26c (master usgs-coupled-subtrees/phreeqc3 на 2026-11-06, состояние после релиза) | глава KINETICS: water.usgs.gov phreeqc3-24.htm + совпадающий по ключевым фрагментам файл HTMLversion/HTML/phreeqc3-24.htm (be755855) | исходный код, ctest.cmake, ctest.regression.cmake по be755855 (usgs-coupled-subtrees/phreeqc3) | файла LICENSE нет; USGS preliminary/provisional (README, проверен); User Rights Notice doc/NOTICE.TXT прочитан (be755855) |
 | REBOUND | 5.2.2 | c34134716cd484ed9cdb9f7d54ef8d859bdf547d (тег 5.2.2) | rebound.hanno-rein.de, соответствие сборке 5.2.2 **(непроверено)** | examples/, ipython_examples/, python_examples/ по тегу 5.2.2 | GPL-3.0-only, pyproject.toml тега 5.2.2 (проверен); LICENSE: текст GPLv3; README: «or later» |
-| VPLanet | v2.5.36 | 35472e7814cf98ea39c2fc7f035a10ee3bd98a62 (тег v2.5.36) | virtualplanetarylaboratory.github.io, обращение 2026-11-10 | examples/ по сайту документации и репозиторию | MIT, LICENSE тега v2.5.36 (проверен) |
+| VPLanet | v2.5.36 | 996173dc4ad76c7b59d48289e28db511ae8008e1 (тег v2.5.36; родитель 35472e7814cf98ea39c2fc7f035a10ee3bd98a62, файлов между ними не изменено) | virtualplanetarylaboratory.github.io, обращение 2026-11-10 | examples/ по сайту документации и репозиторию | MIT, LICENSE тега v2.5.36 (проверен) |
 
 Таблица фиксирует неизменяемые привязки: все commit SHA получены из GitHub по тегам релизов
 в сессии корректирующей редакции 2026-11-11. Версии PHREEQC 3.8.6-17100 (USGS downloads page,
-«Version 3 January 7, 2025») и 3.9.0-17591 (upstream-релиз тега v3.9.0) различаются: последней
+«Version 3 January 7, 2025») и 3.9.0-17591 (релиз мая 2026) различаются: последней
 upstream-версией является 3.9.0-17591, выводы настоящего документа привязаны к ней, если явно
-не указано иное.
+не указано иное. Для PHREEQC доказательная база разделена (см. §6.1): метаданные релиза
+закреплены за документационной ревизией a4b1596 (тег v3.9.0 репозитория phreeqc-dev/phreeqc3),
+исходный код, тесты и User Rights Notice за кодовым snapshot be755855 (master
+usgs-coupled-subtrees/phreeqc3 на 2026-11-06, состояние после релиза); тег v3.9.0 репозитория
+phreeqc-dev/phreeqc3 НЕ является тегом кодового репозитория. SHA тега v2.5.36 VPLanet указывает
+на commit 996173dc (родитель 35472e78, файлов между ними не изменено).
 
 ## 3. PROTEUS: подробный разбор
 
@@ -573,20 +590,36 @@ per-record provenance; записи №1/№70/№72 остаются unknown/no
 
 ### 6.1 Идентификация и статус
 
-Домашняя страница: https://www.usgs.gov/software/phreeqc-version-3. Версии различаются, и
-в первой редакции они не были разведены; корректирующая редакция исправляет это:
+Домашняя страница: https://www.usgs.gov/software/phreeqc-version-3. Версии различаются:
 страница загрузок USGS указывает сборку `3.8.6-17100` («Version 3 January 7, 2025»), тогда
-как upstream-репозиторий https://github.com/phreeqc-dev/phreeqc3 публикует релиз
-`3.9.0-17591` от мая 2026 (тег v3.9.0). Последней upstream-версией является 3.9.0-17591;
-не называть 3.8.6-17100 последней upstream-версией. Исследование в корректирующей редакции
-привязано к тегу v3.9.0, commit a4b1596bc0d4ec479a2493541f275af37e9f7349 (получен по тегу,
-GitHub): по нему прочитаны README, ctest-скрипты и файл документации
-HTMLversion/HTML/phreeqc3-24.htm (глава KINETICS), совпадающий по проверенным ключевым
-фрагментам с https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm.
-Смежный репозиторий https://github.com/usgs-coupled/phreeqc3 содержит тот же README; точное
-отношение двух репозиториев (зеркало, перенос, архив) в этой сессии не устанавливалось:
-**(непроверено)**. Выводы о KINETICS, IPhreeqc и PhreeqcRM ниже привязаны к 3.9.0, если явно
-не указано иное. Основная публикация: Parkhurst, D.L., Appelo, C.A.J.
+как upstream публикует релиз `3.9.0-17591` от мая 2026. Последней upstream-версией является
+3.9.0-17591; не называть 3.8.6-17100 последней upstream-версией.
+
+Происхождение источников разведено (исправление финальной коррекции; ранее commit
+a4b1596bc0d4ec479a2493541f275af37e9f7349 ошибочно указывался как источник исходников,
+тестов и HTML KINETICS):
+
+- Релизная и документационная часть: репозиторий https://github.com/phreeqc-dev/phreeqc3,
+  тег v3.9.0, commit a4b1596bc0d4ec479a2493541f275af37e9f7349 (github-actions[bot],
+  13.05.2026, «Squashed 'doc/' changes from 720d91ed..c3fc4132»; коммит изменяет только
+  RELEASE.TXT с релизными заметками версии от 12.05.2026). Тег v3.9.0 в этом репозитории
+  является документационной ревизией и НЕ является тегом кодового репозитория.
+- Фактический кодовый репозиторий: https://github.com/usgs-coupled-subtrees/phreeqc3,
+  проверенная ревизия master на 2026-11-06:
+  be755855fcc8c564f4d337cedacb599c5361b26c (github-actions[bot], merge коммита «Squashed
+  'src/' changes from bec196cf..44fc22e4»). В этом дереве присутствуют: исходный код
+  PHREEQC, `ctest.cmake`, `ctest.regression.cmake`, `HTMLversion/HTML/phreeqc3-24.htm`
+  (глава KINETICS), `doc/NOTICE.TXT` (User Rights Notice, §6.7) и `doc/RELEASE.TXT`.
+- Важно: be755855 это состояние master ПОСЛЕ релиза (автоматические git-subtree-
+  синхронизации от github-actions продолжаются; doc/RELEASE.TXT в этом дереве содержит
+  заметки сентября 2026), а не подтверждённая исходная ревизия бинарной сборки 3.9.0-17591:
+  он используется как кодовый snapshot, а не как «исходник релиза».
+- Разделение подтверждено структурой: коммиты обоих репозиториев создаются автоматикой
+  git-subtree («Squashed 'doc/'...» и «Squashed 'src/'...»), а файл
+  .github/superprojects.json в обоих деревьях указывает суперпроект
+  usgs-coupled-subtrees/phreeqci.
+
+Выводы о KINETICS, IPhreeqc и PhreeqcRM ниже привязаны к 3.9.0, если явно не указано иное.
 (2013), «Description of input and examples for PHREEQC version 3. A computer program for
 speciation, batch-reaction, one-dimensional transport, and inverse geochemical
 calculations», U.S. Geological Survey Techniques and Methods, book 6, chapter A43,
@@ -608,7 +641,7 @@ surface complexation (включая CD-MUSIC), фиксированные да�
 
 Раздел KINETICS документации (первоисточник:
 https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm;
-сверено с файлом HTMLversion/HTML/phreeqc3-24.htm в теге v3.9.0):
+сверено с файлом HTMLversion/HTML/phreeqc3-24.htm в кодовом snapshot be755855):
 
 - PHREEQC предлагает ДВА варианта интегрирования кинетики, и выбор задаётся пользователем,
   а не алгоритмом. Явный метод Рунге-Кутты используется по умолчанию: «Default is false if
@@ -681,10 +714,11 @@ GetDensityCalculated. Это подтверждает направление Phr
 
 ### 6.6 Тесты
 
-В репозитории phreeqc3 (корень дерева тега v3.9.0): `ctest.cmake` (функциональные тесты по
-скриптам), `ctest.regression.cmake` (регрессионные тесты, сравнение выводов с эталонными
-файлами), `CTestConfig.cmake`, `cmemcheck`-скрипты и `valgrind.cmake` (контур проверки
-памяти), `.gitlab-ci.yml` и jenkins-скрипты (внешние CI-контуры).
+В кодовом репозитории usgs-coupled-subtrees/phreeqc3 (snapshot be755855, корень дерева):
+`ctest.cmake` (функциональные тесты по скриптам), `ctest.regression.cmake` (регрессионные
+тесты, сравнение выводов с эталонными файлами), `CTestConfig.cmake`, `cmemcheck`-скрипты
+и `valgrind.cmake` (контур проверки памяти), `.gitlab-ci.yml` и jenkins-скрипты (внешние
+CI-контуры). Файлы закреплены commit-pinned ссылками (§16).
 Паттерн: выходы фиксированных сценариев сравниваются с сохранёнными эталонами; у такого
 подхода известный риск (эталон фиксирует и корректное, и ошибочное поведение), в PHREEQC
 он компенсируется длинной историей сопоставления с опубликованными расчётами (Parkhurst &
@@ -692,18 +726,28 @@ Appelo 2013 содержит верификационные примеры).
 
 ### 6.7 Лицензия: важно и неудобно
 
-Файла LICENSE в корне репозитория (проверено по дереву тега v3.9.0) не обнаружено. README
-тега v3.9.0 содержит дословный USGS-дисклеймер: «This software is preliminary or
-provisional and is subject to revision. It is being provided to meet the need for timely
-best science. The software is on the standard USGS web site... No warranty, expressed or
-implied, is made by the USGS or the U.S. Government as to the functionality of the
-software...» (проверено; сокращения отмечены многоточием). Код USGS распространяется как
-предварительное программное обеспечение, а не как классическое «public domain» без
-условий: статус публичного достояния для производного использования не заявляется.
-Точный действующий текст «User Rights Notice» конкретной поставки в этой сессии не
-открыт: **(непроверено)**; для любого производного использования требуется прочитать
-notice непосредственно в поставке. Не считать PHREEQC «общественным достоянием по
-умолчанию»: условия надо фиксировать по факту.
+Файла LICENSE в корне репозитория нет (проверено по деревьям тега v3.9.0 и кодового snapshot
+be755855); вместо него действует отдельный USGS «User Rights Notice»: файл doc/NOTICE.TXT в
+кодовом репозитории, прочитан в этой редакции
+(https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/doc/NOTICE.TXT).
+Содержание уведомления: оно разрешает БЕЗ платы использовать, копировать, изменять и
+распространять ПО, производные работы и сопроводительную документацию. Условия:
+(а) при распространении копий или модификаций получатели должны получить копию уведомления
+и возможность получить исходный дистрибутив; (б) при распространении изменений характер
+изменений должен быть ясен получателям, изменённые файлы должны содержать заметное
+уведомление с описанием изменений, их автором и датой; (в) имя USGS для одобрения или
+продвижения продукта в рекламе допустимо только с письменного разрешения USGS;
+(г) пользователь признаёт авторов и USGS в публикациях и продуктах, использующих ПО;
+(д) гарантии, обязательства поддержки и обновлений отсутствуют (взимание платы за
+распространение, гарантии и услуги при этом допустимо). README содержит дословный
+USGS-дисклеймер: «This software is preliminary or provisional and is subject to revision.
+It is being provided to meet the need for timely best science. The software is on the
+standard USGS web site... No warranty, expressed or implied, is made by the USGS or the
+U.S. Government as to the functionality of the software...» (проверено; сокращения отмечены
+многоточием). Ограничения трактовки: уведомлению НЕ приписывается SPDX/OSI-обозначение
+лицензии (такое обозначение отдельно не подтверждено), и настоящий документ не является
+юридическим заключением; статус «public domain» по умолчанию не заявляется, условия
+фиксируются по факту поставки (README и NOTICE.TXT конкретной поставки могут отличаться).
 
 ### 6.8 Где применимость PHREEQC заканчивается
 
@@ -848,17 +892,6 @@ vs `within_tolerance` (CORE_SCIENTIFIC_ENGINE §2.8); (б) урок 5.0.0: см�
 несохраняемого это чек-лист для аудита сериализации EvoWars (что делать с вычислителями,
 callbacks, таймерами при продолжении).
 
-Для EvoWars это самая ценная находка по воспроизводимости: (а) контраст с
-`platform_dependent` семантикой SolverBackend: REBOUND фактически декомпозирует
-«bitwise» на «та же платформа» и «машинно-независимый формат»: EvoWars уже имеет
-эквивалент в `bitwise_same_environment` vs `within_tolerance` (CORE_SCIENTIFIC_ENGINE
-§2.8); (б) паттерн «снапшот + шаг-дельта + рандомизированные интервалы» переносим в
-контракт сохранения состояния 1.x без изменения текущей схемы: снимки истории запусков
-EvoWars уже хранят всё для воспроизведения, но рестарт-тестов (продолжить с снимка,
-сравнить побитово) в VALIDATION_PLAN нет; (в) перечень несохраняемого у REBOUND это
-чек-лист для аудита сериализации EvoWars (что делать с вычислителями, callbacks,
-гонщиками таймеров при продолжении).
-
 ### 7.5 Тесты
 
 Тестовый паттерн REBOUND по дереву тега 5.2.2: каталог `examples/` с per-example
@@ -914,8 +947,12 @@ release code for use if you didn't author it yourself» (проверено до
 ### 8.1 Идентификация и статус
 
 Репозиторий: https://github.com/VirtualPlanetaryLaboratory/vplanet. Исследованная версия:
-v2.5.36, тег v2.5.36, commit 35472e7814cf98ea39c2fc7f035a10ee3bd98a62 (релиз от 20.02.2026;
-страница релизов https://github.com/VirtualPlanetaryLaboratory/vplanet/releases). Лицензия:
+v2.5.36; тег v2.5.36 указывает на commit 996173dc4ad76c7b59d48289e28db511ae8008e1 (merge
+PR #341, 20.02.2026; страница релизов
+https://github.com/VirtualPlanetaryLaboratory/vplanet/releases/tag/v2.5.36). Ранее
+указывавшийся 35472e7814cf98ea39c2fc7f035a10ee3bd98a62 это РОДИТЕЛЬСКИЙ коммит тега, а не
+его прямое содержимое (сравнение 35472e78...996173dc: 1 коммит, изменений файлов нет);
+точным commit тега считается 996173dc. Лицензия:
 MIT, файл LICENSE по тегу v2.5.36
 (https://raw.githubusercontent.com/VirtualPlanetaryLaboratory/vplanet/v2.5.36/LICENSE,
 «Copyright (c) 2018 The VPLANET Team», текст MIT проверен); в корректирующей редакции
@@ -1033,7 +1070,7 @@ push/PR с компиляцией и прогоном примеров (нали
 | Воспроизводимость | golden_run.tsv | не акцентирована | не акцентирована | ctest-регрессия | SimulationArchive, bitwise рестарт; формат менялся в 5.0.0 (архивы предыдущих версий не читаются) | вход+версия+публикация | deterministic семантика, снимки истории, SHA-256 траектории |
 | Тестовая пирамида | unit + integration pairwise + golden | unit (Catch2) + smoke | unit (googletest) + 0D | функциональные + регрессионные ctest | examples как самопроверки | examples по публикациям + broken | 174+ теста, VALIDATION_PLAN 5 уровней |
 | CI | coverage-baseline + nightly | Catch2 + колёса | CI matrix, googletest | ctest | Makefile/CI | GitHub Actions | verify: tsc + tests + lint + build |
-| Лицензия | Apache-2.0 (LICENSE.txt@26.10.16) | MIT (LICENSE@v8.0.0) | BSD-3 (License.txt@v3.2.0) | USGS provisional (README@v3.9.0), notice (непроверено) | GPL-3.0-only (pyproject.toml@5.2.2) | MIT (LICENSE@v2.5.36) | (не проверялась в этой сессии) |
+| Лицензия | Apache-2.0 (LICENSE.txt@26.10.16) | MIT (LICENSE@v8.0.0) | BSD-3 (License.txt@v3.2.0) | файла LICENSE нет; USGS preliminary/provisional (README); User Rights Notice doc/NOTICE.TXT прочитан (be755855) | GPL-3.0-only (pyproject.toml@5.2.2) | MIT (LICENSE@v2.5.36) | (не проверялась в этой сессии) |
 | Язык | Python (+Fortran/C-модули) | C++ | C++ (+Python) | C | C | C | TypeScript |
 | Статус зрелости | Alpha (PyPI fwl-proteus 26.10.16) | (непроверено) | (непроверено) | provisional (README USGS) | Production/Stable (pyproject.toml@5.2.2) | (непроверено) | внутренний проект |
 
@@ -1291,9 +1328,9 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 | PROTEUS | 26.10.16 (тег 26.10.16, commit e6c872f6205f2d3aa213a83136fc02e5fdace2d6; PyPI: Development Status 3 - Alpha) | Apache-2.0 (LICENSE.txt тега 26.10.16, проверен) | модули-репозитории (Aragog, SPIDER, Zalmoxis, AGNI и др.) отдельные репозитории с собственными лицензиями: не проверены по отдельности (непроверено) | да (Apache-2.0) | нет планов; заимствуются паттерны, не код |
 | CoolProp | 8.0.0 (тег v8.0.0, commit ae81610e7d23efc57f9d051c8e70a4d66e87537f) | MIT (LICENSE тега v8.0.0, проверен) | THIRD_PARTY_NOTICES.md; вендоримые pinned Eigen/fmt со своими лицензиями; данные флюидов с собственным происхождением, MIT кода НЕ покрывает данные | да (MIT) | нет; офлайн-оракул (уже используется) |
 | Cantera | 3.2.0 (тег v3.2.0, commit 4a8358eb80cfeb50474386b5f9ec0b3a83519889) | BSD-3 (License.txt тега v3.2.0, проверен) | SUNDIALS (BSD), Boost и др.: лицензии зависимостей индивидуально не проверялись (непроверено) | да (BSD-3) | STUDY; производство Rust/WASM заблокировано отдельным решением |
-| PHREEQC | 3.9.0-17591 (тег v3.9.0, commit a4b1596bc0d4ec479a2493541f275af37e9f7349); USGS downloads: 3.8.6-17100 | файла LICENSE в репо нет; README тега v3.9.0: USGS preliminary/provisional software (дисклеймер проверен дословно), User Rights Notice не открыт (непроверено) | базы данных с собственным происхождением (llnl.dat и др.) | не подтверждено до прочтения notice (непроверено) | нет; при интеграции только отдельный процесс (IPhreeqc/PhreeqcRM) |
+| PHREEQC | 3.9.0-17591 (релиз; документационная ревизия a4b1596 в phreeqc-dev/phreeqc3, кодовый snapshot be755855 в usgs-coupled-subtrees/phreeqc3); USGS downloads: 3.8.6-17100 | файла LICENSE в репо нет; README: USGS preliminary/provisional software (дисклеймер проверен дословно); User Rights Notice (doc/NOTICE.TXT, be755855) прочитан: безвозмездное использование/копирование/изменение/распространение при условиях уведомления, описания изменений и запрета endorsement без письменного разрешения USGS | базы данных с собственным происхождением (llnl.dat и др.) | уведомлением не запрещено (плата за распространение, гарантии и услуги допустима); юридического заключения документ не делает | нет; при интеграции только отдельный процесс (IPhreeqc/PhreeqcRM) |
 | REBOUND | 5.2.2 (тег 5.2.2, commit c34134716cd484ed9cdb9f7d54ef8d859bdf547d) | GPL-3.0-only (pyproject.toml тега 5.2.2; LICENSE/README содержат «or later»: неоднозначность зафиксирована в §7.1) | ядро самодостаточно; расширения (reboundx и др.) отдельные репозитории (не проверены) | да, при GPL-условиях | REJECT встраивание (GPL-3.0-only); REFERENCE офлайн |
-| VPLanet | v2.5.36 (тег v2.5.36, commit 35472e7814cf98ea39c2fc7f035a10ee3bd98a62) | MIT (LICENSE тега v2.5.36, проверен) | модульных зависимостей не выявлено в этой сессии (непроверено) | да (MIT) | нет планов; заимствуются паттерны |
+| VPLanet | v2.5.36 (тег v2.5.36, commit 996173dc4ad76c7b59d48289e28db511ae8008e1; родитель 35472e7814cf98ea39c2fc7f035a10ee3bd98a62, файлов между ними не изменено) | MIT (LICENSE тега v2.5.36, проверен) | модульных зависимостей не выявлено в этой сессии (непроверено) | да (MIT) | нет планов; заимствуются паттерны |
 
 Принципы, подтверждённые практикой исследованных проектов:
 
@@ -1310,8 +1347,8 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
    гарантированным: окончательный вывод требует анализа конкретной схемы
    распространения и взаимодействия компонентов (§7.6).
 4. Для USGS-кода (PHREEQC) до любого использования читается User Rights Notice конкретной
-   поставки (для исследованной 3.9.0-17591 он не открыт); «public domain» не
-   предполагается автоматически.
+   поставки (для кодового snapshot be755855 он прочитан: doc/NOTICE.TXT); отсутствие файла
+   LICENSE не означает «public domain» без условий; SPDX/OSI-обозначение не утверждается.
 5. Статус зрелости проекта фиксируется рядом с выводами: PROTEUS имеет PyPI-статус
    Alpha (26.10.16), REBOUND 5.2.2 Production/Stable (pyproject.toml), PHREEQC
    preliminary/provisional (README USGS); ссылка на «зрелость» любого проекта без
@@ -1339,8 +1376,8 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 - P5 (ADAPT, VPLanet): реестр планетарных сценариев со статусами pass/fail/known-broken/
   excluded и привязкой к эталонам; основа: существующая таблица Уровня 3.
 - P6 (STUDY, PHREEQC): граница интеграции IPhreeqc/PhreeqcRM для этапа 4.9 по версии
-  3.9.0-17591 (тег v3.9.0); отдельное исследование применимости к каталогу
-  компонентов EvoWars.
+  3.9.0-17591 (кодовый snapshot be755855, usgs-coupled-subtrees/phreeqc3); отдельное
+  исследование применимости к каталогу компонентов EvoWars.
 - REJECT (фиксация): встраивание REBOUND (GPL-3.0-only); подмена KIDA/JPL коэффициентов данными любых
   исследованных проектов; PHREEQC для расплавов/недр; объявление фазовой устойчивости
   доказанной без validatedErrorBound; объявление глобальной TPD-устойчивости без
@@ -1354,48 +1391,49 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
    прочитаны по doxygen-указателю, полный разбор не выполнялся (непроверено).
 2. Точные страницы выпусков Michelsen 1982a/b не сверялись с оригиналами (непроверено);
    ссылки даны по библиографическим ключам CoolProp.
-3. User Rights Notice PHREEQC для исследованной поставки 3.9.0-17591 не прочитан (README
-   тега v3.9.0 содержит только дисклеймер preliminary/provisional); лицензионный статус
-   для производного использования не подтверждён (непроверено).
-4. Лицензии модульных репозиториев PROTEUS (Aragog, SPIDER, Zalmoxis, AGNI, JANUS) не
+3. Лицензии модульных репозиториев PROTEUS (Aragog, SPIDER, Zalmoxis, AGNI, JANUS) не
    проверены по отдельности (непроверено).
-5. Лицензии зависимостей Cantera (SUNDIALS, Boost, fmt, Eigen и др.) не проверены
+4. Лицензии зависимостей Cantera (SUNDIALS, Boost, fmt, Eigen и др.) не проверены
    индивидуально (непроверено).
-6. Точные пути Python-тестов Cantera и полный состав test/zeroD не зафиксированы
+5. Точные пути Python-тестов Cantera и полный состав test/zeroD не зафиксированы
    (непроверено).
-7. CI-контур REBOUND: содержимое workflow тега 5.2.2 и наличие энергосохраняющего
+6. CI-контур REBOUND: содержимое workflow тега 5.2.2 и наличие энергосохраняющего
    прогона как отдельного workflow не проверялись (непроверено).
-8. Порядок исполнения модулей VPLanet внутри шага не проверен по исходнику (help.html
+7. Порядок исполнения модулей VPLanet внутри шага не проверен по исходнику (help.html
    не открыт в этой сессии) (непроверено).
-9. Допуски BM-2 и BM-5-расширений «предстоит определить»: обоснование требует
+8. Допуски BM-2 и BM-5-расширений «предстоит определить»: обоснование требует
    исследований сходимости, которые не выполнялись в рамках настоящего документа.
-10. Допуск BM-1 (порядка 1e-13) это предварительная оценка, не измерение; при создании
-    сценария выполняется фактический ULP-анализ.
-11. Лицензия самого репозитория EvoWars в этой сессии не проверялась; выводы §7.6 о
+9. Допуск BM-1 (порядка 1e-13) это предварительная оценка, не измерение; при создании
+   сценария выполняется фактический ULP-анализ.
+10. Лицензия самого репозитория EvoWars в этой сессии не проверялась; выводы §7.6 о
     GPL-конфликте при встраивании REBOUND даны в общем виде и требуют сверки с
     фактической лицензией EvoWars перед любым решением.
-12. Политика REBOUND против AI-generated code: формулировка проверена дословно по README
+11. Политика REBOUND против AI-generated code: формулировка проверена дословно по README
     тега 5.2.2; юридические следствия политики не анализировались.
-13. Риск устаревания: версии зафиксированы на дату 2026-11-10 (первая редакция) и
-    2026-11-11 (корректирующая редакция: SHA, PHREEQC 3.9.0-17591, REBOUND 5.2.2);
-    проекты развиваются, перед реализацией P1-P6 версии перепроверяются.
-14. Значение adaptive_mode по умолчанию в REBOUND 5.2.2 не сверялось (в документации 4.x
+12. Риск устаревания: версии зафиксированы на дату 2026-11-10 (первая редакция) и
+    2026-11-11 (корректирующие редакции: SHA, REBOUND 5.2.2, PHREEQC 3.9.0-17591 с
+    разделением репозиториев, тег v2.5.36 VPLanet); проекты развиваются, перед
+    реализацией P1-P6 версии перепроверяются.
+13. Значение adaptive_mode по умолчанию в REBOUND 5.2.2 не сверялось (в документации 4.x
     по умолчанию PRS23); для сценариев BM-5 проверяется по исходнику тега
     (непроверено).
-15. Сериализация additional forces в SimulationArchive 5.2.2: в материалах тега не
+14. Сериализация additional forces в SimulationArchive 5.2.2: в материалах тега не
     найдена, ограничение перенесено из документации 4.x (непроверено для 5.2.2).
-16. Соответствие страниц сайта rebound.hanno-rein.de сборке 5.2.2 не проверялось;
+15. Соответствие страниц сайта rebound.hanno-rein.de сборке 5.2.2 не проверялось;
     описания интеграторов привязаны к дереву тега и релизным заметкам (непроверено).
-17. Противоречие источников REBOUND: ноутбук 5.2.2 ещё содержит фразу «and even a
+16. Противоречие источников REBOUND: ноутбук 5.2.2 ещё содержит фразу «and even a
     different version of REBOUND», а релизные заметки 5.0.0 заявляют нечитаемость
     архивов предыдущих версий; вывод сделан по релизным заметкам как более свежему и
     специфичному источнику.
-18. Отношение репозиториев phreeqc-dev/phreeqc3 (релиз 3.9.0-17591) и usgs-coupled/
-    phreeqc3, usgs-coupled/phreeqrm не устанавливалось (непроверено).
-19. PyPI-классификаторы зрелости CoolProp, Cantera и VPLanet не проверялись; статус
+17. PyPI-классификаторы зрелости CoolProp, Cantera и VPLanet не проверялись; статус
     зрелости этих проектов в матрице §9 помечен (непроверено).
-20. Деревья тестов PROTEUS и CI-контур CoolProp читались через изменяемые ветки
+18. Деревья тестов PROTEUS и CI-контур CoolProp читались через изменяемые ветки
     main/master (пометки в таблице §2); посимвольная сверка этих деревьев с тегами не
+    выполнялась (непроверено).
+19. Кодовый snapshot PHREEQC be755855 (master usgs-coupled-subtrees/phreeqc3 на
+    2026-11-06) это состояние после релиза с продолжающимися автоматическими
+    git-subtree-синхронизациями; его соответствие точной исходной ревизии бинарной
+    сборки 3.9.0-17591 не подтверждено (непроверено).
     выполнялась (непроверено).
 
 ## 16. Полный список источников
@@ -1452,20 +1490,37 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 ### PHREEQC
 
 - https://www.usgs.gov/software/phreeqc-version-3 (страница загрузок: сборка 3.8.6-17100)
-- https://github.com/phreeqc-dev/phreeqc3 (upstream-репозиторий) и
-  https://github.com/phreeqc-dev/phreeqc3/releases/tag/v3.9.0 (релиз 3.9.0-17591,
-  май 2026)
+- Релизная и документационная часть: https://github.com/phreeqc-dev/phreeqc3, релиз
+  3.9.0-17591 (май 2026): https://github.com/phreeqc-dev/phreeqc3/releases/tag/v3.9.0;
+  commit тега v3.9.0:
+  https://github.com/phreeqc-dev/phreeqc3/commit/a4b1596bc0d4ec479a2493541f275af37e9f7349
+  («Squashed 'doc/' changes from 720d91ed..c3fc4132», github-actions[bot], 13.05.2026,
+  изменяет только RELEASE.TXT; тег v3.9.0 этого репозитория НЕ является тегом кодового
+  репозитория)
 - https://github.com/phreeqc-dev/phreeqc3/blob/v3.9.0/README.md (USGS-дисклеймер,
   проверен дословно)
-- https://github.com/phreeqc-dev/phreeqc3/tree/v3.9.0 (ctest.cmake, ctest.regression.cmake,
-  CTestConfig.cmake, valgrind.cmake, .gitlab-ci.yml)
-- https://github.com/phreeqc-dev/phreeqc3/blob/v3.9.0/HTMLversion/HTML/phreeqc3-24.htm
-  (глава KINETICS по тегу v3.9.0; сверена с онлайн-версией)
+- Кодовый репозиторий: https://github.com/usgs-coupled-subtrees/phreeqc3, ревизия master
+  на 2026-11-06: be755855fcc8c564f4d337cedacb599c5361b26c (merge коммита «Squashed 'src/' changes from bec196cf..44fc22e4»,
+  github-actions[bot]; состояние master после релиза, не подтверждено как точная
+  исходная ревизия сборки 3.9.0-17591). Commit-pinned ссылки:
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/ctest.cmake;
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/ctest.regression.cmake;
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/HTMLversion/HTML/phreeqc3-24.htm
+  (глава KINETICS, сверена с онлайн-версией);
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/doc/NOTICE.TXT
+  (User Rights Notice, прочитан);
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/doc/RELEASE.TXT;
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/README.md
+- Отношение репозиториев: автоматические git-subtree-коммиты («Squashed 'doc/'...» в
+  phreeqc-dev/phreeqc3, «Squashed 'src/'...» в usgs-coupled-subtrees/phreeqc3) и
+  .github/superprojects.json в обоих деревьях, например
+  https://github.com/usgs-coupled-subtrees/phreeqc3/blob/be755855fcc8c564f4d337cedacb599c5361b26c/.github/superprojects.json
+  (суперпроект usgs-coupled-subtrees/phreeqci)
 - https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm
   (первоисточник KINETICS: -cvode default false, -runge_kutta, -bad_step_max)
 - Parkhurst & Appelo 2013, USGS Techniques and Methods 6-A43, DOI 10.3133/tm6A43
-- https://github.com/usgs-coupled/phreeqc3 и https://github.com/usgs-coupled/phreeqrm
-  (PhreeqcRM; смежные репозитории, отношение к upstream не устанавливалось)
+- https://github.com/usgs-coupled/phreeqrm (PhreeqcRM)
+- Cohen & Hindmarsh 1996, CVODE (цитируется по документации PHREEQC)
 - Cohen & Hindmarsh 1996, CVODE (цитируется по документации PHREEQC)
 
 ### REBOUND
