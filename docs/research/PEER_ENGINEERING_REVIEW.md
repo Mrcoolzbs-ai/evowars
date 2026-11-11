@@ -1,7 +1,13 @@
 # PEER_ENGINEERING_REVIEW: сравнительное инженерное исследование зрелых open-source проектов
 
-> Тип документа: исследовательский отчёт. Дата: 2026-11-10. Ветка: `stage-3-planetary-physics`,
-> база: `a886c31d` (fast-forward поверх цепочки `9e2b7b7c` → `c572399b` → `5b8f525b`).
+> Тип документа: исследовательский отчёт. Дата: 2026-11-10, корректирующая редакция 2026-11-11.
+> Ветка: `stage-3-planetary-physics`, база: `4ce7a3c` (fast-forward поверх цепочки `9e2b7b7c` →
+> `c572399b` → `5b8f525b` → `a886c31d`).
+> Корректирующая редакция исправляет: трактовку выбора интеграторов в PHREEQC (выбор задаётся
+> пользователем параметром `-cvode`, автоматической смены метода нет), версию и лицензию REBOUND
+> (исследована 5.2.2, GPL-3.0-only по pyproject.toml), разграничение версий PHREEQC
+> (3.8.6-17100 USGS downloads и 3.9.0-17591 upstream), Alpha-статус PROTEUS, привязку всех
+> исследованных исходников к точным commit SHA.
 > Документ исследовательский: он не является разрешением менять код, тесты, научные данные,
 > этапы 4.5.4/4.5.5 или какие-либо иные незакрытые этапы. Все действующие ограничения EvoWars
 > (NASA CEA, gameSpeedCoefficient, Radau IIA, PURE PR, статусы unknown/no_kinetic_data,
@@ -22,7 +28,13 @@
    dummy-бэкенд для каждого слота, парные интеграционные тесты всех комбинаций модулей,
    golden-файл регрессии (`tests/integration/golden_run.tsv`), разделение быстрых unit-тестов
    и ночных интеграционных прогонов, честная документация известных нарушений сохранности.
-   Лицензия Apache-2.0 не ограничивает заимствование подхода. Категория: **ADAPT**.
+   Лицензия Apache-2.0 не ограничивает заимствование подхода. Оценка зрелости сдержанная:
+   PyPI-классификатор пакета fwl-proteus 26.10.16: «Development Status :: 3 - Alpha», а релизные
+   заметки самих разработчиков перечисляют конфигурационные ключи, значения по умолчанию которых
+   меняются между релизами; интерфейсы и состав модулей могут меняться, PROTEUS не является
+   стабилизированной production-платформой. Переносимы именно архитектурные решения (слоты,
+   dummy, парные тесты, golden-файл), устойчиво присутствующие в нескольких релизах, а не готовые
+   API. Категория: **ADAPT**.
 2. **CoolProp 8.0 реализует двухэтапную процедуру Михельсена** (стабильность по TPD, затем
    расщепление фаз) с GDEM-ускорением и trust-region минимизацией второго порядка, и это
    структурно совпадает с подэтапом 4.4.4.4.2 поиска TPD в EvoWars. Но CoolProp сам
@@ -43,11 +55,19 @@
    и недра не входят в его предметную область. Юридический текст прав USGS в этой сессии не
    открыт полностью: **(непроверено)**. Категория: **REFERENCE** + **STUDY** (граница
    интеграции), для недр: **REJECT**.
-5. **REBOUND даёт два готовых паттерна**: SimulationArchive (бинарные снапшоты с побитовым
-   воспроизведением рестарта, машинно-независимые между ОС и версиями) и дисциплину
-   интеграторов (IAS15 по умолчанию, критерии выбора). Лицензия GPL-3.0-or-later делает
-   встраивание в распространяемый EvoWars проблемным без отдельного лицензионного решения;
-   офлайн-оракул отдельным процессом допустим. Категория: **REFERENCE** (оракул) +
+5. **REBOUND исследован в актуальной версии 5.2.2** (5 октября 2026): SimulationArchive даёт
+   бинарные снапшоты с побитовым воспроизведением рестарта, машинно-независимые между
+   операционными системами; совместимость между версиями не безусловна: релиз 5.0.0
+   (15 мая 2026) прямо заявляет смену формата и нечитаемость архивов предыдущих версий,
+   кросс-версионная совместимость не является свойством формата. Дисциплина интеграторов
+   (IAS15 по умолчанию, симплектики WHFast/SEI/LEAPFROG/EOS/SABA, гибриды MERCURIUS/TRACE,
+   JANUS, SIMD-интегратор WHFast512) образует матрицу «режим → метод». Лицензия 5.2.2 по
+   pyproject.toml: GPL-3.0-only (в README сохраняется формулировка «or (at your option) any
+   later version», неоднозначность текстов зафиксирована); встраивание в распространяемый
+   EvoWars проблемно без отдельного лицензионного решения. Запуск отдельным процессом как
+   офлайн-оракул соответствует текущей практике VALIDATION_PLAN, но отсутствие лицензионных
+   обязательств при этом не заявляется гарантированным без анализа конкретной схемы
+   распространения и взаимодействия компонентов. Категория: **REFERENCE** (оракул) +
    **ADAPT** (паттерн снапшотов), встраивание: **REJECT** без отдельного решения.
 6. **VPLanet показывает, как организовать эталонные планетарные сценарии**: около 40
    сценариев-примеров, каждый привязан к публикации и воспроизводит её результат, плюс
@@ -57,32 +77,42 @@
 
 Сводка лицензий (все проверены по официальным файлам лицензий в репозиториях):
 PROTEUS Apache-2.0; CoolProp MIT; Cantera BSD-3 (Caltech/Sandia/Cantera Developers);
-PHREEQC: явного файла открытой лицензии в репозитории не найдено, USGS распространяет как
-provisional software (текст ниже, полный текст User Rights Notice **(непроверено)**);
-REBOUND GPL-3.0-or-later; VPLanet MIT.
+PHREEQC: файла LICENSE в репозитории нет, README релиза 3.9.0-17591 содержит USGS-дисклеймер
+«preliminary or provisional... No warranty...» (текст ниже), полный текст User Rights Notice
+**(непроверено)**; REBOUND 5.2.2: GPL-3.0-only (pyproject.toml); VPLanet MIT.
 
 ## 2. Методология исследования и версии проектов
 
 Метод: для каждого проекта открывались официальный сайт и документация, репозиторий
 исходного кода, конкретные файлы реализации, тестовые каталоги, файлы лицензий, страницы
 релизов и библиография. Исходные файлы читались напрямую (raw-версии GitHub), страницы
-документации открывались целиком. Дата обращения ко всем источникам: 2026-11-10.
-Исследование велось по документации релизных версий и по веткам main/master репозиториев
-на указанную дату; коммиты фиксируются косвенно датами обращения.
+документации открывались целиком. Дата обращения к первичным источникам: 2026-11-10;
+корректирующая редакция (точные версии, commit SHA, лицензии, PHREEQC KINETICS, REBOUND 5.2.2):
+2026-11-11. Исследование ведётся по релизным версиям; все исходники, тесты и файлы лицензий
+привязаны к неизменяемым commit SHA (таблица ниже). Ссылки на изменяемые ветки main/master не
+используются как доказательные: там, где дерево репозитория читалось через веб-интерфейс ветки,
+это помечено. Код ветки разработки не смешивается со стабильным релизом: анализ Cantera
+выполнен по тегу v3.2.0, ветка main (линия разработки 4.0.0a2) для выводов не используется.
 
 Ограничения метода: (1) чтение файлов через веб-интерфейс ограничено размером выгрузки,
 поэтому для двух больших файлов CoolProp анализировались начала файлов и целевые фрагменты;
 (2) локальный запуск проектов не выполнялся (задача исследования, не установки зависимостей);
 (3) перечисленные в §15 вопросы помечены как непроверенные, а не домысленные.
 
-| Проект | Актуальная стабильная версия | Что фактически исследовано | Репозиторий |
-|---|---|---|---|
-| PROTEUS | релиз `26.10.16` (16.10.2026, 11-й релиз) | документация на proteus-framework.org (страницы model, dummy_modules), дерево `src/proteus`, дерево `tests`, README, LICENSE.txt | https://github.com/FormingWorlds/PROTEUS |
-| CoolProp | `8.0.0` (28.06.2026) | документация 8.0.0 (страница Mixtures), `src/Backends/Helmholtz/FlashRoutines.cpp` (фрагменты), дерево `src/Backends/Helmholtz`, `Web/fluid_properties/Mixtures.rst`, ключи BibTeX, LICENSE, страница релизов | https://github.com/CoolProp/CoolProp |
-| Cantera | `3.2.0` (стабильная; ветка main: `4.0.0a2`) | документация `/stable/yaml/reactions.html`, `/science/reactors/cvodes.html`, `src/kinetics/Falloff.cpp` (целиком, 14 КБ), дерево `test/kinetics`, License.txt, заметки релиза 3.2.0 | https://github.com/Cantera/cantera |
-| PHREEQC | `3.8.6-17100` (страница релиза USGS от 07.01.2025) | страница USGS, глава KINETICS документации, репозиторий `usgs-coupled/phreeqc3` (дерево, ctest-скрипты), отчёт Parkhurst & Appelo 2013 (библиографическая запись) | https://github.com/usgs-coupled/phreeqc3 |
-| REBOUND | `4.4.11` (13.11.2025, PyPI) | страница интегратора IAS15, туториал SimulationarchiveRestart, `src/integrator_ias15.c`, `src/integrator_janus.c` (заголовки), LICENSE, README, публикации | https://github.com/hannorein/rebound |
-| VPLanet | `v2.5.36` (20.02.2026) | README репозитория (полный список модулей), страница Examples документации, страница релизов, LICENSE, статья Barnes et al. 2020 (аннотация) | https://github.com/VirtualPlanetaryLaboratory/vplanet |
+| Проект | Версия | Полный commit SHA | Версия документации | Источники тестов | Лицензия |
+|---|---|---|---|---|---|
+| PROTEUS | 26.10.16 | e6c872f6205f2d3aa213a83136fc02e5fdace2d6 (тег 26.10.16) | proteus-framework.org, обращение 2026-11-10 | дерево tests/ читалось через ветку main 2026-11-10; сверка с тегом не выполнялась **(непроверено)** | Apache-2.0, LICENSE.txt тега 26.10.16 (проверен) |
+| CoolProp | 8.0.0 | ae81610e7d23efc57f9d051c8e70a4d66e87537f (тег v8.0.0) | coolprop.org, страница Mixtures 8.0.0 | CI-workflow каталог читался через ветку master; сверка с тегом не выполнялась **(непроверено)** | MIT, LICENSE тега v8.0.0 (проверен) |
+| Cantera | 3.2.0 | 4a8358eb80cfeb50474386b5f9ec0b3a83519889 (тег v3.2.0) | cantera.org /stable (3.2.0), заметки релиза 3.2.0 | test/kinetics по тегу v3.2.0 (kineticsFromScratch, kineticsFromYaml, pdep, rates) | BSD-3, License.txt тега v3.2.0 (проверен) |
+| PHREEQC | 3.9.0-17591 (upstream, 13.05.2026); USGS downloads: 3.8.6-17100 | a4b1596bc0d4ec479a2493541f275af37e9f7349 (тег v3.9.0) | глава KINETICS: water.usgs.gov phreeqc3-24.htm + совпадающий по ключевым фрагментам файл HTMLversion/HTML/phreeqc3-24.htm в теге v3.9.0 | ctest.cmake, ctest.regression.cmake по тегу v3.9.0 | файла LICENSE нет; USGS provisional, дисклеймер README тега v3.9.0 (проверен); User Rights Notice **(непроверено)** |
+| REBOUND | 5.2.2 | c34134716cd484ed9cdb9f7d54ef8d859bdf547d (тег 5.2.2) | rebound.hanno-rein.de, соответствие сборке 5.2.2 **(непроверено)** | examples/, ipython_examples/, python_examples/ по тегу 5.2.2 | GPL-3.0-only, pyproject.toml тега 5.2.2 (проверен); LICENSE: текст GPLv3; README: «or later» |
+| VPLanet | v2.5.36 | 35472e7814cf98ea39c2fc7f035a10ee3bd98a62 (тег v2.5.36) | virtualplanetarylaboratory.github.io, обращение 2026-11-10 | examples/ по сайту документации и репозиторию | MIT, LICENSE тега v2.5.36 (проверен) |
+
+Таблица фиксирует неизменяемые привязки: все commit SHA получены из GitHub по тегам релизов
+в сессии корректирующей редакции 2026-11-11. Версии PHREEQC 3.8.6-17100 (USGS downloads page,
+«Version 3 January 7, 2025») и 3.9.0-17591 (upstream-релиз тега v3.9.0) различаются: последней
+upstream-версией является 3.9.0-17591, выводы настоящего документа привязаны к ней, если явно
+не указано иное.
 
 ## 3. PROTEUS: подробный разбор
 
@@ -95,7 +125,18 @@ https://raw.githubusercontent.com/FormingWorlds/PROTEUS/main/LICENSE.txt (тек
 License Version 2.0 проверен). Программная цитата: Zenodo concept DOI 10.5281/zenodo.21358380
 (README). Базовая публикация модели: Lichtenberg et al. (2021), указана на странице
 https://proteus-framework.org/PROTEUS/Explanations/model.html как основа, от которой код
-существенно разросся. Последний релиз на дату исследования: `26.10.16` (16.10.2026).
+существенно разросся. Последний релиз на дату исследования: `26.10.16` (16.10.2026), commit
+e6c872f6205f2d3aa213a83136fc02e5fdace2d6 (получен по тегу релиза 26.10.16, GitHub).
+
+Статус зрелости: PyPI-страница пакета fwl-proteus 26.10.16
+(https://pypi.org/project/fwl-proteus/26.10.16/) указывает классификатор
+«Development Status :: 3 - Alpha». Релизные заметки 26.10.16 сами содержат раздел
+«Defaults that change the result of an unchanged config», перечисляющий ключи, значения
+по умолчанию которых менялись между релизами. Вывод для EvoWars: PROTEUS не является
+стабилизированной production-платформой, его интерфейсы и состав модулей могут меняться;
+переносятся архитектурные решения (слоты, dummy, парные тесты, golden-файл), а не готовые
+API. Именно эти решения устойчиво присутствуют в нескольких релизах, что и делает их
+предметом ADAPT.
 
 PROTEUS описывает себя как «modular Python framework that follows a rocky planet from a
 molten magma ocean to a solid surface. It couples the interior, the atmosphere, the star
@@ -127,7 +168,9 @@ https://raw.githubusercontent.com/FormingWorlds/PROTEUS/main/README.md).
 `atmos_chem`, `atmos_clim`, `config`, `data`, `escape`, `grid`, `inference`,
 `interior_energetics`, `interior_struct`, `observe`, `orbit`, `outgas`, `plot`, `star`,
 `utils` плюс `proteus.py`, `cli.py`, `doctor.py`
-(https://github.com/FormingWorlds/PROTEUS/tree/main/src/proteus).
+(https://github.com/FormingWorlds/PROTEUS/tree/main/src/proteus, читалось через
+изменяемую ветку main 2026-11-10; версия закреплена тегом 26.10.16, commit
+e6c872f6205f2d3aa213a83136fc02e5fdace2d6: см. §2).
 
 Реализации спроектированы как взаимные перекрёстные проверки одного физического слота:
 SPIDER решает энтропийную (T-S) формулировку через PETSc, Aragog решает энергетическую
@@ -207,7 +250,9 @@ evolution»). Для EvoWars это REFERENCE на далёкий этап 4.6+:
 
 ### 3.8 Тесты, CI и проверка PR
 
-Каталог `tests/` (https://github.com/FormingWorlds/PROTEUS/tree/main/tests) повторяет
+Каталог `tests/` (https://github.com/FormingWorlds/PROTEUS/tree/main/tests, читался через
+изменяемую ветку main 2026-11-10; посимвольная сверка с деревом тега 26.10.16 не
+выполнялась, см. §2 и §15 п. 20) повторяет
 структуру модулей: `accretion`, `atmos_chem`, `atmos_clim`, `config`, `data`, `escape`,
 `grid`, `helpers`, `inference`, `integration`, `interior_energetics`, `interior_struct`,
 `observe`, `orbit`, `outgas` (далее по дереву). Интеграционные тесты
@@ -255,11 +300,13 @@ PETSc): они REFERENCE/ADAPT, не ADOPT.
 
 ### 4.1 Идентификация и статус
 
-Репозиторий: https://github.com/CoolProp/CoolProp. Лицензия MIT, файл
-https://raw.githubusercontent.com/CoolProp/CoolProp/master/LICENSE («Copyright (c) 2012-2018
-Ian H. Bell and other CoolProp developers», полный текст MIT проверен). Актуальный релиз:
-CoolProp `8.0.0` (страница релизов, дата 28.06; год 2026 подтверждён датами страницы на
-дату исследования 2026-11-10). Основная публикация: Bell, Wronski, Quoilin, Lemort (2014),
+Репозиторий: https://github.com/CoolProp/CoolProp. Лицензия MIT, файл тега v8.0.0
+https://raw.githubusercontent.com/CoolProp/CoolProp/v8.0.0/LICENSE («Copyright (c) 2012-2018
+Ian H. Bell and other CoolProp developers», полный текст MIT проверен по тегу v8.0.0).
+Актуальный релиз: CoolProp `8.0.0`, 28.06.2026, commit
+ae81610e7d23efc57f9d051c8e70a4d66e87537f (получен по тегу v8.0.0, GitHub). Все цитаты
+исходного кода и документации в этом разделе сверены с тегом v8.0.0; изменяемая ветка
+master для выводов не используется. Основная публикация: Bell, Wronski, Quoilin, Lemort (2014),
 «Pure and Pseudo-pure Fluid Thermophysical Property Evaluation and the Open-Source
 Thermophysical Property Library CoolProp», Industrial & Engineering Chemistry Research,
 DOI 10.1021/ie4033999 (https://pubs.acs.org/doi/10.1021/ie4033999).
@@ -312,7 +359,8 @@ DOI 10.1021/ie4033999 (https://pubs.acs.org/doi/10.1021/ie4033999).
 баланса массы; документация рекомендует Михельсена как более робастный у критических
 точек и для смесей с сильно разной летучестью компонентов.
 
-Библиографические ключи проверены по https://raw.githubusercontent.com/CoolProp/CoolProp/master/Web/fluid_properties/Mixtures.rst:
+Библиографические ключи проверены по файлу тега v8.0.0
+https://raw.githubusercontent.com/CoolProp/CoolProp/v8.0.0/Web/fluid_properties/Mixtures.rst:
 `Michelsen-FPE-1982a`, `Michelsen-FPE-1982b`, `Michelsen-BOOK-2007` (Michelsen & Mollerup,
 Thermodynamic Models: Fundamentals and Computational Aspects), `Gernert-FPE-2014`,
 `CroweNishio-AIChE-1975`, `Hebden-1973`, `RachfordRice-1952`. Точные страницы выпусков в
@@ -325,7 +373,8 @@ CoolProp.
   `StabilityRoutines::StabilityEvaluationClass stability_tester(HEOS)`,
   `do_twophase = !stability_tester.is_stable()`, далее расщепление с опцией
   `wilson_seeded`; диспетчеризация «Michelsen or Gernert based on config» (фрагменты файла
-  прочитаны напрямую, https://github.com/CoolProp/CoolProp/tree/master/src/Backends/Helmholtz).
+  прочитаны напрямую). Сверка цитаты о ложных «stable» вердиктах выполнена по файлу тега
+  v8.0.0: https://github.com/CoolProp/CoolProp/blob/v8.0.0/src/Backends/Helmholtz/FlashRoutines.cpp;
 - `src/Backends/Helmholtz/VLERoutines.cpp`: классы последовательной подстановки
   (`SaturationSolvers::successive_substitution`, см. doxygen-указатель
   http://www.coolprop.org/v4/_static/doxygen/html/class_successive_substitution_v_l_e.html);
@@ -404,12 +453,14 @@ per-field provenance. Численная проблема, из-за котор�
 
 ### 5.1 Идентификация и статус
 
-Репозиторий: https://github.com/Cantera/cantera. Лицензия: BSD 3-clause, файл
-https://raw.githubusercontent.com/Cantera/cantera/main/License.txt (Copyright (c) 2001-2009
+Репозиторий: https://github.com/Cantera/cantera. Лицензия: BSD 3-clause, файл тега v3.2.0
+https://raw.githubusercontent.com/Cantera/cantera/v3.2.0/License.txt (Copyright (c) 2001-2009
 California Institute of Technology; (c) 2009 Sandia Corporation; (c) 2011-2026 Cantera
-Developers; текст BSD-3 проверен). Стабильная версия 3.2.0 (селектор версий документации:
-«4.0 (dev) | 3.2.0 (stable)» на https://cantera.org/stable/yaml/reactions.html); ветка main
-на 4.0.0a2 (README репозитория). Заметки релиза 3.2.0:
+Developers; текст BSD-3 проверен по тегу v3.2.0). Исследованная версия: 3.2.0, commit
+4a8358eb80cfeb50474386b5f9ec0b3a83519889 (получен по тегу v3.2.0, GitHub; релиз 18.11.2025).
+Ветка main находится на линии разработки 4.0.0a2 (селектор версий документации:
+«4.0 (dev) | 3.2.0 (stable)» на https://cantera.org/stable/yaml/reactions.html) и для
+выводов настоящего документа не используется. Заметки релиза 3.2.0:
 https://cantera.org/3.2/reference/releasenotes/v3.2.html («nearly 1000 commits since 3.1.0,
 released December 2024»).
 
@@ -439,9 +490,12 @@ https://cantera.org/stable/yaml/reactions.html): `elementary`, `three-body`,
 
 ### 5.3 Реализация falloff: исходный код
 
-Файл `src/kinetics/Falloff.cpp` (прочитан целиком, 14 КБ,
-https://raw.githubusercontent.com/Cantera/cantera/main/src/kinetics/Falloff.cpp).
-Ключевые фрагменты:
+Файл `src/kinetics/Falloff.cpp` (прочитан целиком, 14 КБ). В корректирующей редакции
+файл перечитан и процитирован по тегу v3.2.0:
+https://raw.githubusercontent.com/Cantera/cantera/v3.2.0/src/kinetics/Falloff.cpp.
+Первая редакция ошибочно ссылалась на ветку main (линия разработки 4.0.0a2); все
+анализируемые фрагменты (TroeRate::updateTemp с Fcent и SmallNumber, SriRate,
+InputFileError в setFalloffCoeffs) совпадают в v3.2.0 по существу. Ключевые фрагменты:
 
 - `TroeRate::updateTemp(T, work)`: `Fcent = (1.0 − m_a)·exp(−T·m_rt3) + m_a·exp(−T·m_rt1)`;
   при ненулевом `m_t2` добавляется `exp(−m_t2/T)`; затем `work[0] = log10(max(Fcent,
@@ -476,7 +530,8 @@ https://raw.githubusercontent.com/Cantera/cantera/main/src/kinetics/Falloff.cpp)
 
 ### 5.5 Тесты
 
-Каталог `test/kinetics` (дерево прочитано): `kineticsFromScratch.cpp`,
+Каталог `test/kinetics` (дерево прочитано по тегу v3.2.0: подтверждены файлы
+`kineticsFromScratch.cpp`, `kineticsFromYaml.cpp`, `pdep.cpp`, `rates.cpp`):
 `kineticsFromYaml.cpp`, `pdep.cpp` (pressure-dependent реакции: falloff и его родня),
 `rates.cpp` (rate-классы). C++-тесты на googletest; тесты 0D-реакторов в `test/zeroD`
 (частичный перечень: точное имя файла не подтверждено: **(непроверено)**); Python-тесты
@@ -518,10 +573,20 @@ per-record provenance; записи №1/№70/№72 остаются unknown/no
 
 ### 6.1 Идентификация и статус
 
-Домашняя страница: https://www.usgs.gov/software/phreeqc-version-3. Репозиторий исходного
-кода: https://github.com/usgs-coupled/phreeqc3 (зеркало USGS, ветка master). Исследованная
-версия: 3.8.6, сборка 17100 («3.8.6-17100», идентификация в исходниках/релизах репозитория
-на дату исследования 2026-11-10). Основная публикация: Parkhurst, D.L., Appelo, C.A.J.
+Домашняя страница: https://www.usgs.gov/software/phreeqc-version-3. Версии различаются, и
+в первой редакции они не были разведены; корректирующая редакция исправляет это:
+страница загрузок USGS указывает сборку `3.8.6-17100` («Version 3 January 7, 2025»), тогда
+как upstream-репозиторий https://github.com/phreeqc-dev/phreeqc3 публикует релиз
+`3.9.0-17591` от мая 2026 (тег v3.9.0). Последней upstream-версией является 3.9.0-17591;
+не называть 3.8.6-17100 последней upstream-версией. Исследование в корректирующей редакции
+привязано к тегу v3.9.0, commit a4b1596bc0d4ec479a2493541f275af37e9f7349 (получен по тегу,
+GitHub): по нему прочитаны README, ctest-скрипты и файл документации
+HTMLversion/HTML/phreeqc3-24.htm (глава KINETICS), совпадающий по проверенным ключевым
+фрагментам с https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm.
+Смежный репозиторий https://github.com/usgs-coupled/phreeqc3 содержит тот же README; точное
+отношение двух репозиториев (зеркало, перенос, архив) в этой сессии не устанавливалось:
+**(непроверено)**. Выводы о KINETICS, IPhreeqc и PhreeqcRM ниже привязаны к 3.9.0, если явно
+не указано иное. Основная публикация: Parkhurst, D.L., Appelo, C.A.J.
 (2013), «Description of input and examples for PHREEQC version 3. A computer program for
 speciation, batch-reaction, one-dimensional transport, and inverse geochemical
 calculations», U.S. Geological Survey Techniques and Methods, book 6, chapter A43,
@@ -541,31 +606,54 @@ surface complexation (включая CD-MUSIC), фиксированные да�
 
 ### 6.3 Кинетика: два интегратора и их границы
 
-Раздел KINETICS документации (https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm):
+Раздел KINETICS документации (первоисточник:
+https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm;
+сверено с файлом HTMLversion/HTML/phreeqc3-24.htm в теге v3.9.0):
 
-- `-bad_steps_max` управляет интеграторами. Для явного метода Рунге-Кутты 5-го порядка
-  (RK5, по Cash-Karp вариант, реализация в PHREEQC): параметр ограничивает число
-  уменьшений шага; слишком грубый допуск даёт больше уменьшений шага и при исчерпании
-  лимита расчёт останавливается с ошибкой.
-- Для неявного метода: CVODE (Cohen & Hindmarsh 1996, CVODE: Solver for ODE, статья
-  описывает алгоритм: BDF/Adams с адаптивным порядком и шагом), параметр `-bad_steps_max`
-  ограничивает число неудачных шагов CVODE, при исчерпании также остановка с ошибкой.
-  Рекомендация документации: если RK5 требует более ~30 уменьшений шага, переключиться на
-  CVODE (жёсткие системы).
+- PHREEQC предлагает ДВА варианта интегрирования кинетики, и выбор задаётся пользователем,
+  а не алгоритмом. Явный метод Рунге-Кутты используется по умолчанию: «Default is false if
+  -cvode is not included; Runge-Kutta method is used». Неявный CVODE (Cohen & Hindmarsh
+  1996: BDF/Adams с адаптивными порядком и шагом) включается явным параметром `-cvode true`.
+- Параметр `-runge_kutta (1, 2, 3, или 6)` управляет порядком явного метода; по умолчанию 3.
+  Значение 6 задаёт исключительно вложенную схему Рунге-Кутты 5-го порядка; при значениях
+  1/2/3 и невыполнении допуска интегратор автоматически возвращается к схеме 5-го порядка.
+  Это возврат ВНУТРИ семейства явных методов Рунге-Кутты, а не переход на CVODE.
+- `-bad_step_max` (по умолчанию 500) документирован как «maximum number of integration
+  attempts»: для явного Рунге-Кутты это число повторных попыток с уменьшенным шагом, для
+  CVODE число повторных вызовов CVODE на шаг интегрирования (с ним связаны `-cvode_steps`
+  и `-cvode_order`, по умолчанию 5). При исчерпании лимита расчёт останавливается с
+  ошибкой. В документации встречается и написание `-bad_steps_max` (обзорный абзац той же
+  главы): внутренняя непоследовательность документации зафиксирована, каноническим
+  считается написание из описания параметра: `-bad_step_max`.
+- Про жёсткость документация даёт совет, а не автоматический механизм: CVODE «more robust
+  for stiff sets of equations». Автоматического переключения RK5 → CVODE по признакам
+  жёсткости в документации нет.
 
-Т.е. эвристика та же, что в зрелых решателях: явный адаптивный метод до признаков
-жёсткости, неявный BDF для жёстких систем, оба с явными ошибками при исчерпании лимита
-усилий. Прямая параллель к выбору EvoWars: жёсткая химическая кинетика №89/№106
-обслуживается неявным L-устойчивым Radau IIA (3 стадии, порядок 5, CORE_SCIENTIFIC_ENGINE
-§2.8, ревизия 4.5.3), а не явным методом.
+Исправления первой редакции (признание ошибок): в первой редакции утверждалось, что (а)
+PHREEQC автоматически переключается с RK5 на CVODE, (б) документация рекомендует
+«переключиться на CVODE после примерно 30 уменьшений шага», (в) явная схема это вариант
+Cash-Karp. Ни одно из этих утверждений не подтверждается первоисточником: выбор метода
+делает пользователь параметром `-cvode`, рекомендация «~30 шагов» в документации не
+найдена (число 30 не относится к выбору RK5/CVODE и не переносится на него), упоминание
+Cash-Karp в главе KINETICS отсутствует. Все три утверждения отозваны.
+
+Параллель к выбору EvoWars остаётся умеренной: PHREEQC подтверждает, что зрелый
+геохимический код считает неявный метод более робастным для жёстких систем, но выбор
+метода остаётся решением пользователя. EvoWars фиксирует неявный L-устойчивый Radau IIA
+(3 стадии, порядок 5, CORE_SCIENTIFIC_ENGINE §2.8, ревизия 4.5.3) в контракте, а не
+переключается между методами по эвристике; это осознанное архитектурное решение, для
+которого практика PHREEQC служит фоном, а не доказательством автоматической смены
+метода.
 
 ### 6.4 Кинетические реакции: модель
 
 RATES определяет скорость через Basic-скрипт на каждом шаге интегратора: пользователь
 пишет кинетическое выражение (закон действия, насыщение, произвольные формулы), PHREEQC
 интегрирует dM/dt с температурной и площадной зависимостью (KINETICS: `-m`, `-m0`,
-`-parms`, `TOL`, `-step_divide`, `-cvode` как спецификатор интегратора для конкретной
-реакции). Ограничение по существу: скорости это пользовательские функции, а не
+`-parms`, `TOL`, `-step_divide`; `-cvode` в блоке KINETICS выбирает CVODE для конкретной
+реакции, причём «If neither true nor false is entered, true is assumed»; без параметра
+реакция интегрируется явным Рунге-Куттой). Ограничение по существу: скорости это
+пользовательские функции, а не
 декларативные контракты с provenance; структурой это противоположно подходу EvoWars
 (kineticsCatalog с per-record provenance KIDA/JPL, реакции с unknown/no_kinetic_data
 не исполняются вовсе).
@@ -584,10 +672,19 @@ RATES определяет скорость через Basic-скрипт на �
   Это самый близкий индустриальный аналог контракта SolverBackend «алгебраическое
   равновесие в ячейке с граничными условиями» из существующих у EvoWars сцен.
 
+Релизные заметки 3.9.0-17591 уточняют границу интеграции PhreeqcRM: добавлены
+Python-callbacks (set_basic_callback, использование CALLBACK в RATES и USER_PUNCH,
+set_mpi_worker_callback для MPI) и MPI для Python через mpi4py; исправлен расчёт
+GetDensityCalculated. Это подтверждает направление PhreeqcRM на встраивание в сторонние
+симуляторы с параллелизмом, но Python-интерфейс остаётся обёрткой над тем же ядерным
+контрактом run_cells, а не новой вычислительной моделью.
+
 ### 6.6 Тесты
 
-В репозитории phreeqc3: `ctest.cmake` (функциональные тесты по скриптам) и
-`ctest.regression.cmake` (регрессионные тесты, сравнение выводов с эталонными файлами).
+В репозитории phreeqc3 (корень дерева тега v3.9.0): `ctest.cmake` (функциональные тесты по
+скриптам), `ctest.regression.cmake` (регрессионные тесты, сравнение выводов с эталонными
+файлами), `CTestConfig.cmake`, `cmemcheck`-скрипты и `valgrind.cmake` (контур проверки
+памяти), `.gitlab-ci.yml` и jenkins-скрипты (внешние CI-контуры).
 Паттерн: выходы фиксированных сценариев сравниваются с сохранёнными эталонами; у такого
 подхода известный риск (эталон фиксирует и корректное, и ошибочное поведение), в PHREEQC
 он компенсируется длинной историей сопоставления с опубликованными расчётами (Parkhurst &
@@ -595,15 +692,18 @@ Appelo 2013 содержит верификационные примеры).
 
 ### 6.7 Лицензия: важно и неудобно
 
-Файла LICENSE в корне репозитория https://github.com/usgs-coupled/phreeqc3 при
-исследовании не обнаружено. Код USGS распространяется как «public domain» в смысле
-US-works-of-federal-employees, но с дисклеймером «This software is preliminary or
+Файла LICENSE в корне репозитория (проверено по дереву тега v3.9.0) не обнаружено. README
+тега v3.9.0 содержит дословный USGS-дисклеймер: «This software is preliminary or
 provisional and is subject to revision. It is being provided to meet the need for timely
-best science... No warranty...» (формулировка видна на страницах USGS software).
-Точный действующий текст «User Rights Notice» конкретной версии в этой сессии не открыт:
-**(непроверено)**; для любого производного использования требуется прочитать notice
-непосредственно в поставке. Не считать PHREEQC «общественным достоянием по умолчанию»:
-условия надо фиксировать по факту.
+best science. The software is on the standard USGS web site... No warranty, expressed or
+implied, is made by the USGS or the U.S. Government as to the functionality of the
+software...» (проверено; сокращения отмечены многоточием). Код USGS распространяется как
+предварительное программное обеспечение, а не как классическое «public domain» без
+условий: статус публичного достояния для производного использования не заявляется.
+Точный действующий текст «User Rights Notice» конкретной поставки в этой сессии не
+открыт: **(непроверено)**; для любого производного использования требуется прочитать
+notice непосредственно в поставке. Не считать PHREEQC «общественным достоянием по
+умолчанию»: условия надо фиксировать по факту.
 
 ### 6.8 Где применимость PHREEQC заканчивается
 
@@ -629,7 +729,7 @@ EvoWars это REFERENCE-оракул уровня 3 по водно-минер�
 | Аспект EvoWars | Как решено в PHREEQC | Решение |
 |---|---|---|
 | Минеральные резервуары, насыщение, растворение/осаждение (4.9) | SI, EQUILIBRIUM_PHASES, KINETICS+RATES | REFERENCE: офлайн-оракул для водных сцен; ADAPT концепции SI не требует его исполнения |
-| Жёсткая кинетика | RK5 явный до жёсткости, затем CVODE | параллель подтверждает выбор Radau IIA; PHREEQC не источник данных |
+| Жёсткая кинетика | явный Рунге-Кутта по умолчанию; CVODE по явному выбору пользователя (`-cvode true`), автоматической смены метода нет | умерленная параллель: неявный метод для жёстких систем это выбор пользователя/проекта, что согласуется с фиксированным контрактом Radau IIA; PHREEQC не источник данных |
 | Контракт ячейки с граничными условиями | PhreeqcRM run_cells | STUDY: граница интеграции через IPhreeqc/PhreeqcRM, отдельное решение |
 | Недра/расплавы | неприменимо | REJECT |
 | Provenance коэффициентов | отсутствует (пользовательские скрипты) | REJECT как источник данных; fail-closed сохраняется |
@@ -638,38 +738,57 @@ EvoWars это REFERENCE-оракул уровня 3 по водно-минер�
 
 ### 7.1 Идентификация и статус
 
-Репозиторий: https://github.com/hannorein/rebound. Лицензия: GPL-3.0-or-later, файл
-https://raw.githubusercontent.com/hannorein/rebound/main/LICENSE (стандартный текст
-GPL-3.0 с «or later», проверен). Заголовки исходников содержат копирайт Hanno Rein,
-Daniel Tamayo и др. Актуальная версия: 4.4.11 (PyPI, https://pypi.org/project/rebound/,
-дата выпуска 13.11.2025). Основные публикации: Rein & Liu 2012, «REBOUND: an open-source
-multi-purpose N-body code for collisional dynamics», A&A 537, A128
+Репозиторий: https://github.com/hannorein/rebound. Исследованная версия (корректирующая
+редакция): REBOUND `5.2.2`, релиз 5 октября 2026, commit
+c34134716cd484ed9cdb9f7d54ef8d859bdf547d (получен по тегу 5.2.2, GitHub; страница
+релизов https://github.com/hannorein/rebound/releases, PyPI
+https://pypi.org/project/rebound/). Первая редакция исследовала 4.4.11 и не учитывала
+релизы 5.x; в 5.2.2 перепроверены интеграторы, SimulationArchive, тесты и лицензия.
+
+Лицензия 5.2.2: `pyproject.toml` тега 5.2.2 задаёт `license = "GPL-3.0-only"` и
+классификатор «Development Status :: 5 - Production/Stable»; в этом документе лицензия
+указывается как GPL-3.0-only по pyproject.toml. Зафиксирована неоднозначность текстов:
+файл LICENSE тега 5.2.2 содержит стандартный текст GPLv3 (с «or later» в бойлерплейте),
+а README тега 5.2.2 сохраняет формулировку «either version 3 of the License, or (at your
+option) any later version». Лицензионное обозначение «GPL-3.0-or-later» первой редакции
+(по версии 4.4.11) не переносится на 5.2.2.
+
+Основные публикации: Rein & Liu 2012, «REBOUND: an open-source multi-purpose N-body code
+for collisional dynamics», A&A 537, A128
 (https://aanda.org/articles/aa/full_html/2012/01/aa18085-11/aa18085-11.html);
-IAS15: Rein & Spiegel 2015, MNRAS 446, 1424; JANUS: Rein & Tamayo 2017, MNRAS 467, 2377
+IAS15: Rein & Spiegel 2015, MNRAS 446, 1424 (заголовок `src/integrator_ias15.c` тега
+5.2.2 ссылается на работу Rein & Spiegel); JANUS: Rein & Tamayo 2017, MNRAS 467, 2377
 (https://arxiv.org/pdf/1701.07423).
 
 ### 7.2 Интеграторы и выбор под динамический режим
 
-Список интеграторов (https://rebound.hanno-rein.de/, раздел Integrators):
+Состав интеграторов по дереву тега 5.2.2 (каталог src/: файлы integrator_bs.c,
+integrator_eos.c, integrator_ias15.c, integrator_janus.c, integrator_leapfrog.c,
+integrator_mercurius.c, integrator_saba.c, integrator_sei.c, integrator_trace.c,
+integrator_whfast.c, integrator_whfast512.c и simulationarchive.c):
 
 - IAS15 (по умолчанию): implicit Runge-Kutta 15-го порядка с адаптивным шагом и
   гауссово-Радау разбиением; заявленная точность до машинной точности; контроль ошибок
   через нелинейную компенсированную схему (Rein & Spiegel 2015); параметр epsilon
-  (по умолчанию 1e-9 для гармонических осцилляторов долгоживущих систем; на странице
-  https://rebound.hanno-rein.de/integrators/ias15/ предупреждение: для столкновительных
-  или сильно хаотических систем epsilon следует подбирать, слишком маленький epsilon
-  может не сработать для сильно нелинейных траекторий). В версии 4.4 режимы адаптивного
-  шага: `PRS23` (по умолчанию, рекомендован Pham, Rein et al. 2024, сохраняет
-  динамически отдалённые взаимодействия), альтернативы `INDIVIDUAL`, `GLOBAL`, `AARSETH85`;
-  параметр `min_dt` с предостережением о зависании для неплотных систем.
-- Symplectic: WHFast (WH/WHD/WHCKL, Wisdom-Holman с коррекциями переменного шага для
-  задач с малыми эксцентриситетами), SEI (специальный для задачи двух планет с
-  эксцентриситетом до ~1), LEAPFROG (по умолчанию), EOS (high order explicit
-  symplectic, с оптимизированными коэффициентами для задач с близкими сближениями).
-- Гибридные/переключающие: JANUS (bitwise-reproducible симплектик с периодическим
-  переключением между схемами, described in Rein & Tamayo 2017), MERCURIUS
-  (Hybrid symplectic/Bulirsch-Stoer, для планетных систем со сближениями), TRACE
-  (гибридный переключающийся интегратор).
+  (по умолчанию 1e-9; предупреждение документации: для столкновительных или сильно
+  хаотических систем epsilon следует подбирать). Режимы адаптивного шага присутствуют в
+  исходнике тега 5.2.2: PRS23 (рекомендован Pham, Rein et al. 2024), INDIVIDUAL, GLOBAL,
+  AARSETH85; значение adaptive_mode по умолчанию именно в 5.2.2 не сверялось:
+  **(непроверено)** (в документации 4.x по умолчанию был PRS23).
+- Symplectic: WHFast, SABA, SEI, LEAPFROG, EOS; плюс WHFast512: SIMD-интегратор,
+  переписанный на x86-ассемблер в 5.1.0 (координаты Якоби, симплектические корректоры,
+  отслеживание сближений и выбросов; заявка релизных заметок: точность до 5 порядков
+  лучше и Солнечная система 5 млрд лет за 8.7 часа), в 5.2.0 добавлен решатель задачи
+  Кеплера для эксцентричных и гиперболических орбит и корректоры для WHFast+DHC.
+- Гибридные/переключающие: MERCURIUS (symplectic/Bulirsch-Stoer для систем со
+  сближениями), TRACE, JANUS (bitwise-reproducible симплектик, Rein & Tamayo 2017).
+
+Существенные интерфейсные изменения 5.0.0: новый интерфейс выбора интегратора
+(reb_simulation_set_integrator, в Python атрибуты без префикса ri_, например
+sim.integrator.safe_mode), имена частиц вместо хэшей, структуры Python допускают только
+реальные поля, частицы отсортированы. Соответствие страниц сайта rebound.hanno-rein.de
+сборке 5.2.2 не проверялось: **(непроверено)**; описание интеграторов выше привязано к
+дереву тега и релизным заметкам.
 
 Выбор интегратора по режиму это одновременно урок и предупреждение: REBOUND не
 предлагает «один лучший интегратор», а даёт матрицу «динамический режим → схема»
@@ -691,23 +810,43 @@ IAS15 non-symplectic: плотный вывод, контроль локальн
 
 ### 7.4 SimulationArchive: воспроизводимость и её границы
 
-Страница https://rebound.hanno-rein.de/ipython_examples/SimulationarchiveRestart/ и
-README:
+Первоисточники корректирующей редакции: ноутбук ipython_examples/SimulationarchiveRestart.ipynb
+в дереве тега 5.2.2 и релизные заметки 5.0.0-5.2.2 (https://github.com/hannorein/rebound/releases).
 
 - SimulationArchive это бинарный формат снапшотов симуляции: сохраняет состояние,
-  параметры интегратора и время; обеспечивает побитовый рестарт (bitwise identical)
-  при продолжении с тем же снапшотом на той же платформе и позволяет побитовый
-  повтор от точки снапшота.
-- Заявленная машинно-независимый формат, совместимость между версиями и ОС: архивные файлы двоично совместимы между
-  версиями REBOUND и операционными системами (README: архивы «can be shared between
-  different versions of REBOUND, different operating systems»); формат версионируется
-  и обратная совместимость поддерживается.
-- Честные ограничения (README): (а) additional forces и function pointers (гравитационные
-  потенциалы, радиационное давление, custom effects) не сериализуются: при рестарте их
-  нужно переподключить вручную; (б) WHFast с выключенным safe mode: unsynchronized
-  состояния требуют `sim.integrator = "WHFast"` и `sim.ri_whfast.keep_unsynchronized = 1`
-  для корректного бинарного рестарта; (в) снапшоты пишутся не на точных интервалах, а
-  на первом шаге после истечения интервала (время снапшота записывается фактическое).
+  параметры интегратора и время; побитовый рестарт подтверждён ноутбуком тега 5.2.2:
+  «REBOUND can restart simulation *exactly* (bit by bit)».
+- Машинная независимость между операционными системами подтверждена ноутбуком тега
+  5.2.2: «this will even work if the SA file was generated on a different computer with
+  a different operating system».
+- Кросс-версионная совместимость НЕ является свойством формата. Релиз 5.0.0 (15 мая
+  2026, https://github.com/hannorein/rebound/releases/tag/v5.0.0) прямо заявляет breaking
+  change: «The file format for the Simulationarchive has been changed. Note that you can
+  not read Simulationsarchives that were saved with a previous version». Формат
+  версионируется (changelog 4.4.2: вывод номера версии, создавшей архив, при несовпадении
+  версий), история 4.x уже содержит удаление поддержки старых версий формата. Ноутбук
+  5.2.2 при этом всё ещё содержит фразу «and even a different version of REBOUND»: это
+  противоречит релизным заметкам 5.0.0, противоречие зафиксировано, и вывод сделан по
+  более свежему и специфичному источнику (релизные заметки). Первая редакция ошибочно
+  утверждала безусловную совместимость архивов между версиями: утверждение отозвано.
+- Ограничения рестарта (ноутбук тега 5.2.2): (а) снапшоты пишутся на первом шаге ПОСЛЕ
+  истечения интервала (не на точных границах), для точного воспроизведения финиша нужно
+  exact_finish_time=0; (б) для WHFast с выключенным safe mode рестарт требует
+  `sim.integrator.keep_unsynchronized = 1` (в 5.x атрибуты без префикса ri_*);
+  (в) сериализация additional forces и function pointers в материалах тега 5.2.2 не
+  найдена: известное по документации 4.x ограничение перенесено с пометкой **(непроверено)
+  для 5.2.2**; при любом использовании рестартов это проверяется по факту.
+
+Для EvoWars это самая ценная находка по воспроизводимости, обновлённая версией 5.2.2:
+(а) REBOUND фактически декомпозирует «bitwise» на «та же платформа/среда» и
+«машинно-независимый формат»: EvoWars уже имеет эквивалент в `bitwise_same_environment`
+vs `within_tolerance` (CORE_SCIENTIFIC_ENGINE §2.8); (б) урок 5.0.0: смена формата снапшотов
+это управляемый разрыв совместимости, он требует версионируемого формата и явной политики
+миграции, а не молчаливого чтения чужих архивов; (в) паттерн «снапшот + рестарт-тесты»
+переносим в контракт сохранения состояния 1.x: снимки истории запусков EvoWars уже хранят
+всё для воспроизведения, но рестарт-тестов в VALIDATION_PLAN нет; (г) перечень
+несохраняемого это чек-лист для аудита сериализации EvoWars (что делать с вычислителями,
+callbacks, таймерами при продолжении).
 
 Для EvoWars это самая ценная находка по воспроизводимости: (а) контраст с
 `platform_dependent` семантикой SolverBackend: REBOUND фактически декомпозирует
@@ -722,55 +861,67 @@ EvoWars уже хранят всё для воспроизведения, но �
 
 ### 7.5 Тесты
 
-Тестовый паттерн REBOUND: каталог `examples/` с per-example `problem.c`, где каждый
-пример это самопроверяющийся сценарий (выход в `Makefile`-драйве, проверка границ
-значений). Библиотека использует `unittests/` для unit-уровня; поведение интеграторов
-проверяется на аналитических задачах и на проблемах из публикаций (IAS15: Rein &
-Spiegel 2015 секция тестов). Энергосохраняющий CI-прогон как отдельный workflow не
-подтверждён: **(непроверено)**.
+Тестовый паттерн REBOUND по дереву тега 5.2.2: каталог `examples/` с per-example
+`problem.c`, где каждый пример это самопроверяющийся сценарий (проверен, например,
+examples/shearing_sheet/problem.c), плюс `ipython_examples/` и `python_examples/`.
+Каталога `unittests/` в дереве тега 5.2.2 нет: утверждение первой редакции о unit-каталоге
+отозвано. Поведение интеграторов проверяется на аналитических задачах и на проблемах из
+публикаций (IAS15: Rein & Spiegel 2015, секция тестов). Содержимое CI-контура (.github)
+тега 5.2.2 и наличие энергосохраняющего прогона как отдельного workflow не проверялись:
+**(непроверено)**.
 
-### 7.6 GPL-3.0-or-later: последствия для EvoWars
+### 7.6 GPL-3.0-only (по pyproject.toml 5.2.2): последствия для EvoWars
 
-REBOUND это GPL с опцией «or later». Следствия:
+Лицензия 5.2.2 фиксируется как GPL-3.0-only по pyproject.toml; тексты LICENSE и README
+содержат «or later» (неоднозначность зафиксирована в §7.1). Следствия формулируются
+осторожно и не считаются юридическим заключением:
 
-1. Встраивание кода REBOUND в производственный код EvoWars (не отдельный процесс, а
-   linking в том же смысле, который GPL применяет к производным произведениям)
-   обязывает распространять это произведение по GPL-совместимой лицензии. Текущая
-   лицензия EvoWars и планы распространения в этой сессии не проверялись: решение
-   требует отдельного анализа. Пока такого решения нет: REJECT встраивание,
-   REFERENCE офлайн.
-2. Использование как независимый внешний оракул (запуск отдельным процессом/средой,
-   сравнение результатов по файлам) GPL-обязательств на EvoWars не создаёт: это
-   ровно текущая роль в VALIDATION_PLAN (таблица оракулов: REBOUND уровень 2, офлайн).
-3. Данные (архивы, конфиги), созданные REBOUND, не подпадают под GPL как таковые,
-   но паттерн «снапшот-формат» заимствуется как идея, не как код.
+1. Встраивание кода REBOUND в распространяемый код EvoWars (linking в том смысле,
+   который GPL применяет к производным произведениям) обязывало бы распространять
+   это произведение по GPL-совместимой лицензии. Лицензия самого EvoWars и планы его
+   распространения в этой сессии не проверялись. Пока отдельного лицензионного анализа
+   нет: REJECT встраивание, REFERENCE офлайн.
+2. Использование как внешний офлайн-оракул (запуск отдельным процессом, сравнение
+   результатов по файлам) это текущая роль в VALIDATION_PLAN (таблица оракулов:
+   REBOUND уровень 2, офлайн). При этом отсутствие GPL-обязательств при такой схеме НЕ
+   заявляется гарантированным: окончательный вывод требует анализа конкретной схемы
+   распространения EvoWars и взаимодействия компонентов (что именно распространяется,
+   передаются ли производные произведения REBOUND, как лицензируются связки сценариев
+   и данных). До этого анализа фиксируется только рабочая гипотеза, согласованная с
+   действующей практикой репозитория.
+3. Данные (архивы, конфиги), созданные запуском REBOUND, не подпадают под GPL как
+   таковые, но паттерн «снапшот-формат» заимствуется как идея, не как код.
 
-Отдельно: README REBOUND (и PyPI-страница) содержит явное заявление о политике против
-AI-generated code: «AI-generated code conflicts with this project's license and the
-copyright of its contributors» (формулировка о непринятии вкладов, сгенерированных
-LLM). Для настоящего исследования это означает: НЕ предлагать генерировать патчи в
-REBOUND и не переносить код REBOUND дословно в любой AI-ассистированный репозиторий;
-заимствуются только методы, форматы и архитектурные идеи, в соответствии с §13 и
-политикой происхождения EvoWars.
+Отдельно: README тега 5.2.2 содержит явную политику против AI-generated code:
+«AI-generated code conflicts with this project's license, since you cannot truly
+release code for use if you didn't author it yourself» (проверено дословно). Для
+настоящего исследования это означает: НЕ предлагать генерировать патчи в REBOUND и не
+переносить код REBOUND дословно в любой AI-ассистированный репозиторий; заимствуются
+только методы, форматы и архитектурные идеи, в соответствии с §13 и политикой
+происхождения EvoWars.
 
 ### 7.7 Сопоставление с EvoWars и решения
 
 | Аспект EvoWars | Как решено в REBOUND | Решение |
 |---|---|---|
-| Орбитальная динамика (4.6, ADR-P2: аналитический Кеплер по умолчанию, интеграторы подключаемые) | 4 семейства интеграторов, выбор по режиму | REFERENCE: офлайн-оракул; ADAPT матрицу «режим → метод» для реестра бэкендов |
-| Воспроизводимость (снапшоты истории 1.x, deterministic семантика) | SimulationArchive: бинарные снапшоты, bitwise рестарт, честные ограничения | ADAPT: паттерн снапшотов + рестарт-тесты; REJECT встраивание (GPL, без отдельного решения) |
+| Орбитальная динамика (4.6, ADR-P2: аналитический Кеплер по умолчанию, интеграторы подключаемые) | 11 интеграторов (integrator_*.c тега 5.2.2, включая WHFast512 и SABA), выбор по режиму | REFERENCE: офлайн-оракул (версия оракула фиксируется, включая SHA); ADAPT матрицу «режим → метод» для реестра бэкендов |
+| Воспроизводимость (снапшоты истории 1.x, deterministic семантика) | SimulationArchive: бинарные снапшоты, bitwise рестарт, формат менялся в 5.0.0 (архивы предыдущих версий не читаются), честные ограничения | ADAPT: паттерн снапшотов + версионирование формата + рестарт-тесты; REJECT встраивание (GPL-3.0-only, без отдельного решения) |
 | Проверка инвариантов | энергия/момент в examples как самоцель | ADAPT: инварианты в физическую валидацию Уровня 1/3 |
-| Долгоживущие N-body ансамбли | WHFast/JANUS symplectic | STUDY: если EvoWars понадобится длинная орбитальная эволюция после 4.6, симплектические методы оправданы; текущий Кеплер-по-умолчанию не меняется |
+| Долгоживущие N-body ансамбли | WHFast/SABA/JANUS/WHFast512 symplectic (5.1-5.2) | STUDY: если EvoWars понадобится длинная орбитальная эволюция после 4.6, симплектические методы оправданы; текущий Кеплер-по-умолчанию не меняется |
 
 ## 8. VPLanet: подробный разбор
 
 ### 8.1 Идентификация и статус
 
-Репозиторий: https://github.com/VirtualPlanetaryLaboratory/vplanet. Лицензия: MIT, файл
-https://raw.githubusercontent.com/VirtualPlanetaryLaboratory/vplanet/main/LICENSE
-(«Copyright (c) 2018 The VPLANET Team», текст MIT проверен). Актуальная версия:
-v2.5.36 (страница релизов, дата 20.02.2026; исследовалась документация и репозиторий на
-дату 2026-11-10). Основная публикация: Barnes, R. et al. 2020, «VPLanet: The Virtual
+Репозиторий: https://github.com/VirtualPlanetaryLaboratory/vplanet. Исследованная версия:
+v2.5.36, тег v2.5.36, commit 35472e7814cf98ea39c2fc7f035a10ee3bd98a62 (релиз от 20.02.2026;
+страница релизов https://github.com/VirtualPlanetaryLaboratory/vplanet/releases). Лицензия:
+MIT, файл LICENSE по тегу v2.5.36
+(https://raw.githubusercontent.com/VirtualPlanetaryLaboratory/vplanet/v2.5.36/LICENSE,
+«Copyright (c) 2018 The VPLANET Team», текст MIT проверен); в корректирующей редакции
+ссылки на исходники и тесты закреплены за тегом v2.5.36, а не за изменяемой веткой main.
+Документация исследовалась на дату 2026-11-10. Основная публикация: Barnes, R. et al. 2020,
+«VPLanet: The Virtual
 Planet Simulation Platform», PASP 132, 024502 (ADS: 2020PASP..132b4502B; DOI
 10.1088/1538-3873/ab3ce8; arXiv:1905.06367).
 
@@ -877,13 +1028,14 @@ push/PR с компиляцией и прогоном примеров (нали
 | Реестр заменяемых реализаций | да (getters по списку) | да (типы бэкендов) | частично (интеграторы) | нет (компилируемый сценарный язык) | да (integrator switch) | частично (модули per-body) | PlannedBackendDescriptor, пустые implementedMethods |
 | Координатор вычислений | coupling loop, порядок фиксирован | нет (библиотека вызовов) | ReactorNet | transport loop | sim.integrate() | главный цикл тел | Scheduler: очередь, sub-cycling, Lie/Strang |
 | Контракты данных | config + справочники | fluid JSON, units в данных | YAML с units/диапазонами | input-скрипты | SimulationArchive (бинарный) | входной файл тел | версии схемы 1.x, миграции fail-closed |
-| ODE-интегрирование | внешние модули (SPIDER и др.) | нет | CVODES/IDAS (SUNDIALS) | RK5 явный / CVODE | IAS15/WHFast/JANUS/... | собственный RK-адаптивный (в главном цикле) | Radau IIA (ts-radau-iia), порядок 5, L-stable |
+| ODE-интегрирование | внешние модули (SPIDER и др.) | нет | CVODES/IDAS (SUNDIALS) | явный Рунге-Кутта по умолчанию / CVODE по явному выбору пользователя (`-cvode true`) | IAS15/WHFast/SABA/WHFast512/JANUS/... (11 файлов integrator_*.c тега 5.2.2) | собственный RK-адаптивный (в главном цикле) | Radau IIA (ts-radau-iia), порядок 5, L-stable |
 | Равновесие/flash | нет (физика модулей) | Михельсен 2 этапа, GDEM, trust region | нет (кинетика) | speciation Newton-Raphson | нет | нет | PURE PR + TPD-поиск (сертификация за validatedErrorBound) |
-| Воспроизводимость | golden_run.tsv | не акцентирована | не акцентирована | ctest-регрессия | SimulationArchive, bitwise рестарт | вход+версия+публикация | deterministic семантика, снимки истории, SHA-256 траектории |
+| Воспроизводимость | golden_run.tsv | не акцентирована | не акцентирована | ctest-регрессия | SimulationArchive, bitwise рестарт; формат менялся в 5.0.0 (архивы предыдущих версий не читаются) | вход+версия+публикация | deterministic семантика, снимки истории, SHA-256 траектории |
 | Тестовая пирамида | unit + integration pairwise + golden | unit (Catch2) + smoke | unit (googletest) + 0D | функциональные + регрессионные ctest | examples как самопроверки | examples по публикациям + broken | 174+ теста, VALIDATION_PLAN 5 уровней |
 | CI | coverage-baseline + nightly | Catch2 + колёса | CI matrix, googletest | ctest | Makefile/CI | GitHub Actions | verify: tsc + tests + lint + build |
-| Лицензия | Apache-2.0 | MIT | BSD-3 | USGS provisional, notice (непроверено) | GPL-3.0-or-later | MIT | (не проверялась в этой сессии) |
+| Лицензия | Apache-2.0 (LICENSE.txt@26.10.16) | MIT (LICENSE@v8.0.0) | BSD-3 (License.txt@v3.2.0) | USGS provisional (README@v3.9.0), notice (непроверено) | GPL-3.0-only (pyproject.toml@5.2.2) | MIT (LICENSE@v2.5.36) | (не проверялась в этой сессии) |
 | Язык | Python (+Fortran/C-модули) | C++ | C++ (+Python) | C | C | C | TypeScript |
+| Статус зрелости | Alpha (PyPI fwl-proteus 26.10.16) | (непроверено) | (непроверено) | provisional (README USGS) | Production/Stable (pyproject.toml@5.2.2) | (непроверено) | внутренний проект |
 
 Ключевой вывод матрицы: EvoWars по структуре (координатор+снимки, версии схемы,
 deterministic семантика, provenance) уже сопоставим со зрелыми проектами; главные
@@ -928,20 +1080,28 @@ EvoWars», а состояние области. Переносимо: стру�
 Проблема: контракты реакций, третьи тела, fall-off, единицы, интегрирование жёстких
 систем. Находки: Cantera (§5) даёт референс контрактов: единицы в данных, явные
 `(+N2)`, семантика дублей, диапазоны применимости в данных; Troe/SRI формулы в
-`Falloff.cpp` с защитой SmallNumber. PHREEQC (§6.3) подтверждает выбор неявного метода
-для жёсткой кинетики (RK5 до признаков жёсткости, затем CVODE). Текущие контракты
+`Falloff.cpp` с защитой SmallNumber. PHREEQC (§6.3) предлагает два метода интегрирования
+кинетики, и выбор задаёт пользователь: явный Рунге-Кутта по умолчанию, неявный CVODE
+включается явным параметром `-cvode true`; автоматической смены метода по признакам
+жёсткости нет, документация лишь рекомендует CVODE как более робастный для жёстких
+систем. Это фоновая параллель к фиксированному контракту Radau IIA, а не доказательство
+автоматического выбора метода. Текущие контракты
 EvoWars (механизменная размерность cm3_per_molecule_per_s, fall-off контракт 4.5.2,
 Radau IIA) соответствуют отраслевой практике; коэффициенты не переносятся ни откуда,
 кроме KIDA/JPL (REJECT подмена, сохраняется fail-closed для №1/№70/№72).
 
 ### 10.4 4.6: орбитальная динамика
 
-Проблема: подключаемые интеграторы и их валидация. Находки: REBOUND (§7) даёт матрицу
-«режим → интегратор» и офлайн-оракул IAS15 (уже числится в таблице оракулов VALIDATION_PLAN
-уровень 2). Текущий аналитический Кеплер (ADR-P2) не меняется; при появлении интеграторов
+Проблема: подключаемые интеграторы и их валидация. Находки: REBOUND 5.2.2 (§7; оракул
+фиксируется версией и SHA c34134716cd484ed9cdb9f7d54ef8d859bdf547d) даёт матрицу
+«режим → интегратор» (11 интеграторов, включая SIMD WHFast512) и офлайн-оракул IAS15
+(уже числится в таблице оракулов VALIDATION_PLAN
+уровень 2; для воспроизводимости сопоставлений версию оракула нужно фиксировать так же,
+как фиксируются версии CoolProp 8.0.0 и Cantera 3.2.0 в DATA_PROVENANCE). Текущий
+аналитический Кеплер (ADR-P2) не меняется; при появлении интеграторов
 в реестре бэкендов референс-паттерн REBOUND по выбору схемы по режиму применим к
-документации контрактов SolverBackend. Встраивание REBOUND: REJECT (GPL, отдельное
-решение).
+документации контрактов SolverBackend. Встраивание REBOUND: REJECT (GPL-3.0-only,
+отдельное решение).
 
 ### 10.5 4.7: недра
 
@@ -965,7 +1125,7 @@ VPLanet имеет POISE (0D/1D EBM). Все три подхода к клима
 ### 10.7 4.9: геохимические циклы
 
 Проблема: минеральные резервуары, насыщение, растворение/осаждение, замкнутые циклы.
-Находки: PHREEQC (§6) это референс предметной области: SI, EQUILIBRIUM_PHASES, кинетика
+Находки: PHREEQC 3.9.0-17591 (§6) это референс предметной области: SI, EQUILIBRIUM_PHASES, кинетика
 растворения; IPhreeqc/PhreeqcRM как граница интеграции; применимость заканчивается на
 водной геохимии. Для EvoWars: REFERENCE офлайн-оракул водных сцен; ADAPT концепции
 SI/резервуаров в собственные контракты; REJECT PHREEQC для расплавов/недр. Критерий
@@ -974,8 +1134,10 @@ SI/резервуаров в собственные контракты; REJECT P
 
 ### 10.8 Воспроизводимость и сохранение состояния
 
-Находки: REBOUND SimulationArchive (битовая совместимость формата между версиями/ОС,
-честный список несериализуемого, рестарт-тесты); PROTEUS golden_run.tsv (золотые
+Находки: REBOUND SimulationArchive (bitwise-рестарт и машинная независимость между
+операционными системами подтверждены по материалам тега 5.2.2; кросс-версионная
+совместимость формата НЕ гарантируется: релиз 5.0.0 прямо заявляет нечитаемость архивов
+предыдущих версий; честный список несериализуемого, рестарт-тесты); PROTEUS golden_run.tsv (золотые
 полные прогоны); VPLanet сценарии-по-публикациям. Для EvoWars: текущая схема снимков
 истории (полный вход в снимке 1.1.0, SHA-256 контрольной траектории, deterministic
 семантика bitwise_same_environment|within_tolerance|platform_dependent) покрывает
@@ -1051,8 +1213,10 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
   устойчивости), простой leapfrog на круговой орбите.
 - Сравнение: период лунной орбиты (допуск ± 0.5 %, VALIDATION_PLAN Уровень 3), сфера
   Хилла (± 2 %), дрейф энергии leapfrog (порядок 1e-6 за прогон, как в существующих
-  тестах), REBOUND IAS15 (epsilon 1e-9) как офлайн-оракул для нетривиальных траекторий
-  (например, резонансная пара).
+  тестах), REBOUND 5.2.2 IAS15 (epsilon 1e-9; оракул фиксируется версией и commit SHA
+  c34134716cd484ed9cdb9f7d54ef8d859bdf547d; oracle snapshot фиксирует и версию
+  формата SimulationArchive, урок breaking change 5.0.0) как офлайн-оракул для
+  нетривиальных траекторий (например, резонансная пара).
 - Допуски: взяты из VALIDATION_PLAN и существующих тестов; новые допуски для IAS15-
   сравнений предстоит определить (исследование сходимости, аналогично BM-2).
 
@@ -1124,12 +1288,12 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 
 | Проект | Версия исследована | Лицензия (проверено по файлу) | Зависимости с собственными лицензиями | Коммерческое использование | Встраивание в Rust/WASM-планы EvoWars |
 |---|---|---|---|---|---|
-| PROTEUS | 26.10.16 (Zenodo) | Apache-2.0 (LICENSE.txt, проверен) | модули-репозитории (Aragog, SPIDER, Zalmoxis, AGNI и др.) отдельные репозитории с собственными лицензиями: не проверены по отдельности (непроверено) | да (Apache-2.0) | нет планов; заимствуются паттерны, не код |
-| CoolProp | 8.0.0 | MIT (LICENSE, проверен) | THIRD_PARTY_NOTICES.md; вендоримые pinned Eigen/fmt со своими лицензиями; данные флюидов с собственными происхождением, MIT кода НЕ покрывает данные | да (MIT) | нет; офлайн-оракул (уже используется) |
-| Cantera | 3.2.0 | BSD-3 (License.txt, проверен) | SUNDIALS (BSD), Boost и др.: лицензии зависимостей индивидуально не проверялись (непроверено) | да (BSD-3) | STUDY; производство Rust/WASM заблокировано отдельным решением |
-| PHREEQC | 3.8.6-17100 | файла LICENSE в репо нет; USGS preliminary/provisional software, User Rights Notice не открыт (непроверено) | базы данных с собственным происхождением (llnl.dat и др.) | не подтверждено до прочтения notice (непроверено) | нет; при интеграции только отдельный процесс (IPhreeqc/PhreeqcRM) |
-| REBOUND | 4.4.11 | GPL-3.0-or-later (LICENSE, проверен) | ядро самодостаточно; расширения (reboundx и др.) отдельные репозитории (не проверены) | да, при GPL-условиях | REJECT встраивание (GPL); REFERENCE офлайн |
-| VPLanet | v2.5.36 | MIT (LICENSE, проверен) | модульных зависимостей не выявлено в этой сессии (непроверено) | да (MIT) | нет планов; заимствуются паттерны |
+| PROTEUS | 26.10.16 (тег 26.10.16, commit e6c872f6205f2d3aa213a83136fc02e5fdace2d6; PyPI: Development Status 3 - Alpha) | Apache-2.0 (LICENSE.txt тега 26.10.16, проверен) | модули-репозитории (Aragog, SPIDER, Zalmoxis, AGNI и др.) отдельные репозитории с собственными лицензиями: не проверены по отдельности (непроверено) | да (Apache-2.0) | нет планов; заимствуются паттерны, не код |
+| CoolProp | 8.0.0 (тег v8.0.0, commit ae81610e7d23efc57f9d051c8e70a4d66e87537f) | MIT (LICENSE тега v8.0.0, проверен) | THIRD_PARTY_NOTICES.md; вендоримые pinned Eigen/fmt со своими лицензиями; данные флюидов с собственным происхождением, MIT кода НЕ покрывает данные | да (MIT) | нет; офлайн-оракул (уже используется) |
+| Cantera | 3.2.0 (тег v3.2.0, commit 4a8358eb80cfeb50474386b5f9ec0b3a83519889) | BSD-3 (License.txt тега v3.2.0, проверен) | SUNDIALS (BSD), Boost и др.: лицензии зависимостей индивидуально не проверялись (непроверено) | да (BSD-3) | STUDY; производство Rust/WASM заблокировано отдельным решением |
+| PHREEQC | 3.9.0-17591 (тег v3.9.0, commit a4b1596bc0d4ec479a2493541f275af37e9f7349); USGS downloads: 3.8.6-17100 | файла LICENSE в репо нет; README тега v3.9.0: USGS preliminary/provisional software (дисклеймер проверен дословно), User Rights Notice не открыт (непроверено) | базы данных с собственным происхождением (llnl.dat и др.) | не подтверждено до прочтения notice (непроверено) | нет; при интеграции только отдельный процесс (IPhreeqc/PhreeqcRM) |
+| REBOUND | 5.2.2 (тег 5.2.2, commit c34134716cd484ed9cdb9f7d54ef8d859bdf547d) | GPL-3.0-only (pyproject.toml тега 5.2.2; LICENSE/README содержат «or later»: неоднозначность зафиксирована в §7.1) | ядро самодостаточно; расширения (reboundx и др.) отдельные репозитории (не проверены) | да, при GPL-условиях | REJECT встраивание (GPL-3.0-only); REFERENCE офлайн |
+| VPLanet | v2.5.36 (тег v2.5.36, commit 35472e7814cf98ea39c2fc7f035a10ee3bd98a62) | MIT (LICENSE тега v2.5.36, проверен) | модульных зависимостей не выявлено в этой сессии (непроверено) | да (MIT) | нет планов; заимствуются паттерны |
 
 Принципы, подтверждённые практикой исследованных проектов:
 
@@ -1140,10 +1304,18 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 2. Код и данные имеют разные условия: базы PHREEQC, флюидные данные CoolProp,
    механизмы Cantera (gri30 с собственными ограничениями происхождения) требуют
    отдельной фиксации provenance при любом использовании.
-3. GPL-проект (REBOUND) используется только как отдельный процесс-оракул; встраивание
-   без отдельного лицензионного анализа запрещено (§7.6).
+3. REBOUND (GPL-3.0-only по pyproject.toml 5.2.2) используется только как внешний
+   офлайн-оракул; встраивание без отдельного лицензионного анализа запрещено; при этом
+   отсутствие GPL-обязательств у схемы «отдельный процесс» не заявляется
+   гарантированным: окончательный вывод требует анализа конкретной схемы
+   распространения и взаимодействия компонентов (§7.6).
 4. Для USGS-кода (PHREEQC) до любого использования читается User Rights Notice конкретной
-   поставки; «public domain» не предполагается автоматически.
+   поставки (для исследованной 3.9.0-17591 он не открыт); «public domain» не
+   предполагается автоматически.
+5. Статус зрелости проекта фиксируется рядом с выводами: PROTEUS имеет PyPI-статус
+   Alpha (26.10.16), REBOUND 5.2.2 Production/Stable (pyproject.toml), PHREEQC
+   preliminary/provisional (README USGS); ссылка на «зрелость» любого проекта без
+   сверки статуса по первоисточнику не допускается.
 
 ## 14. Приоритетный план адаптации
 
@@ -1160,12 +1332,16 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
   образцу существующего coolprop-benchmark контура; oracle snapshot с provenance.
 - P4 (ADAPT, REBOUND): рестарт-тесты воспроизводимости на снимках истории (Уровень 5),
   согласование с существующей семантикой bitwise_same_environment|within_tolerance|
-  platform_dependent; аудит сериализации по чек-листу «что не сохраняется».
+  platform_dependent; аудит сериализации по чек-листу «что не сохраняется»;
+  версионирование формата снимков с явной политикой миграции (урок breaking change
+  SimulationArchive в REBOUND 5.0.0: смена формата это управляемый разрыв
+  совместимости, а не молчаливое чтение чужих архивов).
 - P5 (ADAPT, VPLanet): реестр планетарных сценариев со статусами pass/fail/known-broken/
   excluded и привязкой к эталонам; основа: существующая таблица Уровня 3.
-- P6 (STUDY, PHREEQC): граница интеграции IPhreeqc/PhreeqcRM для этапа 4.9; отдельное
-  исследование применимости к каталогу компонентов EvoWars.
-- REJECT (фиксация): встраивание REBOUND; подмена KIDA/JPL коэффициентов данными любых
+- P6 (STUDY, PHREEQC): граница интеграции IPhreeqc/PhreeqcRM для этапа 4.9 по версии
+  3.9.0-17591 (тег v3.9.0); отдельное исследование применимости к каталогу
+  компонентов EvoWars.
+- REJECT (фиксация): встраивание REBOUND (GPL-3.0-only); подмена KIDA/JPL коэффициентов данными любых
   исследованных проектов; PHREEQC для расплавов/недр; объявление фазовой устойчивости
   доказанной без validatedErrorBound; объявление глобальной TPD-устойчивости без
   доказанной нижней границы; изменение NASA CEA, gameSpeedCoefficient, Radau IIA,
@@ -1178,7 +1354,8 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
    прочитаны по doxygen-указателю, полный разбор не выполнялся (непроверено).
 2. Точные страницы выпусков Michelsen 1982a/b не сверялись с оригиналами (непроверено);
    ссылки даны по библиографическим ключам CoolProp.
-3. User Rights Notice PHREEQC для версии 3.8.6-17100 не прочитан; лицензионный статус
+3. User Rights Notice PHREEQC для исследованной поставки 3.9.0-17591 не прочитан (README
+   тега v3.9.0 содержит только дисклеймер preliminary/provisional); лицензионный статус
    для производного использования не подтверждён (непроверено).
 4. Лицензии модульных репозиториев PROTEUS (Aragog, SPIDER, Zalmoxis, AGNI, JANUS) не
    проверены по отдельности (непроверено).
@@ -1186,8 +1363,8 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
    индивидуально (непроверено).
 6. Точные пути Python-тестов Cantera и полный состав test/zeroD не зафиксированы
    (непроверено).
-7. Энергосохраняющий CI-контур REBOUND: наличие отдельного workflow не подтверждено
-   (непроверено).
+7. CI-контур REBOUND: содержимое workflow тега 5.2.2 и наличие энергосохраняющего
+   прогона как отдельного workflow не проверялись (непроверено).
 8. Порядок исполнения модулей VPLanet внутри шага не проверен по исходнику (help.html
    не открыт в этой сессии) (непроверено).
 9. Допуски BM-2 и BM-5-расширений «предстоит определить»: обоснование требует
@@ -1197,10 +1374,29 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 11. Лицензия самого репозитория EvoWars в этой сессии не проверялась; выводы §7.6 о
     GPL-конфликте при встраивании REBOUND даны в общем виде и требуют сверки с
     фактической лицензией EvoWars перед любым решением.
-12. Политика REBOUND против AI-generated code: формулировка зафиксирована по README;
-    точный текущий текст политики и её юридические следствия не анализировались.
-13. Риск устаревания: все версии зафиксированы на дату 2026-11-10; проекты развиваются,
-    перед реализацией P1-P6 версии перепроверяются.
+12. Политика REBOUND против AI-generated code: формулировка проверена дословно по README
+    тега 5.2.2; юридические следствия политики не анализировались.
+13. Риск устаревания: версии зафиксированы на дату 2026-11-10 (первая редакция) и
+    2026-11-11 (корректирующая редакция: SHA, PHREEQC 3.9.0-17591, REBOUND 5.2.2);
+    проекты развиваются, перед реализацией P1-P6 версии перепроверяются.
+14. Значение adaptive_mode по умолчанию в REBOUND 5.2.2 не сверялось (в документации 4.x
+    по умолчанию PRS23); для сценариев BM-5 проверяется по исходнику тега
+    (непроверено).
+15. Сериализация additional forces в SimulationArchive 5.2.2: в материалах тега не
+    найдена, ограничение перенесено из документации 4.x (непроверено для 5.2.2).
+16. Соответствие страниц сайта rebound.hanno-rein.de сборке 5.2.2 не проверялось;
+    описания интеграторов привязаны к дереву тега и релизным заметкам (непроверено).
+17. Противоречие источников REBOUND: ноутбук 5.2.2 ещё содержит фразу «and even a
+    different version of REBOUND», а релизные заметки 5.0.0 заявляют нечитаемость
+    архивов предыдущих версий; вывод сделан по релизным заметкам как более свежему и
+    специфичному источнику.
+18. Отношение репозиториев phreeqc-dev/phreeqc3 (релиз 3.9.0-17591) и usgs-coupled/
+    phreeqc3, usgs-coupled/phreeqrm не устанавливалось (непроверено).
+19. PyPI-классификаторы зрелости CoolProp, Cantera и VPLanet не проверялись; статус
+    зрелости этих проектов в матрице §9 помечен (непроверено).
+20. Деревья тестов PROTEUS и CI-контур CoolProp читались через изменяемые ветки
+    main/master (пометки в таблице §2); посимвольная сверка этих деревьев с тегами не
+    выполнялась (непроверено).
 
 ## 16. Полный список источников
 
@@ -1216,18 +1412,23 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 
 - https://proteus-framework.org/ и https://proteus-framework.org/PROTEUS/Explanations/model.html
 - https://proteus-framework.org/PROTEUS/Explanations/dummy_modules.html
-- https://github.com/FormingWorlds/PROTEUS (README, дерево src/proteus, LICENSE.txt)
-- https://github.com/FormingWorlds/PROTEUS/tree/main/tests и /tree/main/tests/integration
+- https://github.com/FormingWorlds/PROTEUS (README, LICENSE.txt по тегу 26.10.16)
+- https://github.com/FormingWorlds/PROTEUS/releases/tag/26.10.16
+- https://github.com/FormingWorlds/PROTEUS/tree/26.10.16/tests и
+  /tree/26.10.16/tests/integration (дерево также читалось через ветку main 2026-11-10:
+  см. оговорку в §2)
+- https://pypi.org/project/fwl-proteus/26.10.16/ (Development Status :: 3 - Alpha)
 - Zenodo: DOI 10.5281/zenodo.21358380 (версия 26.10.16)
 
 ### CoolProp
 
 - https://coolprop.org/fluid_properties/Mixtures.html (документация 8.0.0)
-- https://github.com/CoolProp/CoolProp (README, releases, дерево src/Backends/Helmholtz)
-- https://raw.githubusercontent.com/CoolProp/CoolProp/master/src/Backends/Helmholtz/FlashRoutines.cpp
-- https://raw.githubusercontent.com/CoolProp/CoolProp/master/LICENSE (MIT)
-- https://raw.githubusercontent.com/CoolProp/CoolProp/master/Web/fluid_properties/Mixtures.rst
-- https://raw.githubusercontent.com/CoolProp/CoolProp/master/THIRD_PARTY_NOTICES.md
+- https://github.com/CoolProp/CoolProp/releases/tag/v8.0.0 (28.06.2026)
+- https://github.com/CoolProp/CoolProp/tree/v8.0.0/src/Backends/Helmholtz
+  (FlashRoutines.cpp, VLERoutines.cpp по тегу v8.0.0)
+- https://raw.githubusercontent.com/CoolProp/CoolProp/v8.0.0/LICENSE (MIT)
+- https://raw.githubusercontent.com/CoolProp/CoolProp/v8.0.0/Web/fluid_properties/Mixtures.rst
+- https://raw.githubusercontent.com/CoolProp/CoolProp/v8.0.0/THIRD_PARTY_NOTICES.md
 - Bell et al. 2014, Ind. Eng. Chem. Res., DOI 10.1021/ie4033999:
   https://pubs.acs.org/doi/10.1021/ie4033999
 - Michelsen 1982a/b (FPE), Michelsen & Mollerup 2007, Gernert et al. 2014,
@@ -1240,28 +1441,54 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 - https://cantera.org/science/reactors/cvodes.html
 - https://cantera.org/3.1/cxx/d7/def/classCantera_1_1ReactorNet.html
 - https://cantera.org/3.2/reference/releasenotes/v3.2.html
-- https://github.com/Cantera/cantera (License.txt, дерево test/kinetics)
-- https://raw.githubusercontent.com/Cantera/cantera/main/src/kinetics/Falloff.cpp
+- https://github.com/Cantera/cantera/releases/tag/v3.2.0 (18.11.2025)
+- https://github.com/Cantera/cantera/tree/v3.2.0/test/kinetics (rates.cpp, pdep.cpp,
+  kineticsFromYaml.cpp, kineticsFromScratch.cpp по тегу v3.2.0)
+- https://raw.githubusercontent.com/Cantera/cantera/v3.2.0/License.txt (BSD-3)
+- https://raw.githubusercontent.com/Cantera/cantera/v3.2.0/src/kinetics/Falloff.cpp
+  (анализировался файл тега v3.2.0; файл ветки main относится к линии разработки
+  4.0.0a2 и для выводов не использовался)
 
 ### PHREEQC
 
-- https://www.usgs.gov/software/phreeqc-version-3
-- https://github.com/usgs-coupled/phreeqc3 (дерево, ctest.cmake, ctest.regression.cmake)
+- https://www.usgs.gov/software/phreeqc-version-3 (страница загрузок: сборка 3.8.6-17100)
+- https://github.com/phreeqc-dev/phreeqc3 (upstream-репозиторий) и
+  https://github.com/phreeqc-dev/phreeqc3/releases/tag/v3.9.0 (релиз 3.9.0-17591,
+  май 2026)
+- https://github.com/phreeqc-dev/phreeqc3/blob/v3.9.0/README.md (USGS-дисклеймер,
+  проверен дословно)
+- https://github.com/phreeqc-dev/phreeqc3/tree/v3.9.0 (ctest.cmake, ctest.regression.cmake,
+  CTestConfig.cmake, valgrind.cmake, .gitlab-ci.yml)
+- https://github.com/phreeqc-dev/phreeqc3/blob/v3.9.0/HTMLversion/HTML/phreeqc3-24.htm
+  (глава KINETICS по тегу v3.9.0; сверена с онлайн-версией)
 - https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-24.htm
-  (KINETICS: RK5/CVODE, -bad_steps_max)
+  (первоисточник KINETICS: -cvode default false, -runge_kutta, -bad_step_max)
 - Parkhurst & Appelo 2013, USGS Techniques and Methods 6-A43, DOI 10.3133/tm6A43
-- https://github.com/usgs-coupled/phreeqrm (PhreeqcRM)
+- https://github.com/usgs-coupled/phreeqc3 и https://github.com/usgs-coupled/phreeqrm
+  (PhreeqcRM; смежные репозитории, отношение к upstream не устанавливалось)
 - Cohen & Hindmarsh 1996, CVODE (цитируется по документации PHREEQC)
 
 ### REBOUND
 
-- https://rebound.hanno-rein.de/ (список интеграторов)
-- https://rebound.hanno-rein.de/integrators/ias15/
-- https://rebound.hanno-rein.de/ipython_examples/SimulationarchiveRestart/
-- https://github.com/hannorein/rebound (README, LICENSE, заголовки исходников)
-- https://raw.githubusercontent.com/hannorein/rebound/main/src/integrator_ias15.c,
-  .../src/integrator_janus.c (заголовки, публикации)
-- https://pypi.org/project/rebound/ (версия 4.4.11, дата 13.11.2025)
+- https://github.com/hannorein/rebound/releases (релизные заметки 5.0.0, 5.1.0, 5.2.0,
+  5.2.1, 5.2.2; в т.ч. смена формата SimulationArchive и нечитаемость архивов
+  предыдущих версий в 5.0.0, SIMD-интегратор WHFast512 в 5.1.0/5.2.0)
+- https://github.com/hannorein/rebound/releases/tag/v5.2.2 (05.10.2026) и
+  https://github.com/hannorein/rebound/tree/5.2.2 (src/integrator_*.c,
+  simulationarchive.c, examples/, ipython_examples/, python_examples/)
+- https://github.com/hannorein/rebound/blob/5.2.2/pyproject.toml (license =
+  "GPL-3.0-only", Development Status :: 5 - Production/Stable)
+- https://github.com/hannorein/rebound/blob/5.2.2/LICENSE и
+  https://github.com/hannorein/rebound/blob/5.2.2/README.md (текст GPLv3 с «or later»;
+  политика против AI-generated code)
+- https://github.com/hannorein/rebound/blob/5.2.2/ipython_examples/SimulationarchiveRestart.ipynb
+  (bitwise-рестарт, машинная независимость между ОС)
+- https://github.com/hannorein/rebound/blob/5.2.2/src/integrator_ias15.c (заголовок,
+  публикации)
+- https://pypi.org/project/rebound/ (версия 5.2.2)
+- https://rebound.hanno-rein.de/, /integrators/ias15/,
+  /ipython_examples/SimulationarchiveRestart/ (соответствие сборке 5.2.2 не
+  проверялось, см. §15 п. 16)
 - Rein & Liu 2012, A&A 537, A128:
   https://aanda.org/articles/aa/full_html/2012/01/aa18085-11/aa18085-11.html
 - Rein & Tamayo 2017 (JANUS): https://arxiv.org/pdf/1701.07423
@@ -1270,6 +1497,8 @@ mpmath rtol 5e-13; DATA_PROVENANCE) закрывает этот пункт дл�
 ### VPLanet
 
 - https://virtualplanetarylaboratory.github.io/vplanet/ и /examples.html
-- https://github.com/VirtualPlanetaryLaboratory/vplanet (LICENSE, releases, README)
+- https://github.com/VirtualPlanetaryLaboratory/vplanet/releases/tag/v2.5.36 (20.02.2026)
+- https://github.com/VirtualPlanetaryLaboratory/vplanet/tree/v2.5.36 (README, examples/)
+- https://raw.githubusercontent.com/VirtualPlanetaryLaboratory/vplanet/v2.5.36/LICENSE (MIT)
 - Barnes et al. 2020, PASP 132, 024502: DOI 10.1088/1538-3873/ab3ce8,
   arXiv:1905.06367, ADS 2020PASP..132b4502B
