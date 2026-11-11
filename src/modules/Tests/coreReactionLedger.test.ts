@@ -1590,3 +1590,62 @@ describe('Stage 4.2.3.4.1 ReactionLedger: полная валидация жур
     expect(deltas.unverifiableIssues).toEqual([]);
   });
 });
+
+
+// ============================================
+// Stage 4.2.3.4: основание arbitrary_units (нормированные игровые единицы)
+// ============================================
+
+describe('Stage 4.2.3.4.2 ReactionLedger: основание arbitrary_units', () => {
+  it('arbitrary_units — допустимое основание записи; mass по-прежнему отклоняется', () => {
+    const game = makeRecord({ extentBasis: 'arbitrary_units' });
+    expect(validateReactionRecord(game)).toEqual([]);
+    const ledger = registerReaction(createReactionLedger(), game);
+    expect(ledger.records).toHaveLength(1);
+    expect(ledger.records[0]?.extentBasis).toBe('arbitrary_units');
+    const mass = makeRecord();
+    mass.extentBasis = 'mass' as unknown as ReactionExtentBasis;
+    expect(validateReactionRecord(mass).some((p) => p.includes('extentBasis'))).toBe(true);
+  });
+
+  it('reactionInventoryDeltas переносит basis arbitrary_units без превращения в моли', () => {
+    const deltas = reactionInventoryDeltas({
+      records: [makeRecord({ id: 'rxn-game', extent: 2, extentBasis: 'arbitrary_units' })]
+    });
+    expect(deltas.formIssues).toEqual([]);
+    expect(deltas.unverifiableIssues).toEqual([]);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    const h2o = deltas.contributions.find((c) => c.speciesId === 'h2o');
+    expect(h2?.delta).toBe(-4);
+    expect(h2?.basis).toBe('arbitrary_units');
+    expect(h2?.recordId).toBe('rxn-game');
+    expect(h2o?.delta).toBe(4);
+    expect(h2o?.basis).toBe('arbitrary_units');
+  });
+
+  it('смешение arbitrary_units с другими основаниями по одной паре — непроверяемость без пересчёта', () => {
+    const arbitrary = makeRecord({
+      id: 'rxn-game',
+      extent: 1,
+      extentBasis: 'arbitrary_units',
+      reactants: [{ reservoirId: 'atm', speciesId: 'h2', coefficient: 2 }],
+      products: [{ reservoirId: 'atm', speciesId: 'h2o', coefficient: 2 }]
+    });
+    const molar = makeRecord({ id: 'rxn-amt', extent: 1, extentBasis: 'amount' });
+    const deltas = reactionInventoryDeltas({ records: [arbitrary, molar] });
+    expect(deltas.formIssues).toEqual([]);
+    expect(deltas.unverifiableIssues.some((i) => i.includes('разных основаниях'))).toBe(true);
+    const h2 = deltas.contributions.find((c) => c.speciesId === 'h2');
+    expect(h2 !== undefined && Number.isNaN(h2.delta)).toBe(true);
+  });
+
+  it('стехиометрический аудит записи arbitrary_units сбалансирован без заявления о молях', () => {
+    const audit = auditReactionLedger(
+      { records: [makeRecord({ id: 'rxn-game', extentBasis: 'arbitrary_units' })] },
+      makeCatalog(),
+      { reservoirIds: ['atm'] }
+    );
+    expect(audit.status).toBe('balanced');
+    expect(audit.recordAudits.every((r) => r.status === 'balanced')).toBe(true);
+  });
+});

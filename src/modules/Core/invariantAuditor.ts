@@ -66,7 +66,7 @@
 import type { CoreWorldState } from './worldState';
 import { validateWorldState } from './worldState';
 import type { SpeciesCatalog } from './species';
-import type { AuditOptions, BalanceDiscrepancy, ConservationStatus, FluxAuditScope, FluxLedger, FluxSubject } from './fluxLedger';
+import type { AuditOptions, BalanceDiscrepancy, ConservationStatus, FluxAuditScope, FluxLedger, FluxSubject, ReactionInventoryContribution } from './fluxLedger';
 import {
   auditChargeConservation,
   auditElementConservation,
@@ -191,7 +191,29 @@ export function auditWorldTransition(
   // секции reaction_inventory, непредставимые вклады — честный
   // not_verifiable без выдуманного нуля.
   const reactionDeltas = reactionInventoryDeltas(opts.reactionLedger ?? { records: [] });
-  const auditOpts = { tolerance: opts.tolerance, scope: opts.scope, reactionDeltas: reactionDeltas.contributions };
+  // Stage 4.2.3.3 (интеграция химии): записи перехода могут иметь
+  // основание 'arbitrary_units' (нормированные игровые единицы
+  // легаси-режима game_normalized). Игровые вклады молями НЕ
+  // объявляются: mol-аудиты (substance) получают только физические
+  // основания (amount / column_amount) — runtime fluxLedger
+  // трактует любое basis ≠ 'amount' как столбовое, поэтому прямой
+  // пропуск arbitrary_units в reactionMolarCounts исказил бы
+  // семантику. Вклады произвольного основания при этом не
+  // выбрасываются молча: полная типизированная проверка в единицах
+  // того же основания выполняется секциями reservoir_fluxes и
+  // reaction_inventory, где основание сопоставляется со строкой
+  // инвентаря (arbitrary_units ↔ arbitrary_units — численная
+  // проверка в игровых единицах, БЕЗ заявления о молях).
+  // Приведение к статическому типу fluxLedger
+  // (ReactionInventoryContribution знает только физические
+  // основания) законно: узкий тип присваиваем широкому, runtime
+  // сравнивает строки; контракт аудита не ослабляется.
+  const molarReactionDeltas = reactionDeltas.contributions.filter(
+    (c) => c.basis !== 'arbitrary_units'
+  ) as readonly ReactionInventoryContribution[];
+  const allReactionDeltas = reactionDeltas.contributions as readonly ReactionInventoryContribution[];
+  const molarAuditOpts = { tolerance: opts.tolerance, scope: opts.scope, reactionDeltas: molarReactionDeltas };
+  const fullAuditOpts = { tolerance: opts.tolerance, scope: opts.scope, reactionDeltas: allReactionDeltas };
   const beforeReservoirs = reservoirsRecordOf(before);
   const afterReservoirs = reservoirsRecordOf(after);
 
@@ -217,19 +239,19 @@ export function auditWorldTransition(
     return issues;
   };
 
-  const substance = auditSubstanceConservation(opts.speciesCatalog, ledger, beforeReservoirs, afterReservoirs, auditOpts);
+  const substance = auditSubstanceConservation(opts.speciesCatalog, ledger, beforeReservoirs, afterReservoirs, molarAuditOpts);
   push('substance', substance.status, conservationIssues(substance));
 
-  const element = auditElementConservation(opts.speciesCatalog, ledger, beforeReservoirs, afterReservoirs, auditOpts);
+  const element = auditElementConservation(opts.speciesCatalog, ledger, beforeReservoirs, afterReservoirs, molarAuditOpts);
   push('element', element.status, conservationIssues(element));
 
-  const charge = auditChargeConservation(opts.speciesCatalog, ledger, beforeReservoirs, afterReservoirs, auditOpts);
+  const charge = auditChargeConservation(opts.speciesCatalog, ledger, beforeReservoirs, afterReservoirs, molarAuditOpts);
   push('charge', charge.status, conservationIssues(charge));
 
-  const energy = auditEnergyConservation(ledger, beforeReservoirs, afterReservoirs, auditOpts);
+  const energy = auditEnergyConservation(ledger, beforeReservoirs, afterReservoirs, molarAuditOpts);
   push('energy', energy.status, conservationIssues(energy));
 
-  const reservoirFluxes = auditReservoirFluxes(ledger, beforeReservoirs, afterReservoirs, auditOpts);
+  const reservoirFluxes = auditReservoirFluxes(ledger, beforeReservoirs, afterReservoirs, fullAuditOpts);
   push('reservoir_fluxes', reservoirFluxes.status, conservationIssues(reservoirFluxes));
 
   // Неотрицательность запасов в состоянии «после».
@@ -294,7 +316,7 @@ export function auditWorldTransition(
   // отсутствие инвентаря, несовпадение или смешение оснований,
   // непредставимые вклады — честное not_verifiable без пересчёта
   // между основаниями; структурные проблемы — invalid.
-  const reactionInventoryAudit = auditReactionInventory(beforeReservoirs, afterReservoirs, ledger, reactionDeltas, auditOpts);
+  const reactionInventoryAudit = auditReactionInventory(beforeReservoirs, afterReservoirs, ledger, reactionDeltas, fullAuditOpts);
   push('reaction_inventory', reactionInventoryAudit.status, reactionInventoryAudit.issues);
 
   // Допустимость ссылок и состояний (до и после).

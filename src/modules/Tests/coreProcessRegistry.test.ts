@@ -13,6 +13,7 @@ import {
   ProcessRegistryError,
   createProcessRegistry,
   heuristicStepSeconds,
+  isExplicitOnlyProcess,
   isProcessAutoRunnable,
   processAvailability,
   tauSeconds,
@@ -229,5 +230,52 @@ describe('Stage 4.2.1.2 ProcessRegistry: числовое τ строго пол
     expect(processAvailability(zero)).toBe('unknown');
     expect(isProcessAutoRunnable(zero)).toBe(false);
     expect(isProcessAutoRunnable(negativeHours)).toBe(false);
+  });
+});
+
+
+// ============================================
+// Stage 4.2.3.3: executionMode — явно инициируемые дискретные операции
+// ============================================
+
+describe('Stage 4.2.3.3 ProcessRegistry: executionMode явно инициируемых процессов', () => {
+  it('отсутствие executionMode означает autonomous', () => {
+    expect(isExplicitOnlyProcess(descriptor())).toBe(false);
+    expect(isExplicitOnlyProcess(descriptor({ executionMode: 'autonomous' }))).toBe(false);
+    expect(isExplicitOnlyProcess(descriptor({ executionMode: 'explicit_only' }))).toBe(true);
+  });
+
+  it('валидация принимает только известные значения executionMode', () => {
+    expect(validateProcessDescriptor(descriptor({ executionMode: 'explicit_only' }))).toEqual([]);
+    expect(validateProcessDescriptor(descriptor({ executionMode: 'autonomous' }))).toEqual([]);
+    const invalid = descriptor({ executionMode: 'always' as unknown as 'explicit_only' });
+    const errors = validateProcessDescriptor(invalid);
+    expect(errors.some((e) => e.includes('executionMode'))).toBe(true);
+    expectRegistryError(() => createProcessRegistry().register(invalid), 'invalid_descriptor');
+  });
+
+  it('explicit_only-процесс с неизвестным τ честно неautorunnable и без фиктивного времени', () => {
+    const d = descriptor({
+      executionMode: 'explicit_only',
+      tau: unknownValue('характеристическое время дискретной операции неизвестно')
+    });
+    expect(validateProcessDescriptor(d)).toEqual([]);
+    expect(tauSeconds(d.tau)).toBeNull();
+    // отсутствие τ НЕ обходится ослаблением availability/autorunnable:
+    expect(processAvailability(d)).toBe('unknown');
+    expect(isProcessAutoRunnable(d)).toBe(false);
+    expect(isExplicitOnlyProcess(d)).toBe(true);
+  });
+
+  it('explicit_only не отменяет требования к остальным полям дескриптора', () => {
+    // executionMode не «покупает» пригодность: невалидный τ по-прежнему отклонён
+    const badTau = descriptor({
+      executionMode: 'explicit_only',
+      tau: knownValue(quantity(0, 's'))
+    });
+    expect(validateProcessDescriptor(badTau).some((e) => e.includes('строго положительным'))).toBe(true);
+    // и остальные обязательные поля проверяются как раньше
+    const noName = descriptor({ executionMode: 'explicit_only', name: '' });
+    expect(validateProcessDescriptor(noName).length).toBeGreaterThan(0);
   });
 });

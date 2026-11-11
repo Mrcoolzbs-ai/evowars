@@ -93,7 +93,9 @@ export class SchedulerError extends Error {
     | 'already_processed'
     | 'operator_error'
     | 'operator_moved_clock'
-    | 'invalid_bookkeeping';
+    | 'invalid_bookkeeping'
+    | 'explicit_only_process'
+    | 'not_explicit_only';
   readonly component = 'Scheduler';
   readonly processId: string | null;
 
@@ -546,6 +548,11 @@ export function readyProcessIds(
     if (dynamics.nextDueElapsedS > nowElapsedS) continue;
     const descriptor = registry.get(processId);
     if (descriptor === null || !isProcessAutoRunnable(descriptor)) continue;
+    // Stage 4.2.3.3: явно инициируемые дискретные операции
+    // (executionMode = 'explicit_only') не попадают в очередь
+    // автоматически готовых процессов: их запуск — только явный
+    // пользовательский вызов с переданной длительностью шага.
+    if (descriptor.executionMode === 'explicit_only') continue;
     if (!operatorIds.has(processId)) continue;
     ready.push(processId);
   }
@@ -592,6 +599,22 @@ export interface MacroStepOptions {
   subCycles?: number;
   /** Аудит инвариантов до фиксации нового состояния. */
   audit?: MacroStepAuditOptions;
+  /**
+   * Stage 4.2.3.3: явный пользовательский запуск дискретного процесса
+   * (executionMode = 'explicit_only'). Требования к такому шагу:
+   * - processId обязан ссылаться на explicit_only-процесс реестра
+   *   (обычный автономный процесс так запустить нельзя: обход
+   *   τ-контроля запрещён — ошибка 'not_explicit_only');
+   * - splitting = 'lie', subCycles = 1, ровно один процесс шага
+   *   (сам explicit.processId): дискретная операция выполняется один
+   *   раз за macro-шаг;
+   * - τ процесса НЕ требуется и НЕ выдумывается: длительность шага
+   *   задаёт вызывающая сторона через durationS (фактическая
+   *   длительность модельного шага, а не характерное время реакции).
+   *
+   * Обратно совместимо: без поля поведение runMacroStep неизменно.
+   */
+  explicit?: { processId: string };
 }
 
 export interface MacroStepResult {
@@ -686,6 +709,15 @@ function snapshotWorldState(world: CoreWorldState): CoreWorldState {
  * самовольное продвижение часов оператором или нарушение
  * обязательных инвариантов отклоняют шаг: возвращается исходное
  * состояние, время не движется, частичное состояние не фиксируется.
+ *
+ * Явный запуск дискретного процесса (Stage 4.2.3.3,
+ * opts.explicit.processId): выполняется ровно один оператор
+ * explicit_only-процесса один раз за шаг (Lie, subCycles = 1,
+ * единственный processId). τ процесса НЕ проверяется и НЕ
+ * выдумывается: у дискретной операции нет физически установленного
+ * характерного времени; длительность шага — фактическая
+ * opts.durationS, переданная вызывающей стороной. Автономные
+ * процессы сохраняют прежнюю семантику: числовое τ обязательно.
  */
 export function runMacroStep(
   world: CoreWorldState,
@@ -750,6 +782,34 @@ export function runMacroStep(
       null
     );
   }
+  // --- Stage 4.2.3.3: явный запуск дискретного процесса ---
+  // Явно инициируемая операция выполняется ОДНИМ оператором один раз
+  // за macro-шаг: Lie splitting, без sub-cycling, ровно один процесс
+  // шага — тот, что назван в opts.explicit.processId.
+  const explicitProcessId = opts.explicit?.processId ?? null;
+  if (explicitProcessId !== null) {
+    if (opts.splitting === 'strang') {
+      throw new SchedulerError(
+        'invalid_splitting',
+        'явный запуск дискретного процесса «' + explicitProcessId + '» выполняется одним оператором (Lie splitting): Strang-композиция к дискретной операции неприменима',
+        explicitProcessId
+      );
+    }
+    if (subCycles > 1) {
+      throw new SchedulerError(
+        'invalid_step',
+        'явный запуск дискретного процесса «' + explicitProcessId + '» выполняется ровно один раз за macro-шаг: sub-cycling запрещён',
+        explicitProcessId
+      );
+    }
+    if (processIds.length !== 1 || processIds[0] !== explicitProcessId) {
+      throw new SchedulerError(
+        'invalid_step',
+        'явный запуск требует ровно один процесс шага — «' + explicitProcessId + '»; получено: ' + processIds.join(', '),
+        explicitProcessId
+      );
+    }
+  }
   for (const processId of processIds) {
     const descriptor = registry.get(processId);
     if (descriptor === null) {
@@ -758,12 +818,37 @@ export function runMacroStep(
     if (!descriptor.enabled) {
       throw new SchedulerError('process_disabled', 'процесс «' + processId + '» отключён (enabled = false): автоматический запуск запрещён', processId);
     }
-    if (tauSeconds(descriptor.tau) === null) {
-      throw new SchedulerError(
-        'process_tau_unknown',
-        'процесс «' + processId + '» не имеет пригодного числового характерного времени τ (требуется строго положительное конечное число секунд): шаг процесса не определяется',
-        processId
-      );
+    if (explicitProcessId === processId) {
+      // Явно инициируемая дискретная операция (Stage 4.2.3.3): τ
+      // процесса НЕ требуется и НЕ выдумывается — длительность шага
+      // задаёт вызывающая сторона (opts.durationS). Такой запуск
+      // доступен ТОЛЬКО explicit_only-процессам: обычный автономный
+      // процесс нельзя запустить в обход обязательного числового τ.
+      if (descriptor.executionMode !== 'explicit_only') {
+        throw new SchedulerError(
+          'not_explicit_only',
+          'процесс «' + processId + '» не является явно инициируемой дискретной операцией (executionMode ≠ explicit_only): явный запуск без числового τ доступен только explicit_only-процессам',
+          processId
+        );
+      }
+    } else {
+      // Автономный (штатный) путь шага: explicit_only-процесс
+      // запустить НЕЛЬЗЯ — у него нет установленного τ, и обход
+      // τ-контроля через обычный список процессов запрещён.
+      if (descriptor.executionMode === 'explicit_only') {
+        throw new SchedulerError(
+          'explicit_only_process',
+          'процесс «' + processId + '» — явно инициируемая дискретная операция (executionMode = explicit_only) без установленного числового τ: автоматический запуск запрещён; используйте opts.explicit с processId',
+          processId
+        );
+      }
+      if (tauSeconds(descriptor.tau) === null) {
+        throw new SchedulerError(
+          'process_tau_unknown',
+          'процесс «' + processId + '» не имеет пригодного числового характерного времени τ (требуется строго положительное конечное число секунд): шаг процесса не определяется',
+          processId
+        );
+      }
     }
     if (descriptor.solverAvailability !== 'available') {
       throw new SchedulerError(

@@ -28,7 +28,7 @@ import { quantity, isKnownUnit } from './physicalQuantity';
 import type { DataProvenance, ScientificValue } from './scientificValue';
 import { estimatedValue, invalidValue, knownValue, notApplicable, unknownValue } from './scientificValue';
 import type { ProcessDescriptor } from './processRegistry';
-import type { MaterialInventory } from './reservoir';
+import type { MaterialInventory, ReservoirRecord } from './reservoir';
 import { createReservoir, setMaterialInventory } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
 import { createSpeciesCatalog } from './species';
@@ -295,6 +295,204 @@ export function chemicalStateToMaterialInventory(state: ChemicalEvolutionState):
 /** Основание, соответствующее легаси режиму инвентаря. */
 export function inventoryModeToBasis(mode: InventoryMode): MaterialInventory['basis'] {
   return mode === 'column_inventory' ? 'column_amount' : 'arbitrary_units';
+}
+
+// ============================================
+// 4а. ЧЕТЫРЕ РЕЗЕРВУАРА ЛЕГАСИ ХИМИИ → ЯДРО (STAGE 4.2.3.3)
+// ============================================
+
+/**
+ * Идентификаторы резервуаров ядра для четырёх резервуаров
+ * легаси-химии (Stage 4.2.3.3): atmospheric → атмосфера,
+ * liquidSurface → поверхностный жидкий, subsurfaceLiquid →
+ * подповерхностный жидкий, solidDeposits → твёрдые отложения.
+ */
+export const CHEMICAL_RESERVOIR_IDS = {
+  atmospheric: 'atmosphere',
+  liquidSurface: 'liquid-surface',
+  subsurfaceLiquid: 'subsurface-liquid',
+  solidDeposits: 'solid-deposits'
+} as const;
+
+/** kind резервуаров ядра для легаси-резервуаров химии. */
+const CHEMICAL_RESERVOIR_KINDS = {
+  atmospheric: 'atmosphere',
+  liquidSurface: 'surface_liquid',
+  subsurfaceLiquid: 'subsurface_liquid',
+  solidDeposits: 'solid_deposits'
+} as const;
+
+/** Структура одного легаси-резервуара для переноса в ядро. */
+interface ChemicalReservoirDef {
+  key: keyof typeof CHEMICAL_RESERVOIR_IDS;
+  source: Record<string, number>;
+}
+
+/** Пары (легаси-резервуар → определение переноса) в фиксированном порядке. */
+function chemicalReservoirDefs(state: ChemicalEvolutionState): ChemicalReservoirDef[] {
+  return [
+    { key: 'atmospheric', source: state.reservoirs.atmospheric },
+    { key: 'liquidSurface', source: state.reservoirs.liquidSurface },
+    { key: 'subsurfaceLiquid', source: state.reservoirs.subsurfaceLiquid },
+    { key: 'solidDeposits', source: state.reservoirs.solidDeposits }
+  ];
+}
+
+/**
+ * Позитивные конечные запасы резервуара: известный инвентарь.
+ * Отсутствие инвентаря (пустой резервуар) — НЕ ноль: null.
+ */
+function reservoirToMaterialInventory(
+  reservoir: Record<string, number>,
+  basis: MaterialInventory['basis']
+): MaterialInventory | null {
+  const entries = Object.fromEntries(
+    Object.entries(reservoir).filter(([, v]) => Number.isFinite(v) && v > 0)
+  );
+  if (Object.keys(entries).length === 0) return null;
+  return { basis, entries };
+}
+
+/**
+ * Все четыре резервуара легаси-химии → резервуары ядра
+ * (Stage 4.2.3.3). Пустой легаси-резервуар НЕ создаётся: отсутствие
+ * инвентаря — неизвестный запас, а не ноль. Основание строгое
+ * (inventoryModeToBasis), единое для состояния; конверсия между
+ * основаниями не выполняется.
+ */
+export function chemicalStateToCoreReservoirs(state: ChemicalEvolutionState): ReservoirRecord[] {
+  const basis = inventoryModeToBasis(state.mode);
+  const reservoirs: ReservoirRecord[] = [];
+  for (const def of chemicalReservoirDefs(state)) {
+    const inventory = reservoirToMaterialInventory(def.source, basis);
+    if (inventory === null) continue;
+    let record = createReservoir(CHEMICAL_RESERVOIR_IDS[def.key], CHEMICAL_RESERVOIR_KINDS[def.key], {
+      bodyId: 'planet',
+      note: state.unitsNote
+    });
+    record = setMaterialInventory(record, inventory.basis, { ...inventory.entries });
+    reservoirs.push(record);
+  }
+  return reservoirs;
+}
+
+/**
+ * Проверка согласованности резервуаров ядра с легаси-проекцией
+ * химического состояния (Stage 4.2.3.3). Ядро — источник физического
+ * состояния: при существующем ядре его резервуары НЕ перезаписываются
+ * данными легаси-проекции молча. Расхождение любых источников —
+ * контролируемый отказ с диагностикой (непустой список проблем).
+ */
+export function chemicalReservoirConsistencyIssues(
+  core: CoreWorldState,
+  state: ChemicalEvolutionState
+): string[] {
+  const issues: string[] = [];
+  const basis = inventoryModeToBasis(state.mode);
+  for (const def of chemicalReservoirDefs(state)) {
+    const reservoirId = CHEMICAL_RESERVOIR_IDS[def.key];
+    const coreInv =
+      core.reservoirs.find((r) => r.id === reservoirId)?.material ?? null;
+    const legacyEntries = Object.fromEntries(
+      Object.entries(def.source).filter(([, v]) => Number.isFinite(v) && v > 0)
+    );
+    const legacyIds = Object.keys(legacyEntries).sort();
+    if (legacyIds.length === 0) {
+      if (coreInv !== null && Object.keys(coreInv.entries).length > 0) {
+        issues.push(
+          'резервуар «' + reservoirId + '»: ядро содержит запасы (' +
+            Object.keys(coreInv.entries).sort().join(', ') +
+            '), отсутствующие в легаси-проекции химического состояния: источники состояния конфликтуют'
+        );
+      }
+      continue;
+    }
+    if (coreInv === null) {
+      issues.push(
+        'резервуар «' + reservoirId + '»: легаси-проекция содержит вещества (' +
+          legacyIds.join(', ') +
+          '), но в ядре резервуар отсутствует или без инвентаря: состояние ядра легаси-данными молча НЕ перезаписывается'
+      );
+      continue;
+    }
+    if (coreInv.basis !== basis) {
+      issues.push(
+        'резервуар «' + reservoirId + '»: основание инвентаря ядра «' + coreInv.basis +
+          '» не совпадает с основанием легаси-режима «' + basis + '»: конверсия между основаниями не выполняется'
+      );
+      continue;
+    }
+    const coreEntries = Object.fromEntries(
+      Object.entries(coreInv.entries).filter(([, v]) => Number.isFinite(v) && v > 0)
+    );
+    const coreIds = Object.keys(coreEntries).sort();
+    if (coreIds.join('|') !== legacyIds.join('|')) {
+      issues.push(
+        'резервуар «' + reservoirId + '»: состав запасов ядра (' + coreIds.join(', ') +
+          ') не совпадает с легаси-проекцией (' + legacyIds.join(', ') + ')'
+      );
+      continue;
+    }
+    for (const [speciesId, amount] of Object.entries(legacyEntries)) {
+      const coreAmount = coreEntries[speciesId];
+      if (coreAmount !== amount) {
+        issues.push(
+          'резервуар «' + reservoirId + '», вид «' + speciesId + '»: запас в ядре (' +
+            String(coreAmount) + ') не совпадает с легаси-проекцией (' + String(amount) +
+            '): конфликт источников состояния'
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * Рабочее ChemicalEvolutionState из резервуаров ядра
+ * (Stage 4.2.3.3): инвентарь и все четыре резервуара читаются из
+ * ядра (источник физического состояния после инициализации),
+ * скалярный контекст (модельное время, длительность шага, история,
+ * заметки, давление/гравитация/состав как производные величины
+ * легаси-модели) — из легаси-состояния. Основание ядра отображается
+ * обратно в режим инвентаря легаси; смешение оснований между
+ * резервуарами ядра — контролируемый отказ (без конверсии).
+ */
+export function chemicalStateFromCoreReservoirs(
+  core: CoreWorldState,
+  context: ChemicalEvolutionState
+): ChemicalEvolutionState {
+  const atmosphere = core.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric) ?? null;
+  const atmosphereInv = atmosphere?.material ?? null;
+  const basis: MaterialInventory['basis'] | null =
+    atmosphereInv !== null ? atmosphereInv.basis : inventoryModeToBasis(context.mode);
+  const mode: InventoryMode = basis === 'column_amount' ? 'column_inventory' : 'game_normalized';
+  const positiveEntries = (source: Record<string, number>): Record<string, number> =>
+    Object.fromEntries(Object.entries(source).filter(([, v]) => Number.isFinite(v) && v > 0));
+  const readReservoir = (reservoirId: string): Record<string, number> => {
+    const res = core.reservoirs.find((r) => r.id === reservoirId) ?? null;
+    const inv = res?.material ?? null;
+    if (inv === null) return {};
+    if (inv.basis !== basis) {
+      throw new Error(
+        'резервуар «' + reservoirId + '»: основание «' + inv.basis +
+          '» не совпадает с основанием атмосферного резервуара «' + basis +
+          '»: смешение оснований без конверсии невозможно'
+      );
+    }
+    return positiveEntries(inv.entries);
+  };
+  const atmosphericEntries = atmosphereInv !== null ? positiveEntries(atmosphereInv.entries) : {};
+  return {
+    ...context,
+    mode,
+    inventory: { ...atmosphericEntries },
+    reservoirs: {
+      atmospheric: { ...atmosphericEntries },
+      liquidSurface: readReservoir(CHEMICAL_RESERVOIR_IDS.liquidSurface),
+      subsurfaceLiquid: readReservoir(CHEMICAL_RESERVOIR_IDS.subsurfaceLiquid),
+      solidDeposits: readReservoir(CHEMICAL_RESERVOIR_IDS.solidDeposits)
+    }
+  };
 }
 
 // ============================================
@@ -715,17 +913,14 @@ export function coreWorldStateFromLegacyWorld(input: LegacyWorldInput): CoreWorl
     planet.properties['equilibriumTemperature'] = physValueToScientificValue(input.energyBudget.equilibriumTemperature);
   }
 
-  // Атмосферный резервуар из химического инвентаря.
+  // Химические резервуары (Stage 4.2.3.3): все ЧЕТЫРЕ резервуара
+  // легаси-химии — атмосферный, поверхностный жидкий, подповерхностный
+  // жидкий и твёрдые отложения — переносятся в ядро в строгом
+  // основании режима инвентаря (без конверсии между основаниями);
+  // пустой легаси-резервуар НЕ создаётся: отсутствие инвентаря —
+  // неизвестный запас, а не ноль.
   if (input.chemicalState) {
-    const inventory = chemicalStateToMaterialInventory(input.chemicalState);
-    if (inventory) {
-      let atmosphere = createReservoir('atmosphere', 'atmosphere', {
-        bodyId: 'planet',
-        note: input.chemicalState.unitsNote
-      });
-      atmosphere = setMaterialInventory(atmosphere, inventory.basis, { ...inventory.entries });
-      state.reservoirs.push(atmosphere);
-    }
+    state.reservoirs.push(...chemicalStateToCoreReservoirs(input.chemicalState));
   }
 
   return state;

@@ -1819,3 +1819,150 @@ describe('Stage 4.2.3.4.1 Scheduler: prototype-safe виды и некоррек
     expect(world.reactionLedger?.records).toEqual([]);
   });
 });
+
+
+// ============================================
+// Stage 4.2.3.3: explicit_only-процессы (явный пользовательский запуск)
+// ============================================
+
+describe('Stage 4.2.3.3 Scheduler: explicit_only-процессы', () => {
+  const explicitDescriptor = (id: string): ProcessDescriptor =>
+    descriptor(id, {
+      executionMode: 'explicit_only',
+      tau: unknownValue('характеристическое время дискретной операции неизвестно')
+    });
+
+  it('explicit_only не попадает в очередь автоматически готовых процессов', () => {
+    const registry = makeRegistry([explicitDescriptor('d'), descriptor('a')]);
+    const bookkeeping = scheduleProcess(
+      scheduleProcess(createSchedulerBookkeeping(), 'd', 0),
+      'a',
+      0
+    );
+    const ready = readyProcessIds(bookkeeping, registry, [recorder('d', []), recorder('a', [])], 0);
+    expect(ready).toContain('a');
+    expect(ready).not.toContain('d');
+  });
+
+  it('автоматический запуск explicit_only (без opts.explicit) → explicit_only_process', () => {
+    const world = testWorld();
+    const registry = makeRegistry([explicitDescriptor('d')]);
+    const calls: Call[] = [];
+    expectSchedulerError(
+      () => runMacroStep(world, registry, [recorder('d', calls)], { durationS: 10, splitting: 'lie' }),
+      'explicit_only_process'
+    );
+    expect(calls).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
+  });
+
+  it('explicit_only в одном списке с обычным процессом (без explicit) → explicit_only_process', () => {
+    const world = testWorld();
+    const registry = makeRegistry([explicitDescriptor('d'), descriptor('a')]);
+    const calls: Call[] = [];
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, [recorder('d', []), recorder('a', calls)], {
+          durationS: 10,
+          splitting: 'lie'
+        }),
+      'explicit_only_process'
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('явный запуск с неизвестным τ выполняется один раз с фактической длительностью шага', () => {
+    const world = testWorld();
+    const registry = makeRegistry([explicitDescriptor('d')]);
+    const calls: Call[] = [];
+    const result = runMacroStep(world, registry, [recorder('d', calls)], {
+      durationS: 10,
+      splitting: 'lie',
+      processIds: ['d'],
+      explicit: { processId: 'd' }
+    });
+    expect(result.status).toBe('committed');
+    expect(calls).toEqual([{ processId: 'd', durationS: 10, intervalStartS: 0 }]);
+    expect(result.world.clock.localTimeS).toBe(10);
+    expect(result.world.clock.stepCount).toBe(1);
+    // τ процесса остался unknown: Scheduler не назначал числового времени.
+    expect(registry.get('d')?.tau.status).toBe('unknown');
+  });
+
+  it('явный запуск обычного автономного процесса → not_explicit_only (обход τ запрещён)', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, [recorder('a', calls)], {
+          durationS: 10,
+          splitting: 'lie',
+          processIds: ['a'],
+          explicit: { processId: 'a' }
+        }),
+      'not_explicit_only'
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('явный запуск запрещает Strang, sub-cycling и несколько процессов шага', () => {
+    const world = testWorld();
+    const registry = makeRegistry([explicitDescriptor('d'), explicitDescriptor('e')]);
+    const ops = [recorder('d', []), recorder('e', [])];
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, ops, {
+          durationS: 10,
+          splitting: 'strang',
+          processIds: ['d', 'e'],
+          explicit: { processId: 'd' }
+        }),
+      'invalid_splitting'
+    );
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, ops, {
+          durationS: 10,
+          splitting: 'lie',
+          subCycles: 2,
+          processIds: ['d'],
+          explicit: { processId: 'd' }
+        }),
+      'invalid_step'
+    );
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, ops, {
+          durationS: 10,
+          splitting: 'lie',
+          processIds: ['d', 'e'],
+          explicit: { processId: 'd' }
+        }),
+      'invalid_step'
+    );
+    expectSchedulerError(
+      () =>
+        runMacroStep(world, registry, ops, {
+          durationS: 10,
+          splitting: 'lie',
+          processIds: ['e'],
+          explicit: { processId: 'd' }
+        }),
+      'invalid_step'
+    );
+  });
+
+  it('отсутствие opts.explicit сохраняет прежнюю семантику автономных шагов (обратная совместимость)', () => {
+    const world = testWorld();
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const calls: Call[] = [];
+    const result = runMacroStep(world, registry, [recorder('a', calls), recorder('b', calls)], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+    expect(result.status).toBe('committed');
+    expect(calls.map((c) => c.processId)).toEqual(['a', 'b']);
+    expect(result.world.clock.localTimeS).toBe(10);
+  });
+});

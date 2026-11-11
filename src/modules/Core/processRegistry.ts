@@ -19,6 +19,10 @@
 // - процесс с неизвестным или непригодным (неположительным) τ или
 //   недоступным решателем НЕ может запускаться автоматически
 //   (isProcessAutoRunnable = false);
+// - Stage 4.2.3.3: explicit_only-процесс — дискретная операция без
+//   физически установленного τ; τ остаётся unknown и не выдумывается,
+//   автоматический запуск закрыт; выполнение — только по явному
+//   вызову (см. scheduler.ts, opts.explicit);
 // - политика шага dt ≤ τ/20 — ТОЛЬКО предварительная эвристика
 //   (stepPolicy 'tau_heuristic'): окончательный шаг выбирает
 //   конкретный solver (устойчивость, локальная ошибка, жёсткость,
@@ -107,6 +111,29 @@ export type ProcessStepPolicy =
   | { kind: 'unspecified'; note?: string }
   | { kind: 'tau_heuristic'; tauFraction: number; note?: string };
 
+/**
+ * Политика запуска процесса (Stage 4.2.3.3 — интеграция химии):
+ * - autonomous — обычный процесс: может запускаться планировщиком
+ *   автоматически; для исполнения требуется пригодное числовое τ;
+ * - explicit_only — дискретная операция БЕЗ физически установленного
+ *   характерного времени: выполняется ТОЛЬКО по явному вызову
+ *   (runMacroStep с opts.explicit.processId); τ процесса остаётся
+ *   unknown и НЕ подменяется числом; длительность шага передаёт
+ *   вызывающая сторона (opts.durationS); автоматический запуск и
+ *   очередь автоматически готовых процессов для такого процесса
+ *   закрыты (readyProcessIds его исключает, автозапуск — ошибка).
+ *
+ * Явно инициируемая операция — не утверждение о физической скорости
+ * реакции: это выполнение заданного модельного шага с явно указанной
+ * длительностью.
+ */
+export type ProcessExecutionMode = 'autonomous' | 'explicit_only';
+
+export const PROCESS_EXECUTION_MODES: readonly ProcessExecutionMode[] = [
+  'autonomous',
+  'explicit_only'
+];
+
 /** Дескриптор физического процесса (сериализуемое описание). */
 export interface ProcessDescriptor {
   /** Уникальный идентификатор процесса. */
@@ -131,6 +158,13 @@ export interface ProcessDescriptor {
   assumptions?: string;
   /** Текстовое описание масштаба времени (легаси timescaleNote) — НЕ число. */
   timescaleNote?: string;
+  /**
+   * Политика запуска (Stage 4.2.3.3): autonomous (по умолчанию) или
+   * explicit_only — только явный пользовательский запуск с τ = unknown.
+   * Отсутствие поля = 'autonomous' (обратная совместимость: все
+   * существующие дескрипторы сохраняют прежнюю семантику).
+   */
+  executionMode?: ProcessExecutionMode;
   /** Зависимости и порядок композиции (идентификаторы процессов). */
   dependencies?: string[];
 }
@@ -243,6 +277,17 @@ export function isProcessAutoRunnable(d: ProcessDescriptor): boolean {
   return processAvailability(d) === 'available';
 }
 
+/**
+ * Явно инициируемая дискретная операция (Stage 4.2.3.3):
+ * executionMode = 'explicit_only'. Такой процесс не имеет
+ * установленного числового τ и не запускается планировщиком
+ * автоматически — только по явному вызову с переданным processId.
+ * Отсутствие поля executionMode означает autonomous.
+ */
+export function isExplicitOnlyProcess(d: ProcessDescriptor): boolean {
+  return d.executionMode === 'explicit_only';
+}
+
 // ============================================
 // 5. ВАЛИДАЦИЯ ДЕСКРИПТОРА
 // ============================================
@@ -341,6 +386,17 @@ export function validateProcessDescriptor(d: unknown): string[] {
     if (d[key] !== undefined && typeof d[key] !== 'string') {
       errors.push('«' + key + '» должен быть строкой, если задан');
     }
+  }
+  // Stage 4.2.3.3: политика запуска — autonomous | explicit_only;
+  // отсутствие поля = autonomous (обратная совместимость).
+  if (
+    d.executionMode !== undefined &&
+    (typeof d.executionMode !== 'string' ||
+      !(PROCESS_EXECUTION_MODES as readonly string[]).includes(d.executionMode))
+  ) {
+    errors.push(
+      'executionMode должен быть одним из: ' + PROCESS_EXECUTION_MODES.join(', ') + '; получено «' + String(d.executionMode) + '»'
+    );
   }
   if (d.dependencies !== undefined) {
     if (!Array.isArray(d.dependencies)) {

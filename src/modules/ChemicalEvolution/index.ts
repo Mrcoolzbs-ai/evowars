@@ -31,9 +31,32 @@ import type {
 } from '../../types';
 import chemicalReactions from '../Data/chemicalReactions';
 import gases from '../Data/gases';
-import { getElementComposition } from '../Data/elementCompositions';
+import { elementCompositions, getElementComposition } from '../Data/elementCompositions';
 import { paToAtm } from '../Units';
 import { createEmptyReservoirs, totalSubstanceAmount } from '../PhaseEquilibrium';
+// Stage 4.2.3.3 (интеграция химии с Scheduler): пользовательский шаг
+// химической эволюции выполняется через атомарный macro-шаг научного
+// ядра. Импортируется только научное ядро (без обратных зависимостей:
+// ядро легаси-химию не импортирует).
+import {
+  CHEMICAL_RESERVOIR_IDS,
+  buildSpeciesCatalogFromLegacy,
+  chemicalReservoirConsistencyIssues,
+  chemicalStateFromCoreReservoirs,
+  coreWorldStateFromLegacyWorld,
+  inventoryModeToBasis
+} from '../Core/adapters';
+import { createProcessRegistry } from '../Core/processRegistry';
+import type { ProcessDescriptor, ProcessRegistry } from '../Core/processRegistry';
+import type { MacroStepResult, ProcessOperator } from '../Core/scheduler';
+import { runMacroStep } from '../Core/scheduler';
+import type { ReactionExtentBasis } from '../Core/reactionLedger';
+import { registerReaction } from '../Core/reactionLedger';
+import { convert, quantity } from '../Core/physicalQuantity';
+import { unknownValue } from '../Core/scientificValue';
+import type { CoreWorldState } from '../Core/worldState';
+import type { ReservoirRecord } from '../Core/reservoir';
+import { setMaterialInventory } from '../Core/reservoir';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -732,6 +755,313 @@ export function runChemicalEvolutionStep(
   };
 }
 
+// ============================================
+// 10. ПОЛЬЗОВАТЕЛЬСКИЙ ШАГ ХИМИИ ЧЕРЕЗ SCHEDULER (STAGE 4.2.3.3)
+// ============================================
+
+/**
+ * Идентификатор процесса «один шаг химической эволюции (режим A)»
+ * в реестре процессов научного ядра. Процесс — ЯВНО ИНИЦИИРУЕМАЯ
+ * дискретная операция (executionMode = 'explicit_only'): у реакций
+ * каталога нет физически установленного характерного времени
+ * (текстовые timescaleNote числом не являются), поэтому τ процесса
+ * неизвестен и НЕ выдумывается; длительность модельного шага при
+ * каждом запуске передаёт вызывающая сторона.
+ */
+export const CHEMICAL_EVOLUTION_STEP_PROCESS_ID = 'chemical_evolution_step';
+
+/**
+ * Реестр процессов с единственным explicit_only-процессом шага
+ * химии. Дескриптор регистрируется стандартной валидацией
+ * ProcessRegistry; числовое τ не назначается.
+ */
+export function createChemicalEvolutionStepRegistry(): ProcessRegistry {
+  const descriptor: ProcessDescriptor = {
+    id: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
+    name: 'Шаг химической эволюции (режим A, стехиометрический)',
+    processKind: 'chemical',
+    tau: unknownValue(
+      'характерное время реакций каталога неизвестно: экспериментальных кинетических данных нет; текстовые масштабы этапа 3 (timescaleNote) числом не являются и в τ не преобразуются'
+    ),
+    stepPolicy: {
+      kind: 'unspecified',
+      note: 'дискретный модельный шаг: длительность задаёт вызывающая сторона (stepDurationYears), эвристика dt ≤ τ/20 неприменима — τ неизвестно'
+    },
+    solverAvailability: 'available',
+    enabled: true,
+    executionMode: 'explicit_only',
+    provenance: {
+      sourceName: 'интеграция Stage 4.2.3.3: ChemicalEvolution (режим A) → Scheduler научного ядра',
+      note: 'runtime-оператор применяет каталог chemicalReactions стехиометрически (extentFraction — игровое допущение)'
+    },
+    applicability: 'миры с ChemicalEvolutionState и физической моделью атмосферы',
+    assumptions:
+      'степень превращения за шаг — игровое допущение (extentFraction), не кинетический расчёт; длительность шага (stepDurationYears) — тоже игровое допущение',
+    timescaleNote: 'реакции каталога не имеют подтверждённых характерных времён'
+  };
+  return createProcessRegistry().register(descriptor);
+}
+
+/** Результат пользовательского шага химии через Scheduler. */
+export interface ChemicalEvolutionSchedulerStepResult {
+  /** Новый мир при committed; ИСХОДНЫЙ мир без изменений при rejected. */
+  world: GeneratedWorld;
+  status: 'committed' | 'rejected';
+  /** Лог шага (причины отказа включаются и в reason). */
+  log: string[];
+  /** Причина отказа; null при успехе. */
+  reason: string | null;
+}
+
+/**
+ * Один пользовательский шаг химической эволюции через атомарный
+ * macro-шаг Scheduler научного ядра (Stage 4.2.3.3).
+ *
+ * Отличия от legacy-пути runChemicalEvolutionStep (который сохранён
+ * как совместимый API и golden-база):
+ * - физическое состояние живёт в CoreWorldState: ядро
+ *   инициализируется адаптером ТОЛЬКО при отсутствии; существующее
+ *   ядро — источник истины и легаси-проекцией НЕ перезаписывается
+ *   (конфликт источников — контролируемый отказ с диагностикой);
+ * - шаг выполняется ОДНИМ оператором ОДНОГО explicit_only-процесса
+ *   через runMacroStep (snapshot-изоляция, append-only контракт
+ *   журнала реакций, аудит инвариантов, продвижение часов ровно
+ *   один раз);
+ * - длительность Scheduler — stepDurationYears, переведённая в
+ *   секунды зарегистрированной единицей юлианского года 'yr'
+ *   (gameSpeedCoefficient не используется);
+ * - фактически применённые реакции регистрируются в ReactionLedger
+ *   ядра (extentBasis — основание режима инвентаря; для
+ *   game_normalized это arbitrary_units: игровые единицы молями
+ *   не объявляются); фиктивные записи для неприменённых реакций
+ *   не создаются;
+ * - после успешного commit GeneratedWorld.chemicalState —
+ *   актуальная совместимая ПРОЕКЦИЯ состояния ядра, а не независимый
+ *   источник физического состояния;
+ * - численный результат идентичен legacy-расчёту на том же входе:
+ *   тот же каталог, порядок применения, extentFraction, условия
+ *   температуры/давления/излучения, лимитирующий реагент, элементный
+ *   баланс, история и кислородный баланс шага.
+ *
+ * При отказе (guards, конфликт источников, ошибка оператора, аудит)
+ * возвращается исходный мир без частичных изменений, часы не
+ * двигаются, reason содержит причину.
+ */
+export function runChemicalEvolutionSchedulerStep(
+  world: GeneratedWorld,
+  options: ApplyReactionOptions = {}
+): ChemicalEvolutionSchedulerStepResult {
+  const log: string[] = [];
+  const reject = (reason: string): ChemicalEvolutionSchedulerStepResult => ({
+    world,
+    status: 'rejected',
+    log: [...log, reason],
+    reason
+  });
+
+  if (!world.chemicalState) {
+    return reject('состояние химической эволюции отсутствует (старый мир или генерация без физической модели): шаг не выполнен');
+  }
+  if (!world.atmospherePhysics) {
+    return reject('физическая модель атмосферы отсутствует: шаг не выполнен');
+  }
+  const chemical = world.chemicalState;
+
+  // Ядро: инициализация ТОЛЬКО при отсутствии. Существующее ядро —
+  // источник физического состояния; перезапись его резервуаров
+  // легаси-проекцией молча запрещена (контролируемый отказ).
+  let core: CoreWorldState;
+  if (world.coreWorldState === undefined || world.coreWorldState === null) {
+    core = coreWorldStateFromLegacyWorld({
+      id: world.id,
+      seed: world.seed,
+      generatorVersion: world.generatorVersion,
+      centralObjectSystem: world.centralObjectSystem ?? null,
+      orbit: world.orbit ? { frame: world.orbit.frame } : null,
+      bodyPhysics: world.bodyPhysics
+        ? {
+            massKg: world.bodyPhysics.massKg,
+            radiusM: world.bodyPhysics.radiusM,
+            densityKgM3: world.bodyPhysics.densityKgM3,
+            surfaceGravityMs2: world.bodyPhysics.surfaceGravityMs2
+          }
+        : null,
+      atmosphere: world.atmosphere
+        ? {
+            temperature: world.atmosphere.temperature,
+            presetKind: world.atmosphere.presetKind,
+            presetNotes: world.atmosphere.presetNotes,
+            presetSourceName: world.atmosphere.presetSourceName
+          }
+        : null,
+      energyBudget: world.energyBudget
+        ? {
+            incidentFlux: world.energyBudget.incidentFlux,
+            equilibriumTemperature: world.energyBudget.equilibriumTemperature
+          }
+        : null,
+      chemicalState: chemical
+    });
+    log.push(
+      'научное ядро мира не было инициализировано: создано адаптером из легаси-состояния (все четыре химических резервуара перенесены без конверсии оснований)'
+    );
+  } else {
+    core = world.coreWorldState;
+    const issues = chemicalReservoirConsistencyIssues(core, chemical);
+    if (issues.length > 0) {
+      return reject(
+        'резервуары научного ядра не согласованы с легаси-химическим состоянием: ' +
+          issues.join('; ') +
+          ' — существующее ядро НЕ перезаписывается легаси-проекцией, шаг не выполнен'
+      );
+    }
+  }
+
+  // Условия шага — идентичны legacy-пути runChemicalEvolutionStep.
+  const temperatureK = world.phaseAnalysis?.temperatureK ?? world.atmosphere.temperature ?? null;
+  const surfacePressurePa =
+    chemical.surfacePressurePa ?? world.atmospherePhysics.surfacePressurePa?.value ?? null;
+  const pressureAtm = surfacePressurePa !== null ? paToAtm(surfacePressurePa) : null;
+  const incidentFlux = world.energyBudget?.incidentFlux?.value ?? null;
+  const radiationAvailable =
+    incidentFlux !== null || world.energySources.primary.includes('stellar_radiation');
+
+  // Длительность macro-шага = stepDurationYears через
+  // зарегистрированную единицу юлианского года (новых коэффициентов
+  // и gameSpeedCoefficient нет).
+  const durationS = convert(quantity(chemical.stepDurationYears, 'yr'), 's').value;
+  if (!Number.isFinite(durationS) || durationS <= 0) {
+    return reject(
+      'длительность шага химической эволюции (' + String(chemical.stepDurationYears) +
+        ' лет) непредставима положительными секундами: шаг не выполнен'
+    );
+  }
+
+  const stepIndex = core.scheduling?.stepCount ?? 0;
+  const basisWide = inventoryModeToBasis(chemical.mode);
+  const basis: ReactionExtentBasis = basisWide === 'column_amount' ? 'column_amount' : 'arbitrary_units';
+  const box: { chemical: ChemicalEvolutionState | null } = { chemical: null };
+
+  // Runtime-оператор шага: применяет каталог реакций к рабочему
+  // состоянию, собранному ИЗ резервуаров ядра, фиксирует результат
+  // в резервуарах ядра и регистрирует фактически применённые
+  // реакции в ReactionLedger. Часы НЕ двигает (это делает Scheduler
+  // ровно один раз после аудита).
+  const operator: ProcessOperator = {
+    processId: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
+    apply(coreWorld: CoreWorldState): CoreWorldState {
+      const workingBase = chemicalStateFromCoreReservoirs(coreWorld, chemical);
+      const stepStartRecordIndex = workingBase.history.length;
+      let working = workingBase;
+      const applied: Array<{ reaction: ChemicalReaction; extent: number; record: ChemicalStepRecord }> = [];
+      for (const reaction of chemicalReactions) {
+        const result = applyReaction(working, reaction, {
+          extentFraction: options.extentFraction ?? 0.1,
+          temperatureK,
+          pressureAtm,
+          radiationAvailable
+        });
+        working = result.state;
+        log.push('[' + reaction.id + '] ' + result.record.reason);
+        if (result.record.applied && result.record.extent !== null) {
+          applied.push({ reaction, extent: result.record.extent, record: result.record });
+        }
+      }
+
+      // Модельное время — ровно на один шаг; кислородный баланс —
+      // только по записям ЭТОГО шага (семантика legacy-шага).
+      working = {
+        ...working,
+        modelTimeYears: working.modelTimeYears + working.stepDurationYears
+      };
+      const stepRecords = working.history.slice(stepStartRecordIndex);
+      working = { ...working, oxygenBalance: computeOxygenBalance(stepRecords, working.mode) };
+      log.push(
+        'кислородный баланс: производство ' + working.oxygenBalance.production.toFixed(6) +
+        ', потребление ' + working.oxygenBalance.consumption.toFixed(6) +
+        ', итог ' + working.oxygenBalance.net.toFixed(6)
+      );
+
+      // Проекция состояния ядра для существующего UI.
+      box.chemical = working;
+
+      // Атмосферный резервуар ядра — результат шага.
+      const atmosphereEntries = Object.fromEntries(
+        Object.entries(working.inventory).filter(([, v]) => Number.isFinite(v) && v > 0)
+      );
+      // ReactionLedger: только ФАКТИЧЕСКИ применённые реакции;
+      // id уникальны по (stepIndex, reactionId).
+      let ledger = coreWorld.reactionLedger ?? { records: [] };
+      const reactionTime = {
+        segmentIndex: coreWorld.clock.segmentIndex,
+        localTimeS: coreWorld.clock.localTimeS
+      };
+      for (const { reaction, extent } of applied) {
+        ledger = registerReaction(ledger, {
+          id: 'chemical-evolution-step:' + String(stepIndex) + ':' + reaction.id,
+          reactionId: reaction.id,
+          reactants: reaction.reactants.map((p) => ({
+            reservoirId: CHEMICAL_RESERVOIR_IDS.atmospheric,
+            speciesId: p.gasId,
+            coefficient: p.coefficient
+          })),
+          products: reaction.products.map((p) => ({
+            reservoirId: CHEMICAL_RESERVOIR_IDS.atmospheric,
+            speciesId: p.gasId,
+            coefficient: p.coefficient
+          })),
+          extent,
+          extentBasis: basis,
+          time: reactionTime,
+          processId: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
+          note:
+            'режим A (стехиометрический): степень превращения — игровое допущение (extentFraction), не кинетический расчёт' +
+            (basis === 'arbitrary_units'
+              ? '; основание arbitrary_units — нормированные игровые единицы, НЕ моли'
+              : '')
+        });
+      }
+      const reservoirs: ReservoirRecord[] = coreWorld.reservoirs.map((res) => {
+        if (res.id !== CHEMICAL_RESERVOIR_IDS.atmospheric) return res;
+        return setMaterialInventory(res, basisWide, atmosphereEntries);
+      });
+      return { ...coreWorld, reservoirs, reactionLedger: ledger };
+    }
+  };
+
+  // Один явный оператор — один runMacroStep (повторный запуск химии
+  // внутри одного macro-шага невозможен по построению).
+  let result: MacroStepResult;
+  try {
+    result = runMacroStep(core, createChemicalEvolutionStepRegistry(), [operator], {
+      durationS,
+      splitting: 'lie',
+      processIds: [CHEMICAL_EVOLUTION_STEP_PROCESS_ID],
+      explicit: { processId: CHEMICAL_EVOLUTION_STEP_PROCESS_ID },
+      audit: {
+        speciesCatalog: buildSpeciesCatalogFromLegacy(gases, elementCompositions),
+        boundary: 'complete'
+      }
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return reject('шаг химической эволюции отклонён планировщиком: ' + reason);
+  }
+  if (result.status !== 'committed') {
+    return reject('шаг химической эволюции отклонён: ' + result.diagnostics.join('; '));
+  }
+
+  // Commit: мир обновляется; chemicalState — актуальная совместимая
+  // проекция состояния ядра (а не независимый источник).
+  const chemicalAfter = box.chemical ?? chemical;
+  return {
+    world: { ...world, coreWorldState: result.world, chemicalState: chemicalAfter },
+    status: 'committed',
+    log,
+    reason: null
+  };
+}
+
 // Все функции экспортированы непосредственно в своих определениях.
 
 export default {
@@ -744,6 +1074,9 @@ export default {
   elementTotalsOf,
   substanceTotalsOf,
   runChemicalEvolutionStep,
+  runChemicalEvolutionSchedulerStep,
+  createChemicalEvolutionStepRegistry,
+  CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
   runConcentrationKineticStep,
   runKineticCompartmentStep,
   runKineticCompartmentTrajectory,

@@ -109,9 +109,14 @@
 // - основание вклада сопоставляется с основанием инвентаря на
 //   стороне аудита: при несовпадении, отсутствии инвентаря или
 //   недоказуемой сопоставимости — not_verifiable;
-//   arbitrary_units в вклады не конвертируются,
-//   ReactionExtentBasis не расширяется, пересчёт между amount и
-//   column_amount без явного основания площади не выполняется;
+//   произвольные игровые основания (Stage 4.2.3.3: 'arbitrary_units')
+//   в физические основания не конвертируются и молями не
+//   объявляются: вклады arbitrary_units сопоставляются только с
+//   инвентарями того же основания (строковое сравнение, численная
+//   проверка в игровых единицах), в mol-аудиты ядра не попадают
+//   (см. invariantAuditor.auditWorldTransition); пересчёт между
+//   amount и column_amount без явного основания площади по-прежнему
+//   не выполняется;
 // - стехиометрия здесь НЕ проверяется (ею занимается секция
 //   reactions): запись с неверным балансом всё равно даёт вклады,
 //   несоответствие инвентарей ловит отдельная секция;
@@ -175,7 +180,7 @@
 //   конкатенация с пробелом допускала коллизии ('r x'+'y' против
 //   'r'+'x y').
 
-import type { ConservationStatus, FluxTime, ReactionInventoryContribution } from './fluxLedger';
+import type { ConservationStatus, FluxTime } from './fluxLedger';
 import { isPlainRecord } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
 
@@ -183,11 +188,27 @@ import type { ScientificSpecies, SpeciesCatalog } from './species';
 // 1. ТИПЫ
 // ============================================
 
-/** Основание степени протекания реакции. */
-export type ReactionExtentBasis = 'amount' | 'column_amount';
+/**
+ * Основание степени протекания реакции.
+ *
+ * 'amount' и 'column_amount' — физические основания (моли и
+ * моли/м² столба). Stage 4.2.3.3 (интеграция химии) добавил
+ * 'arbitrary_units' — нормированные игровые единицы легаси-режима
+ * game_normalized: это НЕ моли и НЕ моли/м², абсолютное физическое
+ * количество неизвестно; такие записи не объявляются
+ * физически проверенными в молях и сопоставляются только с
+ * инвентарями того же основания (строковое сравнение основания,
+ * численная проверка в игровых единицах). Конверсия между
+ * основаниями не выполняется.
+ */
+export type ReactionExtentBasis = 'amount' | 'column_amount' | 'arbitrary_units';
 
 /** Допустимые основания степени протекания. */
-export const REACTION_EXTENT_BASES: readonly ReactionExtentBasis[] = ['amount', 'column_amount'];
+export const REACTION_EXTENT_BASES: readonly ReactionExtentBasis[] = [
+  'amount',
+  'column_amount',
+  'arbitrary_units'
+];
 
 /**
  * Один компонент реакции (реагент или продукт). Резервуар
@@ -278,7 +299,8 @@ export class ReactionLedgerError extends Error {
  * - один и тот же вид может быть и слева, и справа (катализатор);
  * - один и тот же вид в разных резервуарах допустим;
  * - extent — конечное положительное число;
- * - extentBasis — 'amount' | 'column_amount';
+ * - extentBasis — 'amount' | 'column_amount' | 'arbitrary_units'
+ *   (Stage 4.2.3.3: игровые единицы НЕ объявляются молями);
  * - time — ОБЯЗАТЕЛЬНОЕ поле: null или корректная метка FluxTime;
  *   отсутствующее поле (undefined) недопустимо;
  * - processId и note, если заданы, — непустые строки.
@@ -1134,8 +1156,32 @@ export function reactionLedgerAppendOnlyIssues(
  * секция аудита перехода. Функция чистая: входные данные не
  * изменяются.
  */
+/**
+ * Вклад реакции в изменение материального инвентаря с ПОЛНЫМ
+ * основанием (Stage 4.2.3.3 — интеграция химии): basis —
+ * ReactionExtentBasis записи-источника, включая 'arbitrary_units'
+ * (нормированные игровые единицы режима game_normalized). Игровые
+ * вклады молями не объявляются и в физические основания не
+ * пересчитываются: сопоставление — только с инвентарями того же
+ * основания. Статический тип fluxLedger
+ * (ReactionInventoryContribution) знает только физические
+ * основания; mol-аудиты ядра получают отфильтрованный список
+ * (см. invariantAuditor.auditWorldTransition), reservoir_fluxes и
+ * reaction_inventory сравнивают основание как строку.
+ */
+export interface ReactionInventoryContributionWithBasis {
+  reservoirId: string;
+  speciesId: string;
+  /** Ожидаемое Δ со знаком: reactants −coefficient × extent, products +coefficient × extent. */
+  delta: number;
+  /** Основание Δ — extentBasis записи-источника. */
+  basis: ReactionExtentBasis;
+  /** id записи-источника (диагностика). */
+  recordId: string;
+}
+
 export interface ReactionInventoryDeltas {
-  contributions: readonly ReactionInventoryContribution[];
+  contributions: readonly ReactionInventoryContributionWithBasis[];
   formIssues: string[];
   unverifiableIssues: string[];
 }
@@ -1173,7 +1219,7 @@ export function reactionInventoryDeltas(ledger: unknown): ReactionInventoryDelta
     return { contributions: [], formIssues, unverifiableIssues: [] };
   }
   const records = ledger.records as ReactionRecord[];
-  const pairs = new Map<string, ReactionInventoryContribution>();
+  const pairs = new Map<string, ReactionInventoryContributionWithBasis>();
   for (const record of records) {
     const sides: Array<{ participants: ReactionParticipant[]; sign: 1 | -1 }> = [
       { participants: record.reactants, sign: -1 },
