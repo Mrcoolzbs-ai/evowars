@@ -1,0 +1,115 @@
+--- remote-baseline/src/modules/ChemicalEvolution/index.ts
++++ evowars/src/modules/ChemicalEvolution/index.ts
+@@ -31,9 +31,32 @@
+ } from '../../types';
+ import chemicalReactions from '../Data/chemicalReactions';
+ import gases from '../Data/gases';
+-import { getElementComposition } from '../Data/elementCompositions';
++import { elementCompositions, getElementComposition } from '../Data/elementCompositions';
+ import { paToAtm } from '../Units';
+ import { createEmptyReservoirs, totalSubstanceAmount } from '../PhaseEquilibrium';
++// Stage 4.2.3.3 (интеграция химии с Scheduler): пользовательский шаг
++// химической эволюции выполняется через атомарный macro-шаг научного
++// ядра. Импортируется только научное ядро (без обратных зависимостей:
++// ядро легаси-химию не импортирует).
++import {
++  CHEMICAL_RESERVOIR_IDS,
++  buildSpeciesCatalogFromLegacy,
++  chemicalReservoirConsistencyIssues,
++  chemicalStateFromCoreReservoirs,
++  coreWorldStateFromLegacyWorld,
++  inventoryModeToBasis
++} from '../Core/adapters';
++import { createProcessRegistry } from '../Core/processRegistry';
++import type { ProcessDescriptor, ProcessRegistry } from '../Core/processRegistry';
++import type { MacroStepResult, ProcessOperator } from '../Core/scheduler';
++import { runMacroStep } from '../Core/scheduler';
++import type { ReactionExtentBasis } from '../Core/reactionLedger';
++import { registerReaction } from '../Core/reactionLedger';
++import { convert, quantity } from '../Core/physicalQuantity';
++import { unknownValue } from '../Core/scientificValue';
++import type { CoreWorldState } from '../Core/worldState';
++import type { ReservoirRecord } from '../Core/reservoir';
++import { setMaterialInventory } from '../Core/reservoir';
+ 
+ // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
+ // кинетический механизм ограниченного состава (записи каталога №89/№106,
+@@ -732,6 +755,313 @@
+   };
+ }
+ 
++// ============================================
++// 10. ПОЛЬЗОВАТЕЛЬСКИЙ ШАГ ХИМИИ ЧЕРЕЗ SCHEDULER (STAGE 4.2.3.3)
++// ============================================
++
++/**
++ * Идентификатор процесса «один шаг химической эволюции (режим A)»
++ * в реестре процессов научного ядра. Процесс — ЯВНО ИНИЦИИРУЕМАЯ
++ * дискретная операция (executionMode = 'explicit_only'): у реакций
++ * каталога нет физически установленного характерного времени
++ * (текстовые timescaleNote числом не являются), поэтому τ процесса
++ * неизвестен и НЕ выдумывается; длительность модельного шага при
++ * каждом запуске передаёт вызывающая сторона.
++ */
++export const CHEMICAL_EVOLUTION_STEP_PROCESS_ID = 'chemical_evolution_step';
++
++/**
++ * Реестр процессов с единственным explicit_only-процессом шага
++ * химии. Дескриптор регистрируется стандартной валидацией
++ * ProcessRegistry; числовое τ не назначается.
++ */
++export function createChemicalEvolutionStepRegistry(): ProcessRegistry {
++  const descriptor: ProcessDescriptor = {
++    id: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
++    name: 'Шаг химической эволюции (режим A, стехиометрический)',
++    processKind: 'chemical',
++    tau: unknownValue(
++      'характерное время реакций каталога неизвестно: экспериментальных кинетических данных нет; текстовые масштабы этапа 3 (timescaleNote) числом не являются и в τ не преобразуются'
++    ),
++    stepPolicy: {
++      kind: 'unspecified',
++      note: 'дискретный модельный шаг: длительность задаёт вызывающая сторона (stepDurationYears), эвристика dt ≤ τ/20 неприменима — τ неизвестно'
++    },
++    solverAvailability: 'available',
++    enabled: true,
++    executionMode: 'explicit_only',
++    provenance: {
++      sourceName: 'интеграция Stage 4.2.3.3: ChemicalEvolution (режим A) → Scheduler научного ядра',
++      note: 'runtime-оператор применяет каталог chemicalReactions стехиометрически (extentFraction — игровое допущение)'
++    },
++    applicability: 'миры с ChemicalEvolutionState и физической моделью атмосферы',
++    assumptions:
++      'степень превращения за шаг — игровое допущение (extentFraction), не кинетический расчёт; длительность шага (stepDurationYears) — тоже игровое допущение',
++    timescaleNote: 'реакции каталога не имеют подтверждённых характерных времён'
++  };
++  return createProcessRegistry().register(descriptor);
++}
++
++/** Результат пользовательского шага химии через Scheduler. */
++export interface ChemicalEvolutionSchedulerStepResult {
++  /** Новый мир при committed; ИСХОДНЫЙ мир без изменений при rejected. */
++  world: GeneratedWorld;
++  status: 'committed' | 'rejected';
++  /** Лог шага (причины отказа включаются и в reason). */
++  log: string[];
++  /** Причина отказа; null при успехе. */
++  reason: string | null;
++}
++
++/**
++ * Один пользовательский шаг химической эволюции через атомарный
++ * macro-шаг Scheduler научного ядра (Stage 4.2.3.3).
++ *
++ * Отличия от legacy-пути runChemicalEvolutionStep (который сохранён
++ * как совместимый API и golden-база):
++ * - физическое состояние живёт в CoreWorldState: ядро
++ *   инициализируется адаптером ТОЛЬКО при отсутствии; существующее
++ *   ядро — источник истины и легаси-проекцией НЕ перезаписывается
++ *   (конфликт источников — контролируемый отказ с диагностикой);
++ * - шаг выполняется ОДНИМ оператором ОДНОГО explicit_only-процесса
++ *   через runMacroStep (snapshot-изоляция, append-only контракт
++ *   журнала реакций, аудит инвариантов, продвижение часов ровно
++ *   один раз);
++ * - длительность Scheduler — stepDurationYears, переведённая в
++ *   секунды зарегистрированной единицей юлианского года 'yr'
++ *   (gameSpeedCoefficient не используется);

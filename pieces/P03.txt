@@ -1,0 +1,122 @@
++ * - фактически применённые реакции регистрируются в ReactionLedger
++ *   ядра (extentBasis — основание режима инвентаря; для
++ *   game_normalized это arbitrary_units: игровые единицы молями
++ *   не объявляются); фиктивные записи для неприменённых реакций
++ *   не создаются;
++ * - после успешного commit GeneratedWorld.chemicalState —
++ *   актуальная совместимая ПРОЕКЦИЯ состояния ядра, а не независимый
++ *   источник физического состояния;
++ * - численный результат идентичен legacy-расчёту на том же входе:
++ *   тот же каталог, порядок применения, extentFraction, условия
++ *   температуры/давления/излучения, лимитирующий реагент, элементный
++ *   баланс, история и кислородный баланс шага.
++ *
++ * При отказе (guards, конфликт источников, ошибка оператора, аудит)
++ * возвращается исходный мир без частичных изменений, часы не
++ * двигаются, reason содержит причину.
++ */
++export function runChemicalEvolutionSchedulerStep(
++  world: GeneratedWorld,
++  options: ApplyReactionOptions = {}
++): ChemicalEvolutionSchedulerStepResult {
++  const log: string[] = [];
++  const reject = (reason: string): ChemicalEvolutionSchedulerStepResult => ({
++    world,
++    status: 'rejected',
++    log: [...log, reason],
++    reason
++  });
++
++  if (!world.chemicalState) {
++    return reject('состояние химической эволюции отсутствует (старый мир или генерация без физической модели): шаг не выполнен');
++  }
++  if (!world.atmospherePhysics) {
++    return reject('физическая модель атмосферы отсутствует: шаг не выполнен');
++  }
++  const chemical = world.chemicalState;
++
++  // Ядро: инициализация ТОЛЬКО при отсутствии. Существующее ядро —
++  // источник физического состояния; перезапись его резервуаров
++  // легаси-проекцией молча запрещена (контролируемый отказ).
++  let core: CoreWorldState;
++  if (world.coreWorldState === undefined || world.coreWorldState === null) {
++    core = coreWorldStateFromLegacyWorld({
++      id: world.id,
++      seed: world.seed,
++      generatorVersion: world.generatorVersion,
++      centralObjectSystem: world.centralObjectSystem ?? null,
++      orbit: world.orbit ? { frame: world.orbit.frame } : null,
++      bodyPhysics: world.bodyPhysics
++        ? {
++            massKg: world.bodyPhysics.massKg,
++            radiusM: world.bodyPhysics.radiusM,
++            densityKgM3: world.bodyPhysics.densityKgM3,
++            surfaceGravityMs2: world.bodyPhysics.surfaceGravityMs2
++          }
++        : null,
++      atmosphere: world.atmosphere
++        ? {
++            temperature: world.atmosphere.temperature,
++            presetKind: world.atmosphere.presetKind,
++            presetNotes: world.atmosphere.presetNotes,
++            presetSourceName: world.atmosphere.presetSourceName
++          }
++        : null,
++      energyBudget: world.energyBudget
++        ? {
++            incidentFlux: world.energyBudget.incidentFlux,
++            equilibriumTemperature: world.energyBudget.equilibriumTemperature
++          }
++        : null,
++      chemicalState: chemical
++    });
++    log.push(
++      'научное ядро мира не было инициализировано: создано адаптером из легаси-состояния (все четыре химических резервуара перенесены без конверсии оснований)'
++    );
++  } else {
++    core = world.coreWorldState;
++    const issues = chemicalReservoirConsistencyIssues(core, chemical);
++    if (issues.length > 0) {
++      return reject(
++        'резервуары научного ядра не согласованы с легаси-химическим состоянием: ' +
++          issues.join('; ') +
++          ' — существующее ядро НЕ перезаписывается легаси-проекцией, шаг не выполнен'
++      );
++    }
++  }
++
++  // Условия шага — идентичны legacy-пути runChemicalEvolutionStep.
++  const temperatureK = world.phaseAnalysis?.temperatureK ?? world.atmosphere.temperature ?? null;
++  const surfacePressurePa =
++    chemical.surfacePressurePa ?? world.atmospherePhysics.surfacePressurePa?.value ?? null;
++  const pressureAtm = surfacePressurePa !== null ? paToAtm(surfacePressurePa) : null;
++  const incidentFlux = world.energyBudget?.incidentFlux?.value ?? null;
++  const radiationAvailable =
++    incidentFlux !== null || world.energySources.primary.includes('stellar_radiation');
++
++  // Длительность macro-шага = stepDurationYears через
++  // зарегистрированную единицу юлианского года (новых коэффициентов
++  // и gameSpeedCoefficient нет).
++  const durationS = convert(quantity(chemical.stepDurationYears, 'yr'), 's').value;
++  if (!Number.isFinite(durationS) || durationS <= 0) {
++    return reject(
++      'длительность шага химической эволюции (' + String(chemical.stepDurationYears) +
++        ' лет) непредставима положительными секундами: шаг не выполнен'
++    );
++  }
++
++  const stepIndex = core.scheduling?.stepCount ?? 0;
++  const basisWide = inventoryModeToBasis(chemical.mode);
++  const basis: ReactionExtentBasis = basisWide === 'column_amount' ? 'column_amount' : 'arbitrary_units';
++  const box: { chemical: ChemicalEvolutionState | null } = { chemical: null };
++
++  // Runtime-оператор шага: применяет каталог реакций к рабочему
++  // состоянию, собранному ИЗ резервуаров ядра, фиксирует результат
++  // в резервуарах ядра и регистрирует фактически применённые
++  // реакции в ReactionLedger. Часы НЕ двигает (это делает Scheduler
++  // ровно один раз после аудита).
++  const operator: ProcessOperator = {
++    processId: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
++    apply(coreWorld: CoreWorldState): CoreWorldState {
++      const workingBase = chemicalStateFromCoreReservoirs(coreWorld, chemical);
++      const stepStartRecordIndex = workingBase.history.length;
