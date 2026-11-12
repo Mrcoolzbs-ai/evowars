@@ -22,14 +22,14 @@
 //   → дескрипторы ProcessRegistry ядра в честном состоянии:
 //   без выдуманных τ, скоростей, констант и решателей (Stage 4.2.1).
 
-import type { PhysValue, ScientificConfidence } from '../../types/physics';
+import type { BodyPhysicalSample, PhysValue, ScientificConfidence } from '../../types/physics';
 import type { ChemicalEvolutionState, InventoryMode } from '../../types/physics';
 import { quantity, isKnownUnit } from './physicalQuantity';
-import type { DataProvenance, ScientificValue } from './scientificValue';
-import { estimatedValue, invalidValue, knownValue, notApplicable, unknownValue } from './scientificValue';
+import type { DataProvenance, DataStatus, ScientificValue } from './scientificValue';
+import { estimatedValue, hasUsableQuantity, invalidValue, knownValue, notApplicable, unknownValue } from './scientificValue';
 import type { ProcessDescriptor } from './processRegistry';
 import type { MaterialInventory, ReservoirRecord } from './reservoir';
-import { createReservoir, setMaterialInventory } from './reservoir';
+import { createReservoir, setMaterialInventory, validateMaterialInventory } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
 import { createSpeciesCatalog } from './species';
 import type { AtmosphericTemperatureProfile, BodyThermalState } from './thermalState';
@@ -286,10 +286,22 @@ export function buildSpeciesCatalogFromLegacy(
  * Возвращает null, если инвентарь пуст (мир без химической модели).
  */
 export function chemicalStateToMaterialInventory(state: ChemicalEvolutionState): MaterialInventory | null {
-  const entries = Object.fromEntries(Object.entries(state.inventory).filter(([, v]) => Number.isFinite(v) && v > 0));
+  // Stage 4.2.4: записи копируются КАК ЕСТЬ — явные нули сохраняются
+  // (нулевой запас — известное значение, а не отсутствие), а
+  // повреждённые значения (не число, NaN, ∞, отрицательные) НЕ
+  // фильтруются молча: они отклоняются канонической валидацией
+  // инвентаря ядра с диагностикой.
+  const entries = Object.fromEntries(Object.entries(state.inventory));
   if (Object.keys(entries).length === 0) return null;
   const basis: MaterialInventory['basis'] = state.mode === 'column_inventory' ? 'column_amount' : 'arbitrary_units';
-  return { basis, entries };
+  const inventory: MaterialInventory = { basis, entries };
+  const check = validateMaterialInventory(inventory);
+  if (!check.valid) {
+    throw new Error(
+      'химическое состояние: инвентарь повреждён и не преобразуется в инвентарь ядра: ' + check.errors.join('; ')
+    );
+  }
+  return inventory;
 }
 
 /** Основание, соответствующее легаси режиму инвентаря. */
@@ -339,18 +351,30 @@ function chemicalReservoirDefs(state: ChemicalEvolutionState): ChemicalReservoir
 }
 
 /**
- * Позитивные конечные запасы резервуара: известный инвентарь.
- * Отсутствие инвентаря (пустой резервуар) — НЕ ноль: null.
+ * Запасы резервуара: известный инвентарь. Отсутствие инвентаря
+ * (пустой резервуар) — НЕ ноль: null.
+ *
+ * Stage 4.2.4: записи копируются КАК ЕСТЬ (явные нули сохраняются),
+ * повреждённые значения не фильтруются молча, а отклоняются
+ * канонической валидацией инвентаря ядра с диагностикой, называющей
+ * резервуар-источник.
  */
 function reservoirToMaterialInventory(
   reservoir: Record<string, number>,
-  basis: MaterialInventory['basis']
+  basis: MaterialInventory['basis'],
+  reservoirId: string
 ): MaterialInventory | null {
-  const entries = Object.fromEntries(
-    Object.entries(reservoir).filter(([, v]) => Number.isFinite(v) && v > 0)
-  );
+  const entries = Object.fromEntries(Object.entries(reservoir));
   if (Object.keys(entries).length === 0) return null;
-  return { basis, entries };
+  const inventory: MaterialInventory = { basis, entries };
+  const check = validateMaterialInventory(inventory);
+  if (!check.valid) {
+    throw new Error(
+      'резервуар «' + reservoirId + '»: инвентарь повреждён и не преобразуется в инвентарь ядра: ' +
+        check.errors.join('; ')
+    );
+  }
+  return inventory;
 }
 
 /**
@@ -364,7 +388,7 @@ export function chemicalStateToCoreReservoirs(state: ChemicalEvolutionState): Re
   const basis = inventoryModeToBasis(state.mode);
   const reservoirs: ReservoirRecord[] = [];
   for (const def of chemicalReservoirDefs(state)) {
-    const inventory = reservoirToMaterialInventory(def.source, basis);
+    const inventory = reservoirToMaterialInventory(def.source, basis, CHEMICAL_RESERVOIR_IDS[def.key]);
     if (inventory === null) continue;
     let record = createReservoir(CHEMICAL_RESERVOIR_IDS[def.key], CHEMICAL_RESERVOIR_KINDS[def.key], {
       bodyId: 'planet',
@@ -393,9 +417,24 @@ export function chemicalReservoirConsistencyIssues(
     const reservoirId = CHEMICAL_RESERVOIR_IDS[def.key];
     const coreInv =
       core.reservoirs.find((r) => r.id === reservoirId)?.material ?? null;
-    const legacyEntries = Object.fromEntries(
-      Object.entries(def.source).filter(([, v]) => Number.isFinite(v) && v > 0)
-    );
+    // Stage 4.2.4: нулевые запасы участвуют в сравнении (явный ноль —
+    // известное значение), а повреждённые значения (не число, NaN, ∞,
+    // отрицательные) не фильтруются молча — сообщаются как проблема
+    // согласованности, и остаток проверок для резервуара пропускается.
+    const legacyEntries: Record<string, number> = {};
+    let legacyDamaged = false;
+    for (const [speciesId, amount] of Object.entries(def.source)) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+        issues.push(
+          'резервуар «' + reservoirId + '»: легаси-проекция, вид «' + speciesId +
+            '»: запас ' + String(amount) + ' не является конечным неотрицательным числом'
+        );
+        legacyDamaged = true;
+        continue;
+      }
+      legacyEntries[speciesId] = amount;
+    }
+    if (legacyDamaged) continue;
     const legacyIds = Object.keys(legacyEntries).sort();
     if (legacyIds.length === 0) {
       if (coreInv !== null && Object.keys(coreInv.entries).length > 0) {
@@ -422,9 +461,22 @@ export function chemicalReservoirConsistencyIssues(
       );
       continue;
     }
-    const coreEntries = Object.fromEntries(
-      Object.entries(coreInv.entries).filter(([, v]) => Number.isFinite(v) && v > 0)
-    );
+    // Stage 4.2.4: та же политика для стороны ядра — нули участвуют
+    // в сравнении, повреждённые значения сообщаются явно.
+    const coreEntries: Record<string, number> = {};
+    let coreDamaged = false;
+    for (const [speciesId, amount] of Object.entries(coreInv.entries)) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+        issues.push(
+          'резервуар «' + reservoirId + '»: ядро, вид «' + speciesId +
+            '»: запас ' + String(amount) + ' не является конечным неотрицательным числом'
+        );
+        coreDamaged = true;
+        continue;
+      }
+      coreEntries[speciesId] = amount;
+    }
+    if (coreDamaged) continue;
     const coreIds = Object.keys(coreEntries).sort();
     if (coreIds.join('|') !== legacyIds.join('|')) {
       issues.push(
@@ -466,8 +518,23 @@ export function chemicalStateFromCoreReservoirs(
   const basis: MaterialInventory['basis'] | null =
     atmosphereInv !== null ? atmosphereInv.basis : inventoryModeToBasis(context.mode);
   const mode: InventoryMode = basis === 'column_amount' ? 'column_inventory' : 'game_normalized';
-  const positiveEntries = (source: Record<string, number>): Record<string, number> =>
-    Object.fromEntries(Object.entries(source).filter(([, v]) => Number.isFinite(v) && v > 0));
+  // Stage 4.2.4: записи копируются КАК ЕСТЬ (явные нули сохраняются в
+  // проекции); повреждённые значения не очищаются молча — обратное
+  // преобразование отклоняется с диагностикой, называющей резервуар
+  // и вид.
+  const readEntriesStrict = (reservoirId: string, source: Record<string, number>): Record<string, number> => {
+    const entries: Record<string, number> = {};
+    for (const [speciesId, amount] of Object.entries(source)) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+        throw new Error(
+          'резервуар «' + reservoirId + '», вид «' + speciesId + '»: запас ' + String(amount) +
+            ' не является конечным неотрицательным числом — обратное преобразование отклонено (повреждённые значения не очищаются молча)'
+        );
+      }
+      entries[speciesId] = amount;
+    }
+    return entries;
+  };
   const readReservoir = (reservoirId: string): Record<string, number> => {
     const res = core.reservoirs.find((r) => r.id === reservoirId) ?? null;
     const inv = res?.material ?? null;
@@ -479,9 +546,10 @@ export function chemicalStateFromCoreReservoirs(
           '»: смешение оснований без конверсии невозможно'
       );
     }
-    return positiveEntries(inv.entries);
+    return readEntriesStrict(reservoirId, inv.entries);
   };
-  const atmosphericEntries = atmosphereInv !== null ? positiveEntries(atmosphereInv.entries) : {};
+  const atmosphericEntries =
+    atmosphereInv !== null ? readEntriesStrict(CHEMICAL_RESERVOIR_IDS.atmospheric, atmosphereInv.entries) : {};
   return {
     ...context,
     mode,
@@ -993,3 +1061,115 @@ export function chemicalProcessesToCoreDescriptors(
   }));
 }
 
+// ============================================
+// 7. VIEW-MODEL ХАРАКТЕРИСТИК ТЕЛА ДЛЯ UI (STAGE 4.2.4)
+// ============================================
+
+/** Строка таблицы характеристик тела для UI. */
+export interface BodyCharacteristicsDisplayRow {
+  key: 'mass' | 'radius' | 'density' | 'surfaceGravity';
+  label: string;
+  /** Готовая строка: значение с единицей и меткой статуса ИЛИ текст статуса. */
+  display: string;
+  status: DataStatus;
+  /** Пояснение для нечисловых статусов; пустая строка для known/estimated. */
+  note: string;
+}
+
+/** Метки статусов для отображения. */
+const BODY_CHARACTERISTICS_STATUS_LABELS: Record<DataStatus, string> = {
+  known: 'установлено',
+  estimated: 'оценка',
+  unknown: 'неизвестно',
+  invalid: 'непригодно',
+  not_applicable: 'неприменимо',
+  not_implemented: 'не реализовано'
+};
+
+const BODY_CHARACTERISTICS_ROWS: readonly {
+  key: BodyCharacteristicsDisplayRow['key'];
+  label: string;
+  physKey: 'massKg' | 'radiusM' | 'densityKgM3' | 'surfaceGravityMs2';
+}[] = [
+  { key: 'mass', label: 'Масса', physKey: 'massKg' },
+  { key: 'radius', label: 'Радиус', physKey: 'radiusM' },
+  { key: 'density', label: 'Средняя плотность', physKey: 'densityKgM3' },
+  { key: 'surfaceGravity', label: 'Поверхностная гравитация', physKey: 'surfaceGravityMs2' }
+];
+
+/**
+ * Единый канонический путь отображения характеристик тела
+ * (Stage 4.2.4, устранение двойного пути характеристик): каждый
+ * PhysValue из bodyPhysics преобразуется в ScientificValue
+ * (physValueToScientificValue) и отображается строго по статусу.
+ * Число показывается ТОЛЬКО для known/estimated (с единицей и меткой
+ * статуса); unknown/invalid/not_applicable/not_implemented
+ * отображаются текстом статуса с причиной — НИКОГДА как число или
+ * подставленный ноль.
+ *
+ * Без bodyPhysics (старые сохранения этапов 1–2) легаси-числа
+ * physicalCharacteristics (mass/radius/surfaceGravity) показываются
+ * с явной пометкой «legacy-оценка старого сохранения»: это данные
+ * старого сохранения без происхождения, а не установленные значения.
+ * Плотность в этом случае неизвестна: она не вычисляется задним
+ * числом из легаси-оценок.
+ */
+export function bodyCharacteristicsDisplayRows(input: {
+  bodyPhysics?: BodyPhysicalSample | null;
+  physicalCharacteristics?: { mass?: number; radius?: number; surfaceGravity?: number } | null;
+}): BodyCharacteristicsDisplayRow[] {
+  const legacy = input.physicalCharacteristics ?? null;
+  return BODY_CHARACTERISTICS_ROWS.map((row) => {
+    const phys = input.bodyPhysics ?? null;
+    if (phys !== null) {
+      const sv = physValueToScientificValue(phys[row.physKey]);
+      if (hasUsableQuantity(sv)) {
+        const q = sv.quantity;
+        return {
+          key: row.key,
+          label: row.label,
+          display:
+            q.value.toExponential(3) + ' ' + q.unit +
+            ' [' + BODY_CHARACTERISTICS_STATUS_LABELS[sv.status] + ']',
+          status: sv.status,
+          note: ''
+        };
+      }
+      const detail =
+        sv.status === 'invalid' || sv.status === 'not_applicable'
+          ? sv.reason
+          : sv.status === 'not_implemented'
+            ? (sv.note ?? '')
+            : (sv.note ?? '');
+      return {
+        key: row.key,
+        label: row.label,
+        display:
+          BODY_CHARACTERISTICS_STATUS_LABELS[sv.status] + (detail !== '' ? ': ' + detail : ''),
+        status: sv.status,
+        note: detail
+      };
+    }
+    // Легаси-путь: только три поля старого сохранения, плотность —
+    // неизвестна (не вычисляется задним числом).
+    if (row.key === 'density') {
+      return {
+        key: row.key,
+        label: row.label,
+        display: BODY_CHARACTERISTICS_STATUS_LABELS.unknown,
+        status: 'unknown' as DataStatus,
+        note: 'легаси-сохранение без физической модели тела: плотность не вычисляется задним числом'
+      };
+    }
+    const legacyValue =
+      row.key === 'mass'
+        ? legacy?.mass
+        : row.key === 'radius'
+          ? legacy?.radius
+          : legacy?.surfaceGravity;
+    const legacyUnit =
+      row.key === 'mass' ? 'масс Земли' : row.key === 'radius' ? 'радиусов Земли' : 'g';
+    const present = typeof legacyValue === 'number' && Number.isFinite(legacyValue);
+    return {
+      key: row.key,
+      label: row.label,

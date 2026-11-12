@@ -311,18 +311,28 @@ export function calculateBodyCharacteristics(params: {
   if (params.bodyPhysics) {
     // Этап 3: сэмплированные физические параметры (SI) с обратной
     // нормировкой к земным единицам для отображения.
-    characteristics.mass = kgToEarthMasses(params.bodyPhysics.massKg.value ?? 0);
-    characteristics.radius = mToEarthRadii(params.bodyPhysics.radiusM.value ?? 0);
-    characteristics.surfaceGravity = params.bodyPhysics.surfaceGravityInG.value ?? undefined;
-  } else {
-    // Легаси-режим (этап 2): средние значения диапазонов.
-    const { mass, radius } = calculateMassAndRadius(params.celestialBody);
-    if (mass) characteristics.mass = mass;
-    if (radius) characteristics.radius = radius;
-
-    const gravity = calculateSurfaceGravity(params.celestialBody);
-    if (gravity) characteristics.surfaceGravity = gravity;
+    // Stage 4.2.4: значение присваивается ТОЛЬКО если оно известно
+    // (не null) и конечно — подстановка нуля вместо неизвестного
+    // значения запрещена (отсутствие данных ≠ ноль).
+    const massValue = params.bodyPhysics.massKg.value;
+    if (massValue !== null && Number.isFinite(massValue)) {
+      characteristics.mass = kgToEarthMasses(massValue);
+    }
+    const radiusValue = params.bodyPhysics.radiusM.value;
+    if (radiusValue !== null && Number.isFinite(radiusValue)) {
+      characteristics.radius = mToEarthRadii(radiusValue);
+    }
+    const gravityValue = params.bodyPhysics.surfaceGravityInG.value;
+    if (gravityValue !== null && Number.isFinite(gravityValue)) {
+      characteristics.surfaceGravity = gravityValue;
+    }
   }
+  // Stage 4.2.4 (проблема 2.6): легаси-ветка удалена. Отсутствие
+  // bodyPhysics означает отсутствие данных о массе/радиусе/гравитации
+  // тела; средние значения каталога больше НЕ подставляются, чтобы не
+  // создавать второй путь расчёта характеристик и не выдавать
+  // подставленные средние за данные мира. Характеристики остаются
+  // незаданными, а UI отображает их как неизвестные.
 
   // Stage 4.2.2: пресетная температура атмосферы больше НЕ становится
   // температурой поверхности. Это РАЗНЫЕ величины:
@@ -374,6 +384,7 @@ export function calculatePhysicalCharacteristics(params: {
   celestialBody: CelestialBodyOption;
   cradle: CradleOption;
   atmosphere?: AtmosphereState;
+  bodyPhysics?: BodyPhysicalSample;
 }): PhysicalCharacteristics {
   const characteristics = calculateBodyCharacteristics(params);
 
@@ -392,49 +403,13 @@ export function calculatePhysicalCharacteristics(params: {
   return characteristics;
 }
 
-/**
- * Расчет массы и радиуса
- */
-function calculateMassAndRadius(body: CelestialBodyOption): { mass?: number; radius?: number } {
-  if (body.massRange) {
-    // Возвращаем среднее значение диапазона
-    const mass = (body.massRange.min + body.massRange.max) / 2;
-    const radius = body.radiusRange ? (body.radiusRange.min + body.radiusRange.max) / 2 : undefined;
-    return { mass, radius };
-  }
-  return {};
-}
-
-/**
- * Расчет гравитации на поверхности
- */
-function calculateSurfaceGravity(body: CelestialBodyOption): number | undefined {
-  // Используем описание гравитации
-  const gravityMatch = body.gravityDescription.match(/(\d+\.?\d*)g/);
-  if (gravityMatch) {
-    return parseFloat(gravityMatch[1]);
-  }
-
-  // Для известных типов тел используем стандартные значения
-  switch (body.id) {
-    case 'earth_like':
-      return 1.0;
-    case 'small_planet':
-      return 0.3;
-    case 'super_earth':
-      return 1.5;
-    case 'mega_earth':
-      return 3.0;
-    case 'ocean_planet':
-      return 1.0;
-    case 'gas_giant_moon':
-      return 0.5; // Среднее значение
-    case 'carbon_planet':
-      return 1.0;
-    default:
-      return undefined;
-  }
-}
+// Stage 4.2.4 (проблема 2.6): функции calculateMassAndRadius и
+// calculateSurfaceGravity удалены целиком. Они подставляли средние
+// значения каталога и значения из текстового описания гравитации как
+// характеристики конкретного мира — это был второй путь расчёта
+// характеристик, конкурирующий с сэмплированной физической моделью
+// тела (bodyPhysics). Отсутствие bodyPhysics теперь означает
+// отсутствие данных; средние каталога не подставляются.
 
 /**
  * Определение орбитальной конфигурации

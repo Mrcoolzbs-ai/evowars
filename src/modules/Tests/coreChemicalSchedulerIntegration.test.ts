@@ -37,6 +37,7 @@ import {
   buildSpeciesCatalogFromLegacy,
   chemicalReservoirConsistencyIssues,
   chemicalStateFromCoreReservoirs,
+  chemicalStateToCoreReservoirs,
   coreWorldStateFromLegacyWorld
 } from '../Core/adapters';
 import {
@@ -113,7 +114,13 @@ function makeGameWorld(fractions: Record<string, number>, temperatureK = 600): G
   } as unknown as GeneratedWorld;
 }
 
-/** Мир со ВСЕМИ четырьмя непустыми резервуарами легаси-химии. */
+/** Мир со ВСЕМИ четырьмя непустыми резервуарами легаси-химии.
+ *  Stage 4.2.4: температура 250 K — НИЖЕ нижних границ allowedRanges
+ *  всех температурно-зависимых реакций каталога (ch4_oxidation от
+ *  300 K, c2h6_oxidation от 400 K, h2_oxidation от 500 K,
+ *  co_oxidation от 200 K, но co в фикстуре нет): шаг химии гарантированно
+ *  не применяет реакций, поэтому перенос резервуаров проверяется в
+ *  изоляции от их применения. */
 function makeFourReservoirWorld(): GeneratedWorld {
   const model = makeModel({ ch4: 0.6, o2: 0.4 });
   const chemicalState: ChemicalEvolutionState = {
@@ -126,7 +133,7 @@ function makeFourReservoirWorld(): GeneratedWorld {
     }
   };
   return {
-    ...(makeGameWorld({ ch4: 0.6, o2: 0.4 }) as unknown as Record<string, unknown>),
+    ...(makeGameWorld({ ch4: 0.6, o2: 0.4 }, 250) as unknown as Record<string, unknown>),
     chemicalState
   } as unknown as GeneratedWorld;
 }
@@ -232,6 +239,28 @@ describe('Stage 4.2.3.3: инициализация ядра и перенос �
       expect(res.material?.basis).toBe('arbitrary_units');
       expect(res.bodyId).toBe('planet');
     }
+    // Stage 4.2.4: ЯВНАЯ проверка изоляции переноса от применения
+    // реакций. 250 K ниже нижней границы allowedRanges.temperature
+    // каждой реакции каталога, реагенты которой есть в фикс­туре.
+    for (const reaction of chemicalReactions) {
+      const hasReactant = reaction.reactants.some((p) => {
+        const total =
+          (chemicalState.reservoirs.atmospheric[p.gasId] ?? 0) +
+          (chemicalState.reservoirs.liquidSurface[p.gasId] ?? 0) +
+          (chemicalState.reservoirs.subsurfaceLiquid[p.gasId] ?? 0) +
+          (chemicalState.reservoirs.solidDeposits[p.gasId] ?? 0);
+        return total > 0;
+      });
+      if (hasReactant && reaction.allowedRanges.temperature) {
+        expect(
+          250 < reaction.allowedRanges.temperature.min || 250 > reaction.allowedRanges.temperature.max,
+          `реакция ${reaction.id} применима при 250 K — фикс­тура не изолирована`
+        ).toBe(true);
+      }
+    }
+    // Ни одна реакция не применена: перенос проверяется без побочных эффектов.
+    expect(appliedRecordOf(result.world, 0)).toEqual([]);
+    expect(result.world.chemicalState!.inventory).toEqual({ ch4: 60, o2: 40 });
   });
 
   it('основания column_amount и arbitrary_units не смешиваются: основание строго следует режиму', () => {
@@ -624,5 +653,151 @@ describe('Stage 4.2.3.3: explicit_only-процесс и запрет автом
     expect(catalog.get('ch4')).not.toBeNull();
     expect(catalog.get('o2')).not.toBeNull();
     expect(catalog.get('co2')).not.toBeNull();
+  });
+});
+
+// ============================================
+// 7. НУЛИ И ПОВРЕЖДЁННЫЕ ЗНАЧЕНИЯ (STAGE 4.2.4)
+// ============================================
+
+describe('Stage 4.2.4: нулевые запасы сохраняются, повреждённые значения отклоняются атомарно', () => {
+  it('явный ноль во всех четырёх резервуарах сохраняется при переносе в ядро и в обратной проекции', () => {
+    const model = makeModel({ ch4: 0.6, o2: 0.4 });
+    const chemicalState: ChemicalEvolutionState = {
+      ...createChemicalState({ atmospherePhysicalModel: model }),
+      inventory: { ch4: 0, o2: 5 },
+      reservoirs: {
+        atmospheric: { ch4: 0, o2: 5 },
+        liquidSurface: { h2o: 0 },
+        subsurfaceLiquid: { co2: 0 },
+        solidDeposits: { c2h6: 3 }
+      }
+    };
+    // Прямая конверсия: ноль — известное значение, НЕ отсутствие.
+    const reservoirs = chemicalStateToCoreReservoirs(chemicalState);
+    const byId = new Map(reservoirs.map((r) => [r.id, r]));
+    expect(reservoirs).toHaveLength(4);
+    expect(byId.get(CHEMICAL_RESERVOIR_IDS.atmospheric)?.material?.entries).toEqual({ ch4: 0, o2: 5 });
+    expect(byId.get(CHEMICAL_RESERVOIR_IDS.liquidSurface)?.material?.entries).toEqual({ h2o: 0 });
+    expect(byId.get(CHEMICAL_RESERVOIR_IDS.subsurfaceLiquid)?.material?.entries).toEqual({ co2: 0 });
+    expect(byId.get(CHEMICAL_RESERVOIR_IDS.solidDeposits)?.material?.entries).toEqual({ c2h6: 3 });
+    // Ядро — источник состояния: обратная проекция сохраняет нули.
+    const core = coreWorldStateFromLegacyWorld({
+      id: 'w-zero',
+      seed: 'seed-1',
+      generatorVersion: '0.3.0',
+      atmosphere: { temperature: 250 },
+      chemicalState
+    });
+    const projected = chemicalStateFromCoreReservoirs(core, chemicalState);
+    expect(projected.inventory).toEqual({ ch4: 0, o2: 5 });
+    expect(projected.reservoirs).toEqual(chemicalState.reservoirs);
+  });
+
+  it.each([
+    ['atmospheric', NaN],
+    ['liquidSurface', Infinity],
+    ['subsurfaceLiquid', -Infinity],
+    ['solidDeposits', -1]
+  ] as const)('повреждённое значение в резервуаре %s: инициализация ядра бросает, шаг возвращает rejected атомарно', (key, bad) => {
+    const model = makeModel({ ch4: 0.6, o2: 0.4 });
+    const reservoirs: Record<string, Record<string, number>> = {
+      atmospheric: { ch4: 60, o2: 40 },
+      liquidSurface: { h2o: 5 },
+      subsurfaceLiquid: { co2: 3 },
+      solidDeposits: { c2h6: 7 }
+    };
+    reservoirs[key] = { s: bad };
+    const chemicalState = {
+      ...createChemicalState({ atmospherePhysicalModel: model }),
+      reservoirs
+    } as ChemicalEvolutionState;
+
+    // Инициализация ядра напрямую: контролируемый отказ с диагностикой.
+    expect(() =>
+      coreWorldStateFromLegacyWorld({
+        id: 'w-bad',
+        seed: 'seed-1',
+        generatorVersion: '0.3.0',
+        atmosphere: { temperature: 250 },
+        chemicalState
+      })
+    ).toThrow(/не является конечным неотрицательным числом/);
+
+    // Пользовательский шаг: rejected, а не необработанное исключение.
+    const world = {
+      ...(makeGameWorld({ ch4: 0.6, o2: 0.4 }, 250) as unknown as Record<string, unknown>),
+      chemicalState
+    } as unknown as GeneratedWorld;
+    const historyBefore = world.chemicalState!.history.length;
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.reason).toContain('отклонена');
+    // Атомарность: исходная ссылка мира, история, часы и инвентари нетронуты.
+    expect(result.world).toBe(world);
+    expect(result.world.chemicalState!.history).toHaveLength(historyBefore);
+    expect(result.world.chemicalState!.modelTimeYears).toBe(0);
+    expect(result.world.chemicalState!.inventory).toEqual({ ch4: 60, o2: 40 });
+    expect(result.world.coreWorldState).toBeUndefined();
+  });
+
+  it('повреждённый инвентарь ядра: обратное преобразование отклоняется с диагностикой', () => {
+    const model = makeModel({ ch4: 0.6, o2: 0.4 });
+    const chemicalState = createChemicalState({ atmospherePhysicalModel: model });
+    const core = coreWorldStateFromLegacyWorld({
+      id: 'w-core',
+      seed: 'seed-1',
+      generatorVersion: '0.3.0',
+      atmosphere: { temperature: 250 },
+      chemicalState
+    });
+    const damagedCore = {
+      ...core,
+      reservoirs: core.reservoirs.map((r) =>
+        r.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+          ? { ...r, material: { basis: 'arbitrary_units', entries: { ch4: NaN, o2: 40 } } }
+          : r
+      )
+    };
+    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(
+      /не является конечным неотрицательным числом/
+    );
+  });
+
+  it('chemicalReservoirConsistencyIssues сообщает о повреждённых значениях обеих сторон', () => {
+    const model = makeModel({ ch4: 0.6, o2: 0.4 });
+    const chemicalState = {
+      ...createChemicalState({ atmospherePhysicalModel: model }),
+      reservoirs: {
+        atmospheric: { ch4: NaN, o2: 40 },
+        liquidSurface: { h2o: 5 },
+        subsurfaceLiquid: { co2: 3 },
+        solidDeposits: { c2h6: Infinity }
+      }
+    } as ChemicalEvolutionState;
+    // Ядро из валидного состояния, повреждение вносится вручную.
+    const core = coreWorldStateFromLegacyWorld({
+      id: 'w-cons',
+      seed: 'seed-1',
+      generatorVersion: '0.3.0',
+      atmosphere: { temperature: 250 },
+      chemicalState: createChemicalState({ atmospherePhysicalModel: model })
+    });
+    const damagedCore = {
+      ...core,
+      reservoirs: core.reservoirs.map((r) =>
+        r.id === CHEMICAL_RESERVOIR_IDS.liquidSurface
+          ? { ...r, material: { basis: 'arbitrary_units', entries: { h2o: -5 } } }
+          : r
+      )
+    };
+    const issues = chemicalReservoirConsistencyIssues(damagedCore, chemicalState);
+    const all = issues.join(' | ');
+    expect(all).toContain('легаси-проекция, вид «ch4»');
+    expect(all).toContain('NaN');
+    expect(all).toContain('легаси-проекция, вид «c2h6»');
+    expect(all).toContain('Infinity');
+    expect(all).toContain('ядро, вид «h2o»');
+    expect(all).toContain('-5');
   });
 });

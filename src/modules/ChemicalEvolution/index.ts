@@ -872,7 +872,12 @@ export function runChemicalEvolutionSchedulerStep(
   // легаси-проекцией молча запрещена (контролируемый отказ).
   let core: CoreWorldState;
   if (world.coreWorldState === undefined || world.coreWorldState === null) {
-    core = coreWorldStateFromLegacyWorld({
+    // Stage 4.2.4: инициализация ядра из легаси-состояния — часть
+    // атомарности шага. Некорректный legacy-инвентарь (NaN, ∞,
+    // отрицательные запасы) отклоняет шаг через reject, а не даёт
+    // необработанное исключение: мир остаётся без частичных изменений.
+    try {
+      core = coreWorldStateFromLegacyWorld({
       id: world.id,
       seed: world.seed,
       generatorVersion: world.generatorVersion,
@@ -902,6 +907,12 @@ export function runChemicalEvolutionSchedulerStep(
         : null,
       chemicalState: chemical
     });
+    } catch (error) {
+      return reject(
+        'инициализация научного ядра из легаси-состояния отклонена: ' +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
     log.push(
       'научное ядро мира не было инициализировано: создано адаптером из легаси-состояния (все четыре химических резервуара перенесены без конверсии оснований)'
     );
@@ -986,8 +997,11 @@ export function runChemicalEvolutionSchedulerStep(
       box.chemical = working;
 
       // Атмосферный резервуар ядра — результат шага.
+      // Stage 4.2.4: явные нули сохраняются (нулевой запас — известное
+      // значение); повреждённые значения здесь невозможны: working
+      // прошёл валидацию адаптера при переносе в ядро.
       const atmosphereEntries = Object.fromEntries(
-        Object.entries(working.inventory).filter(([, v]) => Number.isFinite(v) && v > 0)
+        Object.entries(working.inventory).filter(([, v]) => Number.isFinite(v) && v >= 0)
       );
       // ReactionLedger: только ФАКТИЧЕСКИ применённые реакции;
       // id уникальны по (stepIndex, reactionId).

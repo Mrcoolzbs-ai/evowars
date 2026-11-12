@@ -153,11 +153,15 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
   });
 
   // 10. Полные физические характеристики
+  // Stage 4.2.4 (требование 2.1): генератор ВСЕГДА передаёт
+  // bodyPhysics — характеристики тела считаются по единому
+  // сэмплированному пути, без подстановки средних каталога.
   const physicalCharacteristics = calculatePhysicalCharacteristics({
     centralObject,
     celestialBody,
     cradle,
-    atmosphere
+    atmosphere,
+    bodyPhysics
   });
 
   // 10a. Физическая модель атмосферы (этап 3): молярные доли, давление

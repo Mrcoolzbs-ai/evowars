@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { generateWorld, generateRandomSeed, generateMultipleWorlds } from './modules/Generator';
 import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
 import { createShortDescription } from './modules/WorldModel';
+import { bodyCharacteristicsDisplayRows } from './modules/Core/adapters';
 import { getAllPresets } from './modules/Atmosphere';
 import { runChemicalEvolutionSchedulerStep, runWorldKineticTrajectory, resetWorldKineticExperiment, kineticRunHistoryViewModel } from './modules/ChemicalEvolution';
 import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit, KineticExperimentRunRecord } from './types';
@@ -777,17 +778,23 @@ function WorldDisplay(props: {
       </div>
 
       <div className="world-physics">
-        <h3>Физические характеристики</h3>
+        {/* Stage 4.2.4: единый канонический путь характеристик тела.
+            Один блок вместо двух: значения берутся из bodyPhysics через
+            ScientificValue (число показывается только для known/estimated,
+            неизвестные — текстом статуса, никогда нулём); для старых
+            сохранений без физической модели показываются легаси-оценки
+            с явной пометкой. */}
+        <h3>Физические характеристики тела</h3>
         <div className="physics-grid">
-          {world.physicalCharacteristics.mass && (
-            <div><span>Масса:</span> {world.physicalCharacteristics.mass} масс Земли</div>
-          )}
-          {world.physicalCharacteristics.radius && (
-            <div><span>Радиус:</span> {world.physicalCharacteristics.radius} радиусов Земли</div>
-          )}
-          {world.physicalCharacteristics.surfaceGravity && (
-            <div><span>Гравитация:</span> {world.physicalCharacteristics.surfaceGravity}g</div>
-          )}
+          {bodyCharacteristicsDisplayRows({
+            bodyPhysics: world.bodyPhysics ?? null,
+            physicalCharacteristics: world.physicalCharacteristics
+          }).map((row) => (
+            <div key={row.key}>
+              <span>{row.label}:</span> {row.display}
+              {row.note !== '' && <small> ({row.note})</small>}
+            </div>
+          ))}
           {world.physicalCharacteristics.surfaceTemperature && (
             <div><span>Температура:</span> {world.physicalCharacteristics.surfaceTemperature} K</div>
           )}
@@ -804,15 +811,8 @@ function WorldDisplay(props: {
 
       {world.bodyPhysics && (
         <div className="world-physics">
-          <h3>Физическая модель тела</h3>
+          <h3>Согласованность физической модели тела</h3>
           <div className="physics-grid">
-            <div><span>Масса:</span> {formatPhysValue(world.bodyPhysics.massKg)} ({(world.bodyPhysics.massKg.value ?? 0).toExponential(2)} кг)</div>
-            <div><span>Радиус:</span> {formatPhysValue(world.bodyPhysics.radiusM)} ({(world.bodyPhysics.radiusM.value ?? 0).toExponential(2)} м)</div>
-            <div><span>Плотность:</span> {formatPhysValue(world.bodyPhysics.densityKgM3)}</div>
-            <div>
-              <span>Гравитация:</span> {formatPhysValue(world.bodyPhysics.surfaceGravityMs2)}
-              {world.bodyPhysics.surfaceGravityInG.value !== null && ` (${world.bodyPhysics.surfaceGravityInG.value.toFixed(2)} g)`}
-            </div>
             <div>
               <span>Согласованность:</span>{' '}
               {world.bodyPhysics.consistencyCheck.plausible
