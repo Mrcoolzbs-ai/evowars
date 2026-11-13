@@ -55,8 +55,8 @@ import { registerReaction } from '../Core/reactionLedger';
 import { convert, quantity } from '../Core/physicalQuantity';
 import { unknownValue } from '../Core/scientificValue';
 import type { CoreWorldState } from '../Core/worldState';
-import type { ReservoirRecord } from '../Core/reservoir';
-import { setMaterialInventory } from '../Core/reservoir';
+import type { MaterialInventory, ReservoirRecord } from '../Core/reservoir';
+import { setMaterialInventory, validateMaterialInventory } from '../Core/reservoir';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -997,12 +997,26 @@ export function runChemicalEvolutionSchedulerStep(
       box.chemical = working;
 
       // Атмосферный резервуар ядра — результат шага.
-      // Stage 4.2.4: явные нули сохраняются (нулевой запас — известное
-      // значение); повреждённые значения здесь невозможны: working
-      // прошёл валидацию адаптера при переносе в ядро.
-      const atmosphereEntries = Object.fromEntries(
-        Object.entries(working.inventory).filter(([, v]) => Number.isFinite(v) && v >= 0)
-      );
+      // Stage 4.2.4 (fail-closed): записи переносятся КАК ЕСТЬ —
+      // повреждённые значения НЕ фильтруются молча через
+      // Number.isFinite/v >= 0. Инвентарь результата проходит
+      // каноническую валидацию validateMaterialInventory (весь объект:
+      // основание, форма entries, числа); повреждённый результат
+      // бросает контролируемую ошибку с диагностикой, а Scheduler
+      // атомарно возвращает rejected с ИСХОДНЫМ миром (часы,
+      // инвентари и ReactionLedger нетронуты).
+      const atmosphereInventory: MaterialInventory = {
+        basis: basisWide,
+        entries: Object.fromEntries(Object.entries(working.inventory))
+      };
+      const atmosphereCheck = validateMaterialInventory(atmosphereInventory);
+      if (!atmosphereCheck.valid) {
+        throw new Error(
+          'химический шаг: инвентарь результата повреждён и не преобразуется в инвентарь ядра: ' +
+            atmosphereCheck.errors.join('; ')
+        );
+      }
+      const atmosphereEntries = atmosphereInventory.entries;
       // ReactionLedger: только ФАКТИЧЕСКИ применённые реакции;
       // id уникальны по (stepIndex, reactionId).
       let ledger = coreWorld.reactionLedger ?? { records: [] };

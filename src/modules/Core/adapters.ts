@@ -417,6 +417,26 @@ export function chemicalReservoirConsistencyIssues(
     const reservoirId = CHEMICAL_RESERVOIR_IDS[def.key];
     const coreInv =
       core.reservoirs.find((r) => r.id === reservoirId)?.material ?? null;
+    // Stage 4.2.4 (fail-closed, весь объект инвентаря): структура
+    // инвентаря ядра (основание, entries — объект, а не null/массив)
+    // проверяется каноническим валидатором ДО любых обращений к полям:
+    // некорректная структура даёт диагностику согласованности, а не
+    // TypeError. Если entries — корректный объект, повреждённые
+    // ЗНАЧЕНИЯ дополнительно перечисляются по-компонентно ниже.
+    if (coreInv !== null) {
+      const coreStructure = validateMaterialInventory(coreInv);
+      const entriesIsRecord =
+        coreInv.entries !== null &&
+        typeof coreInv.entries === 'object' &&
+        !Array.isArray(coreInv.entries);
+      if (!coreStructure.valid) {
+        issues.push(
+          'резервуар «' + reservoirId + '»: инвентарь ядра повреждён (структура или значения): ' +
+            coreStructure.errors.join('; ')
+        );
+        if (!entriesIsRecord) continue;
+      }
+    }
     // Stage 4.2.4: нулевые запасы участвуют в сравнении (явный ноль —
     // известное значение), а повреждённые значения (не число, NaN, ∞,
     // отрицательные) не фильтруются молча — сообщаются как проблема
@@ -546,10 +566,40 @@ export function chemicalStateFromCoreReservoirs(
           '»: смешение оснований без конверсии невозможно'
       );
     }
+    // Stage 4.2.4 (fail-closed, весь объект инвентаря): структура
+    // проверяется каноническим валидатором до чтения entries —
+    // entries: null/массив дают контролируемый отказ, а не TypeError.
+    // Повреждённые ЧИСЛА внутри корректного объекта перечисляются
+    // readEntriesStrict каноническим сообщением ниже.
+    const invCheck = validateMaterialInventory(inv);
+    const entriesIsRecord =
+      inv.entries !== null && typeof inv.entries === 'object' && !Array.isArray(inv.entries);
+    if (!invCheck.valid && !entriesIsRecord) {
+      throw new Error(
+        'резервуар «' + reservoirId + '»: инвентарь ядра повреждён (структура): ' +
+          invCheck.errors.join('; ') + ' — обратное преобразование отклонено'
+      );
+    }
     return readEntriesStrict(reservoirId, inv.entries);
   };
-  const atmosphericEntries =
-    atmosphereInv !== null ? readEntriesStrict(CHEMICAL_RESERVOIR_IDS.atmospheric, atmosphereInv.entries) : {};
+  const readAtmosphericEntries = (): Record<string, number> => {
+    if (atmosphereInv === null) return {};
+    // Stage 4.2.4 (fail-closed): структурная валидация всего объекта
+    // инвентаря каноническим валидатором до чтения entries.
+    const invCheck = validateMaterialInventory(atmosphereInv);
+    const entriesIsRecord =
+      atmosphereInv.entries !== null &&
+      typeof atmosphereInv.entries === 'object' &&
+      !Array.isArray(atmosphereInv.entries);
+    if (!invCheck.valid && !entriesIsRecord) {
+      throw new Error(
+        'резервуар «' + CHEMICAL_RESERVOIR_IDS.atmospheric + '»: инвентарь ядра повреждён (структура): ' +
+          invCheck.errors.join('; ') + ' — обратное преобразование отклонено'
+      );
+    }
+    return readEntriesStrict(CHEMICAL_RESERVOIR_IDS.atmospheric, atmosphereInv.entries);
+  };
+  const atmosphericEntries = readAtmosphericEntries();
   return {
     ...context,
     mode,
@@ -1173,3 +1223,11 @@ export function bodyCharacteristicsDisplayRows(input: {
     return {
       key: row.key,
       label: row.label,
+      display: present
+        ? String(legacyValue) + ' ' + legacyUnit + ' [legacy-оценка старого сохранения]'
+        : BODY_CHARACTERISTICS_STATUS_LABELS.unknown,
+      status: present ? ('estimated' as DataStatus) : ('unknown' as DataStatus),
+      note: present ? 'legacy-оценка старого сохранения' : 'в старом сохранении значение отсутствует'
+    };
+  });
+}

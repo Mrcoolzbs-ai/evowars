@@ -241,9 +241,12 @@ describe('Stage 4.2.3.3: инициализация ядра и перенос �
     }
     // Stage 4.2.4: ЯВНАЯ проверка изоляции переноса от применения
     // реакций. 250 K ниже нижней границы allowedRanges.temperature
-    // каждой реакции каталога, реагенты которой есть в фикс­туре.
+    // каждой реакции каталога, ВСЕ реагенты которой есть в фикс­туре
+    // (проверка every, а не some: co_oxidation содержит o2, но co в
+    // фикстуре отсутствует — реакция НЕ применима, и проверка «хотя бы
+    // один реагент» ошибочно считала бы её применимой).
     for (const reaction of chemicalReactions) {
-      const hasReactant = reaction.reactants.some((p) => {
+      const hasAllReactants = reaction.reactants.every((p) => {
         const total =
           (chemicalState.reservoirs.atmospheric[p.gasId] ?? 0) +
           (chemicalState.reservoirs.liquidSurface[p.gasId] ?? 0) +
@@ -251,7 +254,7 @@ describe('Stage 4.2.3.3: инициализация ядра и перенос �
           (chemicalState.reservoirs.solidDeposits[p.gasId] ?? 0);
         return total > 0;
       });
-      if (hasReactant && reaction.allowedRanges.temperature) {
+      if (hasAllReactants && reaction.allowedRanges.temperature) {
         expect(
           250 < reaction.allowedRanges.temperature.min || 250 > reaction.allowedRanges.temperature.max,
           `реакция ${reaction.id} применима при 250 K — фикс­тура не изолирована`
@@ -799,5 +802,60 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
     expect(all).toContain('Infinity');
     expect(all).toContain('ядро, вид «h2o»');
     expect(all).toContain('-5');
+  });
+});
+
+// ============================================
+// 8. FAIL-CLOSED СТРУКТУРА ИНВЕНТАРЯ ЯДРА (STAGE 4.2.4)
+// ============================================
+
+describe('Stage 4.2.4: некорректная структура MaterialInventory ядра диагностируется без TypeError', () => {
+  it.each([
+    ['entries: null', null],
+    ['entries: массив', [{ ch4: 1 }]]
+  ] as const)('повреждённая структура (%s): согласованность диагностируется, обратная проекция и шаг отказывают контролируемо', (_name, brokenEntries) => {
+    const model = makeModel({ ch4: 0.6, o2: 0.4 });
+    const chemicalState = createChemicalState({ atmospherePhysicalModel: model });
+    const core = coreWorldStateFromLegacyWorld({
+      id: 'w-struct',
+      seed: 'seed-1',
+      generatorVersion: '0.3.0',
+      atmosphere: { temperature: 250 },
+      chemicalState
+    });
+    const damagedMaterial = {
+      basis: 'arbitrary_units',
+      entries: brokenEntries
+    } as unknown as { basis: 'arbitrary_units'; entries: Record<string, number> };
+    const damagedCore = {
+      ...core,
+      reservoirs: core.reservoirs.map((r) =>
+        r.id === CHEMICAL_RESERVOIR_IDS.atmospheric ? { ...r, material: damagedMaterial } : r
+      )
+    };
+
+    // Согласованность: диагностика повреждённой структуры, НЕ TypeError.
+    let issues: string[] = [];
+    expect(() => {
+      issues = chemicalReservoirConsistencyIssues(damagedCore, chemicalState);
+    }).not.toThrow();
+    expect(issues.some((i) => i.includes('инвентарь ядра повреждён'))).toBe(true);
+
+    // Обратная проекция: контролируемый отказ с диагностикой.
+    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(/повреждён/);
+
+    // Пользовательский шаг: rejected, исходный мир атомарно нетронут.
+    const world = {
+      ...(makeGameWorld({ ch4: 0.6, o2: 0.4 }, 250) as unknown as Record<string, unknown>),
+      coreWorldState: damagedCore
+    } as unknown as GeneratedWorld;
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.world.chemicalState!.inventory).toEqual({ ch4: 60, o2: 40 });
+    expect(result.world.chemicalState!.history).toHaveLength(0);
+    expect(
+      result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)?.material
+    ).toEqual(damagedMaterial);
   });
 });
