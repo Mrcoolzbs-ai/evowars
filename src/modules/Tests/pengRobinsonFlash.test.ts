@@ -155,10 +155,14 @@ describe('pengRobinsonFlash: валидация входа', () => {
   });
 
   it('три компонента без полного набора kij — fail-closed missing_binary_interaction', () => {
+    // Доли 1/3 каждая: сумма = 1, чтобы отказ был именно про
+    // отсутствующий kij, а не про неверную сумму состава.
+    const base = binaryInputs('ch4', 'co2');
     const three = {
       components: [
-        ...binaryInputs('ch4', 'co2').components,
-        binaryInputs('n2', 'ar').components[0]!
+        { ...base.components[0]!, moleFraction: 1 / 3 },
+        { ...base.components[1]!, moleFraction: 1 / 3 },
+        { ...binaryInputs('n2', 'ar').components[0]!, moleFraction: 1 / 3 }
       ],
       binaryInteractions: []
     };
@@ -694,3 +698,4 @@ describe('pengRobinsonFlash: тройная смесь co2|n2|ar (250 K, 4 МП�
     expect(c.stabilityNote).not.toContain('доказанная устойчивость:');
   });
 });
+
