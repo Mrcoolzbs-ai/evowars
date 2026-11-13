@@ -56,7 +56,16 @@ describe('Stage 4.2.4: bodyCharacteristicsDisplayRows — канонически
     const mass = rows.find((r) => r.key === 'mass')!;
     expect(mass.status).toBe('unknown');
     expect(mass.display).toContain('неизвестно');
-    expect(mass.display).not.toMatch(/\d/);
+    // Семантическая проверка: неизвестная масса не выводит численное
+    // ЗНАЧЕНИЕ (включая подставленный ноль) и не выдаёт число с
+    // единицей массы как результат. Служебный текст происхождения
+    // может содержать номер этапа (например, «этапа 3») — это не
+    // численное значение массы, поэтому голый /\d/ здесь неуместен.
+    expect(mass.display).not.toMatch(/\d+([.,]\d+)?(e[+-]?\d+)?\s*(кг|kg)/);
+    expect(mass.display.trim()).not.toBe('0');
+    expect(mass.display).not.toBe('0.000e+0');
+    // Реальное значение фикстуры не просачивается в отображение.
+    expect(mass.display).not.toContain('5.972');
     expect(mass.note).toContain('данных недостаточно');
   });
 

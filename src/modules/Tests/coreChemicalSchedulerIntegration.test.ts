@@ -721,15 +721,31 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
     };
 
     // Инициализация ядра напрямую: контролируемый отказ с диагностикой.
-    expect(() =>
+    // Канонические сообщения validateMaterialInventory (узкая формулировка
+    // «не является конечным неотрицательным числом» живёт в другом слое —
+    // readEntriesStrict обратной проекции, не в прямой конверсии).
+    let initMessage = '';
+    try {
       coreWorldStateFromLegacyWorld({
         id: 'w-bad',
         seed: 'seed-1',
         generatorVersion: '0.3.0',
         atmosphere: { temperature: 250 },
         chemicalState
-      })
-    ).toThrow(/не является конечным неотрицательным числом/);
+      });
+    } catch (error) {
+      initMessage = error instanceof Error ? error.message : String(error);
+    }
+    expect(initMessage).not.toBe('');
+    if (bad < 0) {
+      expect(initMessage).toMatch(/отрицательный запас вида «s» невозможен/);
+    } else {
+      expect(initMessage).toMatch(/количество вида «s» должно быть конечным числом/);
+    }
+    // Диагностика называет резервуар, вид и исходное повреждённое значение.
+    expect(initMessage).toContain(CHEMICAL_RESERVOIR_IDS[key]);
+    expect(initMessage).toContain('«s»');
+    expect(initMessage).toContain(String(bad));
 
     // Пользовательский шаг: rejected, а не необработанное исключение.
     const world = {
@@ -766,9 +782,18 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
           : r
       )
     };
-    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(
-      /не является конечным неотрицательным числом/
-    );
+    // Обратная проекция: контролируемый отказ; сообщение называет
+    // резервуар, вид и повреждённое значение (readEntriesStrict).
+    let message = '';
+    try {
+      chemicalStateFromCoreReservoirs(damagedCore, chemicalState);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/не является конечным неотрицательным числом/);
+    expect(message).toContain(CHEMICAL_RESERVOIR_IDS.atmospheric);
+    expect(message).toContain('«ch4»');
+    expect(message).toContain('NaN');
   });
 
   it('chemicalReservoirConsistencyIssues сообщает о повреждённых значениях обеих сторон', () => {
@@ -782,14 +807,31 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
         solidDeposits: { c2h6: Infinity }
       }
     } as ChemicalEvolutionState;
-    // Ядро из валидного состояния, повреждение вносится вручную.
+    // Ядро строится из ВАЛИДНОГО состояния со всеми четырьмя резервуарами
+    // (liquidSurface {h2o:5} реально присутствует в core.reservoirs),
+    // затем повреждается ТОЛЬКО ядро liquidSurface: диагностируется именно
+    // конфликт повреждённого ядра с легаси-проекцией, а не отсутствие
+    // резервуара. Отдельно легаси-сторона повреждена в atmospheric/solidDeposits.
+    const validState: ChemicalEvolutionState = {
+      ...createChemicalState({ atmospherePhysicalModel: model }),
+      reservoirs: {
+        atmospheric: { ch4: 60, o2: 40 },
+        liquidSurface: { h2o: 5 },
+        subsurfaceLiquid: { co2: 3 },
+        solidDeposits: { c2h6: 7 }
+      }
+    };
     const core = coreWorldStateFromLegacyWorld({
       id: 'w-cons',
       seed: 'seed-1',
       generatorVersion: '0.3.0',
       atmosphere: { temperature: 250 },
-      chemicalState: createChemicalState({ atmospherePhysicalModel: model })
+      chemicalState: validState
     });
+    // Предусловие: целевой резервуар реально в ядре (иначе map — no-op).
+    expect(
+      core.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.liquidSurface)?.material?.entries
+    ).toEqual({ h2o: 5 });
     const damagedCore = {
       ...core,
       reservoirs: core.reservoirs.map((r) =>
@@ -870,10 +912,23 @@ describe('Stage 4.2.4: некорректная структура MaterialInven
 // ============================================
 
 describe('Stage 4.4.4.6: неверный basis и примитивные entries отклоняются без обхода', () => {
-  /** Валидное ядро из корректного химического состояния. */
+  /** Валидное ядро из корректного химического состояния со ВСЕМИ
+   *  четырьмя непустыми резервуарами: chemicalStateToCoreReservoirs
+   *  пропускает пустые легаси-резервуары, поэтому ядро из «голого»
+   *  createChemicalState содержало бы только atmospheric, и повреждение
+   *  любого другого резервуара через map() было бы тихим no-op.
+   *  Фикстура обязана гарантировать реальное присутствие цели. */
   function validCore(id: string) {
     const model = makeModel({ ch4: 0.6, o2: 0.4 });
-    const chemicalState = createChemicalState({ atmospherePhysicalModel: model });
+    const chemicalState: ChemicalEvolutionState = {
+      ...createChemicalState({ atmospherePhysicalModel: model }),
+      reservoirs: {
+        atmospheric: { ch4: 60, o2: 40 },
+        liquidSurface: { h2o: 5 },
+        subsurfaceLiquid: { co2: 3 },
+        solidDeposits: { c2h6: 7 }
+      }
+    };
     return {
       chemicalState,
       core: coreWorldStateFromLegacyWorld({
@@ -886,12 +941,23 @@ describe('Stage 4.4.4.6: неверный basis и примитивные entrie
     };
   }
 
-  /** Повреждение material одного резервуара ядра (граница runtime-валидации). */
+  /** Повреждение material одного резервуара ядра (граница runtime-валидации).
+   *  Предусловие: целевой резервуар реально присутствует в ядре и имеет
+   *  material — иначе замена через map() ничего бы не изменила и тест
+   *  проверял бы неизменённое ядро. */
   function withMaterial(
     core: ReturnType<typeof coreWorldStateFromLegacyWorld>,
     reservoirId: string,
     material: unknown
   ): ReturnType<typeof coreWorldStateFromLegacyWorld> {
+    const target = core.reservoirs.find((r) => r.id === reservoirId);
+    if (!target || !target.material) {
+      throw new Error(
+        'тестовая фикстура повреждена: резервуар «' +
+          reservoirId +
+          '» отсутствует в ядре или не имеет material — замена была бы no-op'
+      );
+    }
     return {
       ...core,
       reservoirs: core.reservoirs.map((r) =>
@@ -978,9 +1044,18 @@ describe('Stage 4.4.4.6: неверный basis и примитивные entrie
         entries: Record<string, number>;
       }
     );
-    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(
-      /не является конечным неотрицательным числом/
-    );
+    // Обратная проекция: контролируемый отказ (readEntriesStrict);
+    // сообщение называет резервуар, вид и исходное повреждённое значение.
+    let valueMessage = '';
+    try {
+      chemicalStateFromCoreReservoirs(damagedCore, chemicalState);
+    } catch (error) {
+      valueMessage = error instanceof Error ? error.message : String(error);
+    }
+    expect(valueMessage).toMatch(/не является конечным неотрицательным числом/);
+    expect(valueMessage).toContain(CHEMICAL_RESERVOIR_IDS.solidDeposits);
+    expect(valueMessage).toContain('«c2h6»');
+    expect(valueMessage).toContain(String(bad));
   });
 
   it('явный ноль в корректной структуре остаётся допустимым (контракт 4.2.4 сохранён)', () => {
@@ -997,7 +1072,9 @@ describe('Stage 4.4.4.6: неверный basis и примитивные entrie
   });
 
   it('пользовательский шаг с повреждённым ядром возвращает rejected атомарно, без побочных изменений', () => {
-    const { core } = validCore('w-rejected');
+    // Легаси-состояние согласовано с ядром (те же четыре резервуара):
+    // единственный источник отказа — повреждённый basis в ядре.
+    const { chemicalState, core } = validCore('w-rejected');
     const damagedCore = withMaterial(
       core,
       CHEMICAL_RESERVOIR_IDS.atmospheric,
@@ -1005,10 +1082,12 @@ describe('Stage 4.4.4.6: неверный basis и примитивные entrie
     );
     const world = {
       ...(makeGameWorld({ ch4: 0.6, o2: 0.4 }, 250) as unknown as Record<string, unknown>),
+      chemicalState,
       coreWorldState: damagedCore
     } as unknown as GeneratedWorld;
     const result = runChemicalEvolutionSchedulerStep(world);
     expect(result.status).toBe('rejected');
+    expect(result.reason).toContain('неизвестное основание инвентаря');
     expect(result.world).toBe(world);
     expect(result.world.chemicalState!.inventory).toEqual({ ch4: 60, o2: 40 });
     expect(
