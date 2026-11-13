@@ -66,7 +66,10 @@ describe('Stage 4.2.4: bodyCharacteristicsDisplayRows — канонически
     expect(mass.display).not.toBe('0.000e+0');
     // Реальное значение фикстуры не просачивается в отображение.
     expect(mass.display).not.toContain('5.972');
-    expect(mass.note).toContain('данных недостаточно');
+    // Канонический текст причины unknown (provenance с заметкой
+    // «данных недостаточно» сохраняется в ScientificValue, но строка
+    // таблицы показывает причину статуса, а не заметку provenance).
+    expect(mass.note).toContain('неизвестно');
   });
 
   it('invalid значение (незарегистрированная единица) отображается текстом статуса без числа', () => {

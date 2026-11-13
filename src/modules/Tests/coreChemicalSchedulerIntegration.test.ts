@@ -241,7 +241,7 @@ describe('Stage 4.2.3.3: инициализация ядра и перенос �
     }
     // Stage 4.2.4: ЯВНАЯ проверка изоляции переноса от применения
     // реакций. 250 K ниже нижней границы allowedRanges.temperature
-    // каждой реакции каталога, ВСЕ реагенты которой есть в фикс­туре
+    // каждой реакции каталога, ВСЕ реагенты которой есть в фикстуре
     // (проверка every, а не some: co_oxidation содержит o2, но co в
     // фикстуре отсутствует — реакция НЕ применима, и проверка «хотя бы
     // один реагент» ошибочно считала бы её применимой).
@@ -258,7 +258,7 @@ describe('Stage 4.2.3.3: инициализация ядра и перенос �
       if (hasAllReactants && reaction.allowedRanges.temperature) {
         expect(
           250 < reaction.allowedRanges.temperature.min || 250 > reaction.allowedRanges.temperature.max,
-          `реакция ${reaction.id} применима при 250 K — фикс­тура не изолирована`
+          'реакция ' + reaction.id + ' применима при 250 K — фикстура не изолирована'
         ).toBe(true);
       }
     }
@@ -737,7 +737,10 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
       initMessage = error instanceof Error ? error.message : String(error);
     }
     expect(initMessage).not.toBe('');
-    if (bad < 0) {
+    // Канонический валидатор проверяет КОНЕЧНОСТЬ раньше знака:
+    // -Infinity отклоняется сообщением о конечности, и только конечное
+    // отрицательное значение (-1) — сообщением об отрицательном запасе.
+    if (Number.isFinite(bad) && bad < 0) {
       expect(initMessage).toMatch(/отрицательный запас вида «s» невозможен/);
     } else {
       expect(initMessage).toMatch(/количество вида «s» должно быть конечным числом/);
