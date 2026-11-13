@@ -23,6 +23,13 @@ import { getEosPureComponentParameters } from '../Data/eosParameters';
 import { getBinaryInteractionParameter } from '../Data/binaryInteractionParameters';
 
 const POLICY = 'allow_partial' as const;
+/**
+ * Политика успешных контрольных точек с CH4: acentricFactor CH4 в
+ * каталоге — UNRESOLVED_CROSS_CHECK, allow_partial его отклоняет
+ * (parameter_evidence_rejected). Успешные точки требуют явного
+ * allow_unresolved_cross_check; статусы каталога не повышаются.
+ */
+const AUCC_POLICY = 'allow_unresolved_cross_check' as const;
 
 function catalog(
   composition: readonly { gasId: string; moleFraction: number }[],
@@ -32,7 +39,7 @@ function catalog(
     composition,
     temperatureK: 230,
     pressurePa: 2_000_000,
-    evidencePolicy: POLICY,
+    evidencePolicy: AUCC_POLICY,
     ...overrides
   });
 }
@@ -52,9 +59,12 @@ function byComponent(
   return new Map(composition.map((e) => [e.component, e.moleFraction]));
 }
 
+// Контрольная точка: z = (0.75, 0.25) — при 230 K / 2 МПа сходится как
+// заведомо двухфазная (beta ~ 0.435); z = (0.5, 0.5) даёт beta ~ 0.978
+// у границы и как контрольная точка менее робастна.
 const BINARY_CO2_CH4 = [
-  { gasId: 'co2', moleFraction: 0.5 },
-  { gasId: 'ch4', moleFraction: 0.5 }
+  { gasId: 'co2', moleFraction: 0.75 },
+  { gasId: 'ch4', moleFraction: 0.25 }
 ];
 
 const TERNARY_CO2_N2_AR = [
@@ -70,17 +80,37 @@ const TERNARY_CO2_N2_AR = [
 describe('pengRobinsonFlashFacade: бинарный co2|ch4 (230 K, 2 МПа)', () => {
   const result = catalog(BINARY_CO2_CH4);
 
-  it('возвращает two_phase_candidate сошедшегося flash', () => {
+  it('возвращает two_phase_candidate сошедшегося flash с фактическими значениями контрольной точки', () => {
     const c = asCandidate(result);
     expect(c.status).toBe('two_phase_candidate');
     expect(c.temperatureK).toBe(230);
     expect(c.pressurePa).toBe(2_000_000);
+    expect(c.evidencePolicy).toBe('allow_unresolved_cross_check');
     expect(c.convergence.status).toBe('converged');
     expect(c.materialBalanceResidual).toBeLessThanOrEqual(1e-8);
     expect(c.fugacityEqualityResidual.maxLnFugacityRatio)
       .toBeLessThan(c.fugacityEqualityResidual.tolerance);
+    // Контрольная точка z = (0.75, 0.25); значения из фактического
+    // выполнения реализации (Core и фасад согласованы).
+    const z = byComponent(c.feedComposition);
+    expect(z.get('co2')).toBeCloseTo(0.75, 12);
+    expect(z.get('ch4')).toBeCloseTo(0.25, 12);
+    expect(c.vaporFractionBeta).toBeCloseTo(0.434788, 4);
+    const x = byComponent(c.liquidComposition);
+    const y = byComponent(c.vaporComposition);
+    expect(x.get('co2')!).toBeCloseTo(0.950184, 4);
+    expect(x.get('ch4')!).toBeCloseTo(0.049816, 4);
+    expect(y.get('co2')!).toBeCloseTo(0.489767, 4);
+    expect(y.get('ch4')!).toBeCloseTo(0.510233, 4);
     expect(c.vaporFractionBeta).toBeGreaterThan(0);
     expect(c.vaporFractionBeta).toBeLessThan(1);
+  });
+
+  it('успех с CH4 сохраняет предупреждение о неразрешённом конфликте evidence', () => {
+    const c = asCandidate(result);
+    const unresolved = c.warnings.filter((w) => w.code === 'unresolved_cross_check_parameter');
+    expect(unresolved.length).toBeGreaterThan(0);
+    expect(unresolved.some((w) => w.message.includes('UNRESOLVED_CROSS_CHECK'))).toBe(true);
   });
 
   it('направление разделения физично: co2 обогащает жидкость, ch4 — пар', () => {
@@ -263,6 +293,18 @@ describe('pengRobinsonFlashFacade: fail-closed отказы', () => {
     expect(result.status).toBe('failure');
     if (result.status === 'failure') {
       expect(result.code).toBe('parameter_evidence_rejected');
+    }
+  });
+
+  it('allow_partial НЕ принимает UNRESOLVED_CROSS_CHECK acentricFactor CH4 — parameter_evidence_rejected', () => {
+    // Статус каталога не изменяется: co2|ch4 при allow_partial отклоняется
+    // ДО расчёта VLE с указанием конкретного поля и статуса.
+    const result = catalog(BINARY_CO2_CH4, { evidencePolicy: POLICY });
+    expect(result.status).toBe('failure');
+    if (result.status === 'failure') {
+      expect(result.code).toBe('parameter_evidence_rejected');
+      expect(result.message + ' ' + (result.detail ?? ''))
+        .toContain('ch4.acentricFactor=UNRESOLVED_CROSS_CHECK');
     }
   });
 

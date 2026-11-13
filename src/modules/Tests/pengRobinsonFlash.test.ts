@@ -38,17 +38,33 @@ import { getBinaryInteractionParameter } from '../Data/binaryInteractionParamete
 // ============================================
 
 const POLICY = 'allow_partial' as const;
+/**
+ * Политика для успешных контрольных точек с CH4: acentricFactor CH4 в
+ * каталоге имеет статус UNRESOLVED_CROSS_CHECK (конфликт с независимой
+ * проверкой задокументирован), поэтому allow_partial его НЕ принимает
+ * (parameter_evidence_rejected). Успешные точки co2|ch4 требуют явного
+ * allow_unresolved_cross_check; статусы каталога при этом не повышаются,
+ * а предупреждение о конфликте сохраняется в result.warnings.
+ */
+const AUCC_POLICY = 'allow_unresolved_cross_check' as const;
 
 /**
  * Бинарные входы Core для пары газId из каталогов 4.4.4.1 + 4.4.4.3.
  * includeKij=false имитирует отсутствующий kij (пара без записи).
+ * fractions — состав feed (по умолчанию контрольная точка (0.75, 0.25),
+ * которая при 230 K / 2 МПа сходится как заведомо двухфазная: beta ~ 0.43).
  */
-function binaryInputs(gasA: string, gasB: string, includeKij: boolean = true): PengRobinsonMixtureInputs {
+function binaryInputs(
+  gasA: string,
+  gasB: string,
+  includeKij: boolean = true,
+  fractions: readonly [number, number] = [0.75, 0.25]
+): PengRobinsonMixtureInputs {
   const a = getEosPureComponentParameters(gasA);
   const b = getEosPureComponentParameters(gasB);
-  const components = [a, b].map((record) => ({
+  const components = [a, b].map((record, i) => ({
     component: record.gasId,
-    moleFraction: 0.5,
+    moleFraction: fractions[i]!,
     criticalTemperatureK: record.criticalTemperatureK.value,
     criticalPressurePa: record.criticalPressurePa.value,
     acentricFactor: record.acentricFactor.value,
@@ -85,7 +101,9 @@ function flash(
     request: {
       temperatureK: 230,
       pressurePa: 2_000_000,
-      evidencePolicy: POLICY,
+      // По умолчанию — политика, принимающая UNRESOLVED_CROSS_CHECK CH4:
+      // успешные пути доходят до расчёта VLE, а не до отказа политики.
+      evidencePolicy: AUCC_POLICY,
       ...overrides
     }
   });
@@ -146,7 +164,9 @@ describe('pengRobinsonFlash: валидация входа', () => {
     };
     const result = computePengRobinsonFlash({
       mixtureInputs: three,
-      request: { temperatureK: 230, pressurePa: 2_000_000, evidencePolicy: POLICY }
+      // AUCC: чтобы отказ был именно про отсутствующий kij, а не про
+      // политику evidence UNRESOLVED_CROSS_CHECK CH4.
+      request: { temperatureK: 230, pressurePa: 2_000_000, evidencePolicy: AUCC_POLICY }
     });
     expect(result.status).toBe('failure');
     if (result.status === 'failure') {
@@ -238,6 +258,19 @@ describe('pengRobinsonFlash: fail-closed отказы', () => {
     }
   });
 
+  it('allow_partial НЕ принимает UNRESOLVED_CROSS_CHECK CH4 — parameter_evidence_rejected с указанием поля', () => {
+    // ch4.acentricFactor = UNRESOLVED_CROSS_CHECK (конфликт с Prydz & Goodwin
+    // 1972 задокументирован в каталоге): allow_partial принимает только
+    // PARTIALLY_VERIFIED, поэтому co2|ch4 отклоняется ДО расчёта VLE.
+    const result = flash(binaryInputs('ch4', 'co2'), { evidencePolicy: POLICY });
+    expect(result.status).toBe('failure');
+    if (result.status === 'failure') {
+      expect(result.code).toBe('parameter_evidence_rejected');
+      expect(result.message + ' ' + (result.detail ?? ''))
+        .toContain('ch4.acentricFactor=UNRESOLVED_CROSS_CHECK');
+    }
+  });
+
   it('температура вне верифицированного диапазона применимости kij — temperature_applicability', () => {
     // kij ch4|co2 верифицирован в 228.15–273.15 K; 300 K вне диапазона.
     const result = flash(binaryInputs('ch4', 'co2'), { temperatureK: 300 });
@@ -264,21 +297,43 @@ describe('pengRobinsonFlash: fail-closed отказы', () => {
 });
 
 // ============================================
-// 3. Двухфазный кандидат: co2 + ch4, 230 K, 2 МПа
+// 3. Двухфазный кандидат: co2 + ch4, 230 K, 2 МПа, z = (0.75, 0.25)
 // ============================================
+//
+// Контрольная точка z = (0.75, 0.25) выбрана фактическим выполнением
+// computePengRobinsonFlash: при 230 K / 2 МПа она сходится как
+// заведомо двухфазная (beta ~ 0.435, далеко от границ 0 и 1), тогда
+// как z = (0.5, 0.5) даёт beta ~ 0.978 у границы beta ~ 1. Численные
+// значения ниже зафиксированы из результата программы, не из
+// автономной реплики формул.
 
-describe('pengRobinsonFlash: двухфазный кандидат co2|ch4 (230 K, 2 МПа)', () => {
+describe('pengRobinsonFlash: двухфазный кандидат co2|ch4 (230 K, 2 МПа, z=(0.75, 0.25))', () => {
   const inputs = binaryInputs('co2', 'ch4');
   const result = flash(inputs);
 
-  it('возвращает two_phase_candidate с полным контрактом', () => {
+  it('возвращает two_phase_candidate с полным контрактом и политикой AUCC', () => {
     const c = asCandidate(result);
     expect(c.status).toBe('two_phase_candidate');
     expect(c.temperatureK).toBe(230);
     expect(c.pressurePa).toBe(2_000_000);
-    expect(c.evidencePolicy).toBe('allow_partial');
+    // Успешная точка с CH4 требует явной политики AUCC — и она же
+    // отражена в результате без подмены на allow_partial.
+    expect(c.evidencePolicy).toBe('allow_unresolved_cross_check');
     expect(c.convergence.status).toBe('converged');
     expect(c.iterations).toBeGreaterThan(0);
+    // Контрольная точка feed: z = (0.75, 0.25).
+    const z = byComponent(c.feedComposition);
+    expect(z.get('co2')).toBeCloseTo(0.75, 12);
+    expect(z.get('ch4')).toBeCloseTo(0.25, 12);
+    // Фактические значения реализации (beta, составы фаз) — из результата
+    // программы; допуски не жёстче физической воспроизводимости binary64.
+    expect(c.vaporFractionBeta).toBeCloseTo(0.434788, 4);
+    const x = byComponent(c.liquidComposition);
+    const y = byComponent(c.vaporComposition);
+    expect(x.get('co2')!).toBeCloseTo(0.950184, 4);
+    expect(x.get('ch4')!).toBeCloseTo(0.049816, 4);
+    expect(y.get('co2')!).toBeCloseTo(0.489767, 4);
+    expect(y.get('ch4')!).toBeCloseTo(0.510233, 4);
     // kij использован каталожный, с evidence и диапазоном.
     expect(c.kijUsed).toHaveLength(1);
     expect(c.kijUsed[0]!.kij).toBeCloseTo(0.09897, 12);
@@ -287,6 +342,19 @@ describe('pengRobinsonFlash: двухфазный кандидат co2|ch4 (230 
     // Явное ограничение интерпретации присутствует.
     expect(c.interpretationLimitation).toBe(PENG_ROBINSON_FLASH_INTERPRETATION_LIMITATION);
     expect(c.interpretationLimitation.length).toBeGreaterThan(0);
+  });
+
+  it('успех с CH4 сохраняет provenance: исходный статус evidence и предупреждение о конфликте', () => {
+    const c = asCandidate(result);
+    // Статус acentricFactor CH4 в каталоге НЕ повышен: предупреждение
+    // unresolved_cross_check_parameter присутствует в warnings результата.
+    const unresolved = c.warnings.filter((w) => w.code === 'unresolved_cross_check_parameter');
+    expect(unresolved.length).toBeGreaterThan(0);
+    expect(unresolved.some((w) => w.message.includes('UNRESOLVED_CROSS_CHECK'))).toBe(true);
+    // Предупреждение называет зафиксированный конфликт, а не замалчивает его.
+    expect(unresolved.some((w) => w.message.includes('конфликт'))).toBe(true);
+    // kij-провенанс не повышен: PARTIALLY_VERIFIED остаётся PARTIALLY_VERIFIED.
+    expect(c.kijUsed[0]!.evidence).toBe('PARTIALLY_VERIFIED');
   });
 
   it('фазовые составы нормированы, конечны, неотрицательны; beta в (0, 1)', () => {
@@ -442,11 +510,16 @@ describe('pengRobinsonFlash: однофазные состояния и отка
 
 describe('pengRobinsonFlash: низкодавленческое поведение', () => {
   it('при снижении давления в двухфазной области доля пара растёт, а пар идеализируется', () => {
-    // Две двухфазные точки: 2.5 МПа и 2.0 МПа (обе в диапазоне kij).
-    // При снижении P молярная доля пара beta растёт, а паровая фаза
-    // приближается к идеальному газу (phi -> 1).
+    // Контрольный состав z = (0.75, 0.25): ОБЕ точки сходятся как
+    // двухфазные (проверено фактическим выполнением), направление
+    // изменения beta подтверждается результатами, а не предполагается:
+    // 2.5 МПа -> beta ~ 0.340, 2.0 МПа -> beta ~ 0.435.
     const high = asCandidate(flash(binaryInputs('co2', 'ch4'), { pressurePa: 2_500_000 }));
     const low = asCandidate(flash(binaryInputs('co2', 'ch4'), { pressurePa: 2_000_000 }));
+    expect(high.convergence.status).toBe('converged');
+    expect(low.convergence.status).toBe('converged');
+    expect(high.vaporFractionBeta).toBeCloseTo(0.339982, 4);
+    expect(low.vaporFractionBeta).toBeCloseTo(0.434788, 4);
     expect(low.vaporFractionBeta).toBeGreaterThan(high.vaporFractionBeta);
     for (const id of ['co2', 'ch4']) {
       const phiHigh = high.vapor.components.find((e) => e.component === id)!.phi;

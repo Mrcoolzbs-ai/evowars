@@ -44,23 +44,28 @@ interface FlashPointSpec {
   readonly composition: readonly { gasId: string; moleFraction: number }[];
   readonly temperatureK: number;
   readonly pressurePa: number;
-  readonly evidencePolicy: 'allow_partial';
+  readonly evidencePolicy: 'allow_partial' | 'allow_unresolved_cross_check';
   readonly fugacityTolerance: number;
 }
 
-// 1) бинарная co2 + ch4, 230 K / 2 МПа — kij ch4|co2 (228.15–273.15 K);
+// 1) бинарная co2 + ch4, 230 K / 2 МПа, z = (0.75, 0.25) — kij ch4|co2
+//    (228.15–273.15 K); состав выбран фактическим выполнением: точка
+//    сходится как заведомо двухфазная (beta ~ 0.435). Политика
+//    allow_unresolved_cross_check обязательна: acentricFactor CH4 в
+//    каталоге — UNRESOLVED_CROSS_CHECK, allow_partial отклонил бы точку
+//    до расчёта VLE (parameter_evidence_rejected);
 // 2) тройная co2 + n2 + ar, 250 K / 4 МПа — полный треугольник kij
 //    (co2-n2 и ar-co2 в 228.15–273.15 K; ar-n2 — диапазон null).
 const FLASH_POINTS: readonly FlashPointSpec[] = [
   {
     id: 'flash-co2-ch4-230K-2MPa',
     composition: [
-      { gasId: 'co2', moleFraction: 0.5 },
-      { gasId: 'ch4', moleFraction: 0.5 }
+      { gasId: 'co2', moleFraction: 0.75 },
+      { gasId: 'ch4', moleFraction: 0.25 }
     ],
     temperatureK: 230,
     pressurePa: 2e6,
-    evidencePolicy: 'allow_partial',
+    evidencePolicy: 'allow_unresolved_cross_check',
     fugacityTolerance: 1e-10
   },
   {
@@ -86,14 +91,14 @@ function expectFlashSuccess(
 ): PengRobinsonFlashCatalogSuccess {
   expect(result.status).toBe('two_phase_candidate');
   if (result.status !== 'two_phase_candidate') {
-    throw new Error(`ожидался two_phase_candidate, получен отказ: ${JSON.stringify(result)}`);
+    throw new Error('ожидался two_phase_candidate, получен отказ: ' + JSON.stringify(result));
   }
   return result;
 }
 
 function expectFiniteNumber(value: number, label: string): void {
   if (!Number.isFinite(value)) {
-    throw new Error(`${label}: ожидалось конечное число, получено ${String(value)}`);
+    throw new Error(label + ': ожидалось конечное число, получено ' + String(value));
   }
 }
 
@@ -106,7 +111,7 @@ const flashRows: Record<string, unknown>[] = [];
 
 describe('Stage 4.4.4.6: дамп двухфазных контрольных точек PR VLE flash', () => {
   for (const point of FLASH_POINTS) {
-    it(`flash ${point.id}: two_phase_candidate, конечные составы и невязки в допуске`, () => {
+    it('flash ' + point.id + ': two_phase_candidate, конечные составы и невязки в допуске', () => {
       const s = expectFlashSuccess(computePengRobinsonFlashFromCatalog({
         composition: point.composition,
         temperatureK: point.temperatureK,
@@ -116,12 +121,12 @@ describe('Stage 4.4.4.6: дамп двухфазных контрольных т
       }));
 
       expect(s.convergence.status).toBe('converged');
-      expectFiniteNumber(s.vaporFractionBeta, `${point.id}: beta`);
+      expectFiniteNumber(s.vaporFractionBeta, point.id + ': beta');
       expect(s.vaporFractionBeta).toBeGreaterThan(0);
       expect(s.vaporFractionBeta).toBeLessThan(1);
-      expectFiniteNumber(s.materialBalanceResidual, `${point.id}: materialBalance`);
+      expectFiniteNumber(s.materialBalanceResidual, point.id + ': materialBalance');
       expect(s.materialBalanceResidual).toBeLessThanOrEqual(1e-8);
-      expectFiniteNumber(s.fugacityEqualityResidual.maxLnFugacityRatio, `${point.id}: fugacityResidual`);
+      expectFiniteNumber(s.fugacityEqualityResidual.maxLnFugacityRatio, point.id + ': fugacityResidual');
       expect(s.fugacityEqualityResidual.maxLnFugacityRatio)
         .toBeLessThan(s.fugacityEqualityResidual.tolerance);
       // Честная семантика устойчивости: 'stable' не предусмотрен.
@@ -139,7 +144,7 @@ describe('Stage 4.4.4.6: дамп двухфазных контрольных т
         vaporComposition: s.vaporComposition.map((e) => ({ gasId: e.component, moleFraction: e.moleFraction })),
         vaporFractionBeta: s.vaporFractionBeta,
         kijUsed: s.kijUsed.map((k) => ({
-          pairKey: `${k.componentA}|${k.componentB}`,
+          pairKey: k.componentA + '|' + k.componentB,
           kij: k.kij,
           evidence: k.evidence,
           applicabilityRangeK: k.applicabilityRangeK
