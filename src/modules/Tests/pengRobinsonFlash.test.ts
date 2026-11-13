@@ -1,13 +1,13 @@
 // ============================================
-// STAGE 4.4.4.5 - Тесты двухфазного PR VLE flash (бинарные смеси)
+// STAGE 4.4.4.6 - Тесты двухфазного PR VLE flash (n >= 2 компонентов)
 // ============================================
 //
 // Покрывают контракт computePengRobinsonFlash: валидацию входа,
 // fail-closed отказы (kij, политика, диапазоны применимости),
 // детерминизм, инвариантность к порядку компонентов, материальный
 // баланс, нормировку фаз, равенство фугитивностей, однофазные
-// состояния, несходимость и честную семантику устойчивости
-// (verdict 'stable' не предусмотрен вовсе).
+// состояния, несходимость, нулевые доли и честную семантику
+// устойчивости (verdict 'stable' не предусмотрен вовсе).
 //
 // Входы строятся ИЗ СУЩЕСТВУЮЩИХ каталогов Data (4.4.4.1 и 4.4.4.3)
 // без новых параметров и без подстановок: getEosPureComponentParameters
@@ -136,7 +136,7 @@ describe('pengRobinsonFlash: валидация входа', () => {
     ).toBe('invalid_input');
   });
 
-  it('срез бинарный: три компонента отказывают как unsupported срез, не как данные', () => {
+  it('три компонента без полного набора kij — fail-closed missing_binary_interaction', () => {
     const three = {
       components: [
         ...binaryInputs('ch4', 'co2').components,
@@ -150,8 +150,35 @@ describe('pengRobinsonFlash: валидация входа', () => {
     });
     expect(result.status).toBe('failure');
     if (result.status === 'failure') {
+      expect(result.code).toBe('missing_binary_interaction');
+      expect(result.message.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('дубликат имени компонента — invalid_input', () => {
+    const base = binaryInputs('ch4', 'co2');
+    const dup: PengRobinsonMixtureInputs = {
+      components: [base.components[0]!, base.components[0]!],
+      binaryInteractions: base.binaryInteractions
+    };
+    const result = flash(dup);
+    expect(result.status).toBe('failure');
+    if (result.status === 'failure') {
       expect(result.code).toBe('invalid_input');
-      expect(result.message).toContain('ровно два');
+      expect(result.message).toContain('уникальные');
+    }
+  });
+
+  it('менее двух активных компонентов (z = 1, 0) — invalid_input без вычислений', () => {
+    const base = binaryInputs('ch4', 'co2');
+    const degenerate: PengRobinsonMixtureInputs = {
+      components: base.components.map((c, i) => ({ ...c, moleFraction: i === 0 ? 1 : 0 })),
+      binaryInteractions: base.binaryInteractions
+    };
+    const result = flash(degenerate);
+    expect(result.status).toBe('failure');
+    if (result.status === 'failure') {
+      expect(result.code).toBe('invalid_input');
     }
   });
 
@@ -228,7 +255,11 @@ describe('pengRobinsonFlash: fail-closed отказы', () => {
       ),
       binaryInteractions: inputs.binaryInteractions
     };
-    expect(flash(broken).status === 'failure' ? flash(broken).code : '').toBe('invalid_input');
+    const brokenResult = flash(broken);
+    expect(brokenResult.status).toBe('failure');
+    if (brokenResult.status === 'failure') {
+      expect(brokenResult.code).toBe('invalid_input');
+    }
   });
 });
 
@@ -422,5 +453,171 @@ describe('pengRobinsonFlash: низкодавленческое поведени
       const phiLow = low.vapor.components.find((e) => e.component === id)!.phi;
       expect(Math.abs(phiLow - 1)).toBeLessThan(Math.abs(phiHigh - 1));
     }
+  });
+});
+
+
+// ============================================
+// 6. Многокомпонентность: тройная смесь co2 + n2 + ar (треугольник kij)
+// ============================================
+
+describe('pengRobinsonFlash: тройная смесь co2|n2|ar (250 K, 4 МПа)', () => {
+  /**
+   * Тройные входы Core из каталогов Data: полный треугольник kij
+   * (co2-n2, co2-ar, n2-ar) — единственная тройная комбинация, все пары
+   * которой присутствуют в каталоге 4.4.4.3.
+   */
+  function ternaryInputs(fractions: readonly [number, number, number]): PengRobinsonMixtureInputs {
+    const gases = ['co2', 'n2', 'ar'] as const;
+    const components = gases.map((gas, i) => {
+      const record = getEosPureComponentParameters(gas);
+      return {
+        component: record.gasId,
+        moleFraction: fractions[i]!,
+        criticalTemperatureK: record.criticalTemperatureK.value,
+        criticalPressurePa: record.criticalPressurePa.value,
+        acentricFactor: record.acentricFactor.value,
+        evidence: {
+          criticalTemperatureK: record.criticalTemperatureK.provenance.evidence,
+          criticalPressurePa: record.criticalPressurePa.provenance.evidence,
+          acentricFactor: record.acentricFactor.provenance.evidence
+        },
+        crossChecks: record.crossChecks,
+        limitations: record.limitations
+      };
+    });
+    const pairs: [string, string][] = [['co2', 'n2'], ['co2', 'ar'], ['n2', 'ar']];
+    const binaryInteractions = pairs.map(([a, b]) => {
+      const kijRecord = getBinaryInteractionParameter(a, b);
+      return {
+        componentA: kijRecord.componentA,
+        componentB: kijRecord.componentB,
+        kij: kijRecord.kij.value,
+        evidence: kijRecord.kij.provenance.evidence,
+        applicabilityRangeK: kijRecord.applicabilityRangeK
+      };
+    });
+    return { components, binaryInteractions };
+  }
+
+  function ternaryFlash(fractions: readonly [number, number, number]) {
+    return computePengRobinsonFlash({
+      mixtureInputs: ternaryInputs(fractions),
+      request: {
+        temperatureK: 250,
+        pressurePa: 4_000_000,
+        evidencePolicy: POLICY,
+        fugacityTolerance: 1e-8
+      }
+    });
+  }
+
+  const z: readonly [number, number, number] = [0.6, 0.3, 0.1];
+  const result = ternaryFlash(z);
+
+  it('трёхкомпонентный two_phase_candidate: три пары kij с честными evidence', () => {
+    const c = asCandidate(result);
+    expect(c.kijUsed).toHaveLength(3);
+    const byPair = new Map(c.kijUsed.map((k) => [k.componentA + '|' + k.componentB, k]));
+    // n2-ar: точный диапазон применимости НЕ верифицирован (null) —
+    // наличие числа в каталоге не делает kij полностью подтверждённым.
+    const n2ar = byPair.get('ar|n2');
+    expect(n2ar).toBeDefined();
+    expect(n2ar!.applicabilityRangeK).toBeNull();
+    expect(n2ar!.evidence).toBe('PARTIALLY_VERIFIED');
+    // CO2-содержащие пары: диапазон 228.15–273.15 K сохранён без расширения.
+    for (const key of ['co2|n2', 'ar|co2']) {
+      const record = byPair.get(key);
+      expect(record).toBeDefined();
+      expect(record!.evidence).toBe('PARTIALLY_VERIFIED');
+      expect(record!.applicabilityRangeK).not.toBeNull();
+      expect(record!.applicabilityRangeK!.minTemperatureK).toBe(228.15);
+      expect(record!.applicabilityRangeK!.maxTemperatureK).toBe(273.15);
+    }
+    expect(c.convergence.status).toBe('converged');
+  });
+
+  it('материальный баланс, нормировка и равенство фугитивностей для всех трёх компонентов', () => {
+    const c = asCandidate(result);
+    expect(c.materialBalanceResidual).toBeLessThanOrEqual(1e-8);
+    expect(c.fugacityEqualityResidual.maxLnFugacityRatio)
+      .toBeLessThan(c.fugacityEqualityResidual.tolerance);
+    expect(c.fugacityEqualityResidual.perComponent).toHaveLength(3);
+    for (const composition of [c.liquidComposition, c.vaporComposition]) {
+      const sum = composition.reduce((s, e) => s + e.moleFraction, 0);
+      expect(sum).toBeCloseTo(1, 10);
+      for (const e of composition) {
+        expect(Number.isFinite(e.moleFraction)).toBe(true);
+        expect(e.moleFraction).toBeGreaterThanOrEqual(0);
+      }
+    }
+    const x = byComponent(c.liquidComposition);
+    const y = byComponent(c.vaporComposition);
+    for (const id of ['co2', 'n2', 'ar']) {
+      const balance = (1 - c.vaporFractionBeta) * x.get(id)! + c.vaporFractionBeta * y.get(id)!;
+      expect(balance).toBeCloseTo(z[['co2', 'n2', 'ar'].indexOf(id)]!, 9);
+    }
+  });
+
+  it('направление разделения физично: co2 обогащает жидкость, n2 — пар', () => {
+    const c = asCandidate(result);
+    const x = byComponent(c.liquidComposition);
+    const y = byComponent(c.vaporComposition);
+    expect(x.get('co2')!).toBeGreaterThan(y.get('co2')!);
+    expect(y.get('n2')!).toBeGreaterThan(x.get('n2')!);
+    expect(c.vaporFractionBeta).toBeGreaterThan(0);
+    expect(c.vaporFractionBeta).toBeLessThan(1);
+  });
+
+  it('детерминизм и перестановочная инвариантность тройной смеси', () => {
+    const again = ternaryFlash(z);
+    expect(JSON.stringify(again)).toBe(JSON.stringify(result));
+    const swapped: PengRobinsonMixtureInputs = {
+      components: [...ternaryInputs(z).components].reverse(),
+      binaryInteractions: ternaryInputs(z).binaryInteractions.map((k) => ({
+        componentA: k.componentB,
+        componentB: k.componentA,
+        kij: k.kij,
+        evidence: k.evidence,
+        applicabilityRangeK: k.applicabilityRangeK
+      }))
+    };
+    const flipped = asCandidate(computePengRobinsonFlash({
+      mixtureInputs: swapped,
+      request: { temperatureK: 250, pressurePa: 4_000_000, evidencePolicy: POLICY, fugacityTolerance: 1e-8 }
+    }));
+    const a = asCandidate(result);
+    expect(flipped.vaporFractionBeta).toBeCloseTo(a.vaporFractionBeta, 9);
+    expect(byComponent(flipped.liquidComposition)).toEqual(byComponent(a.liquidComposition));
+    expect(byComponent(flipped.vaporComposition)).toEqual(byComponent(a.vaporComposition));
+  });
+
+  it('нулевая доля ar: x_ar = y_ar = 0 точно, без log(0); пары с ar не требуются', () => {
+    const zeroAr = asCandidate(ternaryFlash([0.6, 0.4, 0]));
+    const x = byComponent(zeroAr.liquidComposition);
+    const y = byComponent(zeroAr.vaporComposition);
+    expect(x.get('ar')).toBe(0);
+    expect(y.get('ar')).toBe(0);
+    const arRow = zeroAr.fugacityEqualityResidual.perComponent.find((r) => r.component === 'ar')!;
+    expect(arRow.lnFugacityRatio).toBe(0);
+    // Только пары активных компонентов попали в kijUsed.
+    expect(zeroAr.kijUsed).toHaveLength(1);
+    expect(zeroAr.kijUsed[0]!.componentA + '|' + zeroAr.kijUsed[0]!.componentB).toBe('co2|n2');
+    expect(zeroAr.materialBalanceResidual).toBeLessThanOrEqual(1e-8);
+  });
+
+  it('вырожденный одноактивный состав (1, 0, 0) — invalid_input', () => {
+    const result1 = ternaryFlash([1, 0, 0]);
+    expect(result1.status).toBe('failure');
+    if (result1.status === 'failure') {
+      expect(result1.code).toBe('invalid_input');
+    }
+  });
+
+  it('устойчивость тройной смеси честная: union без stable', () => {
+    const c = asCandidate(result);
+    expect(['indeterminate', 'two_phase_split_indicated']).toContain(c.stability);
+    expect(c.stabilityNote).toContain('indeterminate');
+    expect(c.stabilityNote).not.toContain('доказанная устойчивость:');
   });
 });

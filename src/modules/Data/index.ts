@@ -343,3 +343,24 @@ export type {
   PengRobinsonMixtureComponentProvenance,
   PengRobinsonMixtureBinaryProvenance
 } from './pengRobinsonMixtureFacade';
+
+
+// Stage 4.4.4.6: фасад VLE flash Peng–Robinson над Core.
+// Валидация состава и уникальности gasId, lookup чистых параметров
+// (каталог 4.4.4.1) и ВСЕХ пар kij активных компонентов (каталог
+// 4.4.4.3, fail-closed: unresolved-пара — явный отказ, kij = 0 молча
+// не подставляется), вызов Core/pengRobinsonFlash.ts и прикрепление
+// provenance каталогов к результату. Ограничения источников и
+// диапазоны применимости kij не скрываются; verdict 'stable'
+// не предусмотрен.
+import { computePengRobinsonFlashFromCatalog } from './pengRobinsonFlashFacade';
+
+export { computePengRobinsonFlashFromCatalog };
+export type {
+  PengRobinsonFlashCompositionEntry,
+  PengRobinsonFlashCatalogRequest,
+  PengRobinsonFlashCatalogResult,
+  PengRobinsonFlashCatalogSuccess,
+  PengRobinsonFlashComponentProvenance,
+  PengRobinsonFlashBinaryProvenance
+} from './pengRobinsonFlashFacade';

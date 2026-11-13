@@ -121,6 +121,11 @@ MPMATH_DPS = 50
 RTOL_COOLPROP = 2e-4   # Ω: exact (CoolProp) против округлённых 0.45724/0.0778 (наша);
                        # максимум наблюдённых rel-ошибок ~9.8e-5, запас ~2x
 RTOL_MPMATH = 5e-13    # проверка реализации против 50-значной арифметики
+RTOL_FLASH = 5e-4      # двухфазная сверка flash (Stage 4.4.4.6): составы фаз
+                       # и T насыщения через PQ-флеш CoolProp; допуск шире
+                       # RTOL_COOLPROP (насыщение смеси — итерационная задача
+                       # с собственной невязкой), но не ослабляет другие
+                       # критерии benchmark
 ATOL_ISOLATED_ROOT = 1e-9    # изолированный корень: двойная точность решателя
 ATOL_NEAR_PAIR_ROOT = 1e-6  # корень вблизи кратного: обусловленность ~ sqrt(eps)
 NEAR_PAIR_SPLIT = 1e-4      # порог «пары» (расщепление меньше — кластер)
@@ -328,6 +333,8 @@ def main() -> int:
                         help="путь к TS-дампу контрольных точек")
     parser.add_argument("--mixtures", default=None,
                         help="путь к TS-дампу СМЕСЕВЫХ контрольных точек (Stage 4.4.4.3)")
+    parser.add_argument("--flash", default=None,
+                        help="путь к TS-дампу TWO-PHASE контрольных точек VLE flash (Stage 4.4.4.6)")
     parser.add_argument("--report", default="benchmark-artifacts/peng-robinson-coolprop-report.json",
                         help="путь записи JSON-отчёта")
     parser.add_argument("--summary-md", default="benchmark-artifacts/benchmark-summary.md",
@@ -1219,6 +1226,164 @@ def main() -> int:
     zero_limit_available = mixtures_data is not None and bool(zero_limit_cases)
 
     # ============================================
+    # VLE FLASH оракул (Stage 4.4.4.6, аргумент --flash)
+    # ============================================
+    # Двухфазные контрольные точки flash из TS-дампа
+    # (peng-robinson-flash-ts-dump.json) сверяются с CoolProp PR: ТЕ ЖЕ
+    # чистые параметры (CATALOG) и ТЕ ЖЕ каталожные kij вводятся через
+    # set_binary_interaction_double. Двухфазное состояние CoolProp
+    # навязывается входом PQ (давление + паровая доля beta из TS-решения):
+    # сверяются T насыщения, составы сосуществующих фаз (x — liquid,
+    # y — vapor) и, если CoolProp их отдаёт, фугативности. СЕМАНТИКА:
+    # это валидация РЕАЛИЗАЦИИ алгоритма flash при одинаковых
+    # параметрах, НЕ экспериментальное подтверждение значений kij.
+    # Однофазный ответ CoolProp, исключение или не-конечные значения
+    # фиксируются как НЕДОСТУПНОСТЬ сравнения (unavailable_*), а НЕ PASS.
+    flash_data = None
+    if args.flash is not None:
+        flash_path = Path(args.flash)
+        if not flash_path.is_file():
+            print(f"ОШИБКА: TS-дамп flash не найден: {flash_path}", file=sys.stderr)
+            return 2
+        with flash_path.open("r", encoding="utf-8") as handle:
+            flash_data = json.load(handle)
+
+    flash_points = []
+    if flash_data is not None:
+        for row in flash_data.get("points", []):
+            comp_ids = [c["gasId"] for c in row["feedComposition"]]
+            fractions = [float(c["moleFraction"]) for c in row["feedComposition"]]
+            index_of = {c["gasId"]: i for i, c in enumerate(row["feedComposition"])}
+            beta_ts = float(row["vaporFractionBeta"])
+
+            cp = {"T_sat": None, "Q": None, "x_liquid": None, "y_vapor": None,
+                  "fugacity_vapor": None, "status": "unavailable_error",
+                  "error": None}
+            comparisons = {"T_sat": None, "x_liquid": [], "y_vapor": []}
+            point_pass = False
+            fluid_errors = [custom_fluids["fluids"][g]["error"] for g in comp_ids]
+            if add_error is not None or any(e is not None for e in fluid_errors):
+                cp["error"] = (f"add_fluids_as_JSON error: {add_error}; "
+                               f"per-fluid: {fluid_errors}")
+            else:
+                try:
+                    names = [CATALOG[g]["custom"] for g in comp_ids]
+                    state = CP.AbstractState("PR", "&".join(names))
+                    # Каталожные kij — те же цифры, что использует TS.
+                    for pair in row["kijUsed"]:
+                        a, b = pair["pairKey"].split("|")
+                        state.set_binary_interaction_double(
+                            index_of[a], index_of[b], "kij", float(pair["kij"]))
+                        state.set_binary_interaction_double(
+                            index_of[b], index_of[a], "kij", float(pair["kij"]))
+                    state.set_mole_fractions(fractions)
+                    # Двухфазный вход: P + паровая доля beta из TS-решения.
+                    # Если PQ-флеш для смеси не поддержан — исключение
+                    # фиксируется как недоступность сравнения (НЕ PASS).
+                    state.update(CP.PQ_INPUTS, row["pressurePa"], beta_ts)
+                    t_sat = float(state.T())
+                    q_cp = float(state.keyed_output(CP.iQ))
+                    x_cp = [float(v) for v in state.mole_fractions_sat_liquid()]
+                    y_cp = [float(v) for v in state.mole_fractions_sat_vapor()]
+                    cp["T_sat"] = t_sat
+                    cp["Q"] = q_cp
+                    cp["x_liquid"] = x_cp
+                    cp["y_vapor"] = y_cp
+                    try:
+                        cp["fugacity_vapor"] = [
+                            float(state.fugacity(i)) for i in range(len(comp_ids))]
+                    except Exception as exc:  # noqa: BLE001 — честная фиксация
+                        cp["fugacity_vapor"] = None
+                        cp["fugacity_note"] = (
+                            f"фугативности фаз двухфазного состояния CoolProp "
+                            f"недоступны: {type(exc).__name__}: {exc}; сверка "
+                            f"фугитивностей фиксируется как недоступная, НЕ PASS")
+                    cp["status"] = "available"
+                except Exception as exc:  # noqa: BLE001 — точная причина, НЕ подмена
+                    cp["error"] = f"{type(exc).__name__}: {exc}"
+                    cp["status"] = "unavailable_error"
+
+            if cp["status"] == "available":
+                point_pass = True
+                # Не-конечные значения CoolProp — недоступность, НЕ PASS
+                # (конечность проверяется ДО относительных сравнений).
+                values = ([cp["T_sat"], cp["Q"]] + cp["x_liquid"] + cp["y_vapor"])
+                if any(not math.isfinite(v) for v in values):
+                    cp["status"] = "unavailable_nonfinite"
+                    cp["error"] = ("CoolProp вернул не-конечные значения "
+                                   "двухфазного состояния; сравнение недоступно")
+                    point_pass = False
+                else:
+                    # T насыщения против TS T (относительный допуск).
+                    t_field = compare_coolprop_field(
+                        row["temperatureK"], cp["T_sat"], RTOL_COOLPROP)
+                    comparisons["T_sat"] = t_field
+                    if t_field["pass"] is not True:
+                        point_pass = False
+                    # Составы фаз: согласование порядка по gasId.
+                    ts_x = {e["gasId"]: float(e["moleFraction"])
+                            for e in row["liquidComposition"]}
+                    ts_y = {e["gasId"]: float(e["moleFraction"])
+                            for e in row["vaporComposition"]}
+                    for i, gas_id in enumerate(comp_ids):
+                        for phase_name, cp_list, ts_map in (
+                                ("x_liquid", cp["x_liquid"], ts_x),
+                                ("y_vapor", cp["y_vapor"], ts_y)):
+                            field = compare_coolprop_field(
+                                ts_map[gas_id], cp_list[i], RTOL_FLASH)
+                            comparisons[phase_name].append(
+                                {"gasId": gas_id, **field})
+                            if field["pass"] is not True:
+                                point_pass = False
+                    # Фугитивности: сравниваются только если CoolProp их
+                    # отдал (конечные); иначе — недоступность (см. note).
+                    if cp["fugacity_vapor"] is not None:
+                        ts_f = {c["component"]: float(c["fugacityPa"])
+                                for c in row["vapor"]["components"]}
+                        fug_comparisons = []
+                        for i, gas_id in enumerate(comp_ids):
+                            cp_f = cp["fugacity_vapor"][i]
+                            if not math.isfinite(cp_f):
+                                fug_comparisons.append(
+                                    {"gasId": gas_id, "pass": None,
+                                     "note": "не конечное значение CoolProp"})
+                                point_pass = False
+                                continue
+                            field = compare_coolprop_field(
+                                ts_f[gas_id], cp_f, RTOL_FLASH)
+                            fug_comparisons.append({"gasId": gas_id, **field})
+                            if field["pass"] is not True:
+                                point_pass = False
+                        comparisons["fugacity_vapor"] = fug_comparisons
+            else:
+                point_pass = False
+
+            flash_points.append({
+                "id": row["id"],
+                "feedComposition": row["feedComposition"],
+                "kijUsed": row["kijUsed"],
+                "temperatureK": row["temperatureK"],
+                "pressurePa": row["pressurePa"],
+                "vaporFractionBeta_ts": beta_ts,
+                "coolprop": cp,
+                "comparison": comparisons,
+                "semantics": ("ВАЛИДАЦИЯ РЕАЛИЗАЦИИ алгоритма flash при "
+                              "одинаковых чистых параметрах и kij (введены "
+                              "set_binary_interaction_double); НЕ "
+                              "экспериментальное подтверждение значений kij. "
+                              "Двухфазное состояние навязано входом PQ "
+                              "(P + beta из TS-решения). Однофазный ответ, "
+                              "исключение или не-конечные значения — "
+                              "НЕДОСТУПНОСТЬ сравнения, НЕ PASS"),
+                "pass": point_pass,
+            })
+
+    flash_available = (flash_data is not None
+                       and bool(flash_data.get("points", [])))
+    flash_coolprop_pass = (all(p["pass"] for p in flash_points)
+                           if flash_available else False)
+
+    # ============================================
     # Итоги
     # ============================================
     coolprop_pass = all(p["pass"] for p in points)
@@ -1229,6 +1394,7 @@ def main() -> int:
     all_pass = (coolprop_pass and mpmath_pass and boundary_pass
                 and mixture_coolprop_pass and mixture_mpmath_pass
                 and zero_limit_pass
+                and (flash_coolprop_pass if flash_available else True)
                 and add_error is None)
 
     report = {
@@ -1260,6 +1426,31 @@ def main() -> int:
                           "константы Генри газов (H2, N2, O2, Ar) в воде "
                           "(Köster, Thol & Vrabec 2018, Supplementary "
                           "Section 4)"),
+        },
+        "flash": {
+            "stage": "4.4.4.6",
+            "available": flash_available,
+            "coolprop_points": flash_points,
+            "tolerances": {
+                "coolprop_rtol_T_sat": RTOL_COOLPROP,
+                "flash_rtol_compositions_fugacity": RTOL_FLASH,
+                "flash_rtol_justification": (
+                    "двухфазная PQ-сверка: T насыщения — rtol 2e-4 (как "
+                    "остальные CoolProp-поля); составы фаз и фугитивности — "
+                    "rtol 5e-4 (насыщение смеси — итерационная задача "
+                    "CoolProp с собственной невязкой); существующие "
+                    "критерии benchmark НЕ ослаблены"),
+            },
+            "semantics": (
+                "двухфазное состояние CoolProp навязано входом PQ "
+                "(P + beta из TS-решения); сверяются T насыщения, составы "
+                "фаз (mole_fractions_sat_liquid/vapor) и, если доступны, "
+                "фугитивности паровой фазы. ВАЛИДАЦИЯ РЕАЛИЗАЦИИ "
+                "алгоритма flash при одинаковых чистых параметрах и kij; "
+                "НЕ экспериментальное подтверждение значений kij. "
+                "Однофазный ответ CoolProp, исключение или не-конечные "
+                "значения — НЕДОСТУПНОСТЬ сравнения (unavailable_*), "
+                "а НЕ PASS"),
         },
         "zeroAttractionLimit": {
             "stage": "4.4.4.3.1",
@@ -1320,6 +1511,8 @@ def main() -> int:
             "mixtures_available": mixtures_data is not None,
             "mixtures_coolprop": mixture_coolprop_pass,
             "mixtures_mpmath": mixture_mpmath_pass,
+            "flash_available": flash_available,
+            "flash_coolprop": flash_coolprop_pass,
             "zero_attraction_limit": zero_limit_pass,
             "zero_attraction_limit_available": zero_limit_available,
             "zero_attraction_limit_mpmath": zero_limit_mpmath_pass,
@@ -1593,6 +1786,40 @@ def build_summary_md(report):
                 f"{'—' if adiff is None else f'{adiff:.2e}'} | "
                 f"{'ok' if mpm.get('pass') else 'FAIL'} | {cp_state} | "
                 f"{'ok' if entry['pass'] else 'FAIL'} |")
+    if report.get("flash", {}).get("available"):
+        lines += [
+            "",
+            "## VLE flash 4.4.4.6: CoolProp PQ-флеш vs TS, rtol 5e-4",
+            "",
+            "Двухфазное состояние навязано входом PQ (P + beta из "
+            "TS-решения); сверяются T насыщения, составы фаз и (если "
+            "доступны) фугитивности. Валидация РЕАЛИЗАЦИИ при одинаковых "
+            "параметрах и kij; НЕ подтверждение значений kij. "
+            "Однофазный ответ / исключение / не-конечные значения — "
+            "НЕДОСТУПНОСТЬ сравнения, НЕ PASS.",
+            "",
+            "| точка | T_sat (rel) | max x_liquid (rel) | max y_vapor (rel) | max f_vapor (rel) | итог |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for point in report["flash"]["coolprop_points"]:
+            if point["coolprop"]["status"] != "available":
+                lines.append(
+                    f"| {point['id']} | {point['coolprop']['status']} | — | — | — | "
+                    f"{'ok' if point['pass'] else 'FAIL'} |")
+                continue
+            comp = point["comparison"]
+            def frel(rows):
+                rels = [r["rel"] for r in rows
+                        if isinstance(r, dict) and r.get("pass") is not None
+                        and "rel" in r]
+                return "—" if not rels else f"{max(rels):.2e}"
+            t_rel = comp.get("T_sat")
+            t_rel_md = ("—" if not isinstance(t_rel, dict) else f"{t_rel['rel']:.2e}")
+            lines.append(
+                f"| {point['id']} | {t_rel_md} | {frel(comp['x_liquid'])} "
+                f"| {frel(comp['y_vapor'])} "
+                f"| {frel(comp.get('fugacity_vapor', []))} "
+                f"| {'ok' if point['pass'] else 'FAIL'} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
     zl_coolprop_md = ", ".join(
         f"{key}={value}"
@@ -1610,6 +1837,14 @@ def build_summary_md(report):
         f"CoolProp по точкам: {zl_coolprop_md}))",
         "",
     ]
+    if report["summary"].get("flash_available"):
+        flash_state = ("ok" if report["summary"].get("flash_coolprop") else "FAIL")
+    else:
+        flash_state = "— (дамп --flash не передан: сверка flash не выполнялась)"
+    lines += [
+        f"**VLE flash 4.4.4.6 (CoolProp PQ-флеш): {flash_state}**",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -1625,4 +1860,5 @@ if __name__ == "__main__":
         print(f"::error title=Peng-Robinson benchmark CRASH::{safe}", flush=True)
         print(tb, file=sys.stderr, flush=True)
         sys.exit(3)
+
 

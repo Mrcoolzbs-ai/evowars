@@ -29,7 +29,12 @@ import type { DataProvenance, DataStatus, ScientificValue } from './scientificVa
 import { estimatedValue, hasUsableQuantity, invalidValue, knownValue, notApplicable, unknownValue } from './scientificValue';
 import type { ProcessDescriptor } from './processRegistry';
 import type { MaterialInventory, ReservoirRecord } from './reservoir';
-import { createReservoir, setMaterialInventory, validateMaterialInventory } from './reservoir';
+import {
+  createReservoir,
+  isKnownBasis,
+  setMaterialInventory,
+  validateMaterialInventory
+} from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
 import { createSpeciesCatalog } from './species';
 import type { AtmosphericTemperatureProfile, BodyThermalState } from './thermalState';
@@ -555,10 +560,33 @@ export function chemicalStateFromCoreReservoirs(
     }
     return entries;
   };
+  // Stage 4.4.4.6 (закрытие структурной дыры): СТРОГАЯ структурная
+  // валидация всего объекта инвентаря — неизвестный/отсутствующий
+  // basis и entries, не являющиеся записью (null, массив, примитив,
+  // Map/Set), отклоняются ВСЕГДА, даже если числовые значения
+  // корректны. Структурно некорректный инвентарь не становится
+  // допустимым из-за корректных чисел.
+  const validateStructureStrict = (reservoirId: string, inv: MaterialInventory): void => {
+    const entriesIsRecord =
+      inv.entries !== null &&
+      typeof inv.entries === 'object' &&
+      !Array.isArray(inv.entries) &&
+      (Object.getPrototypeOf(inv.entries) === Object.prototype || Object.getPrototypeOf(inv.entries) === null);
+    if (!isKnownBasis(inv.basis) || !entriesIsRecord) {
+      const structure = validateMaterialInventory(inv);
+      throw new Error(
+        'резервуар «' + reservoirId + '»: инвентарь ядра повреждён (структура): ' +
+          structure.errors.join('; ') + ' — обратное преобразование отклонено'
+      );
+    }
+  };
   const readReservoir = (reservoirId: string): Record<string, number> => {
     const res = core.reservoirs.find((r) => r.id === reservoirId) ?? null;
     const inv = res?.material ?? null;
     if (inv === null) return {};
+    // Stage 4.4.4.6: строгая структурная валидация ДО сравнения basis —
+    // неизвестный basis и malformed entries отклоняются без обхода.
+    validateStructureStrict(reservoirId, inv);
     if (inv.basis !== basis) {
       throw new Error(
         'резервуар «' + reservoirId + '»: основание «' + inv.basis +
@@ -571,32 +599,15 @@ export function chemicalStateFromCoreReservoirs(
     // entries: null/массив дают контролируемый отказ, а не TypeError.
     // Повреждённые ЧИСЛА внутри корректного объекта перечисляются
     // readEntriesStrict каноническим сообщением ниже.
-    const invCheck = validateMaterialInventory(inv);
-    const entriesIsRecord =
-      inv.entries !== null && typeof inv.entries === 'object' && !Array.isArray(inv.entries);
-    if (!invCheck.valid && !entriesIsRecord) {
-      throw new Error(
-        'резервуар «' + reservoirId + '»: инвентарь ядра повреждён (структура): ' +
-          invCheck.errors.join('; ') + ' — обратное преобразование отклонено'
-      );
-    }
+    validateStructureStrict(reservoirId, inv);
     return readEntriesStrict(reservoirId, inv.entries);
   };
   const readAtmosphericEntries = (): Record<string, number> => {
     if (atmosphereInv === null) return {};
     // Stage 4.2.4 (fail-closed): структурная валидация всего объекта
-    // инвентаря каноническим валидатором до чтения entries.
-    const invCheck = validateMaterialInventory(atmosphereInv);
-    const entriesIsRecord =
-      atmosphereInv.entries !== null &&
-      typeof atmosphereInv.entries === 'object' &&
-      !Array.isArray(atmosphereInv.entries);
-    if (!invCheck.valid && !entriesIsRecord) {
-      throw new Error(
-        'резервуар «' + CHEMICAL_RESERVOIR_IDS.atmospheric + '»: инвентарь ядра повреждён (структура): ' +
-          invCheck.errors.join('; ') + ' — обратное преобразование отклонено'
-      );
-    }
+    // инвентаря каноническим валидатором до чтения entries;
+    // Stage 4.4.4.6: строгая проверка basis + формы entries без обхода.
+    validateStructureStrict(CHEMICAL_RESERVOIR_IDS.atmospheric, atmosphereInv);
     return readEntriesStrict(CHEMICAL_RESERVOIR_IDS.atmospheric, atmosphereInv.entries);
   };
   const atmosphericEntries = readAtmosphericEntries();
@@ -1231,3 +1242,4 @@ export function bodyCharacteristicsDisplayRows(input: {
     };
   });
 }
+

@@ -1,5 +1,6 @@
-# Stage 4.4.4.2.1 / 4.4.4.3 — независимый CoolProp benchmark чистокомпонентного
-# Peng-Robinson (4.4.4.2.x) и многокомпонентных смесей (4.4.4.3).
+# Stage 4.4.4.2.1 / 4.4.4.3 / 4.4.4.6 — независимый CoolProp benchmark
+# чистокомпонентного Peng-Robinson (4.4.4.2.x), многокомпонентных смесей
+# (4.4.4.3) и VLE flash (4.4.4.6).
 # Python и CoolProp НЕ входят в runtime приложения:
 # workflow запускается вручную (workflow_dispatch) и по путям
 # benchmark-файлов; результаты — в логах, аннотациях, артефактах и
@@ -20,11 +21,15 @@ on:
       - 'scripts/benchmarks/**'
       - 'src/modules/Core/pengRobinson.ts'
       - 'src/modules/Core/pengRobinsonMixture.ts'
+      - 'src/modules/Core/pengRobinsonFlash.ts'
       - 'src/modules/Data/pengRobinsonFacade.ts'
       - 'src/modules/Data/pengRobinsonMixtureFacade.ts'
+      - 'src/modules/Data/pengRobinsonFlashFacade.ts'
       - 'src/modules/Data/binaryInteractionParameters.ts'
       - 'src/modules/Tests/pengRobinsonBenchmarkDump.test.ts'
       - 'src/modules/Tests/pengRobinsonMixtureBenchmarkDump.test.ts'
+      - 'src/modules/Tests/pengRobinsonFlashFacade.test.ts'
+      - 'src/modules/Tests/pengRobinsonFlashBenchmarkDump.test.ts'
       - '.github/workflows/peng-robinson-benchmark.yml'
 
 permissions:
@@ -53,6 +58,9 @@ jobs:
       - name: TS-дамп смесевых контрольных точек PR (4.4.4.3)
         run: npx vitest run src/modules/Tests/pengRobinsonMixtureBenchmarkDump.test.ts
 
+      - name: TS-дамп контрольных точек VLE flash (4.4.4.6)
+        run: npx vitest run src/modules/Tests/pengRobinsonFlashBenchmarkDump.test.ts
+
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -64,11 +72,16 @@ jobs:
       - name: Python unit tests (классификация non-finite CoolProp, строгий JSON)
         run: python -m unittest discover -s scripts/benchmarks -p "test_*.py" -v
 
+      # VLE flash 4.4.4.6: CoolProp PQ-флеш как независимый оракул реализации
+      # при тех же каталожных параметрах и kij (валидация реализации, НЕ
+      # подтверждение значений kij). Однофазный/не-конечный ответ CoolProp —
+      # недоступность сравнения, не PASS.
       - name: CoolProp PR benchmark (независимый оракул)
         run: |
           python scripts/benchmarks/peng_robinson_coolprop.py \
             --dump benchmark-artifacts/peng-robinson-ts-dump.json \
             --mixtures benchmark-artifacts/peng-robinson-mixture-ts-dump.json \
+            --flash benchmark-artifacts/peng-robinson-flash-ts-dump.json \
             --report benchmark-artifacts/peng-robinson-coolprop-report.json \
             --summary-md benchmark-artifacts/benchmark-summary.md
 
@@ -86,3 +99,4 @@ jobs:
           name: peng-robinson-benchmark
           path: benchmark-artifacts/
           if-no-files-found: warn
+

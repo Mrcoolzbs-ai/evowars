@@ -44,8 +44,8 @@
 //                      строгие verdicts только по validated error bound,
 //                      indeterminate с машинно-читаемой причиной иначе; не
 //                      импортирует Data;
-//   pengRobinsonFlash  — изотермо-изобарный двухфазный VLE flash бинарной
-//                      смеси (4.4.4.5): Wilson-старт, Рачфорд–Райс,
+//   pengRobinsonFlash  — изотермо-изобарный многокомпонентный VLE flash
+//                        (n >= 2, 4.4.4.6): Wilson-старт, Рачфорд–Райс,
 //                      последовательные замены K по PR-фугитивностям;
 //                      кандидат равновесия, verdict stable не выдаётся;
 //   migrations        — версии схем, датасетов и миграции сохранений;
@@ -78,5 +78,6 @@ export * from './prTangentPlaneDistanceSearch';
 export * from './pengRobinsonFlash';
 export * from './migrations';
 export * from './adapters';
+
 
 

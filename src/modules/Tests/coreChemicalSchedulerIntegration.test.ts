@@ -245,6 +245,7 @@ describe('Stage 4.2.3.3: инициализация ядра и перенос �
     // (проверка every, а не some: co_oxidation содержит o2, но co в
     // фикстуре отсутствует — реакция НЕ применима, и проверка «хотя бы
     // один реагент» ошибочно считала бы её применимой).
+    const chemicalState = result.world.chemicalState!;
     for (const reaction of chemicalReactions) {
       const hasAllReactants = reaction.reactants.every((p) => {
         const total =
@@ -704,17 +705,20 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
     ['solidDeposits', -1]
   ] as const)('повреждённое значение в резервуаре %s: инициализация ядра бросает, шаг возвращает rejected атомарно', (key, bad) => {
     const model = makeModel({ ch4: 0.6, o2: 0.4 });
-    const reservoirs: Record<string, Record<string, number>> = {
+    const reservoirs: ChemicalEvolutionState['reservoirs'] = {
       atmospheric: { ch4: 60, o2: 40 },
       liquidSurface: { h2o: 5 },
       subsurfaceLiquid: { co2: 3 },
       solidDeposits: { c2h6: 7 }
     };
     reservoirs[key] = { s: bad };
-    const chemicalState = {
+    // Типобезопасная структура четырёх резервуаров: без приведения всей
+    // фикстуры к ChemicalEvolutionState. Повреждённое ЗНАЧЕНИЕ вносится
+    // в типобезопасный контейнер; runtime-границей служит валидация ядра.
+    const chemicalState: ChemicalEvolutionState = {
       ...createChemicalState({ atmospherePhysicalModel: model }),
       reservoirs
-    } as ChemicalEvolutionState;
+    };
 
     // Инициализация ядра напрямую: контролируемый отказ с диагностикой.
     expect(() =>
@@ -758,7 +762,7 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
       ...core,
       reservoirs: core.reservoirs.map((r) =>
         r.id === CHEMICAL_RESERVOIR_IDS.atmospheric
-          ? { ...r, material: { basis: 'arbitrary_units', entries: { ch4: NaN, o2: 40 } } }
+          ? { ...r, material: { basis: 'arbitrary_units' as const, entries: { ch4: NaN, o2: 40 } } }
           : r
       )
     };
@@ -790,7 +794,7 @@ describe('Stage 4.2.4: нулевые запасы сохраняются, по�
       ...core,
       reservoirs: core.reservoirs.map((r) =>
         r.id === CHEMICAL_RESERVOIR_IDS.liquidSurface
-          ? { ...r, material: { basis: 'arbitrary_units', entries: { h2o: -5 } } }
+          ? { ...r, material: { basis: 'arbitrary_units' as const, entries: { h2o: -5 } } }
           : r
       )
     };
@@ -857,5 +861,158 @@ describe('Stage 4.2.4: некорректная структура MaterialInven
     expect(
       result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)?.material
     ).toEqual(damagedMaterial);
+  });
+});
+
+
+// ============================================
+// 9. СТРОГАЯ ВАЛИДАЦИЯ ИНВЕНТАРЯ ЯДРА (STAGE 4.4.4.6)
+// ============================================
+
+describe('Stage 4.4.4.6: неверный basis и примитивные entries отклоняются без обхода', () => {
+  /** Валидное ядро из корректного химического состояния. */
+  function validCore(id: string) {
+    const model = makeModel({ ch4: 0.6, o2: 0.4 });
+    const chemicalState = createChemicalState({ atmospherePhysicalModel: model });
+    return {
+      chemicalState,
+      core: coreWorldStateFromLegacyWorld({
+        id,
+        seed: 'seed-1',
+        generatorVersion: '0.3.0',
+        atmosphere: { temperature: 250 },
+        chemicalState
+      })
+    };
+  }
+
+  /** Повреждение material одного резервуара ядра (граница runtime-валидации). */
+  function withMaterial(
+    core: ReturnType<typeof coreWorldStateFromLegacyWorld>,
+    reservoirId: string,
+    material: unknown
+  ): ReturnType<typeof coreWorldStateFromLegacyWorld> {
+    return {
+      ...core,
+      reservoirs: core.reservoirs.map((r) =>
+        r.id === reservoirId ? ({ ...r, material } as unknown as typeof r) : r
+      )
+    };
+  }
+
+  it.each([
+    ['атмосферный', CHEMICAL_RESERVOIR_IDS.atmospheric],
+    ['жидкий поверхностный', CHEMICAL_RESERVOIR_IDS.liquidSurface],
+    ['подповерхностный жидкий', CHEMICAL_RESERVOIR_IDS.subsurfaceLiquid],
+    ['твёрдые отложения', CHEMICAL_RESERVOIR_IDS.solidDeposits]
+  ])('неверный basis в резервуаре «%s» отклоняется обратной проекцией и диагностируется согласованностью', (_name, reservoirId) => {
+    const { chemicalState, core } = validCore('w-basis');
+    const damagedCore = withMaterial(
+      core,
+      reservoirId,
+      // Намеренно повреждённые данные: unknown-cast к границе
+      // runtime-валидации, без ослабления типов production-кода.
+      { basis: 'mol', entries: { ch4: 1 } } as unknown as { basis: 'arbitrary_units'; entries: Record<string, number> }
+    );
+    // Обратная проекция: контролируемая ошибка с указанием резервуара.
+    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(/повреждён/);
+    // Согласованность: диагностика без TypeError.
+    let issues: string[] = [];
+    expect(() => {
+      issues = chemicalReservoirConsistencyIssues(damagedCore, chemicalState);
+    }).not.toThrow();
+    expect(issues.some((i) => i.includes('инвентарь ядра повреждён'))).toBe(true);
+  });
+
+  it.each([
+    ['число', 42],
+    ['строка', 'мусор'],
+    ['массив', [{ ch4: 1 }]],
+    ['null', null]
+  ] as const)('malformed entries (%s) в атмосферном резервуаре отклоняются контролируемо', (_name, brokenEntries) => {
+    const { chemicalState, core } = validCore('w-entries');
+    const damagedCore = withMaterial(
+      core,
+      CHEMICAL_RESERVOIR_IDS.atmospheric,
+      { basis: 'arbitrary_units', entries: brokenEntries } as unknown as {
+        basis: 'arbitrary_units';
+        entries: Record<string, number>;
+      }
+    );
+    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(/повреждён/);
+    let issues: string[] = [];
+    expect(() => {
+      issues = chemicalReservoirConsistencyIssues(damagedCore, chemicalState);
+    }).not.toThrow();
+    expect(issues.some((i) => i.includes('инвентарь ядра повреждён'))).toBe(true);
+  });
+
+  it('структурно некорректный инвентарь не становится допустимым из-за корректных чисел', () => {
+    const { chemicalState, core } = validCore('w-struct');
+    const damagedCore = withMaterial(
+      core,
+      CHEMICAL_RESERVOIR_IDS.liquidSurface,
+      // Числа корректны, но basis неизвестен: отклонение обязательно.
+      { basis: 'moles_per_liter', entries: { h2o: 5 } } as unknown as {
+        basis: 'arbitrary_units';
+        entries: Record<string, number>;
+      }
+    );
+    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(
+      /резервуар «.*»: инвентарь ядра повреждён/
+    );
+  });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['+Infinity', Number.POSITIVE_INFINITY],
+    ['-Infinity', Number.NEGATIVE_INFINITY],
+    ['отрицательное', -1]
+  ] as const)('повреждённое числовое значение (%s) в неатмосферном резервуаре отклоняется с диагностикой вида', (_name, bad) => {
+    const { chemicalState, core } = validCore('w-value');
+    const damagedCore = withMaterial(
+      core,
+      CHEMICAL_RESERVOIR_IDS.solidDeposits,
+      { basis: 'arbitrary_units', entries: { c2h6: bad } } as unknown as {
+        basis: 'arbitrary_units';
+        entries: Record<string, number>;
+      }
+    );
+    expect(() => chemicalStateFromCoreReservoirs(damagedCore, chemicalState)).toThrow(
+      /не является конечным неотрицательным числом/
+    );
+  });
+
+  it('явный ноль в корректной структуре остаётся допустимым (контракт 4.2.4 сохранён)', () => {
+    const { chemicalState, core } = validCore('w-zero');
+    const zeroCore = withMaterial(
+      core,
+      CHEMICAL_RESERVOIR_IDS.atmospheric,
+      { basis: 'arbitrary_units', entries: { ch4: 0, o2: 0 } }
+    );
+    const projected = chemicalStateFromCoreReservoirs(zeroCore, chemicalState);
+    // Явный ноль сохраняется в обратной проекции (не отсутствие).
+    expect(projected.inventory).toEqual({ ch4: 0, o2: 0 });
+    expect(projected.reservoirs.atmospheric).toEqual({ ch4: 0, o2: 0 });
+  });
+
+  it('пользовательский шаг с повреждённым ядром возвращает rejected атомарно, без побочных изменений', () => {
+    const { core } = validCore('w-rejected');
+    const damagedCore = withMaterial(
+      core,
+      CHEMICAL_RESERVOIR_IDS.atmospheric,
+      { basis: 'mol', entries: { ch4: 1 } } as unknown as { basis: 'arbitrary_units'; entries: Record<string, number> }
+    );
+    const world = {
+      ...(makeGameWorld({ ch4: 0.6, o2: 0.4 }, 250) as unknown as Record<string, unknown>),
+      coreWorldState: damagedCore
+    } as unknown as GeneratedWorld;
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.world.chemicalState!.inventory).toEqual({ ch4: 60, o2: 40 });
+    expect(
+      result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)?.material
+    ).toEqual({ basis: 'mol', entries: { ch4: 1 } });
   });
 });
