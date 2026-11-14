@@ -1605,6 +1605,25 @@ def main() -> int:
             if not entry["pass"]:
                 print(f"::error title=Peng-Robinson zero-limit {entry['id']}::"
                        f"{json.dumps(entry, ensure_ascii=False)[:800]}")
+        # Диагностика flash (4.4.4.6): без этих аннотаций падение
+        # flash-секции нечитаемо в логах без входа в аккаунт.
+        for point in flash_points:
+            if not point["pass"]:
+                detail = point["coolprop"]["error"] or json.dumps(
+                    point["comparison"], ensure_ascii=False)
+                print(f"::error title=Peng-Robinson flash {point['id']}::"
+                       f"{detail[:800]}")
+
+    flash_state_notice = (
+        "ok" if flash_coolprop_pass
+        else ("FAIL" if flash_available
+              else "не выполнялась (дамп --flash не передан)"))
+    flash_pts_notice = ", ".join(
+        f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
+        f"(coolprop={p['coolprop']['status']})"
+        for p in flash_points) or "—"
+    print(f"::notice title=Peng-Robinson flash 4.4.4.6::VLE flash CoolProp PQ: "
+          f"{flash_state_notice}; точки [{flash_pts_notice}]")
 
     print(f"\nИТОГ Stage 4.4.4.2.2/4.4.4.3/4.4.4.3.1 benchmark: {'ПРОЙДЕН' if all_pass else 'ПРОВАЛЕН'}")
     return 0 if all_pass else 1
