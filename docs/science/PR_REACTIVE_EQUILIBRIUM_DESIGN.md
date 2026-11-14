@@ -1,15 +1,19 @@
 # PR_REACTIVE_EQUILIBRIUM_DESIGN — Stage 4.4.4.8-A: design gate PR-coupled reactive gas equilibrium
 
-**Статус: DESIGN-ONLY + диагностическая надстройка B1.** Этот документ —
+**Статус: DESIGN-ONLY + диагностическая надстройка B1 + чистый Core-решатель B2.** Этот документ —
 проверяемая спецификация интеграции
 коэффициентов фугитивности Peng–Robinson с существующим химическим
 равновесным решателем `Core/equilibrium.ts`. Ревизия Stage 4.4.4.8-B1:
 добавлен ОТДЕЛЬНЫЙ диагностический API
 `solveEquilibriumWithDiagnostics` (стационарность внутренней
-идеальногазовой задачи, §3.2/§6.4/§7.4). Сам PR-решатель ПО-ПРЕЖНЕМУ
-НЕ РЕАЛИЗОВАН: `solveEquilibrium` остаётся идеальногазовым
+идеальногазовой задачи, §3.2/§6.4/§7.4). Ревизия Stage 4.4.4.8-B2:
+реализован чистый Core-решатель `solveReactiveGasEquilibriumWithPengRobinson`
+(модуль `Core/prReactiveEquilibrium.ts`, внешний fixed-point цикл по
+компонентным ln(phi), фактический контракт — §11). При этом
+`solveEquilibrium` остаётся идеальногазовым
 (`model = 'ideal_gas'`, контракт без изменений), EOS/BIP-каталоги,
-golden baseline и legacy-поведение не менялись.
+golden baseline и legacy-поведение не менялись; каталоговый Data-фасад
+ещё НЕ реализован (Core принимает EOS/BIP-параметры явно).
 Сверка контрактов выполнена по фактическим исходникам на HEAD
 `e3486d7f20146fd01f2705208d87f13be5bf6528` (ветка `stage-3-planetary-physics`):
 `Core/equilibrium.ts`, `Core/pengRobinsonMixture.ts`, `Core/pengRobinsonFlash.ts`,
@@ -641,10 +645,181 @@ fixed-point остаток по lnPhi и приведённое выше сра�
 
 ---
 
-*Файл — design-артефакт Stage 4.4.4.8-A, ревизия Stage 4.4.4.8-B1
-(реализован только диагностический API solveEquilibriumWithDiagnostics
-и его тесты). PR-решатель не реализован: production runtime
-(кроме указанной добавляющей диагностической функции), EOS/BIP
-каталоги, контракт и поведение solveEquilibrium, flash, TPD-поиск,
-golden baseline, main и история Git не менялись. Полная реализация —
-отдельный подэтап с собственным design review.*
+## 11. Фактическая реализация Stage 4.4.4.8-B2 (сверка с кодом)
+
+Модуль `Core/prReactiveEquilibrium.ts`; экспорт через `Core/index.ts`.
+Зависимости только внутри Core: `equilibrium.ts`
+(`solveEquilibriumWithDiagnostics` + типы), `pengRobinsonMixture.ts`
+(`computePengRobinsonMixture`, `validatePengRobinsonMixtureInputsStrict` + типы),
+`pengRobinson.ts` (типы evidence/политики), `physicalQuantity.ts`,
+`thermoFunctions.ts` (универсальная газовая постоянная). Импортов из Data,
+PhaseEquilibrium, Atmosphere и UI нет; каталогового lookup нет — все
+EOS/BIP-параметры, evidence и ограничения применимости передаются вызывающим
+слоем ЯВНО (замороженные provenance-объекты каталогов добавит Data-фасад
+следующего подэтапа; возвращаемые `eosInputsUsed`/`binaryInteractionsUsed` —
+использованные значения и их evidence/limitations, НЕ каталоговый provenance).
+
+### 11.1 Фактический API
+
+    solveReactiveGasEquilibriumWithPengRobinson(
+      request: PrReactiveGasEquilibriumRequest
+    ): PrReactiveGasEquilibriumResult
+
+Вход (`PrReactiveGasEquilibriumRequest`): `temperature`, `pressure`,
+`standardStatePressure` — `PhysicalQuantity` (размерности проверяются явно;
+неверная размерность — `EquilibriumError invalid_input`, без предположений);
+`species: PrReactiveEquilibriumSpecies[]` — `EquilibriumSpecies` + ЯВНОЕ
+`eos` (Tc, Pc, acentric factor, evidence, crossChecks, limitations; идентификатор
+PR-компонента совпадает с `id` вида); `elementTotals`, `chargeTotal`;
+`binaryInteractions` — явные kij с evidence и `applicabilityRangeK`;
+обязательная `evidencePolicy`; `options` (дефолты по §6:
+maxOuterIterations=100, outerTolerance=1e-10, minDamping=1/1024,
+stagnationWindow=5, stagnationEpsilon=1e-14, innerOptions для внутреннего
+решателя). Все опции валидируются; невалидные значения отклоняются
+(`invalid_input`).
+
+Результат — discriminated union:
+
+- `PrReactiveGasEquilibriumSuccess` (только `status: 'candidate_converged'`,
+  `model: 'peng_robinson_vapor'`, `root: 'vapor'`): temperatureK/pressurePa/
+  standardStatePressurePa, totalMoles, moleFractions, speciesMoles,
+  elementResiduals, chargeResidual, lnPhiUsed, lnPhiFixedPointResidual,
+  stationarityResidual (по активным видам), maxAbsStationarityResidual,
+  stationarityDiagnostics (диагностика B1 финальной итерации), outerIterations,
+  innerIterations, finalDamping, dampingEscalations, oscillationDetected,
+  gibbsEnergy (Дж, полная энергия PR-задачи, НЕ значение идеальногазового
+  результата), eosInputsUsed, binaryInteractionsUsed, warnings, notes,
+  interpretationLimitation.
+- `PrReactiveGasEquilibriumFailure` (`max_iterations` | `stagnated` |
+  `numerical_failure` | `unsupported_eos_data`): код причины (собственный или
+  нижнего слоя с префиксами `inner:`/`pr:`), последний fixed-point остаток,
+  последний вектор lnPhiUsed и состав внутреннего решения, внутренний статус и
+  сообщение, полный список дефицитов EOS/BIP-данных (`deficiencies`), warnings,
+  notes. Состав НЕ выдаётся за равновесный.
+
+Статусы `stable` / `globally_stable` / `phase_stable` / `global_minimum` в типы
+НЕ введены. Каждый результат несёт постоянное предупреждение
+`single_phase_vapor_candidate_without_phase_stability` и
+`interpretationLimitation` (однофазный vapor-кандидат без проверки глобальной
+фазовой устойчивости и без расчёта конденсированных фаз).
+
+### 11.2 Фактический алгоритм
+
+1. Строгая предитерационная проверка PR-входов ДО первой итерации (§8):
+   `validatePengRobinsonMixtureInputsStrict` (validation-only helper в
+   `pengRobinsonMixture.ts`, Stage 4.4.4.8-B2) проверяет ВСЕ компоненты и ВСЕ
+   пары различных видов — включая виды, которые внутренний решатель исключит
+   из-за нулевых итогов элементов: чистокомпонентные параметры (конечность,
+   наличие всех полей, без подмен приближениями), evidence по переданной
+   политике, каноническая единственность пар (самопары, дубликаты даже при
+   согласованном kij, противоречивые kij, неизвестные ID — отказ), конечность
+   kij, температура внутри `applicabilityRangeK` каждой пары (если задан).
+   Отсутствующий kij — отказ; молчаливый `kij = 0` запрещён. Дефициты
+   возвращаются ПОЛНЫМ списком (`unsupported_eos_data`), виды не удаляются,
+   element balance не меняется. Production-поведение `computePengRobinsonMixture`
+   для прежних потребителей не менялось.
+2. Инициализация `lnPhiUsed_i(0) = 0` — только стартовая точка итерации, а не
+   утверждение, что смесь идеальна (заметка включается в каждый успех).
+3. Итерация k: `gEffective_i/(RT) = g°_i/(RT) + lnPhiUsed_i(k)` → внутренний
+   `solveEquilibriumWithDiagnostics` (идеальногазовый решатель БЕЗ изменений;
+   §11 ТЗ B2: internals-снапшот собирается только по запросу — обычный
+   `solveEquilibrium` не аллоцирует диагностические массивы) → молярные доли
+   решения БЕЗ нормализации → `computePengRobinsonMixture` (фактические T, P,
+   состав, все явные PR-параметры, строго `root: 'vapor'`, переданная
+   evidencePolicy) → целевой вектор `lnPhiTarget`.
+4. Fixed-point остаток `r_i = lnPhiTarget_i − lnPhiUsed_i`,
+   `fixedPointResidual = max_i |r_i|` по ВСЕМ видам (виды с нулевой долей имеют
+   собственный lnPhi — фиктивных ln(0)-невязок нет).
+5. Демпфированное обновление в пространстве ln(phi) (не phi):
+   `lnPhiUsed_i(next) = lnPhiUsed_i(current) + lambda·r_i`.
+
+### 11.3 Фактическое демпфирование и детекторы
+
+Детерминированное адаптивное правило вынесено в экспортируемый для тестов
+helper `prReactiveDampingUpdate(lambda, residual, previousResidual,
+residualTwoStepsAgo, minDamping)` (без случайности, времени и
+недетерминированного выбора; без callback в публичном API):
+
+- рост нормы fixed-point остатка относительно предыдущей итерации → lambda
+  делится пополам (эскалация, счётчик dampingEscalations);
+- осцилляция «вниз-вверх» (невязка выросла после локального минимума два шага
+  назад) → ещё одно деление пополам и флаг `oscillationDetected`;
+- lambda не опускается ниже `minDamping` (1/1024 по умолчанию);
+- старт lambda = 1.
+
+Застой: если изменение демпфированного вектора `lambda·residual <
+stagnationEpsilon` при fixed-point остатке ≥ outerTolerance в течение
+`stagnationWindow` последовательных итераций — честный отказ `stagnated`.
+Застой НЕ выдаётся за сходимость: независимый fixed-point остаток всё равно
+обязан быть меньше допуска. Исчерпание бюджета — `max_iterations`. Отказ
+PR-вычислителя на промежуточном составе (данные уже проверены строго) —
+демпфированный откат к предыдущему вектору с уменьшением lambda вдвое; при
+lambda = minDamping — `numerical_failure` с кодом `pr:<code>`.
+
+### 11.4 Фактические критерии кандидата равновесия
+
+`candidate_converged` только при ОДНОВРЕМЕННОМ выполнении: внутренний статус
+`converged`; диагностика B1 существует и конечна; `max |lnPhiTarget −
+lnPhiUsed| < outerTolerance`; изменение демпфированного вектора <
+outerTolerance; прямая PR-невязка стационарности каждого АКТИВНОГО вида в
+допуске; C2-критерий всех element/charge residuals перепроверен независимо
+(допуск внутреннего решателя); все PR-вычисления успешны (предупреждения и
+evidence-ограничения сохранены в результате); финальный состав передан в
+PR-вычислитель на той же итерации — lnPhiTarget свежие, не устаревшие.
+
+Прямая PR-невязка стационарности (использует диагностику B1):
+
+    muPR_i/(RT) = muIdealEffective_i/(RT) + lnPhiTarget_i − lnPhiUsed_i
+    PRStationarityResidual_i = internalStationarityResidual_i
+                               + lnPhiTarget_i − lnPhiUsed_i
+
+(внутренняя невязка относится к задаче с `gEffective = g° + lnPhiUsed`, поэтому
+полная PR-невязка получается добавлением разности целей и использованных
+lnPhi). Сравнивать с допуском только внутреннюю невязку запрещено — это
+проверка другой задачи.
+
+### 11.5 Энергия Гиббса
+
+    G/(RT) = nTotal · SUM_i x_i · ( g°_i/(RT) + ln(x_i) + ln(P/p°) + lnPhiFinal_i )
+
+по активным видам (сумма только по x_i > 0 — без ln(0)); умножение на R·T даёт
+Дж. Неконечный результат — `numerical_failure`, кандидат не выдаётся.
+
+### 11.6 Фактическая тестовая матрица
+
+`Tests/prReactiveEquilibrium.test.ts`, 25 групп: алгоритм и физические пределы
+(идеальногазовый предел vs `solveEquilibrium`; точный нулевой предел
+притяжения a_i = 0 при T = Tc·(1+1/kappa)² с предельной формой lnPhi =
+(b_i/b)(Z−1) − ln(Z−B); однокомпонентный предел; бинарная реакция с
+синтетическими PR-параметрами; НЕЗАВИСИМЫЙ 1-D оракул — бисекция
+стационарного уравнения h(xB) = ln(xB/xA) + dg + lnPhiB − lnPhiA; знак и
+согласованность lnPhiUsed; перестановочная инвариантность; детерминизм),
+сходимость (запрет candidate_converged при внутренней несходимости и при
+fixed-point остатке выше допуска; формула PR-невязки при ненулевых lnPhi;
+детерминированное демпфирование напрямую — эскалация, осцилляция через две
+итерации, пол minDamping; stagnated; max_iterations; границы [minDamping, 1] и
+отклонение невалидных опций), fail-closed (отсутствующие параметры и kij, в
+том числе у пар с нулевой текущей долей; непринятый evidence, в том числе у
+неактивного вида; температура вне применимости BIP; неверные размерности;
+NaN/Infinity/повреждённые записи; дубликаты ID и пар, самопары, неизвестные
+ID, противоречивые kij; element/charge ограничения; нулевые итоги без ln(0);
+отсутствующие поля каталога не заменяются приближениями). Все PR-параметры в
+тестах — синтетические тестовые данные с явной пометкой в limitations.
+
+### 11.7 Границы B2
+
+Каталоговая интеграция (Data-фасад с замороженными provenance-объектами),
+интеграция с Atmosphere/Scheduler/UI и автоматическое переключение модели НЕ
+реализованы. LLE, PPR78, фазовая устойчивость, validated continuous TPD error
+bound, независимая экспериментальная проверка kij — вне объёма (§10).
+Stage 4.4.4 остаётся частично реализованным.
+
+---
+
+*Файл — design-артефакт Stage 4.4.4.8-A, ревизии Stage 4.4.4.8-B1
+(диагностический API solveEquilibriumWithDiagnostics) и Stage 4.4.4.8-B2
+(чистый Core-решатель solveReactiveGasEquilibriumWithPengRobinson, §11).
+Контракт и поведение solveEquilibrium не менялись (решатель остался
+идеальногазовым); EOS/BIP каталоги, golden baseline, flash, TPD-поиск, main
+и история Git не менялись. Каталоговый Data-фасад — отдельный следующий
+подэтап.*

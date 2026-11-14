@@ -206,6 +206,42 @@
 > остаётся идеальногазовым (model = ideal_gas). Phase 4.4.4
 > остаётся ЧАСТИЧНО РЕАЛИЗОВАННОЙ.
 
+> Ревизия Stage 4.4.4.8-B2 (2026-11-14, чистый Core-решатель PR
+> reactive gas equilibrium): в `Core/prReactiveEquilibrium.ts`
+> реализован `solveReactiveGasEquilibriumWithPengRobinson` — внешний
+> последовательный fixed-point цикл по компонентным ln(phi) вокруг
+> НЕИЗМЕНЁННОГО идеальногазового решателя: на итерации k внутренний
+> решатель получает gEffective_i/(RT) = g°_i/(RT) + lnPhiUsed_i(k),
+> затем по найденному составу `computePengRobinsonMixture` (строго
+> root = vapor) даёт lnPhiTarget; демпфированное обновление
+> lnPhiUsed += lambda·(lnPhiTarget − lnPhiUsed) в пространстве
+> ln(phi) с детерминированной адаптацией (эскалация при росте
+> невязки, осцилляция через две итерации, пол minDamping, детектор
+> застоя). Инициализация lnPhiUsed = 0 — стартовая точка, а не
+> утверждение об идеальности. Кандидат равновесия
+> (candidate_converged) требует одновременно: внутренний converged,
+> конечную диагностику B1, fixed-point остаток < outerTolerance,
+> изменение вектора < outerTolerance, прямую PR-невязку
+> PRStationarityResidual_i = internalResidual_i + lnPhiTarget_i −
+> lnPhiUsed_i в допуске по активным видам и перепроверенный C2
+> element/charge критерий. До первой итерации ВСЕ виды и ВСЕ пары
+> (включая исключаемые нулевыми итогами) проходят строгую
+> validation-only проверку `validatePengRobinsonMixtureInputsStrict`
+> (новый helper в `Core/pengRobinsonMixture.ts` на тех же внутренних
+> правилах evidence/параметров/applicability, что и production
+> вычислитель); дефицит данных — structured unsupported_eos_data с
+> полным списком, молчаливый kij = 0 запрещён. Энергия Гиббса
+> считается по финальному составу и финальным PR-фугитивностям
+> (не значение идеальногазового результата). ГРАНИЦЫ: все
+> EOS/BIP-параметры передаются ЯВНО (каталоговый lookup и
+> Data-фасад НЕ реализованы); это однофазный vapor-кандидат БЕЗ
+> проверки глобальной фазовой устойчивости и без конденсированных
+> фаз; статусы stable/globally_stable/phase_stable/global_minimum
+> не вводятся; solveEquilibrium остаётся идеальногазовым
+> (model = ideal_gas, internals-снапшот собирается только по
+> запросу). Phase 4.4.4 остаётся ЧАСТИЧНО РЕАЛИЗОВАННОЙ
+> (детали — PR_REACTIVE_EQUILIBRIUM_DESIGN.md §11).
+
 ## 1. Принципы
 
 1. Равновесие, кинетика и стехиометрия — ТРИ РАЗНЫЕ подсистемы, которые не
@@ -670,4 +706,5 @@ TP-2002-211556; 1 atm = 101325 Па не принимается), и данны�
   целом НЕ закрыт.
 - **4.9 (циклы)**: закрытый цикл C на тестовом сценарии сохраняет углерод
   в пределах 1e-9 за 1000 шагов; каждый поток имеет источник или `unknown`.
+
 

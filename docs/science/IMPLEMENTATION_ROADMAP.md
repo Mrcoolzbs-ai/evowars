@@ -2240,7 +2240,7 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   задавались); скрининг фаз — план; конденсированные фазы, кинетика
   (4.5) — вне 4.4.
 
-### 4.4.4 — Реальное EOS многокомпонентной смеси — ЧАСТИЧНО РЕАЛИЗОВАНО (4.4.4.1–4.4.4.4.2, 4.4.4.6, 4.4.4.7; design-gate 4.4.4.8-A; multi-start поиск минимумов TPD, изотермо-изобарный VLE flash Peng–Robinson и его явная интеграция в PhaseEquilibrium реализованы — без validated error bound; фазовые verdicts stable, LLE, PPR78 и интеграция с solveEquilibrium — НЕ РЕАЛИЗОВАНЫ)
+### 4.4.4 — Реальное EOS многокомпонентной смеси — ЧАСТИЧНО РЕАЛИЗОВАНО (4.4.4.1–4.4.4.4.2, 4.4.4.6, 4.4.4.7; design-gate 4.4.4.8-A; диагностика 4.4.4.8-B1; PR-решатель 4.4.4.8-B2; multi-start поиск минимумов TPD, изотермо-изобарный VLE flash Peng–Robinson и его явная интеграция в PhaseEquilibrium реализованы — без validated error bound; фазовые verdicts stable, LLE, PPR78 и интеграция с solveEquilibrium — НЕ РЕАЛИЗОВАНЫ)
 
 - **Статус раздела (05.11.2026, корректировка согласованности
   документации): частичная реализация, а не полное отсутствие
@@ -2756,6 +2756,82 @@ TPD-оракул. Phase 4.4.4 и подэтап 4.4.4.4 НЕ объявляют�
   автоматически; глобальная сходимость и глобальный минимум Гиббса НЕ
   доказаны; validated TPD error bound остаётся NO-GO. Phase 4.4.4
   остаётся ЧАСТИЧНО РЕАЛИЗОВАННОЙ.
+
+- **Статус (2026-11-14, Stage 4.4.4.8-B1 выполнен: добавляющая
+  диагностика стационарности внутренней идеальногазовой задачи;
+  PR-решатель НЕ реализован)** (`docs/science/
+  PR_REACTIVE_EQUILIBRIUM_DESIGN.md` §3.2/§6.4/§7.4). В
+  Core/equilibrium.ts добавлен отдельный диагностический API
+  solveEquilibriumWithDiagnostics (EquilibriumDetailedSolution
+  { result; stationarityDiagnostics | null }): для сошедшегося
+  внутреннего решения публикуются фактический редуцированный
+  базис (после reduceRows), двойственная проекция
+  dualProjection_i = SUM_j pi_j·c_ji, идеальногазовый химический
+  потенциал g_i_deg/(RT) + ln(x_i) + ln(P/p_deg) и невязка
+  стационарности по каждому активному виду; виды, исключённые
+  нулевыми итогами элементов, - inactive без вычисленного ln(0);
+  при несходимости (max_iterations / line_search_stalled /
+  numerical_failure) - null без фиктивных двойственных значений.
+  Общий внутренний путь с solveEquilibrium (private helper):
+  публичный контракт EquilibriumResult, арифметика Ньютона,
+  критерии сходимости, линейный поиск, reduceRows,
+  initialPotentials и численные результаты не изменены
+  (13 новых тестов; существующие тесты без изменений).
+  ГРАНИЦА: диагностика проверяет стационарность ВНУТРЕННЕЙ
+  идеальногазовой задачи с заданным effective g, а НЕ
+  стационарность полной PR-задачи (для неё дополнительно нужен
+  fixed-point остаток по lnPhi и сравнение muPR с проекцией);
+  solveReactiveGasEquilibriumWithPengRobinson не реализован,
+  solveEquilibrium остаётся идеальногазовым (model = ideal_gas),
+  EOS/BIP-каталоги и golden baseline не менялись. Phase 4.4.4
+  остаётся ЧАСТИЧНО РЕАЛИЗОВАННОЙ.
+
+- **Статус (2026-11-14, Stage 4.4.4.8-B2 выполнен: чистый Core-решатель
+  PR reactive gas equilibrium; каталоговая интеграция НЕ реализована)**
+  (`docs/science/PR_REACTIVE_EQUILIBRIUM_DESIGN.md` §11). В
+  Core/prReactiveEquilibrium.ts реализован
+  solveReactiveGasEquilibriumWithPengRobinson: внешний
+  последовательный fixed-point цикл по компонентным ln(phi) вокруг
+  НЕИЗМЕНЁННОГО идеальногазового решателя (gEffective_i/(RT) =
+  g°_i/(RT) + lnPhiUsed_i(k); lnPhiUsed(0) = 0 - стартовая точка
+  итерации, не утверждение об идеальности смеси; lnPhiTarget от
+  computePengRobinsonMixture строго root = vapor на фактическом
+  составе внутреннего решения; демпфированное обновление
+  lnPhiUsed += lambda·(lnPhiTarget - lnPhiUsed) в пространстве
+  ln(phi) с детерминированной адаптацией: эскалация при росте
+  невязки, осцилляция через две итерации, пол minDamping = 1/1024,
+  детектор застоя; без случайности, времени и недетерминированного
+  выбора). candidate_converged только при одновременном выполнении:
+  внутренний converged; конечная диагностика B1; fixed-point
+  остаток max|lnPhiTarget - lnPhiUsed| < outerTolerance; изменение
+  демпфированного вектора < outerTolerance; прямая PR-невязка
+  стационарности PRStationarityResidual_i = internalResidual_i +
+  lnPhiTarget_i - lnPhiUsed_i в допуске по каждому активному виду;
+  перепроверенный C2 element/charge критерий; успешные
+  PR-вычисления со свежим финальным составом (не устаревшие
+  lnPhiTarget). До ПЕРВОЙ итерации ВСЕ виды и ВСЕ пары (включая
+  виды, исключаемые нулевыми итогами элементов) проходят строгую
+  validation-only проверку новым helper'ом
+  validatePengRobinsonMixtureInputsStrict в
+  Core/pengRobinsonMixture.ts (те же внутренние правила
+  evidence/параметров/applicability, что у production-вычислителя;
+  дефициты возвращаются полным списком в unsupported_eos_data;
+  молчаливый kij = 0 запрещён; поведение computePengRobinsonMixture
+  для прежних потребителей не менялось). Энергия Гиббса считается
+  по финальному составу и финальным PR-фугитивностям (не
+  идеальногазовое значение; без ln(0)). Обычный solveEquilibrium не
+  аллоцирует internals-снапшот (сбор только по запросу
+  solveEquilibriumWithDiagnostics, §11 ТЗ B2); контракт, арифметика
+  и golden baseline не менялись (25 новых тестов; существующие
+  тесты без изменений). ГРАНИЦЫ: все EOS/BIP-параметры передаются
+  ЯВНО (каталоговый lookup и Data-фасад НЕ реализованы); это
+  однофазный vapor-кандидат БЕЗ проверки глобальной фазовой
+  устойчивости и без конденсированных фаз (постоянное
+  предупреждение); статусы stable/globally_stable/phase_stable/
+  global_minimum не вводятся; несходимые результаты (max_iterations,
+  stagnated, numerical_failure, unsupported_eos_data) не выдают
+  состав за равновесный. Phase 4.4.4 остаётся ЧАСТИЧНО
+  РЕАЛИЗОВАННОЙ.
 
 ## 4.5 Химическая кинетика
 
@@ -4178,6 +4254,7 @@ mute и хранение сообщений. Технология чатов н�
 каждый выбор из этого перечня откладывается до отдельного
 архитектурного этапа с обоснованием, опирающимся на прототип и
 измерения нагрузки.
+
 
 
 

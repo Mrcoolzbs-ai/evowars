@@ -73,11 +73,13 @@ export * from './solverBackend';
 export * from './odeSolver';
 export * from './pengRobinson';
 export * from './pengRobinsonMixture';
+export * from './prReactiveEquilibrium';
 export * from './prTangentPlaneDistance';
 export * from './prTangentPlaneDistanceSearch';
 export * from './pengRobinsonFlash';
 export * from './migrations';
 export * from './adapters';
+
 
 
 

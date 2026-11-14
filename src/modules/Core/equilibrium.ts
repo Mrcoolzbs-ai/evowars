@@ -830,9 +830,14 @@ function failedResult(
  * сходимости, линейный поиск, reduceRows и initialPotentials не
  * менялись; публичный solveEquilibrium ниже возвращает тот же
  * результат, что и прежняя монолитная реализация.
+ *
+ * Stage 4.4.4.8-B2 (§11): параметр collectInternals управляет
+ * сбором internals-снапшота; обычный путь (false) не аллоцирует
+ * диагностические массивы.
  */
 function solveEquilibriumInternal(
-  problem: EquilibriumProblem
+  problem: EquilibriumProblem,
+  collectInternals: boolean
 ): EquilibriumInternalSolution {
   const validated = validateProblem(problem);
   const { maxIterations, tolerance } = parseOptions(problem);
@@ -1156,15 +1161,20 @@ function solveEquilibriumInternal(
   // сошедшегося решателя (копии - internals не разделяет мутабельное
   // состояние); порядок видов и строк - канонический порядок
   // решателя, без восстановления базиса заново.
-  const internals: EquilibriumSolverInternals = {
-    potentials: pi.slice(),
-    reducedRows: reduced.map((row) => ({ name: row.name, coefficients: row.coefficients.slice() })),
-    activeSpeciesIds: species.map((s) => s.id),
-    inactiveSpeciesIds: excludedSpecies.map((s) => s.id),
-    fractions: state.fractions.slice(),
-    logPressureRatio,
-    gStandardOverRT: gOverRT.slice()
-  };
+  // Stage 4.4.4.8-B2 (§11): снапшот собирается ТОЛЬКО по запросу
+  // (collectInternals) - обычный solveEquilibrium не аллоцирует
+  // диагностические массивы; арифметика решателя не менялась.
+  const internals: EquilibriumSolverInternals | null = collectInternals
+    ? {
+        potentials: pi.slice(),
+        reducedRows: reduced.map((row) => ({ name: row.name, coefficients: row.coefficients.slice() })),
+        activeSpeciesIds: species.map((s) => s.id),
+        inactiveSpeciesIds: excludedSpecies.map((s) => s.id),
+        fractions: state.fractions.slice(),
+        logPressureRatio,
+        gStandardOverRT: gOverRT.slice()
+      }
+    : null;
   return {
     result: {
       status: 'converged',
@@ -1190,7 +1200,7 @@ function solveEquilibriumInternal(
  * EquilibriumResult.
  */
 export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult {
-  return solveEquilibriumInternal(problem).result;
+  return solveEquilibriumInternal(problem, false).result;
 }
 
 /**
@@ -1216,7 +1226,7 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
 export function solveEquilibriumWithDiagnostics(
   problem: EquilibriumProblem
 ): EquilibriumDetailedSolution {
-  const internal = solveEquilibriumInternal(problem);
+  const internal = solveEquilibriumInternal(problem, true);
   if (internal.result.status !== 'converged' || internal.internals === null) {
     return {
       result: internal.result,
@@ -1606,3 +1616,4 @@ export function elementTotalsFromCatalogAmounts(
 // Scheduler/CoreWorldState, конденсированные фазы (равновесный
 // flash), неидеальные EOS и кинетика - вне объёма этого подэтапа
 // (см. docs/science/IMPLEMENTATION_ROADMAP.md §4.4).
+

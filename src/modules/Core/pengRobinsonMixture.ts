@@ -751,6 +751,350 @@ function evaluateStatusAgainstPolicy(
 }
 
 // ============================================
+// 3.1 СТРОГАЯ ПРЕДИТЕРАЦИОННАЯ ПРОВЕРКА ВХОДОВ (Stage 4.4.4.8-B2)
+// ============================================
+
+/**
+ * Вид дефицита строгой проверки входов реактивной задачи
+ * (Stage 4.4.4.8-B2). В отличие от production-вычислителя смеси,
+ * который требует kij только для пар с ПОЛОЖИТЕЛЬНЫМИ долями
+ * (итоговый состав заранее неизвестен и на момент проверки ещё
+ * не вычислен), строгая проверка покрывает ВСЕ компоненты и ВСЕ
+ * пары.
+ */
+export type PengRobinsonStrictInputDeficiencyKind =
+  | 'invalid_component_parameters'
+  | 'duplicate_component'
+  | 'component_evidence_not_accepted'
+  | 'self_pair'
+  | 'duplicate_binary_interaction'
+  | 'contradictory_binary_interaction'
+  | 'unknown_component_in_binary_interaction'
+  | 'invalid_binary_interaction_parameters'
+  | 'binary_evidence_not_accepted'
+  | 'binary_interaction_applicability'
+  | 'missing_binary_interaction'
+  | 'invalid_temperature';
+
+/** Один дефицит: вид, субъект (вид/пара) и человеческое описание. */
+export interface PengRobinsonStrictInputDeficiency {
+  readonly kind: PengRobinsonStrictInputDeficiencyKind;
+  readonly subject: string;
+  readonly message: string;
+}
+
+/** Успех строгой проверки (предупреждения evidence сохраняются). */
+export interface PengRobinsonStrictInputsCheckSuccess {
+  readonly ok: true;
+  readonly warnings: readonly PengRobinsonMixtureWarning[];
+}
+
+/** Отказ строгой проверки: ПОЛНЫЙ список дефицитов (fail-closed). */
+export interface PengRobinsonStrictInputsCheckFailure {
+  readonly ok: false;
+  readonly deficiencies: readonly PengRobinsonStrictInputDeficiency[];
+  readonly warnings: readonly PengRobinsonMixtureWarning[];
+}
+
+/**
+ * Validation-only строгая проверка входов PR-смеси для реактивной
+ * задачи (Stage 4.4.4.8-B2): все компоненты и ВСЕ пары различных
+ * компонентов — включая компоненты, которые в текущем составе имеют
+ * нулевую долю (в реактивной задаче итоговый состав заранее
+ * неизвестен, поэтому гейтинг обязан быть полным ДО первой
+ * итерации). Проверки используют ТЕ ЖЕ внутренние правила, что и
+ * production-вычислитель: evaluateStatusAgainstPolicy для evidence,
+ * канонизацию пар canonicalPairKey, те же численные требования к
+ * параметрам и applicability. Кубическое уравнение НЕ решается и
+ * искусственный состав НЕ строится — это только проверка.
+ *
+ * Отличия от production-пути computePengRobinsonMixture:
+ * - kij требуется для КАЖДОЙ пары различных компонентов (не только
+ *   с положительными долями); отсутствие — дефицит
+ *   missing_binary_interaction, молчаливый kij = 0 запрещён;
+ * - дубликаты пары отклоняются даже при согласованном kij
+ *   («ровно один раз в каноническом смысле»);
+ * - evidence-политика применяется ко ВСЕМ компонентам и парам;
+ * - возвращается ПОЛНЫЙ список дефицитов, а не первый отказ.
+ *
+ * Поведение computePengRobinsonMixture для прежних потребителей
+ * НЕ меняется.
+ */
+export function validatePengRobinsonMixtureInputsStrict(
+  components: readonly Omit<PengRobinsonMixtureComponentInput, 'moleFraction'>[],
+  binaryInteractions: readonly PengRobinsonBinaryInteractionInput[],
+  temperatureK: number,
+  evidencePolicy: PengRobinsonEvidencePolicy
+): PengRobinsonStrictInputsCheckSuccess | PengRobinsonStrictInputsCheckFailure {
+  const deficiencies: PengRobinsonStrictInputDeficiency[] = [];
+  const warnings: PengRobinsonMixtureWarning[] = [];
+
+  if (!Number.isFinite(temperatureK) || temperatureK <= 0) {
+    deficiencies.push({
+      kind: 'invalid_temperature',
+      subject: 'temperatureK',
+      message: `температура должна быть конечным положительным числом (K), получено: ${String(temperatureK)}`
+    });
+  }
+
+  // --- Компоненты: форма, уникальность, конечность параметров ---
+  if (!Array.isArray(components)) {
+    return {
+      ok: false,
+      deficiencies: [
+        {
+          kind: 'invalid_component_parameters',
+          subject: 'components',
+          message: 'components должен быть массивом компонентов'
+        }
+      ],
+      warnings
+    };
+  }
+  if (components.length === 0) {
+    return {
+      ok: false,
+      deficiencies: [
+        {
+          kind: 'invalid_component_parameters',
+          subject: 'components',
+          message: 'список компонентов пуст: требуется минимум один вид'
+        }
+      ],
+      warnings
+    };
+  }
+  const seen = new Set<string>();
+  for (const raw of components) {
+    const def = (kind: PengRobinsonStrictInputDeficiencyKind, subject: string, message: string) =>
+      deficiencies.push({ kind, subject, message });
+    if (raw === null || typeof raw !== 'object') {
+      def('invalid_component_parameters', String(raw), 'компонент должен быть объектом');
+      continue;
+    }
+    const rec = raw as Record<string, unknown>;
+    if (typeof rec.component !== 'string' || rec.component.trim() === '') {
+      def('invalid_component_parameters', String(rec.component), 'идентификатор компонента должен быть непустой строкой');
+      continue;
+    }
+    const id = rec.component;
+    if (seen.has(id)) {
+      def('duplicate_component', id, `дублированный компонент «${id}» (идентификаторы должны быть уникальными)`);
+      continue;
+    }
+    seen.add(id);
+    if (!isFiniteNumber(rec.criticalTemperatureK) || (rec.criticalTemperatureK as number) <= 0) {
+      def('invalid_component_parameters', id, `criticalTemperatureK вида «${id}» должен быть конечным положительным числом (K), получено: ${String(rec.criticalTemperatureK)}`);
+    }
+    if (!isFiniteNumber(rec.criticalPressurePa) || (rec.criticalPressurePa as number) <= 0) {
+      def('invalid_component_parameters', id, `criticalPressurePa вида «${id}» должен быть конечным положительным числом (Pa), получено: ${String(rec.criticalPressurePa)}`);
+    }
+    if (!isFiniteNumber(rec.acentricFactor)) {
+      def('invalid_component_parameters', id, `acentricFactor вида «${id}» должен быть конечным числом, получено: ${String(rec.acentricFactor)}`);
+    }
+    const evidence = rec.evidence as unknown;
+    if (
+      !isNonNullObject(evidence) ||
+      typeof (evidence as Record<string, unknown>).criticalTemperatureK !== 'string' ||
+      typeof (evidence as Record<string, unknown>).criticalPressurePa !== 'string' ||
+      typeof (evidence as Record<string, unknown>).acentricFactor !== 'string'
+    ) {
+      def('invalid_component_parameters', id, `evidence вида «${id}» должен содержать статусы доказанности всех трёх параметров`);
+    }
+    if (!Array.isArray(rec.crossChecks) || !Array.isArray(rec.limitations)) {
+      def('invalid_component_parameters', id, `crossChecks и limitations вида «${id}» должны быть массивами`);
+    }
+    // Evidence-политика — ТЕ ЖЕ внутренние проверки, что и в
+    // production-вычислителе (evaluateStatusAgainstPolicy).
+    if (isNonNullObject(evidence)) {
+      const typedEvidence = evidence as unknown as PengRobinsonParameterEvidence;
+      const fields: readonly [keyof PengRobinsonParameterEvidence, string][] = [
+        ['criticalTemperatureK', 'criticalTemperatureK'],
+        ['criticalPressurePa', 'criticalPressurePa'],
+        ['acentricFactor', 'acentricFactor']
+      ];
+      const crossChecks = Array.isArray(rec.crossChecks)
+        ? (rec.crossChecks as readonly PengRobinsonCrossCheck[])
+        : [];
+      for (const [field, label] of fields) {
+        const { rejected, warning } = evaluateStatusAgainstPolicy(
+          `компонент «${id}»`,
+          label,
+          typedEvidence[field],
+          evidencePolicy,
+          'partially_verified_parameter',
+          crossChecks
+        );
+        if (rejected !== null) {
+          def('component_evidence_not_accepted', id, `политика «${evidencePolicy}» не принимает: ${id}.${rejected}`);
+        } else if (warning !== null) {
+          warnings.push(warning);
+        }
+      }
+    }
+  }
+
+  // --- Бинарные записи: форма, самопары, дубликаты, противоречия ---
+  if (!Array.isArray(binaryInteractions)) {
+    deficiencies.push({
+      kind: 'invalid_binary_interaction_parameters',
+      subject: 'binaryInteractions',
+      message: 'binaryInteractions должен быть массивом записей kij'
+    });
+  } else {
+    const pairCounts = new Map<string, { count: number; kij: number; record: PengRobinsonBinaryInteractionInput }>();
+    for (const raw of binaryInteractions) {
+      if (raw === null || typeof raw !== 'object') {
+        deficiencies.push({
+          kind: 'invalid_binary_interaction_parameters',
+          subject: String(raw),
+          message: 'запись kij должна быть объектом {componentA, componentB, kij, evidence, applicabilityRangeK}'
+        });
+        continue;
+      }
+      const rec = raw as Record<string, unknown>;
+      const a = rec.componentA;
+      const b = rec.componentB;
+      if (typeof a !== 'string' || a.trim() === '' || typeof b !== 'string' || b.trim() === '') {
+        deficiencies.push({
+          kind: 'invalid_binary_interaction_parameters',
+          subject: `${String(a)}|${String(b)}`,
+          message: 'componentA и componentB записи kij должны быть непустыми строками'
+        });
+        continue;
+      }
+      if (a === b) {
+        deficiencies.push({
+          kind: 'self_pair',
+          subject: `${a}|${b}`,
+          message: `самопара «${a}|${b}» недопустима: a_ii = a_i по определению, k_ii не является пользовательским параметром`
+        });
+        continue;
+      }
+      const knownA = seen.has(a);
+      const knownB = seen.has(b);
+      if (!knownA || !knownB) {
+        const unknownIds = [!knownA ? a : null, !knownB ? b : null].filter((x) => x !== null);
+        deficiencies.push({
+          kind: 'unknown_component_in_binary_interaction',
+          subject: `${a}|${b}`,
+          message: `запись kij ссылается на компоненты, отсутствующие в списке видов: ${unknownIds.join(', ')}`
+        });
+        continue;
+      }
+      if (!isFiniteNumber(rec.kij)) {
+        deficiencies.push({
+          kind: 'invalid_binary_interaction_parameters',
+          subject: `${a}|${b}`,
+          message: `kij пары «${a}|${b}» должен быть конечным числом, получено: ${String(rec.kij)}`
+        });
+        continue;
+      }
+      if (
+        typeof rec.evidence !== 'string' ||
+        !(
+          ['VERIFIED', 'PARTIALLY_VERIFIED', 'UNRESOLVED_CROSS_CHECK', 'UNRESOLVED'] as readonly string[]
+        ).includes(rec.evidence)
+      ) {
+        deficiencies.push({
+          kind: 'invalid_binary_interaction_parameters',
+          subject: `${a}|${b}`,
+          message: `evidence записи kij пары «${a}|${b}» должен быть статусом доказанности (VERIFIED | PARTIALLY_VERIFIED | UNRESOLVED_CROSS_CHECK | UNRESOLVED)`
+        });
+        continue;
+      }
+      const range = rec.applicabilityRangeK;
+      if (range !== null && range !== undefined) {
+        const rangeRecord = isNonNullObject(range) ? range : null;
+        const minT: unknown = rangeRecord !== null ? rangeRecord.minTemperatureK : undefined;
+        const maxT: unknown = rangeRecord !== null ? rangeRecord.maxTemperatureK : undefined;
+        if (!isFiniteNumber(minT) || !isFiniteNumber(maxT) || (minT as number) <= 0 || (maxT as number) <= 0 || (minT as number) >= (maxT as number)) {
+          deficiencies.push({
+            kind: 'invalid_binary_interaction_parameters',
+            subject: `${a}|${b}`,
+            message: `applicabilityRangeK пары «${a}|${b}» должен быть null или {minTemperatureK, maxTemperatureK}: конечные положительные, min < max`
+          });
+          continue;
+        }
+      }
+      const key = canonicalPairKey(a, b);
+      const existing = pairCounts.get(key);
+      if (existing !== undefined) {
+        if (existing.kij !== (rec.kij as number)) {
+          deficiencies.push({
+            kind: 'contradictory_binary_interaction',
+            subject: key,
+            message: `для пары «${key}» переданы РАЗНЫЕ значения kij: ${String(existing.kij)} и ${String(rec.kij)}; классические правила смешения требуют симметрии kij = kji`
+          });
+        } else {
+          deficiencies.push({
+            kind: 'duplicate_binary_interaction',
+            subject: key,
+            message: `пара «${key}» присутствует в binaryInteractions более одного раза (требуется ровно одна каноническая запись)`
+          });
+        }
+        continue;
+      }
+      pairCounts.set(key, { count: 1, kij: rec.kij as number, record: raw as unknown as PengRobinsonBinaryInteractionInput });
+    }
+
+    // Полнота: каждая пара различных компонентов — ровно один раз.
+    const ids = Array.from(seen).sort();
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const key = canonicalPairKey(ids[i], ids[j]);
+        const entry = pairCounts.get(key);
+        if (entry === undefined) {
+          deficiencies.push({
+            kind: 'missing_binary_interaction',
+            subject: key,
+            message: `отсутствует бинарный параметр взаимодействия для пары «${key}»; расчёт без kij НЕ выполняется (fail-closed): kij = 0 не является «нейтральным» значением`
+          });
+          continue;
+        }
+        const record = entry.record;
+        // Evidence-политика и применимость — для ВСЕХ пар, включая
+        // пары видов с нулевыми текущими долями.
+        const { rejected, warning } = evaluateStatusAgainstPolicy(
+          `бинарное взаимодействие «${key}»`,
+          'kij',
+          record.evidence,
+          evidencePolicy,
+          'partially_verified_binary_interaction',
+          []
+        );
+        if (rejected !== null) {
+          deficiencies.push({
+            kind: 'binary_evidence_not_accepted',
+            subject: key,
+            message: `политика «${evidencePolicy}» не принимает: ${key}.${rejected}`
+          });
+        } else if (warning !== null) {
+          warnings.push(warning);
+        }
+        if (
+          record.applicabilityRangeK !== null &&
+          Number.isFinite(temperatureK) &&
+          (temperatureK < record.applicabilityRangeK.minTemperatureK ||
+            temperatureK > record.applicabilityRangeK.maxTemperatureK)
+        ) {
+          deficiencies.push({
+            kind: 'binary_interaction_applicability',
+            subject: key,
+            message: `температура ${temperatureK} K вне верифицированного диапазона применимости kij пары «${key}» [${record.applicabilityRangeK.minTemperatureK}, ${record.applicabilityRangeK.maxTemperatureK}] K`
+          });
+        }
+      }
+    }
+  }
+
+  if (deficiencies.length > 0) {
+    return { ok: false, deficiencies, warnings };
+  }
+  return { ok: true, warnings };
+}
+
+// ============================================
 // 4. ПУБЛИЧНЫЙ СМЕСЕВОЙ ВЫЧИСЛИТЕЛЬ CORE
 // ============================================
 
@@ -1216,4 +1560,5 @@ export function computePengRobinsonMixture(
 // каталоги (чистых параметров и kij) — Data; flash, VLE/LLE, фазовая
 // устойчивость, PPR78, конденсированные фазы, ternary-параметры и
 // интеграция с solveEquilibrium — вне объёма подэтапа.
+
 
