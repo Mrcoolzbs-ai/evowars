@@ -1,0 +1,1968 @@
+// ============================================
+// FLUX LEDGER - Учёт потоков вещества и энергии
+// ============================================
+//
+// Единая система регистрации переносов между резервуарами и через
+// внешнюю границу системы (Stage 4.1; научная целостность аудитов
+// и применения потоков исправлена в Stage 4.1.1).
+//
+// Главные правила:
+// - три вида потоков, не смешиваемых между собой:
+//   internal_transfer (между внутренними резервуарами),
+//   external_input (поступление извне), external_output
+//   (потеря системой); внешний поток нельзя замаскировать
+//   под внутренний перенос;
+// - РАЗДЕЛЕНИЕ rate и integrated amount:
+//   скорость (моль/с, Вт) — НЕ перенесённое количество (моль, Дж);
+//   rate-запись к инвентарю не применяется; чтобы применить поток,
+//   скорость интегрируется по времени ЯВНЫМ вызовом integrateRate()
+//   и регистрируется как integrated-поток;
+// - каждая запись применяется к резервуарам ровно один раз
+//   (идемпотентность: повторное применение той же записи — ошибка);
+// - применение записи atomic: убыль из источника и прибавление
+//   получателю происходят вместе либо не происходят вовсе;
+// - применённая запись может быть корректно отменена (revert),
+//   статус при этом сохраняется — история не переписывается;
+// - балансные аудиты (элементный, зарядовый, по веществам,
+//   энергетический) сверяют фактические инвентари с потока́ми.
+//
+// Stage 4.1.1 (исправление Issues 3-4 и связанных):
+// - применение энергетического потока РЕАЛЬНО изменяет storedJ
+//   резервуаров: зарегистрированный поток ≠ физически применённый,
+//   но применённый поток обязан изменить запас энергии;
+// - вещество не применяется к несуществующему инвентарю молча:
+//   отсутствие инвентаря/несовместимость основания/нехватка запаса
+//   диагностируются явно, а не обходятся;
+// - аудиты проверяют каждый резервуар и каждый вид, а не только
+//   суммарный запас системы: «вещество ушло не туда» теперь
+//   ловится даже при сохранении общей суммы (auditReservoirFluxes);
+// - аудиты подчиняются временной области (FluxAuditScope):
+//   записи вне интервала и записи без привязки ко времени не
+//   учитываются молча — они исключаются и перечисляются явно;
+// - элементный/зарядовый/вещественный аудиты basis-aware:
+//   массы переводятся в моли по молярной массе вида; невозможность
+//   перевода — это 'not_verifiable', а не выдуманный ноль;
+// - отсутствие знания (unknown storedJ, неизвестная молярная масса,
+//   исключённые виды) никогда не трактуется как успешный баланс.
+//
+// Stage 4.1.1.3 (materialApplicability и форма записей):
+// - пофазовый аудит (auditReservoirFluxes) соблюдает ЯВНУЮ семантику
+//   materialApplicability: отсутствие material без маркера
+//   'not_applicable' — неизвестный запас (not_verifiable), а не
+//   автоматическая нематериальность; законное исключение материального
+//   измерения требует маркер в ОБОИХ состояниях;
+// - material.entries и properties — объекты-записи: массив не
+//   принимается за словарь и не трактуется как «известная пустота».
+//
+// Stage 4.1.1.3.1 (строгая форма записей): словарь speciesId →
+// количество — ТОЛЬКО настоящая объектная запись (прототип
+// Object.prototype или null). Map, Set, Date, RegExp и экземпляры
+// пользовательских классов отвергаются во всех точках входа:
+// Object.entries по таким структурам вернул бы пустой массив и
+// выдал бы некорректную структуру за «известную пустоту».
+//
+// Материя не создаётся и не уничтожается «внутри системы»:
+// изменение суммарного инвентаря допустимо ТОЛЬКО за счёт
+// внешних потоков; внутренние переносы сохраняют итог.
+//
+// Stage 4.2.3.4 (реакционные вклады в аудиты инвентарей):
+// - AuditOptions.reactionDeltas — типизированные вклады реакционных
+//   транзакций (±coefficient × extent по extentBasis) в изменение
+//   запасов; ReactionRecord НЕ превращается в FluxRecord и в
+//   FluxLedger не попадает: реакции и потоки — раздельные механизмы,
+//   аудиты инвентарей складывают их вклады ровно один раз каждый
+//   (expected Δ = flux Δ + reaction Δ);
+// - auditSubstanceConservation учитывает реакционные вклады в
+//   молярном счёте по видам (моли/моли-на-м² по extentBasis);
+//   смешение реакционных оснований или несовпадение с основанием
+//   системы — честное not_verifiable без пересчёта через выдуманную
+//   площадь;
+// - auditReservoirFluxes складывает реакционные вклады с потоковыми
+//   Δ по паре (reservoirId, speciesId); основание вклада обязано
+//   совпадать с основанием инвентаря — иначе исключение, а не
+//   выдуманный ноль;
+// - элементный и зарядовый аудиты реакционных вкладов НЕ получают:
+//   элементы и заряд реакция сохраняет по построению (стехиометрия
+//   проверяется отдельно секцией reactions аудита перехода), а
+//   глобальное сохранение элементов и заряда продолжает
+//   проверяться независимо — сбалансированная реакция не маскирует
+//   его нарушение.
+//
+// Корректирующая ревизия Stage 4.2.3.4.1 (prototype-safe накопление
+// и численная устойчивость объединения вкладов):
+// - speciesId — произвольная непустая строка: накопление вкладов по
+//   видам (reactionMolarCounts, ExpectedDelta.species в
+//   auditReservoirFluxes) ведётся в Map, а не в обычном объекте —
+//   присваивание '__proto__' в {} не создаёт собственного ключа и
+//   вклад терялся, а унаследованные свойства ('constructor',
+//   'toString') не являются количествами; чтение количества вида из
+//   инвентаря (ownEntryAmount) учитывает только СОБСТВЕННЫЕ ключи:
+//   отсутствие собственного ключа — известный ноль, унаследованное
+//   свойство количеством не считается, нечисловое собственное
+//   значение непредставимо (NaN-диагностика, а не выдуманный ноль);
+// - конечность проверяется после КАЖДОГО сложения при объединении
+//   вкладов FluxLedger и ReactionLedger (не только Number.isNaN —
+//   Infinity и -Infinity тоже непригодны): непредставимый вклад
+//   становится явным исключением (exclusion → not_verifiable), а
+//   не обычным численным расхождением; в auditSubstanceConservation
+//   конечность проверяется у каждого компонента и каждой
+//   промежуточной суммы expected = before + netFlux + reactionDelta,
+//   включая ожидаемый итоговый запас и фактический счёт;
+//   настоящий конечный дисбаланс сверх tolerance по-прежнему даёт
+//   imbalanced — проверка не ослаблена;
+// - энергетическое измерение auditReservoirFluxes следует тому же
+//   правилу: непредставимый ожидаемый или фактический запас —
+//   исключение (not_verifiable), а не расхождение из Infinity.
+
+import type { InventoryBasis, MaterialInventory, ReservoirRecord } from './reservoir';
+import { addMaterial, describeRecordCandidate, isKnownBasis, isPlainRecord, removeMaterial, validateMaterialInventory } from './reservoir';
+import type { SpeciesCatalog } from './species';
+import { chargeTotal, elementTotals as speciesElementTotals } from './species';
+import { comparePoints } from './simulationClock';
+
+// ============================================
+// 1. ТИПЫ ПОТОКОВ
+// ============================================
+
+/** Идентификатор внешней границы системы. */
+export const EXTERNAL = 'external';
+
+export type FluxKind = 'internal_transfer' | 'external_input' | 'external_output';
+
+export const FLUX_KINDS: readonly FluxKind[] = ['internal_transfer', 'external_input', 'external_output'];
+
+export const FLUX_STATUSES: readonly FluxStatus[] = ['pending', 'applied', 'reverted'];
+
+/**
+ * Переносимый субъект потока.
+ *
+ * quantityKind:
+ * - 'integrated' — количество, перенесённое ЗА ИНТЕРВАЛ
+ *   (моль/м² столба, моль, кг, Дж): применяется к инвентарю;
+ * - 'rate' — скорость переноса (моль/с, Вт): к инвентарю НЕ
+ *   применяется; должна быть явно интегрирована по времени.
+ */
+export type FluxSubject =
+  | {
+      subjectType: 'substance';
+      speciesId: string;
+      quantityKind: 'integrated';
+      /** Перенесённое количество в единицах основания. */
+      amount: number;
+      /** Основание количества (как у инвентаря резервуара). */
+      basis: InventoryBasis;
+    }
+  | {
+      subjectType: 'substance';
+      speciesId: string;
+      quantityKind: 'rate';
+      /** Скорость переноса количества вещества в единицах basis за секунду. */
+      ratePerSecond: number;
+      basis: InventoryBasis;
+      /** Семантика скорости (какая модель её дала), если задана. */
+      note?: string;
+    }
+  | {
+      subjectType: 'energy';
+      quantityKind: 'integrated';
+      /** Энергия, переданная за интервал, Дж. */
+      energyJ: number;
+    }
+  | {
+      subjectType: 'energy';
+      quantityKind: 'rate';
+      /** Мощность, Вт. НЕ равна переданной энергии. */
+      powerW: number;
+      note?: string;
+    };
+
+/** Привязка потока к моменту времени симуляции (SimulationClock). */
+export interface FluxTime {
+  segmentIndex: number;
+  localTimeS: number;
+}
+
+export type FluxStatus = 'pending' | 'applied' | 'reverted';
+
+/** Запись потока. */
+export interface FluxRecord {
+  id: string;
+  kind: FluxKind;
+  /** Источник: reservoirId (или EXTERNAL для external_input). */
+  from: string;
+  /** Получатель: reservoirId (или EXTERNAL для external_output). */
+  to: string;
+  subject: FluxSubject;
+  /** Момент/интервал, к которому относится поток; null — не привязан. */
+  time: FluxTime | null;
+  status: FluxStatus;
+  note?: string;
+}
+
+export interface FluxLedger {
+  records: FluxRecord[];
+}
+
+// ============================================
+// 2. ОШИБКИ И ВАЛИДАЦИЯ
+// ============================================
+
+export class FluxLedgerError extends Error {
+  readonly code:
+    | 'invalid_flux'
+    | 'duplicate_flux_id'
+    | 'unknown_flux'
+    | 'already_applied'
+    | 'not_applied'
+    | 'rate_not_applicable'
+    | 'unknown_reservoir'
+    | 'unknown_inventory'
+    | 'unknown_energy_inventory'
+    | 'insufficient_energy'
+    | 'incompatible_basis';
+  readonly component = 'FluxLedger';
+  readonly fluxId: string | null;
+
+  constructor(code: FluxLedgerError['code'], message: string, fluxId: string | null) {
+    super(`[FluxLedger/${code}] ${message}`);
+    this.name = 'FluxLedgerError';
+    this.code = code;
+    this.fluxId = fluxId;
+  }
+}
+
+/** Пустой реестр. */
+export function createFluxLedger(): FluxLedger {
+  return { records: [] };
+}
+
+function recordById(ledger: FluxLedger, id: string): FluxRecord {
+  const rec = ledger.records.find((r) => r.id === id);
+  if (!rec) {
+    throw new FluxLedgerError('unknown_flux', `поток «${id}» не зарегистрирован`, id);
+  }
+  return rec;
+}
+
+function requireReservoir(reservoirs: Record<string, ReservoirRecord>, reservoirId: string, fluxId: string): ReservoirRecord {
+  const res = reservoirs[reservoirId];
+  if (!res) {
+    throw new FluxLedgerError('unknown_reservoir', `резервуар «${reservoirId}» не существует`, fluxId);
+  }
+  return res;
+}
+
+/**
+ * Регистрация потока. Проверки:
+ * - internal_transfer: from и to — существующие внутренние резервуары
+ *   и from ≠ to (перенос самому себе бессмыслен);
+ * - external_input: from = EXTERNAL, to — внутренний резервуар;
+ * - external_output: to = EXTERNAL, from — внутренний резервуар;
+ * - integrated-количество — конечное положительное число
+ *   (нулевой перенос не регистрируется как поток);
+ * - rate — конечное положительное число.
+ */
+export function registerFlux(ledger: FluxLedger, record: {
+  id: string;
+  kind: FluxKind;
+  from: string;
+  to: string;
+  subject: FluxSubject;
+  time?: FluxTime | null;
+  note?: string;
+}): FluxLedger {
+  if (record.id.trim() === '') {
+    throw new FluxLedgerError('invalid_flux', 'id потока не может быть пустым', null);
+  }
+  if (ledger.records.some((r) => r.id === record.id)) {
+    throw new FluxLedgerError('duplicate_flux_id', `поток «${record.id}» уже зарегистрирован`, record.id);
+  }
+  if (record.kind === 'internal_transfer') {
+    if (record.from === EXTERNAL || record.to === EXTERNAL) {
+      throw new FluxLedgerError('invalid_flux', `внутренний перенос «${record.id}» не может пересекать внешнюю границу (from=${record.from}, to=${record.to})`, record.id);
+    }
+    if (record.from === record.to) {
+      throw new FluxLedgerError('invalid_flux', `перенос «${record.id}» в самого себя (${record.from}) не является переносом между резервуарами`, record.id);
+    }
+  } else if (record.kind === 'external_input') {
+    if (record.from !== EXTERNAL || record.to === EXTERNAL) {
+      throw new FluxLedgerError('invalid_flux', `external_input «${record.id}» требует from=external и внутреннего получателя`, record.id);
+    }
+  } else {
+    if (record.to !== EXTERNAL || record.from === EXTERNAL) {
+      throw new FluxLedgerError('invalid_flux', `external_output «${record.id}» требует to=external и внутреннего источника`, record.id);
+    }
+  }
+  if (record.subject.subjectType === 'substance') {
+    if (record.subject.speciesId.trim() === '') {
+      throw new FluxLedgerError('invalid_flux', `поток «${record.id}»: speciesId не может быть пустым`, record.id);
+    }
+    const amount = record.subject.quantityKind === 'integrated' ? record.subject.amount : record.subject.ratePerSecond;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new FluxLedgerError('invalid_flux', `поток «${record.id}»: переносимое количество/скорость должно быть конечным положительным числом, получено ${amount}`, record.id);
+    }
+  } else if (record.subject.quantityKind === 'integrated') {
+    if (!Number.isFinite(record.subject.energyJ) || record.subject.energyJ <= 0) {
+      throw new FluxLedgerError('invalid_flux', `поток «${record.id}»: энергия должна быть конечным положительным числом, получено ${record.subject.energyJ}`, record.id);
+    }
+  } else {
+    if (!Number.isFinite(record.subject.powerW) || record.subject.powerW <= 0) {
+      throw new FluxLedgerError('invalid_flux', `поток «${record.id}»: мощность должна быть конечным положительным числом, получено ${record.subject.powerW}`, record.id);
+    }
+  }
+  return {
+    records: [
+      ...ledger.records,
+      { id: record.id, kind: record.kind, from: record.from, to: record.to, subject: record.subject, time: record.time ?? null, status: 'pending', note: record.note }
+    ]
+  };
+}
+
+/**
+ * Явная интеграция скорости переноса по интервалу времени.
+ * Возвращает integrated-субъект. Скорость НЕ применяется к инвентарю
+ * сама по себе: без этой интеграции переноса не происходит.
+ * Отрицательный интервал времени запрещён (нет режима обратного
+ * интегрирования).
+ */
+export function integrateSubstanceRate(subject: Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'rate' }>, durationS: number): Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }> {
+  if (!Number.isFinite(durationS) || durationS <= 0) {
+    throw new FluxLedgerError('invalid_flux', `интеграция скорости требует положительного интервала времени, получено ${durationS}`, null);
+  }
+  const amount = subject.ratePerSecond * durationS;
+  if (!Number.isFinite(amount)) {
+    throw new FluxLedgerError('invalid_flux', 'результат интеграции непредставим (переполнение)', null);
+  }
+  return { subjectType: 'substance', speciesId: subject.speciesId, quantityKind: 'integrated', amount, basis: subject.basis };
+}
+
+/**
+ * Интеграция мощности по времени: энергия за интервал.
+ * Мощность НЕ равна переданной энергии.
+ */
+export function integratePower(powerW: number, durationS: number): number {
+  if (!Number.isFinite(powerW) || !Number.isFinite(durationS) || durationS <= 0) {
+    throw new FluxLedgerError('invalid_flux', `интеграция мощности требует конечной мощности и положительного интервала (получено ${powerW} Вт, ${durationS} с)`, null);
+  }
+  const energyJ = powerW * durationS;
+  if (!Number.isFinite(energyJ)) {
+    throw new FluxLedgerError('invalid_flux', 'результат интеграции мощности непредставим (переполнение)', null);
+  }
+  return energyJ;
+}
+
+// ============================================
+// 3. ПРИМЕНЕНИЕ И ОТМЕНА
+// ============================================
+
+/**
+ * Применить Δ энергии к запасу резервуара (Stage 4.1.1).
+ * Меняет ТОЛЬКО storedJ; остальные поля энергетического инвентаря
+ * не трогаются (их пересчёт — задача энергетической модели).
+ * Отсутствие знания (нет инвентаря / storedJ = null) — ошибка:
+ * отсутствие знания не заменяется нулём.
+ */
+function applyEnergyDelta(res: ReservoirRecord, deltaJ: number, fluxId: string): ReservoirRecord {
+  if (!res.energy || res.energy.storedJ === null) {
+    throw new FluxLedgerError(
+      'unknown_energy_inventory',
+      `резервуар «${res.id}» не содержит известного запаса энергии (инвентарь отсутствует или storedJ = null): применение потока «${fluxId}» невозможно — отсутствие знания не заменяется нулём`,
+      fluxId
+    );
+  }
+  const nextStoredJ = res.energy.storedJ + deltaJ;
+  if (!Number.isFinite(nextStoredJ)) {
+    throw new FluxLedgerError('invalid_flux', `запас энергии резервуара «${res.id}» после применения потока «${fluxId}» непредставим (переполнение)`, fluxId);
+  }
+  if (nextStoredJ < 0) {
+    throw new FluxLedgerError(
+      'insufficient_energy',
+      `резервуар «${res.id}» содержит ${res.energy.storedJ} Дж, а поток «${fluxId}» требует изъять ${-deltaJ} Дж: отрицательный запас энергии невозможен`,
+      fluxId
+    );
+  }
+  return { ...res, energy: { ...res.energy, storedJ: nextStoredJ } };
+}
+
+/**
+ * Применить поток к состоянию резервуаров.
+ * Идемпотентность: pending-поток становится applied; повторное
+ * применение applied/потока — ошибка already_applied (двойного
+ * применения не бывает).
+ *
+ * Rate-потоки к инвентарю НЕ применяются (ошибка rate_not_applicable):
+ * сначала integrateSubstanceRate/integratePower.
+ *
+ * Stage 4.1.1:
+ * - энергетический поток РЕАЛЬНО переносит storedJ между резервуарами
+ *   (internal), из внешней среды (external_input) или наружу
+ *   (external_output): до исправления статус менялся на applied без
+ *   какого-либо изменения запаса — зарегистрированный поток не
+ *   становился физически применённым;
+ * - материальный поток требует СУЩЕСТВУЮЩЕГО инвентаря в том же
+ *   основании: пустой инвентарь больше не создаётся молча
+ *   (unknown_inventory), несовместимое основание — ошибка
+ *   incompatible_basis, достаточность запаса проверяется всегда.
+ *
+ * Возвращает новые резервуары и реестр (иммутабельно).
+ */
+export function applyFlux(
+  ledger: FluxLedger,
+  reservoirs: Record<string, ReservoirRecord>,
+  fluxId: string
+): { ledger: FluxLedger; reservoirs: Record<string, ReservoirRecord> } {
+  const rec = recordById(ledger, fluxId);
+  if (rec.status === 'applied') {
+    throw new FluxLedgerError('already_applied', `поток «${fluxId}» уже применён: повторное применение запрещено (двойной учёт)`, fluxId);
+  }
+  if (rec.status === 'reverted') {
+    throw new FluxLedgerError('not_applied', `поток «${fluxId}» отменён и не может быть применён`, fluxId);
+  }
+  if (rec.subject.subjectType === 'substance' && rec.subject.quantityKind === 'rate') {
+    throw new FluxLedgerError('rate_not_applicable', `поток «${fluxId}» — скорость переноса: инвентарь она не меняет, интегрируйте по времени (integrateSubstanceRate) и зарегистрируйте integrated-поток`, fluxId);
+  }
+  if (rec.subject.subjectType === 'energy' && rec.subject.quantityKind === 'rate') {
+    throw new FluxLedgerError('rate_not_applicable', `поток «${fluxId}» — мощность (Вт), а не переданная энергия: интегрируйте по времени (integratePower)`, fluxId);
+  }
+
+  const next: Record<string, ReservoirRecord> = { ...reservoirs };
+
+  // Энергетический поток: реальный перенос запаса энергии.
+  if (rec.subject.subjectType === 'energy') {
+    const subject = rec.subject as Extract<FluxSubject, { subjectType: 'energy'; quantityKind: 'integrated' }>;
+    if (rec.kind === 'internal_transfer') {
+      const from = requireReservoir(next, rec.from, fluxId);
+      requireReservoir(next, rec.to, fluxId);
+      next[rec.from] = applyEnergyDelta(from, -subject.energyJ, fluxId);
+      next[rec.to] = applyEnergyDelta(next[rec.to], subject.energyJ, fluxId);
+    } else if (rec.kind === 'external_input') {
+      const to = requireReservoir(next, rec.to, fluxId);
+      next[rec.to] = applyEnergyDelta(to, subject.energyJ, fluxId);
+    } else {
+      const from = requireReservoir(next, rec.from, fluxId);
+      next[rec.from] = applyEnergyDelta(from, -subject.energyJ, fluxId);
+    }
+    return {
+      ledger: {
+        records: ledger.records.map((r) => (r.id === fluxId ? { ...r, status: 'applied' as FluxStatus } : r))
+      },
+      reservoirs: next
+    };
+  }
+
+  const subject = rec.subject as Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }>;
+
+  const requireInventory = (reservoirId: string): MaterialInventory => {
+    const res = requireReservoir(next, reservoirId, fluxId);
+    if (!res.material) {
+      throw new FluxLedgerError(
+        'unknown_inventory',
+        `резервуар «${reservoirId}» не содержит материального инвентаря: применение потока «${fluxId}» не создаёт инвентарь молча — задайте его явно (setMaterialInventory)`,
+        fluxId
+      );
+    }
+    if (res.material.basis !== subject.basis) {
+      throw new FluxLedgerError(
+        'incompatible_basis',
+        `резервуар «${reservoirId}» хранит инвентарь в основании «${res.material.basis}», а поток «${fluxId}» — в «${subject.basis}»: основания несовместимы без явного преобразования`,
+        fluxId
+      );
+    }
+    return res.material;
+  };
+
+  if (rec.kind === 'internal_transfer') {
+    const fromInventory = requireInventory(rec.from);
+    requireInventory(rec.to);
+    const available = fromInventory.entries[subject.speciesId] ?? 0;
+    if (available < subject.amount) {
+      throw new FluxLedgerError(
+        'invalid_flux',
+        `резервуар «${rec.from}» содержит ${available} «${subject.speciesId}», а перенос «${fluxId}» требует ${subject.amount}`,
+        fluxId
+      );
+    }
+    // Атомарно: сначала убыль, затем прибавление; при ошибке
+    // на любом шаге исключение прерывает применение до
+    // записи applied-статуса.
+    next[rec.from] = removeMaterial(next[rec.from], subject.speciesId, subject.amount);
+    next[rec.to] = addMaterial(next[rec.to], subject.speciesId, subject.amount);
+  } else if (rec.kind === 'external_input') {
+    requireInventory(rec.to);
+    next[rec.to] = addMaterial(next[rec.to], subject.speciesId, subject.amount);
+  } else {
+    const fromInventory = requireInventory(rec.from);
+    const available = fromInventory.entries[subject.speciesId] ?? 0;
+    if (available < subject.amount) {
+      throw new FluxLedgerError(
+        'invalid_flux',
+        `резервуар «${rec.from}» содержит ${available} «${subject.speciesId}», а потеря «${fluxId}» требует ${subject.amount}`,
+        fluxId
+      );
+    }
+    next[rec.from] = removeMaterial(next[rec.from], subject.speciesId, subject.amount);
+  }
+
+  return {
+    ledger: {
+      records: ledger.records.map((r) => (r.id === fluxId ? { ...r, status: 'applied' as FluxStatus } : r))
+    },
+    reservoirs: next
+  };
+}
+
+/**
+ * Отменить применение потока (возврат перенесённого).
+ * Отменять можно только applied-поток; статус становится reverted,
+ * запись сохраняется в истории — учёт не переписывается задним числом.
+ *
+ * Stage 4.1.1: отмена ЭНЕРГЕТИЧЕСКОГО потока возвращает перенесённую
+ * энергию (до исправления статус менялся на reverted без возврата).
+ * Порядок: сначала вычитающие стороны, затем прибавляющие —
+ * при нехватке энергии у вычитающей стороны исключение прерывает
+ * отмену до каких-либо изменений (атомарность).
+ */
+export function revertFlux(
+  ledger: FluxLedger,
+  reservoirs: Record<string, ReservoirRecord>,
+  fluxId: string
+): { ledger: FluxLedger; reservoirs: Record<string, ReservoirRecord> } {
+  const rec = recordById(ledger, fluxId);
+  if (rec.status !== 'applied') {
+    throw new FluxLedgerError('not_applied', `поток «${fluxId}» не применён (статус: ${rec.status}): отменять нечего`, fluxId);
+  }
+  const next: Record<string, ReservoirRecord> = { ...reservoirs };
+
+  if (rec.subject.subjectType === 'energy') {
+    const subject = rec.subject as Extract<FluxSubject, { subjectType: 'energy'; quantityKind: 'integrated' }>;
+    if (rec.kind === 'internal_transfer') {
+      requireReservoir(next, rec.from, fluxId);
+      requireReservoir(next, rec.to, fluxId);
+      next[rec.to] = applyEnergyDelta(next[rec.to], -subject.energyJ, fluxId);
+      next[rec.from] = applyEnergyDelta(next[rec.from], subject.energyJ, fluxId);
+    } else if (rec.kind === 'external_input') {
+      next[rec.to] = applyEnergyDelta(next[rec.to], -subject.energyJ, fluxId);
+    } else {
+      next[rec.from] = applyEnergyDelta(next[rec.from], subject.energyJ, fluxId);
+    }
+    return {
+      ledger: { records: ledger.records.map((r) => (r.id === fluxId ? { ...r, status: 'reverted' as FluxStatus } : r)) },
+      reservoirs: next
+    };
+  }
+
+  const subject = rec.subject as Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }>;
+
+  if (rec.kind === 'internal_transfer') {
+    next[rec.to] = removeMaterial(next[rec.to], subject.speciesId, subject.amount);
+    next[rec.from] = addMaterial(next[rec.from], subject.speciesId, subject.amount);
+  } else if (rec.kind === 'external_input') {
+    next[rec.to] = removeMaterial(next[rec.to], subject.speciesId, subject.amount);
+  } else {
+    next[rec.from] = addMaterial(next[rec.from], subject.speciesId, subject.amount);
+  }
+
+  return {
+    ledger: { records: ledger.records.map((r) => (r.id === fluxId ? { ...r, status: 'reverted' as FluxStatus } : r)) },
+    reservoirs: next
+  };
+}
+
+// ============================================
+// 4. БАЛАНСОВЫЕ АУДИТЫ
+// ============================================
+
+/** Расхождение аудита; reservoirId указывает резервуар, если расхождение локализовано. */
+export interface BalanceDiscrepancy {
+  key: string;
+  expected: number;
+  actual: number;
+  reservoirId?: string;
+}
+
+/**
+ * Статус аудита сохранения (Stage 4.1.1):
+ * - 'balanced' — проверка выполнена и выполнена положительно;
+ * - 'approximate' — проверка выполнена на основе оценок
+ *   (например, оценочные молярные массы): численного расхождения
+ *   нет, но точность ограничена;
+ * - 'imbalanced' — проверка выполнена и нашла расхождение;
+ * - 'not_verifiable' — проверка НЕПРОВЕРЯЕМА: не хватает данных
+ *   (неизвестные запасы, непереводимые основания, исключённые виды).
+ *   НЕ является успехом и никогда не приравнивается к нулю.
+ */
+export type ConservationStatus = 'balanced' | 'imbalanced' | 'approximate' | 'not_verifiable';
+
+/** Исключение из проверки с явной причиной. */
+export interface AuditExclusion {
+  key: string;
+  reason: string;
+}
+
+export interface ConservationAuditResult {
+  /** Статус проверки; balanced === true только при status 'balanced'. */
+  status: ConservationStatus;
+  /** Согласовано ли: ИСТИНА только при status === 'balanced'. */
+  balanced: boolean;
+  /** Расхождения (пусто при balanced=true). */
+  discrepancies: BalanceDiscrepancy[];
+  /** Виды, исключённые из проверки (не зарегистрированы в каталоге). */
+  excludedSpecies: string[];
+  /** Исключённые вклады/резервуары с причинами. */
+  exclusions: AuditExclusion[];
+  /** Абсолютный допуск сравнения (в единицах инвентаря). */
+  tolerance: number;
+  /** applied-записи без привязки ко времени, исключённые из проверки. */
+  untimedRecords: string[];
+}
+
+/**
+ * Временная область аудита (Stage 4.1.1). Аудит учитывает applied-
+ * integrated-записи с временем t, удовлетворяющим after < t <= upTo
+ * (сравнение по comparePoints, без потери порядка сегментов).
+ * Записи без привязки ко времени (time = null) в ограниченной области
+ * НЕ МОГУТ быть отнесены к интервалу: по умолчанию они исключаются
+ * и перечисляются в untimedRecords; includeUntimed включает их
+ * (на ответственности вызывающего кода). Без ограничений области
+ * учитываются все записи, включая непривязанные.
+ */
+export interface FluxAuditScope {
+  /** Нижняя граница (НЕ включается). */
+  after?: FluxTime | null;
+  /** Верхняя граница (включается). */
+  upTo?: FluxTime | null;
+  /** Включать ли applied-записи без привязки ко времени в ограниченной области. */
+  includeUntimed?: boolean;
+}
+
+/** Ограничена ли область хотя бы одной границей. */
+export function scopeIsBounded(scope?: FluxAuditScope): boolean {
+  if (!scope) return false;
+  return (scope.after != null) || (scope.upTo != null);
+}
+
+/** Попадает ли ПРИВЯЗАННЫЙ момент в область (after < t <= upTo). */
+export function inTimeScope(time: FluxTime, scope?: FluxAuditScope): boolean {
+  if (scope?.after != null && comparePoints(time, scope.after) <= 0) {
+    return false;
+  }
+  if (scope?.upTo != null && comparePoints(time, scope.upTo) > 0) {
+    return false;
+  }
+  return true;
+}
+
+/** Исключаются ли непривязанные записи в данной области. */
+export function excludedUntimed(scope?: FluxAuditScope): boolean {
+  return scopeIsBounded(scope) && scope?.includeUntimed !== true;
+}
+
+/** Учитывается ли запись (со статусом applied) во временной области аудита. */
+export function recordInScope(rec: FluxRecord, scope?: FluxAuditScope): boolean {
+  if (rec.time === null) {
+    return !excludedUntimed(scope);
+  }
+  return inTimeScope(rec.time, scope);
+}
+
+/** id applied-integrated-записей, исключённых из области из-за отсутствия привязки. */
+function untimedRecordsOf(ledger: FluxLedger, scope?: FluxAuditScope): string[] {
+  if (!excludedUntimed(scope)) return [];
+  const ids: string[] = [];
+  for (const rec of ledger.records) {
+    if (rec.status !== 'applied') continue;
+    if (rec.subject.quantityKind !== 'integrated') continue;
+    if (rec.time === null) ids.push(rec.id);
+  }
+  return ids;
+}
+
+/**
+ * Реакционный вклад в изменение материального инвентаря
+ * (Stage 4.2.3.4). Это ТИПИЗИРОВАННЫЙ вклад, а НЕ FluxRecord:
+ * реакции не превращаются в потоки и в FluxLedger не попадают.
+ */
+export interface ReactionInventoryContribution {
+  reservoirId: string;
+  speciesId: string;
+  /** Ожидаемое Δ со знаком: reactants −coefficient × extent, products +coefficient × extent. */
+  delta: number;
+  /** Основание Δ — extentBasis записи-источника. */
+  basis: 'amount' | 'column_amount';
+  /** id записи-источника (диагностика). */
+  recordId: string;
+}
+
+/** Общие параметры аудитов. */
+export interface AuditOptions {
+  /** Абсолютный допуск сравнения (по умолчанию 1e-9). */
+  tolerance?: number;
+  /** Временная область аудита. */
+  scope?: FluxAuditScope;
+  /**
+   * Реакционные вклады перехода (Stage 4.2.3.4): ожидаемые
+   * изменения инвентарей по парам (reservoirId, speciesId), уже
+   * агрегированные. Учитываются аудитами инвентарей РОВНО один
+   * раз рядом с потоковыми Δ; элементный и зарядовый аудиты их не
+   * используют (элементы и заряд реакция сохраняет по построению,
+   * стехиометрия проверяется отдельно секцией reactions).
+   */
+  reactionDeltas?: readonly ReactionInventoryContribution[];
+}
+
+/** Рамка результата аудита при непроверяемости/исключениях. */
+function auditFrame(
+  status: ConservationStatus,
+  exclusions: AuditExclusion[],
+  untimedRecords: string[],
+  tolerance: number,
+  excludedSpecies: string[] = []
+): ConservationAuditResult {
+  return {
+    status,
+    balanced: status === 'balanced',
+    discrepancies: [],
+    excludedSpecies,
+    exclusions,
+    tolerance,
+    untimedRecords
+  };
+}
+
+/**
+ * Суммарный инвентарь по веществам для набора резервуаров
+ * (только резервуары с материальным инвентарём; основания
+ * резервуаров должны быть согласованы вызывающим кодом —
+ * аудит сравнивает резервуары с ОДНИМ основанием).
+ * Референс-агрегат в сырых единицах основания; basis-aware аудиты
+ * используют reservoirsToMolarCounts.
+ *
+ * ВАЖНО (Stage 4.1.1.3): это СПРАВОЧНЫЙ агрегат заданных инвентарей,
+ * а НЕ доказательство сохранения материи. Резервуары БЕЗ
+ * материального инвентаря в сумму не входят — их запас НЕИВЕСТЕН
+ * (не ноль), поэтому «постоянство» итога totalInventory ничего не
+ * доказывает о полноте баланса. Доказательство сохранения —
+ * auditSubstanceConservation и reservoirsToMolarCounts, дающие
+ * not_verifiable при неизвестных запасах.
+ */
+export function totalInventory(reservoirs: Record<string, ReservoirRecord>): { basis: InventoryBasis | null; totals: Record<string, number> } {
+  let basis: InventoryBasis | null = null;
+  const totals: Record<string, number> = {};
+  for (const res of Object.values(reservoirs)) {
+    if (!res.material) continue;
+    if (basis === null) {
+      basis = res.material.basis;
+    } else if (basis !== res.material.basis) {
+      throw new FluxLedgerError('invalid_flux', `аудит объединяет резервуары с одним основанием: «${basis}» против «${res.material.basis}» (${res.id})`, null);
+    }
+    // Stage 4.1.1.3 (ISSUE B): entries — объект-запись; массив не
+    // принимается за словарь (Object.entries по массиву дал бы
+    // мусорные «виды» с числовыми индексными ключами).
+    // Stage 4.1.1.3.1: строгий прототип — Map/Set/Date/RegExp и
+    // экземпляры классов тоже не словари: Object.entries по ним
+    // вернул бы пустой массив и «изобрёл» известную пустоту.
+    if (!isPlainRecord(res.material.entries)) {
+      throw new FluxLedgerError('invalid_flux', `резервуар «${res.id}»: material.entries должен быть настоящим объектом-записью (speciesId → количество), а не массивом/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(res.material.entries)}`, null);
+    }
+    for (const [id, amount] of Object.entries(res.material.entries)) {
+      totals[id] = (totals[id] ?? 0) + amount;
+    }
+  }
+  return { basis, totals };
+}
+
+/** Чистый внешний перенос по веществам: входы − выходы (applied-потоки). */
+export function netExternalTransfers(ledger: FluxLedger, scope?: FluxAuditScope): Record<string, number> {
+  const net: Record<string, number> = {};
+  for (const rec of ledger.records) {
+    if (rec.status !== 'applied' || rec.subject.subjectType !== 'substance' || rec.subject.quantityKind !== 'integrated') continue;
+    if (!recordInScope(rec, scope)) continue;
+    const sign = rec.kind === 'external_input' ? 1 : rec.kind === 'external_output' ? -1 : 0;
+    if (sign === 0) continue;
+    net[rec.subject.speciesId] = (net[rec.subject.speciesId] ?? 0) + sign * rec.subject.amount;
+  }
+  return net;
+}
+
+// ============================================
+// 4а. BASIS-AWARE МОЛЯРНАЯ СЕМАНТИКА
+// ============================================
+
+/**
+ * Результат перевода запасов/потоков в молярные счёты.
+ * scope: 'amount' — моли; 'column' — моли/м² (столбовые основания).
+ * Смешение scope'ов в одном подсчёте недопустимо.
+ */
+export interface MolarCountResult {
+  status: 'exact' | 'approximate' | 'not_verifiable';
+  counts: Record<string, number>;
+  exclusions: AuditExclusion[];
+  scope: 'amount' | 'column' | null;
+}
+
+/**
+ * Молярная масса вида с учётом статуса данных (Stage 4.1.1):
+ * отсутствие данных (null) или некорректный статус делают перевод
+ * массы в моли НЕПРОВЕРЯЕМЫМ — молярная масса не подменяется нулём
+ * или средним значением.
+ */
+function molarMassOf(catalog: SpeciesCatalog, speciesId: string): { status: 'exact' | 'approximate' | 'not_verifiable'; kgMol: number | null; reason?: string } {
+  const species = catalog.get(speciesId);
+  if (!species) {
+    return { status: 'not_verifiable', kgMol: null, reason: `вид «${speciesId}» не зарегистрирован в каталоге` };
+  }
+  const m = species.molarMassKgMol;
+  if (m === null) {
+    return { status: 'not_verifiable', kgMol: null, reason: `молярная масса вида «${speciesId}» неизвестна` };
+  }
+  if (!Number.isFinite(m) || m <= 0) {
+    return { status: 'not_verifiable', kgMol: null, reason: `молярная масса вида «${speciesId}» некорректна: ${m}` };
+  }
+  if (species.molarMassStatus === 'known') {
+    return { status: 'exact', kgMol: m };
+  }
+  if (species.molarMassStatus === 'estimated') {
+    return { status: 'approximate', kgMol: m };
+  }
+  return { status: 'not_verifiable', kgMol: null, reason: `статус молярной массы вида «${speciesId}» — «${species.molarMassStatus}»: перевод массы в моли непроверяем` };
+}
+
+/**
+ * Перевод инвентаря в молярные счёты по видам (Stage 4.1.1).
+ *
+ * Основания:
+ * - amount → моли (точно); column_amount → моли/м² (точно);
+ * - mass / column_mass → моли через молярную массу вида:
+ *   молярная масса unknown → непроверяемо; estimated → approximate;
+ * - molar_concentration / mass_concentration → непроверяемо
+ *   (требуется объём резервуара);
+ * - molar_fraction / mass_fraction → непроверяемо (требуется
+ *   общий запас системы: доля — не количество);
+ * - arbitrary_units → непроверяемо (нет калибровки).
+ */
+export function inventoryToMolarCounts(catalog: SpeciesCatalog, inv: { basis: string; entries: Record<string, number> }): MolarCountResult {
+  // Stage 4.1.1.3 (ISSUE B): entries — объект-запись (speciesId →
+  // количество). Массив (typeof 'object') за словарь не принимается:
+  // пустой массив НЕ является известным пустым инвентарём — подсчёт
+  // честно непроверяем, а не «успешен без вида».
+  if (!isPlainRecord(inv.entries)) {
+    return {
+      status: 'not_verifiable',
+      counts: {},
+      exclusions: [{
+        key: 'inventory',
+        reason: `material.entries должен быть настоящим объектом-записью (speciesId → количество), а не массивом/null/Map/Set/Date/RegExp/экземпляром класса: получено ${describeRecordCandidate(inv.entries)}`
+      }],
+      scope: null
+    };
+  }
+  const basis = inv.basis;
+  // Stage 4.2.3.4.1 (prototype-safe накопление): speciesId —
+  // произвольная непустая строка; счёт ведётся на null-prototype
+  // записи: собственный ключ '__proto__' сохраняется как данные
+  // (spread сохранял бы его, но последующее чтение отсутствующего
+  // ключа обычного объекта возвращало бы унаследованные 'constructor'/
+  // 'toString'/'__proto__', которые количеством не являются).
+  if (basis === 'amount') {
+    const counts: Record<string, number> = Object.assign(Object.create(null), inv.entries);
+    return { status: 'exact', counts, exclusions: [], scope: 'amount' };
+  }
+  if (basis === 'column_amount') {
+    const counts: Record<string, number> = Object.assign(Object.create(null), inv.entries);
+    return { status: 'exact', counts, exclusions: [], scope: 'column' };
+  }
+  if (basis === 'mass' || basis === 'column_mass') {
+    const counts: Record<string, number> = Object.create(null);
+    let approximate = false;
+    for (const [id, amount] of Object.entries(inv.entries)) {
+      const mm = molarMassOf(catalog, id);
+      if (mm.status === 'not_verifiable') {
+        return {
+          status: 'not_verifiable',
+          counts: {},
+          exclusions: [{ key: id, reason: `${mm.reason}: масса не переводится в моли` }],
+          scope: null
+        };
+      }
+      if (mm.status === 'approximate') approximate = true;
+      counts[id] = amount / (mm.kgMol as number);
+    }
+    return {
+      status: approximate ? 'approximate' : 'exact',
+      counts,
+      exclusions: [],
+      scope: basis === 'mass' ? 'amount' : 'column'
+    };
+  }
+  if (basis === 'molar_concentration' || basis === 'mass_concentration') {
+    return {
+      status: 'not_verifiable',
+      counts: {},
+      exclusions: [{ key: 'inventory', reason: `основание «${basis}» требует объёма резервуара для перевода в моли` }],
+      scope: null
+    };
+  }
+  if (basis === 'molar_fraction' || basis === 'mass_fraction') {
+    return {
+      status: 'not_verifiable',
+      counts: {},
+      exclusions: [{ key: 'inventory', reason: `основание-доля «${basis}» требует общего запаса системы для перевода в моли` }],
+      scope: null
+    };
+  }
+  if (basis === 'arbitrary_units') {
+    return {
+      status: 'not_verifiable',
+      counts: {},
+      exclusions: [{ key: 'inventory', reason: 'основание «arbitrary_units» не переводится в моли без калибровки' }],
+      scope: null
+    };
+  }
+  return {
+    status: 'not_verifiable',
+    counts: {},
+    exclusions: [{ key: 'inventory', reason: `неизвестное основание инвентаря «${String(basis)}»` }],
+    scope: null
+  };
+}
+
+/**
+ * Перевод количества одного потока в молярный счёт по его основанию.
+ */
+export function fluxAmountToMolarCount(
+  catalog: SpeciesCatalog,
+  speciesId: string,
+  amount: number,
+  basis: string
+): { status: 'exact' | 'approximate' | 'not_verifiable'; count: number | null; scope: 'amount' | 'column' | null; reason?: string } {
+  if (basis === 'amount') return { status: 'exact', count: amount, scope: 'amount' };
+  if (basis === 'column_amount') return { status: 'exact', count: amount, scope: 'column' };
+  if (basis === 'mass' || basis === 'column_mass') {
+    const mm = molarMassOf(catalog, speciesId);
+    if (mm.status === 'not_verifiable') {
+      return { status: 'not_verifiable', count: null, scope: null, reason: `${mm.reason}: масса потока не переводится в моли` };
+    }
+    return { status: mm.status, count: amount / (mm.kgMol as number), scope: basis === 'mass' ? 'amount' : 'column' };
+  }
+  if (basis === 'molar_concentration' || basis === 'mass_concentration') {
+    return { status: 'not_verifiable', count: null, scope: null, reason: `основание «${basis}» требует объёма для перевода в моли` };
+  }
+  if (basis === 'molar_fraction' || basis === 'mass_fraction') {
+    return { status: 'not_verifiable', count: null, scope: null, reason: `основание-доля «${basis}» требует общего запаса системы для перевода в моли` };
+  }
+  if (basis === 'arbitrary_units') {
+    return { status: 'not_verifiable', count: null, scope: null, reason: 'основание «arbitrary_units» не переводится в моли без калибровки' };
+  }
+  return { status: 'not_verifiable', count: null, scope: null, reason: `основание «${basis}» не переводится в моли` };
+}
+
+/** Слияние молярных счётов: исключения копятся, статусы объединяются. */
+function mergeMolarCounts(results: MolarCountResult[]): MolarCountResult {
+  const exclusions: AuditExclusion[] = [];
+  // Stage 4.2.3.4.1 (prototype-safe): счёт — null-prototype запись:
+  // присваивание '__proto__' в обычный объект {} молча теряло вклад,
+  // а чтение отсутствующего 'constructor'/'toString' возвращало
+  // унаследованное свойство вместо известного нуля.
+  const counts: Record<string, number> = Object.create(null);
+  let approximate = false;
+  let scope: 'amount' | 'column' | null = null;
+  for (const result of results) {
+    exclusions.push(...result.exclusions);
+    if (result.status === 'not_verifiable') {
+      return { status: 'not_verifiable', counts: {}, exclusions, scope: null };
+    }
+    if (result.status === 'approximate') approximate = true;
+    if (result.scope !== null) {
+      if (scope === null) {
+        scope = result.scope;
+      } else if (scope !== result.scope) {
+        exclusions.push({
+          key: 'bases',
+          reason: `смешение оснований: «${scope === 'amount' ? 'моли' : 'моли/м²'}» и «${result.scope === 'amount' ? 'моли' : 'моли/м²'}» не сопоставимы без площади`
+        });
+        return { status: 'not_verifiable', counts: {}, exclusions, scope: null };
+      }
+    }
+    for (const [id, count] of Object.entries(result.counts)) {
+      counts[id] = (counts[id] ?? 0) + count;
+    }
+  }
+  return { status: approximate ? 'approximate' : 'exact', counts, exclusions, scope };
+}
+
+/**
+ * Молярные счёты системы резервуаров (basis-aware).
+ *
+ * Stage 4.1.1.2 (ISSUE A): резервуар БЕЗ материального инвентаря —
+ * это НЕ известный ноль. Три состояния различаются явно:
+ * - material задан (entries могут быть пусты или содержать нули) —
+ *   известный запас, участвует в балансе;
+ * - material отсутствует и materialApplicability = 'not_applicable' —
+ *   резервуар по своей природе не содержит материю: законно исключён
+ *   из материального баланса;
+ * - material отсутствует без явного неприменима — запас неизвестен:
+ *   весь подсчёт становится not_verifiable, а не «успешным без него».
+ */
+export function reservoirsToMolarCounts(catalog: SpeciesCatalog, reservoirs: Record<string, ReservoirRecord>): MolarCountResult {
+  const results: MolarCountResult[] = [];
+  for (const res of Object.values(reservoirs)) {
+    if (!res.material) {
+      if (res.materialApplicability === 'not_applicable') {
+        continue;
+      }
+      return {
+        status: 'not_verifiable',
+        counts: {},
+        exclusions: [{
+          key: res.id,
+          reason: `резервуар «${res.id}»: материальный инвентарь не задан — запас неизвестен и не приравнивается к нулю`
+        }],
+        scope: null
+      };
+    }
+    const converted = inventoryToMolarCounts(catalog, res.material);
+    if (converted.status === 'not_verifiable') {
+      results.push({
+        ...converted,
+        exclusions: converted.exclusions.map((excl) => ({ key: `${res.id}:${excl.key}`, reason: `резервуар «${res.id}»: ${excl.reason}` }))
+      });
+    } else {
+      results.push(converted);
+    }
+  }
+  return mergeMolarCounts(results);
+}
+
+/** Чистый внешний перенос в молярных счётах (basis-aware, по области). */
+export function netExternalMolarCounts(catalog: SpeciesCatalog, ledger: FluxLedger, scope?: FluxAuditScope): MolarCountResult {
+  // Stage 4.2.3.4.1 (prototype-safe): счёт — null-prototype запись
+  // (speciesId — произвольная непустая строка, включая '__proto__').
+  const counts: Record<string, number> = Object.create(null);
+  const exclusions: AuditExclusion[] = [];
+  let approximate = false;
+  let countScope: 'amount' | 'column' | null = null;
+  for (const rec of ledger.records) {
+    if (rec.status !== 'applied' || rec.subject.subjectType !== 'substance' || rec.subject.quantityKind !== 'integrated') continue;
+    if (!recordInScope(rec, scope)) continue;
+    if (rec.kind === 'internal_transfer') continue;
+    const subject = rec.subject as Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }>;
+    const converted = fluxAmountToMolarCount(catalog, subject.speciesId, subject.amount, subject.basis);
+    if (converted.status === 'not_verifiable') {
+      exclusions.push({ key: rec.id, reason: `поток «${rec.id}»: ${converted.reason}` });
+      return { status: 'not_verifiable', counts: {}, exclusions, scope: null };
+    }
+    if (converted.status === 'approximate') approximate = true;
+    if (converted.scope !== null) {
+      if (countScope === null) {
+        countScope = converted.scope;
+      } else if (countScope !== converted.scope) {
+        exclusions.push({ key: 'bases', reason: 'смешение оснований: «моли» и «моли/м²» не сопоставимы без площади' });
+        return { status: 'not_verifiable', counts: {}, exclusions, scope: null };
+      }
+    }
+    const sign = rec.kind === 'external_input' ? 1 : -1;
+    counts[subject.speciesId] = (counts[subject.speciesId] ?? 0) + sign * (converted.count as number);
+  }
+  return { status: approximate ? 'approximate' : 'exact', counts, exclusions, scope: countScope };
+}
+
+/**
+ * Реакционные вклады в молярном счёте по видам (Stage 4.2.3.4).
+ * Вклады уже рассчитаны по extentBasis записей: пересчёта между
+ * основаниями нет; моли и моли/м² не смешиваются — смешение даёт
+ * честное not_verifiable. Непредставимый вклад (не конечное число
+ * или переполнение суммы) — тоже not_verifiable, а не ноль.
+ *
+ * Stage 4.2.3.4.1 (prototype-safe накопление): speciesId —
+ * произвольная непустая строка; накопление ведётся в Map, а не в
+ * обычном объекте: присваивание '__proto__' в {} не создаёт
+ * собственного ключа и вклад теряется, унаследованные свойства
+ * ('constructor', 'toString') не являются количествами. Ключи Map —
+ * ровно те виды, чьи вклады реально учтены.
+ */
+function reactionMolarCounts(
+  deltas: readonly ReactionInventoryContribution[]
+): { ok: true; counts: Map<string, number>; scope: 'amount' | 'column' | null } | { ok: false; exclusion: AuditExclusion } {
+  const counts = new Map<string, number>();
+  let scope: 'amount' | 'column' | null = null;
+  for (const contribution of deltas) {
+    if (!Number.isFinite(contribution.delta)) {
+      return {
+        ok: false,
+        exclusion: { key: contribution.speciesId, reason: 'реакционный вклад вида «' + contribution.speciesId + '» непредставим (не конечное число)' }
+      };
+    }
+    const contributionScope: 'amount' | 'column' = contribution.basis === 'amount' ? 'amount' : 'column';
+    if (scope === null) {
+      scope = contributionScope;
+    } else if (scope !== contributionScope) {
+      return {
+        ok: false,
+        exclusion: { key: 'reaction_bases', reason: 'смешение реакционных оснований: вклады в «моли» и «моли/м²» не сопоставимы без площади' }
+      };
+    }
+    const next = (counts.get(contribution.speciesId) ?? 0) + contribution.delta;
+    if (!Number.isFinite(next)) {
+      return {
+        ok: false,
+        exclusion: { key: contribution.speciesId, reason: 'реакционный вклад вида «' + contribution.speciesId + '» непредставим (переполнение суммы)' }
+      };
+    }
+    counts.set(contribution.speciesId, next);
+  }
+  return { ok: true, counts, scope };
+}
+
+// ============================================
+// 4б. АУДИТЫ СОХРАНЕНИЯ
+// ============================================
+
+/**
+ * Собственное количество вида в инвентаре (Stage 4.2.3.4.1,
+ * prototype-safe чтение). speciesId — произвольная непустая строка:
+ * отсутствие СОБСТВЕННОГО ключа означает известный ноль, но
+ * унаследованное свойство прототипа (Object.prototype.toString,
+ * 'constructor', '__proto__') количеством НЕ является и чтением не
+ * подменяется. Собственное значение обязано быть числом: значение
+ * иного типа не выдаётся за количество (NaN — непредставимо).
+ */
+export function ownEntryAmount(entries: Record<string, unknown>, speciesId: string): number {
+  if (!Object.prototype.hasOwnProperty.call(entries, speciesId)) {
+    return 0;
+  }
+  const value = entries[speciesId];
+  return typeof value === 'number' ? value : Number.NaN;
+}
+
+function molarBasisOfAudit(catalog: SpeciesCatalog, ledger: FluxLedger, before: Record<string, ReservoirRecord>, after: Record<string, ReservoirRecord>, opts?: AuditOptions): { ok: true; before: MolarCountResult; after: MolarCountResult; net: MolarCountResult } | { ok: false; exclusions: AuditExclusion[] } {
+  const beforeCounts = reservoirsToMolarCounts(catalog, before);
+  const afterCounts = reservoirsToMolarCounts(catalog, after);
+  const netCounts = netExternalMolarCounts(catalog, ledger, opts?.scope);
+  if (beforeCounts.status === 'not_verifiable' || afterCounts.status === 'not_verifiable' || netCounts.status === 'not_verifiable') {
+    return { ok: false, exclusions: [...beforeCounts.exclusions, ...afterCounts.exclusions, ...netCounts.exclusions] };
+  }
+  return { ok: true, before: beforeCounts, after: afterCounts, net: netCounts };
+}
+
+/**
+ * Аудит сохранения вещества (Stage 4.1.1, basis-aware):
+ * сравнивает изменение суммарного МОЛЯРНОГО счёта системы между
+ * «до» и «после» с чистым внешним переносом. Массы переводятся
+ * в моли по молярным массам видов; концентрации/доли/arbitrary_units
+ * не переводятся — аудит сообщит not_verifiable, а не выдумает итог.
+ * Внутренние переносы не меняют итог — если меняют, это расхождение.
+ */
+export function auditSubstanceConservation(
+  catalog: SpeciesCatalog,
+  ledger: FluxLedger,
+  before: Record<string, ReservoirRecord>,
+  after: Record<string, ReservoirRecord>,
+  opts?: AuditOptions
+): ConservationAuditResult {
+  const tolerance = opts?.tolerance ?? 1e-9;
+  const untimed = untimedRecordsOf(ledger, opts?.scope);
+  const basis = molarBasisOfAudit(catalog, ledger, before, after, opts);
+  if (!basis.ok) {
+    return auditFrame('not_verifiable', basis.exclusions, untimed, tolerance);
+  }
+  // Stage 4.2.3.4: реакционные вклады в молярном счёте по видам.
+  // Вклады уже рассчитаны по extentBasis записей (моли либо моли/м²):
+  // пересчёта между основаниями нет; при смешении реакционных
+  // оснований или несовпадении с основанием системы итог честно
+  // непроверяем (площадь для пересчёта не выдумывается).
+  const reaction = reactionMolarCounts(opts?.reactionDeltas ?? []);
+  if (!reaction.ok) {
+    return auditFrame('not_verifiable', [reaction.exclusion], untimed, tolerance);
+  }
+  const systemScope = basis.before.scope ?? basis.after.scope ?? basis.net.scope ?? null;
+  if (reaction.scope !== null && systemScope !== null && reaction.scope !== systemScope) {
+    return auditFrame(
+      'not_verifiable',
+      [{
+        key: 'reaction_bases',
+        reason:
+          'реакционные вклады (' + (reaction.scope === 'amount' ? 'моли' : 'моли/м²') +
+          ') не сопоставимы с основанием системы (' + (systemScope === 'amount' ? 'моли' : 'моли/м²') +
+          ') без явного основания площади'
+      }],
+      untimed,
+      tolerance
+    );
+  }
+  const discrepancies: BalanceDiscrepancy[] = [];
+  const overflowExclusions: AuditExclusion[] = [];
+  const ids = new Set([
+    ...Object.keys(basis.before.counts),
+    ...Object.keys(basis.after.counts),
+    ...Object.keys(basis.net.counts),
+    ...reaction.counts.keys()
+  ]);
+  for (const id of ids) {
+    // Stage 4.2.3.4.1 (численная устойчивость): конечность каждого
+    // компонента и КАЖДОЙ промежуточной суммы проверяется явно.
+    // Непредставимое ожидаемое количество — честное not_verifiable
+    // с исключением, а не ложный imbalanced из Infinity/NaN: NaN и
+    // бесконечности не сравниваются с tolerance и прежде молча
+    // проходили проверку. Настоящий конечный дисбаланс сверх
+    // tolerance по-прежнему даёт imbalanced — проверка не ослаблена.
+    const beforeCount = basis.before.counts[id] ?? 0;
+    const netCount = basis.net.counts[id] ?? 0;
+    const reactionCount = reaction.counts.get(id) ?? 0;
+    if (!Number.isFinite(beforeCount) || !Number.isFinite(netCount) || !Number.isFinite(reactionCount)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'молярный счёт вида «' + id + '» непредставим (компонент не является конечным числом) — сопоставление невозможно'
+      });
+      continue;
+    }
+    const withNet = beforeCount + netCount;
+    if (!Number.isFinite(withNet)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'ожидаемый молярный счёт вида «' + id + '» непредставим (переполнение суммы до + netFlux) — сопоставление невозможно'
+      });
+      continue;
+    }
+    const expected = withNet + reactionCount;
+    if (!Number.isFinite(expected)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'ожидаемый молярный счёт вида «' + id + '» непредставим (переполнение суммы до + netFlux + reactionDelta) — сопоставление невозможно'
+      });
+      continue;
+    }
+    const actual = basis.after.counts[id] ?? 0;
+    if (!Number.isFinite(actual)) {
+      overflowExclusions.push({
+        key: id,
+        reason: 'фактический молярный счёт вида «' + id + '» непредставим (не конечное число) — сопоставление невозможно'
+      });
+      continue;
+    }
+    if (Math.abs(expected - actual) > tolerance) {
+      discrepancies.push({ key: id, expected, actual });
+    }
+  }
+  if (discrepancies.length > 0) {
+    return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: overflowExclusions, tolerance, untimedRecords: untimed };
+  }
+  if (overflowExclusions.length > 0 || untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
+    // времени, исключённые из ограниченной области, — это реальные
+    // изменения, которые нельзя отнести к интервалу. Аудит не может
+    // объявить полный успех — только честную непроверяемость.
+    // Stage 4.2.3.4.1: непредставимые суммы — такие же явные
+    // исключения: ни ноль, ни расхождение.
+    const exclusions = [...overflowExclusions];
+    if (untimed.length > 0) {
+      exclusions.push({ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' });
+    }
+    return auditFrame('not_verifiable', exclusions, untimed, tolerance);
+  }
+  const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
+  return {
+    status: approximate ? 'approximate' : 'balanced',
+    balanced: !approximate,
+    discrepancies: [],
+    excludedSpecies: [],
+    exclusions: [],
+    tolerance,
+    untimedRecords: untimed
+  };
+}
+
+/**
+ * Аудит сохранения элементов (Stage 4.1.1, basis-aware): тот же
+ * принцип в пространстве элементов. Виды, не зарегистрированные
+ * в каталоге (состав неизвестен), делают проверку НЕПРОВЕРЯЕМОЙ
+ * и перечисляются явно: их вклад не выдумывается, «balanced» при
+ * исключённых видах невозможен. Оценочные молярные массы дают
+ * статус 'approximate' (численного расхождения нет, но итог
+ * не выдаётся за точный).
+ */
+export function auditElementConservation(
+  catalog: SpeciesCatalog,
+  ledger: FluxLedger,
+  before: Record<string, ReservoirRecord>,
+  after: Record<string, ReservoirRecord>,
+  opts?: AuditOptions
+): ConservationAuditResult {
+  const tolerance = opts?.tolerance ?? 1e-9;
+  const untimed = untimedRecordsOf(ledger, opts?.scope);
+  const basis = molarBasisOfAudit(catalog, ledger, before, after, opts);
+  if (!basis.ok) {
+    return auditFrame('not_verifiable', basis.exclusions, untimed, tolerance);
+  }
+  const beforeTotals = speciesElementTotals(catalog, basis.before.counts);
+  const afterTotals = speciesElementTotals(catalog, basis.after.counts);
+  const netTotals = speciesElementTotals(catalog, basis.net.counts);
+  const excluded = new Set<string>([...beforeTotals.excludedSpecies, ...afterTotals.excludedSpecies, ...netTotals.excludedSpecies]);
+  if (excluded.size > 0) {
+    return auditFrame('not_verifiable', [], untimed, tolerance, [...excluded]);
+  }
+  const discrepancies: BalanceDiscrepancy[] = [];
+  const elements = new Set([
+    ...Object.keys(beforeTotals.totals),
+    ...Object.keys(afterTotals.totals),
+    ...Object.keys(netTotals.totals)
+  ]);
+  for (const el of elements) {
+    const expected = (beforeTotals.totals[el] ?? 0) + (netTotals.totals[el] ?? 0);
+    const actual = afterTotals.totals[el] ?? 0;
+    if (Math.abs(expected - actual) > tolerance) {
+      discrepancies.push({ key: el, expected, actual });
+    }
+  }
+  if (discrepancies.length > 0) {
+    return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: [], tolerance, untimedRecords: untimed };
+  }
+  if (untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
+    // времени, исключённые из ограниченной области, — это реальные
+    // изменения, которые нельзя отнести к интервалу. Аудит не может
+    // объявить полный успех — только честную непроверяемость.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
+  }
+  const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
+  return {
+    status: approximate ? 'approximate' : 'balanced',
+    balanced: !approximate,
+    discrepancies: [],
+    excludedSpecies: [],
+    exclusions: [],
+    tolerance,
+    untimedRecords: untimed
+  };
+}
+
+/**
+ * Аудит сохранения электрического заряда (Stage 4.1.1, basis-aware):
+ * суммарный заряд системы меняется только внешними потоками.
+ * Беззарядная химия даёт нули — аудит всё равно проходит по общему
+ * контракту. Исключённые виды или непереводимые основания делают
+ * проверку непроверяемой, а не успешной.
+ */
+export function auditChargeConservation(
+  catalog: SpeciesCatalog,
+  ledger: FluxLedger,
+  before: Record<string, ReservoirRecord>,
+  after: Record<string, ReservoirRecord>,
+  opts?: AuditOptions
+): ConservationAuditResult {
+  const tolerance = opts?.tolerance ?? 1e-9;
+  const untimed = untimedRecordsOf(ledger, opts?.scope);
+  const basis = molarBasisOfAudit(catalog, ledger, before, after, opts);
+  if (!basis.ok) {
+    return auditFrame('not_verifiable', basis.exclusions, untimed, tolerance);
+  }
+  const beforeCharge = chargeTotal(catalog, basis.before.counts);
+  const afterCharge = chargeTotal(catalog, basis.after.counts);
+  const netCharge = chargeTotal(catalog, basis.net.counts);
+  const excluded = new Set<string>([...beforeCharge.excludedSpecies, ...afterCharge.excludedSpecies, ...netCharge.excludedSpecies]);
+  if (excluded.size > 0) {
+    return auditFrame('not_verifiable', [], untimed, tolerance, [...excluded]);
+  }
+  const expected = beforeCharge.charge + netCharge.charge;
+  const actual = afterCharge.charge;
+  const discrepancies: BalanceDiscrepancy[] =
+    Math.abs(expected - actual) > tolerance
+      ? [{ key: 'charge', expected, actual }]
+      : [];
+  if (discrepancies.length > 0) {
+    return { status: 'imbalanced', balanced: false, discrepancies, excludedSpecies: [], exclusions: [], tolerance, untimedRecords: untimed };
+  }
+  if (untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые потоки без привязки ко
+    // времени, исключённые из ограниченной области, — это реальные
+    // изменения, которые нельзя отнести к интервалу. Аудит не может
+    // объявить полный успех — только честную непроверяемость.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
+  }
+  const approximate = basis.before.status === 'approximate' || basis.after.status === 'approximate' || basis.net.status === 'approximate';
+  return {
+    status: approximate ? 'approximate' : 'balanced',
+    balanced: !approximate,
+    discrepancies: [],
+    excludedSpecies: [],
+    exclusions: [],
+    tolerance,
+    untimedRecords: untimed
+  };
+}
+
+/**
+ * Аудит энергетического баланса (Stage 4.1.1): запас энергии системы
+ * меняется только за счёт внешних энергетических потоков (applied).
+ * Мощность (rate) в балансе НЕ участвует — она не является
+ * переданной энергией, пока не проинтегрирована и не зарегистрирована.
+ *
+ * КЛЮЧЕВОЕ: если запас энергии хотя бы одного резервуара неизвестен
+ * (нет энергетического инвентаря или storedJ = null) в «до» или
+ * «после», аудит возвращает not_verifiable. Отсутствие знания
+ * НЕ приравнивается к нулю и не выдаётся за сбалансированность.
+ */
+export function auditEnergyConservation(
+  ledger: FluxLedger,
+  before: Record<string, ReservoirRecord>,
+  after: Record<string, ReservoirRecord>,
+  opts?: AuditOptions
+): ConservationAuditResult {
+  const tolerance = opts?.tolerance ?? 1e-9;
+  const untimed = untimedRecordsOf(ledger, opts?.scope);
+  const energyTotal = (reservoirs: Record<string, ReservoirRecord>): { value: number; problems: AuditExclusion[] } => {
+    let sum = 0;
+    const problems: AuditExclusion[] = [];
+    for (const res of Object.values(reservoirs)) {
+      if (!res.energy || res.energy.storedJ === null) {
+        problems.push({
+          key: res.id,
+          reason: `запас энергии резервуара «${res.id}» неизвестен (нет инвентаря или storedJ = null): он не приравнивается к нулю`
+        });
+      } else {
+        sum += res.energy.storedJ;
+      }
+    }
+    return { value: sum, problems };
+  };
+  const beforeTotal = energyTotal(before);
+  const afterTotal = energyTotal(after);
+  const exclusions = [...beforeTotal.problems, ...afterTotal.problems];
+  if (exclusions.length > 0) {
+    return auditFrame('not_verifiable', exclusions, untimed, tolerance);
+  }
+  let netEnergyJ = 0;
+  for (const rec of ledger.records) {
+    if (rec.status !== 'applied') continue;
+    if (rec.subject.subjectType !== 'energy' || rec.subject.quantityKind !== 'integrated') continue;
+    if (!recordInScope(rec, opts?.scope)) continue;
+    // Внутренний перенос энергии не меняет суммарный запас системы:
+    // убыль источника равна прибавлению получателя. Меняют итог
+    // только внешние энергетические потоки.
+    if (rec.kind === 'internal_transfer') continue;
+    netEnergyJ += rec.kind === 'external_input' ? rec.subject.energyJ : -rec.subject.energyJ;
+  }
+  const expected = beforeTotal.value + netEnergyJ;
+  const actual = afterTotal.value;
+  const discrepancies: BalanceDiscrepancy[] =
+    Math.abs(expected - actual) > tolerance ? [{ key: 'energy', expected, actual }] : [];
+  if (discrepancies.length === 0 && untimed.length > 0) {
+    // Stage 4.1.1.2 (ISSUE C): применённые энергетические потоки без
+    // времени исключены из области — их вклад нельзя отнести к
+    // интервалу, полный успех невозможен.
+    return auditFrame(
+      'not_verifiable',
+      [{ key: 'untimed', reason: 'в ограниченной области есть применённые потоки без привязки ко времени: их изменения нельзя отнести к интервалу (includeUntimed — на ответственность вызывающего)' }],
+      untimed,
+      tolerance
+    );
+  }
+  return {
+    status: discrepancies.length === 0 ? 'balanced' : 'imbalanced',
+    balanced: discrepancies.length === 0,
+    discrepancies,
+    excludedSpecies: [],
+    exclusions: [],
+    tolerance,
+    untimedRecords: untimed
+  };
+}
+
+// ============================================
+// 4в. ПОФАЗОВЫЙ АУДИТ РЕЗЕРВУАРОВ
+// ============================================
+
+export interface ReservoirFluxAuditResult {
+  status: ConservationStatus;
+  balanced: boolean;
+  discrepancies: BalanceDiscrepancy[];
+  exclusions: AuditExclusion[];
+  untimedRecords: string[];
+  tolerance: number;
+}
+
+/**
+ * Пофазовый аудит применения потоков (Stage 4.1.1; полнота — 4.1.1.2):
+ * сверяет фактические изменения КАЖДОГО резервуара с ожидаемыми Δ от
+ * каждого applied-потока в области. Ловит «вещество ушло не туда»:
+ * суммарный аудит системы при этом остаётся сбалансированным, но
+ * пофазовый находит неверного получателя/источник.
+ *
+ * Stage 4.1.1.2 (ISSUE B): проверяется ОБЪЕДИНЕНИЕ резервуаров —
+ * всех ID из состояния «до», всех ID из состояния «после» и всех,
+ * затронутых applied-потоками в области. Резервуар без потоков в
+ * области обязан сохранить инвентарь (ожидаемое Δ = 0): его изменение
+ * без записи потока — расхождение, а не слепая зона.
+ *
+ * Измерение (материя/энергия) обязательно для резервуара, если
+ * соответствующий инвентарь задан хотя бы в одном состоянии или
+ * резервуар затронут потоком этого типа. Непроверяемые вклады
+ * (неизвестный запас энергии, отсутствующий инвентарь, несовместимое
+ * основание) не заносятся в расхождения — они исключаются с явной
+ * причиной и ДЕЛАЮТ итог непроверяемым: balanced при наличии
+ * исключений невозможен (ISSUE B). Исключённые untimed-записи
+ * (ISSUE C) также не позволяют объявить полный успех.
+ *
+ * Stage 4.1.1.3 (ISSUE A): материальное измерение без инвентаря в
+ * ОБОИХ состояниях — НЕ автоматическая нематериальность. Единственное
+ * законное основание пропустить его — materialApplicability =
+ * 'not_applicable' в ОБОИХ состояниях (явная неприменимость по
+ * природе резервуара). Отсутствие material без маркера — неизвестный
+ * запас: исключение с ключом reservoirId и итог not_verifiable —
+ * согласованно с reservoirsToMolarCounts. Маркер только в одном
+ * состоянии — переход неприменимости не подтверждён, тоже
+ * not_verifiable. Материальная и энергетическая применимость НЕ
+ * смешиваются: materialApplicability ничего не говорит об известности
+ * энергетического инвентаря.
+ */
+export function auditReservoirFluxes(
+  ledger: FluxLedger,
+  before: Record<string, ReservoirRecord>,
+  after: Record<string, ReservoirRecord>,
+  opts?: AuditOptions
+): ReservoirFluxAuditResult {
+  const tolerance = opts?.tolerance ?? 1e-9;
+  const untimed = untimedRecordsOf(ledger, opts?.scope);
+
+  // Stage 4.2.3.4.1 (prototype-safe накопление): speciesId —
+  // произвольная непустая строка, поэтому накопление Δ по видам
+  // ведётся в Map, а не в обычном объекте: присваивание '__proto__'
+  // в {} не создаёт собственного ключа (вклад терялся), унаследованные
+  // 'constructor'/'toString' количеством не являются. reason в
+  // значении — диагностика непредставимой Δ: конечность проверяется
+  // после КАЖДОГО сложения (не только Number.isNaN — Infinity и
+  // -Infinity тоже непригодны); непредставимый вклад становится
+  // явным исключением (not_verifiable), а не численным
+  // расхождением из Infinity.
+  interface ExpectedSpeciesDelta {
+    delta: number;
+    basis: string;
+    reason?: string;
+  }
+  interface ExpectedDelta {
+    species: Map<string, ExpectedSpeciesDelta>;
+    energyJ: number;
+    hasEnergy: boolean;
+    energyReason: string | null;
+  }
+  const expected = new Map<string, ExpectedDelta>();
+  const deltaOf = (reservoirId: string): ExpectedDelta => {
+    let d = expected.get(reservoirId);
+    if (!d) {
+      d = { species: new Map(), energyJ: 0, hasEnergy: false, energyReason: null };
+      expected.set(reservoirId, d);
+    }
+    return d;
+  };
+
+  for (const rec of ledger.records) {
+    if (rec.status !== 'applied' || rec.subject.quantityKind !== 'integrated') continue;
+    if (!recordInScope(rec, opts?.scope)) continue;
+    const sides: Array<{ reservoirId: string; sign: 1 | -1 }> =
+      rec.kind === 'internal_transfer'
+        ? [{ reservoirId: rec.from, sign: -1 }, { reservoirId: rec.to, sign: 1 }]
+        : rec.kind === 'external_input'
+          ? [{ reservoirId: rec.to, sign: 1 }]
+          : [{ reservoirId: rec.from, sign: -1 }];
+    if (rec.subject.subjectType === 'substance') {
+      const subject = rec.subject as Extract<FluxSubject, { subjectType: 'substance'; quantityKind: 'integrated' }>;
+      for (const side of sides) {
+        const d = deltaOf(side.reservoirId);
+        const prev = d.species.get(subject.speciesId);
+        if (prev && prev.basis !== subject.basis) {
+          // несогласованные основания одного вида у одного резервуара
+          d.species.set(subject.speciesId, {
+            delta: Number.NaN,
+            basis: prev.basis,
+            reason: `резервуар «${side.reservoirId}»: вклады вида «${subject.speciesId}» (потоки и/или реакции) имеют несовместимые основания`
+          });
+        } else {
+          const next = (prev?.delta ?? 0) + side.sign * subject.amount;
+          if (!Number.isFinite(next)) {
+            d.species.set(subject.speciesId, {
+              delta: Number.NaN,
+              basis: subject.basis,
+              reason: `резервуар «${side.reservoirId}»: накопленный вклад вида «${subject.speciesId}» непредставим (не конечное число или переполнение суммы)`
+            });
+          } else {
+            d.species.set(subject.speciesId, { delta: next, basis: subject.basis });
+          }
+        }
+      }
+    } else {
+      const subject = rec.subject as Extract<FluxSubject, { subjectType: 'energy'; quantityKind: 'integrated' }>;
+      for (const side of sides) {
+        const d = deltaOf(side.reservoirId);
+        d.hasEnergy = true;
+        const next = d.energyJ + side.sign * subject.energyJ;
+        if (!Number.isFinite(next)) {
+          d.energyReason = `резервуар «${side.reservoirId}»: накопленный энергетический вклад непредставим (не конечное число или переполнение суммы) — пофазовая проверка энергии невозможна`;
+        } else {
+          d.energyJ = next;
+        }
+      }
+    }
+  }
+
+  // Stage 4.2.3.4: реакционные вклады складываются с потоковыми Δ по
+  // той же паре (reservoirId, speciesId) и по тем же накопительным
+  // правилам: основание вклада обязано совпадать с уже накопленным
+  // (конфликт — NaN-Δ и исключение ниже), двойной счёт невозможен —
+  // каждый источник добавлен ровно один раз. Реакционные пары
+  // автоматически делают материальное измерение резервуара
+  // обязательным (materialMandatory) тем же правилом, что и потоки.
+  for (const contribution of opts?.reactionDeltas ?? []) {
+    const d = deltaOf(contribution.reservoirId);
+    const prev = d.species.get(contribution.speciesId);
+    if (prev && prev.basis !== contribution.basis) {
+      d.species.set(contribution.speciesId, {
+        delta: Number.NaN,
+        basis: prev.basis,
+        reason: `резервуар «${contribution.reservoirId}»: вклады вида «${contribution.speciesId}» (потоки и/или реакции) имеют несовместимые основания`
+      });
+    } else {
+      const next = (prev?.delta ?? 0) + contribution.delta;
+      if (!Number.isFinite(next)) {
+        d.species.set(contribution.speciesId, {
+          delta: Number.NaN,
+          basis: contribution.basis,
+          reason: `резервуар «${contribution.reservoirId}»: накопленный вклад вида «${contribution.speciesId}» непредставим (не конечное число или переполнение суммы)`
+        });
+      } else {
+        d.species.set(contribution.speciesId, { delta: next, basis: contribution.basis });
+      }
+    }
+  }
+
+  const discrepancies: BalanceDiscrepancy[] = [];
+  const exclusions: AuditExclusion[] = [];
+
+  // Stage 4.1.1.2 (ISSUE B): проверяются ВСЕ резервуары — объединение
+  // ID из «до», «после» и затронутых потоками в области. Раньше
+  // резервуар без applied-потоков не проверялся вовсе: его изменение
+  // «из ниоткуда» проходило молча.
+  const allIds = new Set<string>([...Object.keys(before), ...Object.keys(after), ...expected.keys()]);
+
+  for (const reservoirId of allIds) {
+    const beforeRes = before[reservoirId];
+    const afterRes = after[reservoirId];
+    if (!beforeRes || !afterRes) {
+      exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}» отсутствует в состоянии «${!beforeRes ? 'до' : 'после'}»: пофазовая проверка невозможна` });
+      continue;
+    }
+    const delta = expected.get(reservoirId);
+    const fluxSpecies = delta?.species;
+    const energyTouched = delta !== undefined && delta.hasEnergy;
+    const fluxEnergyJ = delta !== undefined && delta.hasEnergy && delta.energyReason === null ? delta.energyJ : null;
+
+    // --- МАТЕРИАЛЬНОЕ ИЗМЕРЕНИЕ ---
+    // Обязательно, если инвентарь задан хотя бы в одном состоянии
+    // (явное наличие материи) или резервуар затронут вещественным
+    // потоком (Stage 4.1.1.3, ISSUE A): если инвентаря нет в ОБОИХ
+    // состояниях и материальных потоков нет, единственное законное
+    // основание пропустить измерение — materialApplicability =
+    // 'not_applicable' в ОБОИХ состояниях. Отсутствие material без
+    // маркера — неизвестный запас (не ноль и не нематериальность):
+    // явное исключение и not_verifiable, согласованно с
+    // reservoirsToMolarCounts.
+    const beforeInv = beforeRes.material;
+    const afterInv = afterRes.material;
+    const beforeNotApplicable = beforeRes.materialApplicability === 'not_applicable';
+    const afterNotApplicable = afterRes.materialApplicability === 'not_applicable';
+    const materialMandatory =
+      beforeInv !== undefined || afterInv !== undefined || (fluxSpecies !== undefined && fluxSpecies.size > 0);
+    if (materialMandatory) {
+      if (!beforeInv || !afterInv) {
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: материальный инвентарь не задан в состоянии «${!beforeInv ? 'до' : 'после'}» — пофазовая проверка невозможна (запас неизвестен, а не ноль)` });
+      } else if (!isPlainRecord(beforeInv.entries) || !isPlainRecord(afterInv.entries)) {
+        // Stage 4.1.1.3 (ISSUE B): массив — не словарь; пофазовая
+        // сверка по индексным «видам» невозможна и не имитируется.
+        // Stage 4.1.1.3.1: строгий прототип — Map/Set/Date/RegExp и
+        // экземпляры классов тоже не словари.
+        const nonRecordEntries = isPlainRecord(beforeInv.entries) ? afterInv.entries : beforeInv.entries;
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: material.entries не является настоящим объектом-записью (speciesId → количество; получено ${describeRecordCandidate(nonRecordEntries)}) — пофазовая проверка невозможна` });
+      } else if (beforeInv.basis !== afterInv.basis) {
+        exclusions.push({ key: reservoirId, reason: `резервуар «${reservoirId}»: основание инвентаря изменилось («${beforeInv.basis}» → «${afterInv.basis}») — пофазовая проверка невозможна` });
+      } else {
+        // виды: объединение из «до», «после» и ожидаемых Δ потока
+        const speciesIds = new Set<string>([
+          ...Object.keys(beforeInv.entries),
+          ...Object.keys(afterInv.entries),
+          ...(fluxSpecies !== undefined ? [...fluxSpecies.keys()] : [])
+        ]);
+        for (const speciesId of speciesIds) {
+          const spec = fluxSpecies?.get(speciesId);
+          // Stage 4.2.3.4.1: непредставимая Δ (переполнение суммы
+          // вкладов или конфликт оснований) — явное исключение
+          // (not_verifiable), а не численное расхождение; Infinity
+          // не превращается в обычный дисбаланс.
+          if (spec && !Number.isFinite(spec.delta)) {
+            exclusions.push({
+              key: `${reservoirId}:${speciesId}`,
+              reason: spec.reason ?? `резервуар «${reservoirId}»: вклады вида «${speciesId}» (потоки и/или реакции) имеют несовместимые основания`
+            });
+            continue;
+          }
+          if (spec && spec.basis !== beforeInv.basis) {
+            exclusions.push({ key: `${reservoirId}:${speciesId}`, reason: `резервуар «${reservoirId}»: основание вклада (потока или реакции) «${spec.basis}» не совпадает с основанием инвентаря «${beforeInv.basis}»` });
+            continue;
+          }
+          // Stage 4.2.3.4.1 (prototype-safe чтение): собственный ключ
+          // отсутствует — известный ноль; унаследованное свойство
+          // количеством не является. Нечисловое собственное значение
+          // непредставимо.
+          const beforeAmount = ownEntryAmount(beforeInv.entries, speciesId);
+          const afterAmount = ownEntryAmount(afterInv.entries, speciesId);
+          const expectedAmount = beforeAmount + (spec ? spec.delta : 0);
+          if (!Number.isFinite(expectedAmount) || !Number.isFinite(afterAmount)) {
+            exclusions.push({
+              key: `${reservoirId}:${speciesId}`,
+              reason: `резервуар «${reservoirId}»: ожидаемый запас вида «${speciesId}» (до + поток + реакция) непредставим (не конечное число или переполнение суммы) — пофазовая проверка невозможна`
+            });
+            continue;
+          }
+          if (Math.abs(expectedAmount - afterAmount) > tolerance) {
+            discrepancies.push({
+              key: `${reservoirId}:${speciesId}`,
+              expected: expectedAmount,
+              actual: afterAmount,
+              reservoirId
+            });
+          }
+        }
+      }
+    } else {
+      // Stage 4.1.1.3 (ISSUE A): инвентарь отсутствует в ОБОИХ
+      // состояниях и материальных потоков нет. Единственное законное
+      // основание пропустить материальное измерение — ЯВНАЯ
+      // неприменимость в обоих состояниях. Во всех остальных случаях
+      // запас неизвестен или неприменимость не подтверждена — итог
+      // обязан быть not_verifiable, а не «balanced без проверки».
+      if (beforeNotApplicable && afterNotApplicable) {
+        // законное явное исключение — резервуар по своей природе
+        // не содержит материю; оно не диагностируется как проблема
+      } else if (beforeNotApplicable !== afterNotApplicable) {
+        exclusions.push({
+          key: reservoirId,
+          reason: `резервуар «${reservoirId}»: materialApplicability = 'not_applicable' задан только в состоянии «${beforeNotApplicable ? 'до' : 'после'}» — переход неприменимости не подтверждён, материальное измерение непроверяемо`
+        });
+      } else {
+        exclusions.push({
+          key: reservoirId,
+          reason: `резервуар «${reservoirId}»: материальный инвентарь не задан ни в одном состоянии и неприменимость не объявлена (materialApplicability) — запас неизвестен и не приравнивается к нулю или отсутствию материи`
+        });
+      }
+    }
+
+    // --- ЭНЕРГЕТИЧЕСКОЕ ИЗМЕРЕНИЕ ---
+    // Обязательно, если энергия задана хотя бы в одном состоянии или
+    // резервуар затронут энергетическим потоком. storedJ = null —
+    // «неизвестно», а не ноль: проверка невозможна → исключение.
+    const beforeEnergy = beforeRes.energy;
+    const afterEnergy = afterRes.energy;
+    const energyMandatory =
+      beforeEnergy !== undefined || afterEnergy !== undefined || energyTouched;
+    if (energyMandatory) {
+      if (!beforeEnergy || !afterEnergy || beforeEnergy.storedJ === null || afterEnergy.storedJ === null) {
+        exclusions.push({ key: `${reservoirId}:energy`, reason: `резервуар «${reservoirId}»: запас энергии неизвестен (нет инвентаря или storedJ = null) — пофазовая проверка энергии невозможна` });
+      } else if (delta !== undefined && delta.energyReason !== null) {
+        // Stage 4.2.3.4.1: непредставимый энергетический вклад —
+        // явное исключение, а не расхождение из Infinity.
+        exclusions.push({ key: `${reservoirId}:energy`, reason: delta.energyReason });
+      } else {
+        const expectedStoredJ = beforeEnergy.storedJ + (fluxEnergyJ ?? 0);
+        const actualStoredJ = afterEnergy.storedJ as number;
+        if (!Number.isFinite(expectedStoredJ) || !Number.isFinite(actualStoredJ)) {
+          exclusions.push({
+            key: `${reservoirId}:energy`,
+            reason: `резервуар «${reservoirId}»: ожидаемый или фактический запас энергии непредставим (не конечное число или переполнение суммы) — пофазовая проверка энергии невозможна`
+          });
+        } else if (Math.abs(expectedStoredJ - actualStoredJ) > tolerance) {
+          discrepancies.push({
+            key: `${reservoirId}:energy`,
+            expected: expectedStoredJ,
+            actual: actualStoredJ,
+            reservoirId
+          });
+        }
+      }
+    }
+  }
+
+  // Статус: расхождения > непроверяемость от untimed-исключений >
+  // непроверяемость от исключений > успех. balanced возможен только
+  // при полностью проверенном аудите без расхождений (ISSUE B/C).
+  let status: ConservationStatus;
+  if (discrepancies.length > 0) {
+    status = 'imbalanced';
+  } else if (untimed.length > 0 || exclusions.length > 0) {
+    status = 'not_verifiable';
+  } else {
+    status = 'balanced';
+  }
+  return {
+    status,
+    balanced: status === 'balanced',
+    discrepancies,
+    exclusions,
+    untimedRecords: untimed,
+    tolerance
+  };
+}
+
+// ============================================
+// 5. ВАЛИДАЦИЯ РЕЕСТРА
+// ============================================
+
+/**
+ * Валидация формы записей реестра (Stage 4.1.1): записи могут
+ * приходить из JSON/сохранений, поэтому проверяется runtime-форма:
+ * - id непуст и уникален;
+ * - kind/status из допустимых наборов;
+ * - from/to согласованы с kind (external-граница, from ≠ to);
+ * - subject согласован с типом (положительные конечные величины);
+ * - time: segmentIndex — неотрицательное целое, localTimeS —
+ *   неотрицательное конечное число;
+ * - при переданном reservoirIds ссылки from/to должны существовать.
+ * Возвращает список проблем (пустой = реестр корректен).
+ */
+export function validateFluxLedger(ledger: unknown, opts?: { reservoirIds?: readonly string[] }): string[] {
+  const problems: string[] = [];
+  if (typeof ledger !== 'object' || ledger === null) {
+    return ['реестр потоков должен быть объектом с полем records'];
+  }
+  const rec = ledger as Record<string, unknown>;
+  if (!Array.isArray(rec.records)) {
+    return ['реестр потоков: поле records должно быть массивом'];
+  }
+  const seen = new Set<string>();
+  const records = rec.records as unknown[];
+  records.forEach((entry, index) => {
+    const at = (message: string): string => `запись #${index}: ${message}`;
+    if (typeof entry !== 'object' || entry === null) {
+      problems.push(at('запись потока должна быть объектом'));
+      return;
+    }
+    const r = entry as Record<string, unknown>;
+    if (typeof r.id !== 'string' || r.id.trim() === '') {
+      problems.push(at('id потока должен быть непустой строкой'));
+    } else if (seen.has(r.id)) {
+      problems.push(at(`дублирующийся id потока «${r.id}»`));
+    } else {
+      seen.add(r.id);
+    }
+    if (typeof r.kind !== 'string' || !(FLUX_KINDS as readonly string[]).includes(r.kind)) {
+      problems.push(at(`kind потока должен быть одним из ${FLUX_KINDS.join(' | ')}, получено «${String(r.kind)}»`));
+    }
+    if (typeof r.status !== 'string' || !(FLUX_STATUSES as readonly string[]).includes(r.status)) {
+      problems.push(at(`status потока должен быть одним из ${FLUX_STATUSES.join(' | ')}, получено «${String(r.status)}»`));
+    }
+    const from = r.from;
+    const to = r.to;
+    if (typeof from !== 'string' || from.trim() === '' || typeof to !== 'string' || to.trim() === '') {
+      problems.push(at('from/to потока должны быть непустыми строками'));
+    } else if (r.kind === 'internal_transfer') {
+      if (from === EXTERNAL || to === EXTERNAL) {
+        problems.push(at(`внутренний перенос не может пересекать внешнюю границу (from=${from}, to=${to})`));
+      } else if (from === to) {
+        problems.push(at(`перенос в самого себя (${from}) не является переносом`));
+      }
+    } else if (r.kind === 'external_input') {
+      if (from !== EXTERNAL || to === EXTERNAL) {
+        problems.push(at(`external_input требует from=${EXTERNAL} и внутреннего получателя (from=${from}, to=${to})`));
+      }
+    } else if (r.kind === 'external_output') {
+      if (to !== EXTERNAL || from === EXTERNAL) {
+        problems.push(at(`external_output требует to=${EXTERNAL} и внутреннего источника (from=${from}, to=${to})`));
+      }
+    }
+    const subject = r.subject;
+    if (typeof subject !== 'object' || subject === null) {
+      problems.push(at('subject потока должен быть объектом'));
+    } else {
+      const s = subject as Record<string, unknown>;
+      if (s.subjectType !== 'substance' && s.subjectType !== 'energy') {
+        problems.push(at(`subjectType должен быть 'substance' или 'energy', получено «${String(s.subjectType)}»`));
+      }
+      if (s.quantityKind !== 'integrated' && s.quantityKind !== 'rate') {
+        problems.push(at(`quantityKind должен быть 'integrated' или 'rate', получено «${String(s.quantityKind)}»`));
+      }
+      if (s.subjectType === 'substance') {
+        if (typeof s.speciesId !== 'string' || s.speciesId.trim() === '') {
+          problems.push(at('speciesId должен быть непустой строкой'));
+        }
+        if (typeof s.basis !== 'string' || !isKnownBasis(s.basis)) {
+          problems.push(at(`basis должен быть известным основанием, получено «${String(s.basis)}»`));
+        }
+        const amount = s.quantityKind === 'integrated' ? s.amount : s.ratePerSecond;
+        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+          problems.push(at(`переносимое количество/скорость должно быть конечным положительным числом, получено ${String(amount)}`));
+        }
+      } else if (s.subjectType === 'energy') {
+        const amount = s.quantityKind === 'integrated' ? s.energyJ : s.powerW;
+        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+          problems.push(at(`энергия/мощность должна быть конечным положительным числом, получено ${String(amount)}`));
+        }
+      }
+    }
+    if (r.time !== null && r.time !== undefined) {
+      if (typeof r.time !== 'object' || r.time === null) {
+        problems.push(at('time потока должен быть объектом или null'));
+      } else {
+        const t = r.time as Record<string, unknown>;
+        if (typeof t.segmentIndex !== 'number' || !Number.isInteger(t.segmentIndex) || t.segmentIndex < 0) {
+          problems.push(at('time.segmentIndex должен быть неотрицательным целым числом'));
+        }
+        if (typeof t.localTimeS !== 'number' || !Number.isFinite(t.localTimeS) || t.localTimeS < 0) {
+          problems.push(at('time.localTimeS должен быть неотрицательным конечным числом'));
+        }
+      }
+    }
+    if (opts?.reservoirIds) {
+      for (const side of [from, to]) {
+        if (typeof side === 'string' && side !== EXTERNAL && !opts.reservoirIds.includes(side)) {
+          problems.push(at(`ссылка на несуществующий резервуар «${side}»`));
+        }
+      }
+    }
+  });
+  return problems;
+}
+
+/**
+ * Проверка целостности записей реестра относительно набора резервуаров:
+ * все from/to (кроме EXTERNAL) должны существовать, форма записей
+ * должна быть корректной. Возвращает список проблем
+ * (пустой = реестр согласован).
+ */
+export function validateLedgerReferences(
+  ledger: FluxLedger,
+  reservoirs: Record<string, ReservoirRecord>
+): string[] {
+  return validateFluxLedger(ledger, { reservoirIds: Object.keys(reservoirs) });
+}
+
+/** Проверка валидности всех материальных инвентарей набора резервуаров. */
+export function validateReservoirInventories(reservoirs: Record<string, ReservoirRecord>): string[] {
+  const problems: string[] = [];
+  for (const res of Object.values(reservoirs)) {
+    if (res.material) {
+      const check = validateMaterialInventory(res.material);
+      if (!check.valid) {
+        problems.push(`резервуар «${res.id}»: ${check.errors.join('; ')}`);
+      }
+    }
+  }
+  return problems;
+}
+
+

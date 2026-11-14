@@ -9,7 +9,11 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "wasm:build": "node scripts/wasm/build-wasm.mjs",
+    "benchmark:rust": "vitest run --config scripts/benchmarks/vitest.bench.config.ts",
+    "benchmark:prepared": "vitest run --config scripts/benchmarks/vitest.prepared.config.ts",
+    "benchmark:browser": "node scripts/bench-browser/run-stage-i-browser.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",

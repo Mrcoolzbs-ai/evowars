@@ -1,0 +1,19 @@
+[package]
+name = "evowars-sim-core"
+version = "0.1.0"
+edition = "2021"
+description = "Evolution Wars Rust/WASM performance pilot: numeric kernels of kinetics k(T) and stoichiometry audit"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "evowars_bench"
+path = "src/bin/evowars_bench.rs"
+
+[dependencies]
+wasm-bindgen = "=0.2.95"
+
+[profile.release]
+opt-level = 3

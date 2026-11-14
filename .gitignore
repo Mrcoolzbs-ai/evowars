@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust/WASM pilot (Stage H): артефакты сборки не коммитятся
+rust/evowars-sim-core/target/
+rust/evowars-sim-core/pkg-node/
+rust/evowars-sim-core/pkg-web/
+
+# Результаты benchmark (публикуются артефактами CI)
+benchmark-artifacts/

@@ -6,10 +6,11 @@ import { useState, useEffect } from 'react';
 import { generateWorld, generateRandomSeed, generateMultipleWorlds } from './modules/Generator';
 import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
 import { createShortDescription } from './modules/WorldModel';
-import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID } from './types';
+import { bodyCharacteristicsDisplayRows } from './modules/Core/adapters';
+import { getAllPresets } from './modules/Atmosphere';
+import { runChemicalEvolutionSchedulerStep, runWorldKineticTrajectory, resetWorldKineticExperiment, kineticRunHistoryViewModel } from './modules/ChemicalEvolution';
+import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit, KineticExperimentRunRecord } from './types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
-
-import './App.css';
 
 import './App.css';
 
@@ -143,6 +144,47 @@ function GeneratorPanel(props: {
         </div>
       </div>
 
+      <div className="atmosphere-preset">
+        <h3>Атмосферный пресет</h3>
+        <div className="category-selector">
+          <label>Пресет:</label>
+          <select
+            value={localSettings.atmospherePreset || ''}
+            onChange={(e) => {
+              const newSettings = { ...localSettings, atmospherePreset: e.target.value || undefined };
+              setLocalSettings(newSettings);
+              props.onSettingsChange(newSettings);
+            }}
+          >
+            <option value="">По умолчанию (метаново-этановая)</option>
+            {Object.entries(getAllPresets()).map(([presetId]) => (
+              <option key={presetId} value={presetId}>
+                {presetId === 'methane_ethane'
+                  ? 'Метаново-этановая (историческая игровая)'
+                  : presetId === 'titan_reference'
+                    ? 'Титан — наблюдательный ориентир'
+                    : presetId}
+              </option>
+            ))}
+          </select>
+          {localSettings.atmospherePreset && (
+            <p className="preset-note">
+              {(() => {
+                const preset = getAllPresets()[localSettings.atmospherePreset];
+                if (!preset) return null;
+                if (preset.presetKind === 'historical_game') {
+                  return 'Исторический игровой сценарий. Исходные 1.5 atm и 95 K — неподтверждённые игровые допущения, не данные наблюдений.';
+                }
+                if (preset.presetKind === 'observational_reference') {
+                  return 'Справочный ориентир на основе наблюдений реального небесного тела. Не является универсальным шаблоном для всех планет этого класса.';
+                }
+                return 'Пресет сгенерирует атмосферу с допустимыми вариациями состава.';
+              })()}
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className="generator-actions">
         <button onClick={handleGenerate} className="primary">
           Сгенерировать мир
@@ -180,11 +222,489 @@ function CategorySelector<T extends { id: ID; name: string }>(props: {
   );
 }
 
+// ============================================
+// Stage 4.5.5: кинетический эксперимент №89/№106
+// ============================================
+// Отдельный пользовательский расчётный сценарий в паспорте мира:
+// пользователь явно настраивает толщину слоя и начальные запасы
+// (они НЕ извлекаются из атмосферного состава), строит расписание
+// сегментов и выполняет последовательную траекторию. Это НЕ шаг
+// режима A и НЕ рассчитанная эволюция атмосферы планеты.
+
+type KineticSpeciesKey = 'O' | 'NO' | 'NO2' | 'H' | 'O2' | 'HO2' | 'N2';
+
+const KINETIC_EXPERIMENT_SPECIES_FIELDS: Array<{ key: KineticSpeciesKey; formula: string }> = [
+  { key: 'O', formula: 'O' },
+  { key: 'NO', formula: 'NO' },
+  { key: 'NO2', formula: 'NO₂' },
+  { key: 'H', formula: 'H' },
+  { key: 'O2', formula: 'O₂' },
+  { key: 'HO2', formula: 'HO₂' },
+  { key: 'N2', formula: 'N₂' }
+];
+
+const KINETIC_EXPERIMENT_REACTIONS: Array<{ id: string; label: string }> = [
+  { id: 'kida-tb-2015-03-19-89', label: '№89: O + NO + N₂ → NO₂ + N₂ (200–300 K)' },
+  { id: 'kida-tb-2015-03-19-106', label: '№106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)' }
+];
+
+/** Черновик сегмента расписания в редакторе UI (строки, не числа). */
+interface KineticSegmentDraft {
+  temperatureK: string;
+  dtSeconds: string;
+  reactionIds: string[];
+}
+
+function emptyKineticInventoryDraft(): Record<KineticSpeciesKey, string> {
+  return { O: '', NO: '', NO2: '', H: '', O2: '', HO2: '', N2: '' };
+}
+
+function formatKineticAmount(value: number): string {
+  if (value === 0) {
+    return '0';
+  }
+  return value.toExponential(4);
+}
+
+/**
+ * Источник provenance для блока аудита (срез трассируемости 4.5.5):
+ * первый непустой идентификатор, без подстановки фиктивных значений.
+ */
+function kineticProvenanceSource(p: {
+  sourceName?: string;
+  sourceId?: string;
+  datasetId?: string;
+  reference?: string;
+  datasetVersion?: string;
+}): string {
+  const source = p.sourceName ?? p.sourceId ?? p.datasetId ?? p.reference ?? 'источник не идентифицирован';
+  return p.datasetVersion ? `${source} (версия данных: ${p.datasetVersion})` : source;
+}
+
+/**
+ * Аудит фактического расчёта одного сегмента (срез кинетической
+ * трассируемости 4.5.5). recorded показывает фактическую константу,
+ * единицу, диапазон, fall-off-диагностику, provenance и концентрацию
+ * N₂ из результата вычислителя; unavailable_legacy честно обозначает
+ * отсутствие исторического снимка; сегмент старой схемы 1.0.0 без
+ * audit обозначается явно. Реконструкция старых значений не
+ * выполняется.
+ */
+function KineticSegmentAuditView({ audit }: { audit: KineticExperimentSegmentAudit | undefined }) {
+  if (audit === undefined) {
+    return (
+      <p className="kinetic-audit-note">
+        Исторический снимок аудита отсутствует: сегмент выполнен до введения снимков аудита
+        (схема состояния 1.0.0); фактические параметры старого расчёта не записывались и задним
+        числом не восстанавливаются.
+      </p>
+    );
+  }
+  if (audit.kind === 'unavailable_legacy') {
+    return <p className="kinetic-audit-note">Исторический снимок аудита отсутствует: {audit.reason}</p>;
+  }
+  return (
+    <div>
+      <p className="kinetic-audit-note">
+        Модель концентраций: {audit.concentrationModel}; концентрация третьего тела N₂:{' '}
+        {formatKineticAmount(audit.thirdBodyN2MoleculeCm3)} molecule/cm³
+        {audit.integration &&
+          `; интегратор: ${audit.integration.method} (малых отрицательных компонент: ${audit.integration.minorNegativeCount}, проверок инвариантов: ${audit.integration.invariantChecks})`}
+      </p>
+      <table className="atmosphere-table kinetic-audit-table">
+        <thead>
+          <tr>
+            <th>Реакция</th>
+            <th>k (фактически)</th>
+            <th>Диапазон, K</th>
+            <th>fall-off</th>
+            <th>Источник и provenance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {audit.reactions.map((reaction) => (
+            <tr key={reaction.reactionId}>
+              <td>{reaction.label}</td>
+              <td>
+                {formatKineticAmount(reaction.rateConstant.value)} {reaction.rateConstant.unit} (статус
+                данных: {reaction.dataStatus})
+              </td>
+              <td>
+                [{reaction.appliedRangeK.min}, {reaction.appliedRangeK.max}]
+              </td>
+              <td>
+                k₀ = {formatKineticAmount(reaction.fallOff.lowPressureLimit)}; k∞ ={' '}
+                {formatKineticAmount(reaction.fallOff.highPressureLimit)}; Pr ={' '}
+                {formatKineticAmount(reaction.fallOff.reducedPressure)}; log10(Pr) ={' '}
+                {formatKineticAmount(reaction.fallOff.log10ReducedPressure)}; F ={' '}
+                {formatKineticAmount(reaction.fallOff.broadeningFactor)}
+              </td>
+              <td>
+                {kineticProvenanceSource(reaction.provenance)}; k₀ —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.lowPressureLimit)}; k∞ —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.highPressureLimit)}; уширение —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.broadening)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Полная история запусков эксперимента (корректирующий пакет
+ * трассируемости): ВСЕ запуски в хронологическом порядке, последний
+ * раскрыт по умолчанию, предыдущие свёрнуты. При раскрытии доступны
+ * расписание и аудит каждого сегмента; unavailable_legacy
+ * показывается с исходной причиной. Раскрытие — только
+ * переключение видимости уже сохранённых данных: повторные расчёты,
+ * реконструкции и обращения к каталогу не выполняются.
+ */
+function KineticRunHistoryView({ history }: { history: KineticExperimentRunRecord[] }) {
+  const entries = kineticRunHistoryViewModel(history);
+  const [expandedOverrides, setExpandedOverrides] = useState<Record<number, boolean>>({});
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="kinetic-run-history">
+      {entries.map((entry) => {
+        const run = history[entry.runIndex];
+        if (run === undefined) {
+          return null;
+        }
+        const expanded =
+          entry.runIndex in expandedOverrides ? expandedOverrides[entry.runIndex] === true : entry.defaultExpanded;
+        return (
+          <details key={entry.runIndex} className="kinetic-run-details" open={expanded}>
+            <summary
+              onClick={(event) => {
+                event.preventDefault();
+                setExpandedOverrides((prev) => ({ ...prev, [entry.runIndex]: !expanded }));
+              }}
+            >
+              Запуск №{run.runIndex + 1}
+              {entry.defaultExpanded ? ' (последний)' : ''}
+            </summary>
+            <p>
+              Физическое время:{' '}
+              {formatKineticAmount(run.startElapsedSeconds)} с → {formatKineticAmount(run.endElapsedSeconds)} с
+            </p>
+            <table className="atmosphere-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>T, K</th>
+                  <th>dt, с</th>
+                  <th>Реакции</th>
+                  <th>Начало, с</th>
+                  <th>Конец, с</th>
+                </tr>
+              </thead>
+              <tbody>
+                {run.segments.map((segment) => (
+                  <tr key={segment.index}>
+                    <td>{segment.index + 1}</td>
+                    <td>{segment.temperatureK}</td>
+                    <td>{formatKineticAmount(segment.dtSeconds)}</td>
+                    <td>
+                      {segment.reactionIds
+                        .map(
+                          (id) =>
+                            KINETIC_EXPERIMENT_REACTIONS.find((r) => r.id === id)?.label ?? id
+                        )
+                        .join(', ')}
+                    </td>
+                    <td>{formatKineticAmount(segment.startTimeSeconds)}</td>
+                    <td>{formatKineticAmount(segment.endTimeSeconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {run.segments.map((segment) => (
+              <div className="kinetic-audit" key={'audit-' + segment.index}>
+                <h5>Аудит сегмента №{segment.index + 1}: фактический расчёт</h5>
+                <KineticSegmentAuditView audit={segment.audit} />
+              </div>
+            ))}
+            {run.warnings.length > 0 && (
+              <p className="kinetic-warnings">Предупреждения: {run.warnings.join('; ')}</p>
+            )}
+            {run.assumptions.length > 0 && (
+              <p className="model-note">Предпосылки результата: {run.assumptions.join('; ')}</p>
+            )}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function KineticExperimentSection(props: {
+  world: GeneratedWorld;
+  onWorldReplace: (world: GeneratedWorld) => void;
+}) {
+  const world = props.world;
+  const experiment = world.kineticExperiment;
+
+  const [layerThicknessDraft, setLayerThicknessDraft] = useState('');
+  const [inventoryDraft, setInventoryDraft] = useState<Record<KineticSpeciesKey, string>>(
+    emptyKineticInventoryDraft()
+  );
+  const [scheduleDraft, setScheduleDraft] = useState<KineticSegmentDraft[]>([
+    { temperatureK: '', dtSeconds: '', reactionIds: [] }
+  ]);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const setSegmentField = (index: number, field: 'temperatureK' | 'dtSeconds', value: string) => {
+    setScheduleDraft((drafts) =>
+      drafts.map((draft, i) => (i === index ? { ...draft, [field]: value } : draft))
+    );
+  };
+
+  const toggleSegmentReaction = (index: number, reactionId: string) => {
+    setScheduleDraft((drafts) =>
+      drafts.map((draft, i) =>
+        i === index
+          ? {
+              ...draft,
+              reactionIds: draft.reactionIds.includes(reactionId)
+                ? draft.reactionIds.filter((id) => id !== reactionId)
+                : [...draft.reactionIds, reactionId]
+            }
+          : draft
+      )
+    );
+  };
+
+  const addSegment = () => {
+    setScheduleDraft((drafts) => [...drafts, { temperatureK: '', dtSeconds: '', reactionIds: [] }]);
+  };
+
+  const removeSegment = (index: number) => {
+    setScheduleDraft((drafts) =>
+      drafts.length <= 1 ? drafts : drafts.filter((_, i) => i !== index)
+    );
+  };
+
+  // Явный сброс эксперимента: только по действию пользователя,
+  // форма первичной настройки возвращается в пустое состояние.
+  const handleReset = () => {
+    props.onWorldReplace(resetWorldKineticExperiment(world));
+    setLayerThicknessDraft('');
+    setInventoryDraft(emptyKineticInventoryDraft());
+    setScheduleDraft([{ temperatureK: '', dtSeconds: '', reactionIds: [] }]);
+    setRunError(null);
+  };
+
+  const handleRun = () => {
+    setRunError(null);
+    const segments: Array<{ temperatureK: number; dtSeconds: number; reactionIds: string[] }> = [];
+    for (let i = 0; i < scheduleDraft.length; i++) {
+      const draft = scheduleDraft[i];
+      const temperatureRaw = draft.temperatureK.trim();
+      const dtRaw = draft.dtSeconds.trim();
+      if (temperatureRaw === '' || dtRaw === '') {
+        setRunError(`сегмент ${i + 1}: заполните температуру (K) и длительность (с)`);
+        return;
+      }
+      if (draft.reactionIds.length === 0) {
+        setRunError(`сегмент ${i + 1}: выберите хотя бы одну реакцию (№89 и/или №106)`);
+        return;
+      }
+      segments.push({
+        temperatureK: Number(temperatureRaw),
+        dtSeconds: Number(dtRaw),
+        reactionIds: [...draft.reactionIds]
+      });
+    }
+
+    // Первичная настройка передаётся ТОЛЬКО пока эксперимент не настроен:
+    // пустое поле не превращается в ноль (ключ просто не передаётся,
+    // адаптер назовёт отсутствующий вид), толщина пустая → NaN → явный
+    // отказ адаптера, а не молчаливый ноль.
+    let setup: { layerThicknessM: number; initialInventoriesMolM2: Partial<Record<KineticSpeciesKey, number>> } | undefined;
+    if (!experiment) {
+      const thicknessRaw = layerThicknessDraft.trim();
+      const initialInventoriesMolM2: Partial<Record<KineticSpeciesKey, number>> = {};
+      for (const field of KINETIC_EXPERIMENT_SPECIES_FIELDS) {
+        const raw = inventoryDraft[field.key].trim();
+        if (raw !== '') {
+          initialInventoriesMolM2[field.key] = Number(raw);
+        }
+      }
+      setup = {
+        layerThicknessM: thicknessRaw === '' ? NaN : Number(thicknessRaw),
+        initialInventoriesMolM2
+      };
+    }
+
+    try {
+      const nextWorld = runWorldKineticTrajectory(
+        world,
+        experiment ? { segments } : { segments, setup }
+      );
+      // Ошибка запуска не изменяет отображаемый мир: мир заменяется
+      // только при полном успешном завершении траектории.
+      props.onWorldReplace(nextWorld);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  return (
+    <div className="kinetic-experiment">
+      <h3>Кинетический эксперимент — ограниченный механизм №89/№106</h3>
+      <p className="kinetic-experiment-note">
+        ⚠ Отдельный пользовательский расчётный сценарий в паспорте мира. Он не изменяет
+        основной атмосферный ChemicalEvolutionState, не подключён к игровым часам и не
+        моделирует перенос, диффузию, конвекцию или пополнение вещества. Начальные
+        запасы вводятся пользователем явно и не извлекаются автоматически из
+        атмосферного состава: радикалов O, NO, NO₂, H и HO₂ в атмосферном каталоге нет.
+      </p>
+
+      {!experiment && (
+        <div className="kinetic-setup">
+          <h4>Первичная настройка</h4>
+          <p className="model-note">
+            Все поля пустые по умолчанию: пустое поле не превращается в ноль. Для
+            реакционных видов (O, NO, NO₂, H, O₂, HO₂) допустим явный 0; N₂ обязан быть
+            конечным и строго положительным (третье тело механизма).
+          </p>
+          <div className="kinetic-setup-grid">
+            <label>
+              Толщина слоя, м
+              <input
+                type="text"
+                value={layerThicknessDraft}
+                onChange={(e) => setLayerThicknessDraft(e.target.value)}
+                placeholder="например, 1000"
+              />
+            </label>
+            {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+              <label key={field.key}>
+                Начальный запас {field.formula}, моль/м²
+                <input
+                  type="text"
+                  value={inventoryDraft[field.key]}
+                  onChange={(e) =>
+                    setInventoryDraft((draft) => ({ ...draft, [field.key]: e.target.value }))
+                  }
+                  placeholder="число или 0"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {experiment && (
+        <div className="kinetic-status">
+          <h4>Состояние эксперимента</h4>
+          <div className="physics-grid">
+            <div><span>Толщина слоя:</span> {formatKineticAmount(experiment.layerThicknessM)} м</div>
+            <div><span>Накопленное физическое время:</span> {formatKineticAmount(experiment.elapsedSeconds)} с</div>
+            <div><span>Успешных запусков:</span> {experiment.completedRuns}</div>
+          </div>
+          <table className="atmosphere-table">
+            <thead>
+              <tr>
+                {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+                  <th key={field.key}>{field.formula}, моль/м²</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+                  <td key={field.key}>{formatKineticAmount(experiment.currentInventoriesMolM2[field.key])}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+          {experiment.history.length > 0 && <KineticRunHistoryView history={experiment.history} />}
+        </div>
+      )}
+
+      <div className="kinetic-schedule">
+        <h4>Расписание сегментов</h4>
+        <p className="model-note">
+          Температурные диапазоны: №89: 200–300 K; №106: 300–400 K; совместный выбор
+          №89+№106 допустим только при 300 K. Ничего не исправляется и не отключается
+          автоматически: ошибка запуска будет показана с причиной из механизма.
+        </p>
+        {scheduleDraft.map((draft, i) => (
+          <div className="kinetic-segment" key={i}>
+            <span className="kinetic-segment-title">Сегмент {i + 1}</span>
+            <label>
+              T, K
+              <input
+                type="text"
+                value={draft.temperatureK}
+                onChange={(e) => setSegmentField(i, 'temperatureK', e.target.value)}
+                placeholder="например, 250"
+              />
+            </label>
+            <label>
+              dt, с
+              <input
+                type="text"
+                value={draft.dtSeconds}
+                onChange={(e) => setSegmentField(i, 'dtSeconds', e.target.value)}
+                placeholder="например, 100"
+              />
+            </label>
+            {KINETIC_EXPERIMENT_REACTIONS.map((reaction) => (
+              <label className="kinetic-reaction-option" key={reaction.id}>
+                <input
+                  type="checkbox"
+                  checked={draft.reactionIds.includes(reaction.id)}
+                  onChange={() => toggleSegmentReaction(i, reaction.id)}
+                />
+                {reaction.label}
+              </label>
+            ))}
+            <button
+              className="secondary"
+              onClick={() => removeSegment(i)}
+              disabled={scheduleDraft.length <= 1}
+            >
+              Удалить сегмент
+            </button>
+          </div>
+        ))}
+        <button className="secondary" onClick={addSegment}>
+          Добавить сегмент
+        </button>
+      </div>
+
+      {runError && <div className="kinetic-error">✖ {runError}</div>}
+
+      <div className="kinetic-actions">
+        <button className="primary" onClick={handleRun}>
+          {experiment ? 'Выполнить запуск' : 'Настроить и выполнить запуск'}
+        </button>
+        {experiment && (
+          <button className="danger" onClick={handleReset}>
+            Сбросить эксперимент
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Компонент для отображения мира
 function WorldDisplay(props: {
   world: GeneratedWorld | null;
   onSave: () => void;
   onClose: () => void;
+  onChemicalStep?: () => void;
+  /** Причина отклонённого шага химии (Stage 4.2.3.3); null/undefined — шаг успешен. */
+  chemicalStepNotice?: string | null;
+  onWorldReplace: (world: GeneratedWorld) => void;
 }) {
   if (!props.world) return null;
 
@@ -258,17 +778,23 @@ function WorldDisplay(props: {
       </div>
 
       <div className="world-physics">
-        <h3>Физические характеристики</h3>
+        {/* Stage 4.2.4: единый канонический путь характеристик тела.
+            Один блок вместо двух: значения берутся из bodyPhysics через
+            ScientificValue (число показывается только для known/estimated,
+            неизвестные — текстом статуса, никогда нулём); для старых
+            сохранений без физической модели показываются легаси-оценки
+            с явной пометкой. */}
+        <h3>Физические характеристики тела</h3>
         <div className="physics-grid">
-          {world.physicalCharacteristics.mass && (
-            <div><span>Масса:</span> {world.physicalCharacteristics.mass} масс Земли</div>
-          )}
-          {world.physicalCharacteristics.radius && (
-            <div><span>Радиус:</span> {world.physicalCharacteristics.radius} радиусов Земли</div>
-          )}
-          {world.physicalCharacteristics.surfaceGravity && (
-            <div><span>Гравитация:</span> {world.physicalCharacteristics.surfaceGravity}g</div>
-          )}
+          {bodyCharacteristicsDisplayRows({
+            bodyPhysics: world.bodyPhysics ?? null,
+            physicalCharacteristics: world.physicalCharacteristics
+          }).map((row) => (
+            <div key={row.key}>
+              <span>{row.label}:</span> {row.display}
+              {row.note !== '' && <small> ({row.note})</small>}
+            </div>
+          ))}
           {world.physicalCharacteristics.surfaceTemperature && (
             <div><span>Температура:</span> {world.physicalCharacteristics.surfaceTemperature} K</div>
           )}
@@ -280,6 +806,208 @@ function WorldDisplay(props: {
           )}
         </div>
       </div>
+
+      {/* --- Этап 3: физическая модель планетарной системы --- */}
+
+      {world.bodyPhysics && (
+        <div className="world-physics">
+          <h3>Согласованность физической модели тела</h3>
+          <div className="physics-grid">
+            <div>
+              <span>Согласованность:</span>{' '}
+              {world.bodyPhysics.consistencyCheck.plausible
+                ? `правдоподобная плотность (${world.bodyPhysics.consistencyCheck.note})`
+                : `⚠ ${world.bodyPhysics.consistencyCheck.note}`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(world.centralObjectSystem || world.orbit || world.energyBudget) && (
+        <div className="world-physics">
+          <h3>Астрономическая система</h3>
+          <div className="physics-grid">
+            {world.centralObjectSystem && (
+              <div><span>Структура системы:</span> {describeCentralObjectSystem(world.centralObjectSystem)}</div>
+            )}
+            {world.orbit && (
+              <>
+                <div><span>Орбита:</span> {world.orbit.orbitalBasis}</div>
+                <div>
+                  <span>Большая полуось:</span>{' '}
+                  {world.orbit.semiMajorAxis.value !== null
+                    ? `${(world.orbit.semiMajorAxis.value / 1.495978707e11).toFixed(3)} а.е. (${world.orbit.semiMajorAxis.value.toExponential(2)} м)`
+                    : `неизвестно — ${world.orbit.semiMajorAxis.note ?? ''}`}
+                </div>
+                {world.orbit.eccentricity.value !== null && (
+                  <div><span>Эксцентриситет:</span> {world.orbit.eccentricity.value.toFixed(3)}</div>
+                )}
+                {world.orbit.orbitalPeriod.value !== null && (
+                  <div>
+                    <span>Орбитальный период:</span>{' '}
+                    {(world.orbit.orbitalPeriod.value / 3.15576e7).toFixed(2)} лет
+                  </div>
+                )}
+                <div>
+                  <span>Приливный захват:</span> {world.orbit.tidalLocking.value === 'possible' ? 'возможен' : world.orbit.tidalLocking.value === 'unknown' ? 'неизвестно' : 'маловероятен'}
+                </div>
+                <div><span>Устойчивость:</span> {world.orbit.stabilityCheck === 'not_performed' ? 'динамически не проверялась' : world.orbit.stabilityCheck}</div>
+              </>
+            )}
+            {world.energyBudget && (
+              <>
+                <div><span>Падающий поток:</span> {formatPhysValue(world.energyBudget.incidentFlux)}</div>
+                <div><span>Равновесная температура:</span> {formatPhysValue(world.energyBudget.equilibriumTemperature)}</div>
+                <div><span>Внутреннее тепло:</span> {formatHeatLevel(world.energyBudget.internalHeatLevel)}</div>
+              </>
+            )}
+          </div>
+          {world.energyBudget && (
+            <p className="model-note">ℹ {world.energyBudget.greenhouseNote}</p>
+          )}
+        </div>
+      )}
+
+      {world.atmospherePhysics && (
+        <div className="world-atmosphere">
+          <h3>Физическая модель атмосферы</h3>
+          <table className="atmosphere-table">
+            <thead>
+              <tr>
+                <th>Газ</th>
+                <th>Молярная доля</th>
+                <th>Парциальное давление, Па</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(world.atmospherePhysics.molarFractions).map(([gasId, fraction]) => {
+                const gas = gases.find(g => g.id === gasId);
+                const partial = world.atmospherePhysics?.partialPressuresPa[gasId]?.value;
+                return (
+                  <tr key={gasId}>
+                    <td>{gas?.name || gasId}</td>
+                    <td>{(fraction * 100).toFixed(4)}%</td>
+                    <td>{partial !== null && partial !== undefined ? partial.toExponential(3) : 'неизвестно'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="physics-grid">
+            {world.atmospherePhysics.surfacePressurePa && (
+              <div><span>Общее давление:</span> {formatPhysValue(world.atmospherePhysics.surfacePressurePa)}</div>
+            )}
+            {world.atmospherePhysics.meanMolarMassKgMol && (
+              <div><span>Средняя молярная масса:</span> {(world.atmospherePhysics.meanMolarMassKgMol.value ?? 0).toFixed(4)} кг/моль</div>
+            )}
+            {world.atmospherePhysics.columnMassKgM2 && (
+              <div><span>Масса столба:</span> {formatPhysValue(world.atmospherePhysics.columnMassKgM2)}</div>
+            )}
+            {world.atmospherePhysics.columnMolM2 && (
+              <div><span>Вещество столба:</span> {formatPhysValue(world.atmospherePhysics.columnMolM2)}</div>
+            )}
+          </div>
+          <p className="model-note">ℹ {world.atmospherePhysics.idealGasNote}</p>
+          <p className="model-note">⚠ {world.atmospherePhysics.fugacityNote}</p>
+        </div>
+      )}
+
+      {world.phaseAnalysis && (
+        <div className="world-phases">
+          <h3>Фазовые состояния компонентов</h3>
+          <ul>
+            {world.phaseAnalysis.components.map(component => {
+              const gas = gases.find(g => g.id === component.gasId);
+              return (
+                <li key={component.gasId}>
+                  <strong>{gas?.name || component.gasId}:</strong>{' '}
+                  {formatPhaseState(component.state)}
+                  {component.screeningRatio !== null && component.screeningRatio !== undefined && ` (S = ${component.screeningRatio.toFixed(2)})`}
+                  {component.extrapolated && ' — вне экспериментального диапазона корреляции'}
+                  {` — ${component.message}`}
+                </li>
+              );
+            })}
+          </ul>
+          {world.phaseAnalysis.warnings.map((warning, i) => (
+            <p key={i} className="warning">⚠ {warning}</p>
+          ))}
+        </div>
+      )}
+
+      {world.geologyAnalysis && (
+        <div className="world-physics">
+          <h3>Внутреннее тепло и геология</h3>
+          <div className="physics-grid">
+            <div><span>Суммарный уровень:</span> {formatHeatLevel(world.geologyAnalysis.totalInternalHeat)}</div>
+            <div>
+              <span>Геотермальная энергия:</span>{' '}
+              {world.geologyAnalysis.geothermalEnergyAvailable ? 'доступна' : 'недоступна (автоматически не добавляется)'}
+            </div>
+            <div><span>Остаточное тепло:</span> {formatHeatSource(world.geologyAnalysis.primordialHeat)}</div>
+            <div><span>Радиогенный нагрев:</span> {formatHeatSource(world.geologyAnalysis.radiogenicHeat)}</div>
+            <div><span>Приливный нагрев:</span> {formatHeatSource(world.geologyAnalysis.tidalHeat)}</div>
+            <div>
+              <span>Вулканизм:</span>{' '}
+              {world.geologyAnalysis.volcanism === true ? 'возможен' : world.geologyAnalysis.volcanism === null ? 'неизвестно' : 'маловероятен'}
+            </div>
+            <div>
+              <span>Гидротермальные системы:</span>{' '}
+              {world.geologyAnalysis.hydrothermalSystems === true ? 'возможны' : world.geologyAnalysis.hydrothermalSystems === null ? 'неизвестно' : 'маловероятны'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {world.chemicalState && (
+        <div className="world-chemistry">
+          <h3>Химическая эволюция</h3>
+          <div className="physics-grid">
+            <div>
+              <span>Режим инвентаря:</span>{' '}
+              {world.chemicalState.mode === 'column_inventory'
+                ? 'моль/м² атмосферного столба'
+                : 'нормированный игровой (абсолютное количество неизвестно)'}
+            </div>
+            <div><span>Модельное время:</span> {world.chemicalState.modelTimeYears.toExponential(2)} лет</div>
+            <div><span>Длительность шага:</span> {world.chemicalState.stepDurationYears.toExponential(2)} лет (игровое допущение)</div>
+            {world.chemicalState.surfacePressurePa !== null && (
+              <div><span>Давление:</span> {world.chemicalState.surfacePressurePa.toExponential(4)} Па</div>
+            )}
+            <div>
+              <span>Баланс O₂ (за последний шаг):</span> производство {world.chemicalState.oxygenBalance.production.toExponential(2)},
+              потребление {world.chemicalState.oxygenBalance.consumption.toExponential(2)},
+              итог {world.chemicalState.oxygenBalance.net.toExponential(2)}{' '}
+              {world.chemicalState.mode === 'column_inventory' ? 'моль/м²' : 'нормированные игровые единицы'}
+            </div>
+          </div>
+          <p className="model-note">ℹ {world.chemicalState.unitsNote}</p>
+          {world.chemicalState.history.length > 0 && (
+            <details>
+              <summary>История шагов ({world.chemicalState.history.length})</summary>
+              <ul>
+                {world.chemicalState.history.map((record, i) => (
+                  <li key={i}>
+                    {record.reactionId}: {record.applied ? 'выполнена' : `не выполнена (${record.reason})`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {props.onChemicalStep && (
+            <button onClick={props.onChemicalStep} className="secondary">
+              Сделать шаг химической эволюции
+            </button>
+          )}
+          {props.chemicalStepNotice && (
+            <p className="model-note">
+              ⚠ Шаг химической эволюции НЕ выполнен: {props.chemicalStepNotice}
+            </p>
+          )}
+        </div>
+      )}
+
+      <KineticExperimentSection world={world} onWorldReplace={props.onWorldReplace} />
 
       {world.warnings.length > 0 && (
         <div className="world-warnings">
@@ -463,6 +1191,78 @@ function formatScientificStatus(status: string): string {
   return map[status] || status;
 }
 
+// ===== Помощники отображения физической модели (этап 3) =====
+
+// Русская метка степени научной достоверности значения
+function formatConfidence(confidence: ScientificConfidence): string {
+  const map: Record<ScientificConfidence, string> = {
+    'established': 'установлено',
+    'derived': 'рассчитано',
+    'estimated': 'оценка',
+    'hypothetical': 'гипотеза',
+    'game_assumption': 'игровое допущение',
+    'unknown': 'неизвестно'
+  };
+  return map[confidence] ?? confidence;
+}
+
+// Форматирование физического значения с указанием достоверности:
+// пользователь видит, где известная физика, а где модельное предположение.
+function formatPhysValue(value: PhysValue): string {
+  if (value.value === null) {
+    return `неизвестно — ${value.note ?? 'данных недостаточно'}`;
+  }
+  return `${value.value.toExponential(3)} ${value.unit} [${formatConfidence(value.confidence)}]`;
+}
+
+// Русская метка фазового состояния компонента
+function formatPhaseState(state: string): string {
+  const map: Record<string, string> = {
+    'gas': 'газ',
+    'potentially_condensing': 'потенциальная конденсация',
+    'potential_solid_deposition': 'возможно выпадение твёрдой фазы',
+    'no_condensation_above_critical': 'выше критической температуры',
+    'unknown': 'неизвестно'
+  };
+  return map[state] ?? state;
+}
+
+// Русская метка уровня внутреннего тепла
+function formatHeatLevel(level: string): string {
+  const map: Record<string, string> = {
+    'high': 'высокий',
+    'moderate': 'умеренный',
+    'low': 'низкий',
+    'none': 'отсутствует',
+    'unknown': 'неизвестно'
+  };
+  return map[level] ?? level;
+}
+
+// Описание отдельного источника внутреннего тепла
+function formatHeatSource(source: { level: string | null; status: string; note: string }): string {
+  if (source.level === null) {
+    return `${source.status === 'potential' ? 'возможен, не оценён' : 'не оценён'} — ${source.note}`;
+  }
+  return `${formatHeatLevel(source.level)} — ${source.note}`;
+}
+
+// Краткое описание структурированной системы центрального объекта
+function describeCentralObjectSystem(system: NonNullable<GeneratedWorld['centralObjectSystem']>): string {
+  switch (system.kind) {
+    case 'star':
+      return `звезда спектрального класса ${system.spectralClass} (масса ${(system.massKg.range?.min ?? 0).toExponential(1)}–${(system.massKg.range?.max ?? 0).toExponential(1)} кг; время жизни класса ${system.typicalLifetimeGyr.min}–${system.typicalLifetimeGyr.max} млрд лет)`;
+    case 'compact_remnant':
+      return `компактный остаток (${system.remnantType === 'white_dwarf' ? 'белый карлик' : system.remnantType === 'neutron_star' ? 'нейтронная звезда' : 'чёрная дыра'})${system.accretionDependent ? '; мощное излучение зависит от аккреции и не гарантировано' : ''}`;
+    case 'substellar':
+      return `субзвёздный объект (коричневый карлик)${system.hasInternalHeat ? ' с внутренним тепловыделением' : ''}`;
+    case 'gas_giant_system':
+      return `одинокий газовый гигант${system.moonSystem.possible ? ' с возможной системой спутников' : ''}; внутреннее тепловыделение неизвестно`;
+    case 'jet_system':
+      return 'релятивистский джет — направленный высокоэнергетический поток, связанный с компактным объектом активного ядра; это НЕ обычный гравитационный центр системы';
+  }
+}
+
 // ============================================
 // ОСНОВНОЙ КОМПОНЕНТ
 // ============================================
@@ -486,6 +1286,9 @@ function App() {
   });
   const [activeTab, setActiveTab] = useState<'generator' | 'history' | 'export'>('generator');
   const [multipleWorlds, setMultipleWorlds] = useState<GeneratedWorld[]>([]);
+  // Причина последнего отклонённого шага химической эволюции
+  // (Stage 4.2.3.3): null — последний шаг зафиксирован.
+  const [chemicalStepNotice, setChemicalStepNotice] = useState<string | null>(null);
 
   // Загрузка сохраненных миров и настроек
   useEffect(() => {
@@ -514,6 +1317,7 @@ function App() {
   // Загрузка мира из истории
   const handleLoadWorld = (world: SavedWorld) => {
     setCurrentWorld(world);
+    setChemicalStepNotice(null);
     setActiveTab('generator');
   };
 
@@ -534,6 +1338,7 @@ function App() {
   // Генерация мира
   const handleGenerate = (world: GeneratedWorld) => {
     setCurrentWorld(world);
+    setChemicalStepNotice(null);
     setMultipleWorlds([]);
   };
 
@@ -541,6 +1346,21 @@ function App() {
   const handleGenerateMultiple = (worlds: GeneratedWorld[]) => {
     setMultipleWorlds(worlds);
     setCurrentWorld(null);
+  };
+
+  // Шаг химической эволюции (Stage 4.2.3.3): выполняется через
+  // атомарный macro-шаг Scheduler научного ядра (runMacroStep), а не
+  // напрямую через легаси-функцию. При отказе Scheduler мир остаётся
+  // неизменным, пользователю показывается причина.
+  const handleChemicalStep = () => {
+    if (!currentWorld) return;
+    const result = runChemicalEvolutionSchedulerStep(currentWorld);
+    if (result.status === 'committed') {
+      setChemicalStepNotice(null);
+      setCurrentWorld(result.world);
+    } else {
+      setChemicalStepNotice(result.reason ?? 'шаг химической эволюции отклонён планировщиком');
+    }
   };
 
   return (
@@ -609,6 +1429,9 @@ function App() {
                 world={currentWorld}
                 onSave={handleSaveWorld}
                 onClose={() => setCurrentWorld(null)}
+                onChemicalStep={handleChemicalStep}
+                chemicalStepNotice={chemicalStepNotice}
+                onWorldReplace={setCurrentWorld}
               />
             )}
           </>
@@ -629,10 +1452,11 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Эволюционные Войны - Генератор условий мира v0.1.0</p>
+        <p>Эволюционные Войны - Генератор условий мира v0.3.0 (этап 3: физическая модель)</p>
       </footer>
     </div>
   );
 }
 
 export default App;
+
