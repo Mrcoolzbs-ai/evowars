@@ -1446,3 +1446,163 @@ export function buildEquilibriumProblemFromCatalog(
       declaredPressure,
       PRESSURE_DIMENSION,
       'Pa',
+      op,
+      `давление стандартного состояния данных вида «${id}»`
+    );
+    if (Math.abs(declared.value - taskStandardStatePa) > 1e-6 * Math.max(1, Math.abs(declared.value))) {
+      throw new EquilibriumError({
+        code: 'invalid_input',
+        operation: op,
+        message: `давление стандартного состояния задачи (${taskStandardStatePa} Pa) не совпадает с конвенцией p° данных вида «${id}» (${declared.value} Pa)`,
+        details: 'коэффициенты отнесены к p° данных NASA CEA (идеальный газ, 1 бар); пересчёт g° на другое p° не реализован - задайте p° задачи равным конвенции данных'
+      });
+    }
+    let gStandardOverRT: number;
+    try {
+      gStandardOverRT = speciesStandardGibbsEnergyOverRT(thermodynamics, config.temperature);
+    } catch (error) {
+      if (error instanceof ThermoFunctionsError) {
+        if (error.code === 'no_thermodynamic_data') {
+          throw new EquilibriumError({
+            code: 'species_data_missing',
+            operation: op,
+            message: `у вида «${id}» нет NASA-7 параметризации теплоёмкости`,
+            details: error.message
+          });
+        }
+        throw new EquilibriumError({
+          code: 'invalid_input',
+          operation: op,
+          message: `не удалось вычислить g°/(R·T) вида «${id}» при заданной температуре`,
+          details: error.message
+        });
+      }
+      throw error;
+    }
+    species.push({ id, elements, charge, gStandardOverRT });
+  }
+  if (missing.length > 0) {
+    throw new EquilibriumError({
+      code: 'species_data_missing',
+      operation: op,
+      message: 'виды отсутствуют в каталоге, не газ или без блока термодинамики',
+      details: `виды: ${missing.join(', ')}`
+    });
+  }
+  const elementTotals: Record<string, number> = {};
+  let chargeTotal = 0;
+  if (hasAmounts) {
+    // C1 (Stage 4.4.3): кандидаты speciesIds без начального
+    // количества вносят нулевые итоги своих элементов: элемент
+    // вида-кандидата не может остаться без явного итога, иначе
+    // решатель способен создать его из ничего. Нулевой запас -
+    // явный ноль (соответствующие виды исключаются из активной
+    // задачи решателем).
+    for (const s of species) {
+      const amount = amounts[s.id] ?? 0;
+      for (const element of Object.keys(s.elements)) {
+        elementTotals[element] = (elementTotals[element] ?? 0) + amount * s.elements[element];
+      }
+      chargeTotal += amount * s.charge;
+    }
+  } else {
+    const given = config.elementTotals as Readonly<Record<string, number>>;
+    validateElements(given, op, 'итоги элементов');
+    for (const element of Object.keys(given)) {
+      elementTotals[element] = given[element];
+    }
+    if (config.chargeTotal !== undefined) {
+      if (typeof config.chargeTotal !== 'number' || !Number.isFinite(config.chargeTotal)) {
+        throw new EquilibriumError({
+          code: 'invalid_input',
+          operation: op,
+          message: `итоговый заряд должен быть конечным числом, получено ${String(config.chargeTotal)}`
+        });
+      }
+      chargeTotal = config.chargeTotal;
+    }
+  }
+  return {
+    temperature: config.temperature,
+    pressure: config.pressure,
+    standardStatePressure: config.standardStatePressure,
+    species,
+    elementTotals,
+    chargeTotal,
+    options: config.options
+  };
+}
+
+/**
+ * Итоги элементов и заряда из начальных количеств видов каталога:
+ * точные суммы amount·(состав вида) и amount·charge. Отсутствующие
+ * в каталоге виды - ошибка species_data_missing со всем списком.
+ *
+ * Итоги строятся только по видам с положительными количествами:
+ * если вызывающая сторона выбирает дополнительные виды-кандидаты,
+ * она обязана сама добавить явные нулевые итоги их элементов
+ * (или использовать buildEquilibriumProblemFromCatalog, который
+ * делает это автоматически) - элемент вида-кандидата без итога
+ * решатель не контролирует молча (Stage 4.4.3, C1).
+ */
+export function elementTotalsFromCatalogAmounts(
+  catalog: EquilibriumCatalogLike,
+  amounts: Readonly<Record<string, number>>
+): { elementTotals: Record<string, number>; chargeTotal: number } {
+  const op = 'elementTotalsFromCatalogAmounts';
+  if (catalog === null || typeof catalog !== 'object' || typeof catalog.get !== 'function') {
+    throw new EquilibriumError({ code: 'invalid_input', operation: op, message: 'каталог должен иметь метод get(id)' });
+  }
+  if (amounts === null || typeof amounts !== 'object' || Array.isArray(amounts)) {
+    throw new EquilibriumError({ code: 'invalid_input', operation: op, message: 'amounts должна быть записью «id вида → моль»' });
+  }
+  const elementTotals: Record<string, number> = {};
+  let chargeTotal = 0;
+  const missing: string[] = [];
+  for (const id of Object.keys(amounts)) {
+    const amount = amounts[id];
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      throw new EquilibriumError({
+        code: 'invalid_input',
+        operation: op,
+        message: `количество вида «${id}» должно быть конечным положительным числом, получено ${String(amount)}`
+      });
+    }
+    const record = readCatalogSpecies(catalog, id);
+    if (record === null) {
+      missing.push(id);
+      continue;
+    }
+    const elements = asElementRecord(record.elements, op, `состав вида «${id}» каталога`);
+    validateElements(elements, op, `состав вида «${id}» каталога`);
+    if (typeof record.charge !== 'number' || !Number.isInteger(record.charge)) {
+      throw new EquilibriumError({
+        code: 'invalid_input',
+        operation: op,
+        message: `заряд вида «${id}» в каталоге должен быть целым числом, получено ${String(record.charge)}`
+      });
+    }
+    for (const element of Object.keys(elements)) {
+      elementTotals[element] = (elementTotals[element] ?? 0) + amount * elements[element];
+    }
+    chargeTotal += amount * record.charge;
+  }
+  if (missing.length > 0) {
+    throw new EquilibriumError({
+      code: 'species_data_missing',
+      operation: op,
+      message: 'виды отсутствуют в каталоге, не газ или без блока термодинамики',
+      details: `виды: ${missing.join(', ')}`
+    });
+  }
+  return { elementTotals, chargeTotal };
+}
+
+// ============================================
+// 7. ГРАНИЦЫ МОДУЛЯ
+// ============================================
+//
+// Stage 4.4.1 - решатель и адаптер каталога. Интеграция в
+// Scheduler/CoreWorldState, конденсированные фазы (равновесный
+// flash), неидеальные EOS и кинетика - вне объёма этого подэтапа
+// (см. docs/science/IMPLEMENTATION_ROADMAP.md §4.4).
