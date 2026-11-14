@@ -1283,8 +1283,8 @@ def main() -> int:
                     state.update(CP.PQ_INPUTS, row["pressurePa"], beta_ts)
                     t_sat = float(state.T())
                     q_cp = float(state.keyed_output(CP.iQ))
-                    x_cp = [float(v) for v in state.mole_fractions_sat_liquid()]
-                    y_cp = [float(v) for v in state.mole_fractions_sat_vapor()]
+                    x_cp = [float(v) for v in state.mole_fractions_liquid()]
+                    y_cp = [float(v) for v in state.mole_fractions_vapor()]
                     cp["T_sat"] = t_sat
                     cp["Q"] = q_cp
                     cp["x_liquid"] = x_cp
