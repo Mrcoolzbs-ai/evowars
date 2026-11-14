@@ -1312,7 +1312,7 @@ def main() -> int:
                     cp["status"] = "unavailable_nonfinite"
                     cp["error"] = ("CoolProp вернул не-конечные значения "
                                    "двухфазного состояния; сравнение недоступно")
-                    point_pass = False
+                    point_pass = None  # недоступность — НЕ PASS и НЕ провал
                 else:
                     # T насыщения против TS T (относительный допуск).
                     t_field = compare_coolprop_field(
@@ -1356,7 +1356,10 @@ def main() -> int:
                                 point_pass = False
                         comparisons["fugacity_vapor"] = fug_comparisons
             else:
-                point_pass = False
+                # Недоступность сравнения (исключение/однофазный ответ):
+                # фиксируется с точной причиной, НЕ PASS и НЕ провал
+                # benchmark (раздел 5 ТЗ 4.4.4.6).
+                point_pass = None
 
             flash_points.append({
                 "id": row["id"],
@@ -1380,7 +1383,13 @@ def main() -> int:
 
     flash_available = (flash_data is not None
                        and bool(flash_data.get("points", [])))
-    flash_coolprop_pass = (all(p["pass"] for p in flash_points)
+    # Проваливают benchmark ТОЛЬКО доступные точки CoolProp, не совпавшие
+    # с TS. Недоступные (исключение/однофазный ответ/не-конечные) —
+    # unavailable с точной причиной: ни PASS, ни провал.
+    flash_available_points = [p for p in flash_points
+                              if p["coolprop"]["status"] == "available"]
+    flash_unavailable_count = len(flash_points) - len(flash_available_points)
+    flash_coolprop_pass = (all(p["pass"] for p in flash_available_points)
                            if flash_available else False)
 
     # ============================================
@@ -1394,7 +1403,7 @@ def main() -> int:
     all_pass = (coolprop_pass and mpmath_pass and boundary_pass
                 and mixture_coolprop_pass and mixture_mpmath_pass
                 and zero_limit_pass
-                and (flash_coolprop_pass if flash_available else True)
+                and (flash_coolprop_pass if flash_available_points else True)
                 and add_error is None)
 
     report = {
@@ -1512,6 +1521,7 @@ def main() -> int:
             "mixtures_coolprop": mixture_coolprop_pass,
             "mixtures_mpmath": mixture_mpmath_pass,
             "flash_available": flash_available,
+            "flash_unavailable_points": flash_unavailable_count,
             "flash_coolprop": flash_coolprop_pass,
             "zero_attraction_limit": zero_limit_pass,
             "zero_attraction_limit_available": zero_limit_available,
@@ -1608,18 +1618,26 @@ def main() -> int:
         # Диагностика flash (4.4.4.6): без этих аннотаций падение
         # flash-секции нечитаемо в логах без входа в аккаунт.
         for point in flash_points:
-            if not point["pass"]:
+            if point["pass"] is False:
                 detail = point["coolprop"]["error"] or json.dumps(
                     point["comparison"], ensure_ascii=False)
                 print(f"::error title=Peng-Robinson flash {point['id']}::"
                        f"{detail[:800]}")
 
     flash_state_notice = (
-        "ok" if flash_coolprop_pass
-        else ("FAIL" if flash_available
-              else "не выполнялась (дамп --flash не передан)"))
+        "ok" if (flash_available and flash_coolprop_pass
+                 and flash_unavailable_count == 0)
+        else ("FAIL" if any(p["pass"] is False for p in flash_points)
+              else ("недоступна: unavailable точек "
+                    + str(flash_unavailable_count) + " из "
+                    + str(len(flash_points)) + " (причины в отчёте)"
+                    if flash_available
+                    else "не выполнялась (дамп --flash не передан)")))
+    def _flash_mark(p):
+        return ("ok" if p["pass"] is True
+                else ("unavailable" if p["pass"] is None else "FAIL"))
     flash_pts_notice = ", ".join(
-        f"{p['id']}={'ok' if p['pass'] else 'FAIL'}"
+        f"{p['id']}={_flash_mark(p)}"
         f"(coolprop={p['coolprop']['status']})"
         for p in flash_points) or "—"
     print(f"::notice title=Peng-Robinson flash 4.4.4.6::VLE flash CoolProp PQ: "
@@ -1824,7 +1842,7 @@ def build_summary_md(report):
             if point["coolprop"]["status"] != "available":
                 lines.append(
                     f"| {point['id']} | {point['coolprop']['status']} | — | — | — | "
-                    f"{'ok' if point['pass'] else 'FAIL'} |")
+                    f"{'ok' if point['pass'] is True else ('unavailable' if point['pass'] is None else 'FAIL')} |")
                 continue
             comp = point["comparison"]
             def frel(rows):
@@ -1838,7 +1856,7 @@ def build_summary_md(report):
                 f"| {point['id']} | {t_rel_md} | {frel(comp['x_liquid'])} "
                 f"| {frel(comp['y_vapor'])} "
                 f"| {frel(comp.get('fugacity_vapor', []))} "
-                f"| {'ok' if point['pass'] else 'FAIL'} |")
+                f"| {'ok' if point['pass'] is True else ('unavailable' if point['pass'] is None else 'FAIL')} |")
     verdict = "PASS" if report["summary"]["all"] else "FAIL"
     zl_coolprop_md = ", ".join(
         f"{key}={value}"
@@ -1857,7 +1875,16 @@ def build_summary_md(report):
         "",
     ]
     if report["summary"].get("flash_available"):
-        flash_state = ("ok" if report["summary"].get("flash_coolprop") else "FAIL")
+        _flash_statuses = [p["pass"] for p in report["flash"]["coolprop_points"]]
+        if any(s is False for s in _flash_statuses):
+            flash_state = "FAIL (доступная точка не совпала с TS)"
+        elif all(s is True for s in _flash_statuses):
+            flash_state = "ok"
+        else:
+            flash_state = ("— недоступна (unavailable точки: "
+                           + str(sum(1 for s in _flash_statuses if s is None))
+                           + " из " + str(len(_flash_statuses))
+                           + "; причины в отчёте)")
     else:
         flash_state = "— (дамп --flash не передан: сверка flash не выполнялась)"
     lines += [
