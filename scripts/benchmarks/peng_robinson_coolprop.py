@@ -1636,10 +1636,13 @@ def main() -> int:
     def _flash_mark(p):
         return ("ok" if p["pass"] is True
                 else ("unavailable" if p["pass"] is None else "FAIL"))
+    def _flash_entry(p):
+        err = p["coolprop"].get("error")
+        extra = ("; причина: " + str(err)[:220]) if err else ""
+        return (f"{p['id']}={_flash_mark(p)}"
+                f"(coolprop={p['coolprop']['status']}{extra})")
     flash_pts_notice = ", ".join(
-        f"{p['id']}={_flash_mark(p)}"
-        f"(coolprop={p['coolprop']['status']})"
-        for p in flash_points) or "—"
+        _flash_entry(p) for p in flash_points) or "—"
     print(f"::notice title=Peng-Robinson flash 4.4.4.6::VLE flash CoolProp PQ: "
           f"{flash_state_notice}; точки [{flash_pts_notice}]")
 
