@@ -1,10 +1,15 @@
 # PR_REACTIVE_EQUILIBRIUM_DESIGN — Stage 4.4.4.8-A: design gate PR-coupled reactive gas equilibrium
 
-**Статус: DESIGN-ONLY.** Этот документ — проверяемая спецификация интеграции
+**Статус: DESIGN-ONLY + диагностическая надстройка B1.** Этот документ —
+проверяемая спецификация интеграции
 коэффициентов фугитивности Peng–Robinson с существующим химическим
-равновесным решателем `Core/equilibrium.ts`. РЕАЛИЗАЦИЯ НЕ НАЧАТА:
-production TypeScript, EOS/BIP-каталоги, `solveEquilibrium`, golden baseline
-и поведение `result.model = 'ideal_gas'` на этом подэтапе НЕ менялись.
+равновесным решателем `Core/equilibrium.ts`. Ревизия Stage 4.4.4.8-B1:
+добавлен ОТДЕЛЬНЫЙ диагностический API
+`solveEquilibriumWithDiagnostics` (стационарность внутренней
+идеальногазовой задачи, §3.2/§6.4/§7.4). Сам PR-решатель ПО-ПРЕЖНЕМУ
+НЕ РЕАЛИЗОВАН: `solveEquilibrium` остаётся идеальногазовым
+(`model = 'ideal_gas'`, контракт без изменений), EOS/BIP-каталоги,
+golden baseline и legacy-поведение не менялись.
 Сверка контрактов выполнена по фактическим исходникам на HEAD
 `e3486d7f20146fd01f2705208d87f13be5bf6528` (ветка `stage-3-planetary-physics`):
 `Core/equilibrium.ts`, `Core/pengRobinsonMixture.ts`, `Core/pengRobinsonFlash.ts`,
@@ -126,20 +131,36 @@ g_deg на другое p_deg не проектируется.
 
 ### 3.2 Извлечение двойственных переменных (lambda)
 
-`EquilibriumResult` не публикует pi. Для вычисления невязки
-стационарности полной задачи (§7.4) проект допускает два пути:
+`EquilibriumResult` не публикует pi. ВЫБРАННЫЙ ПУТЬ (реализован в
+Stage 4.4.4.8-B1): отдельный диагностический API
+`solveEquilibriumWithDiagnostics` в `Core/equilibrium.ts` возвращает
+`EquilibriumDetailedSolution { result; stationarityDiagnostics | null }`,
+где диагностика вычислена на ФАКТИЧЕСКИХ внутренних значениях
+сошедшегося решателя: финальный вектор pi, редуцированные строки
+после `reduceRows`, активные/исключённые виды и финальные доли —
+без повторного решения и без восстановления базиса заново. Для
+каждого активного вида i:
 
-1. Минимальное ДОБАВЛЯЮЩЕЕ расширение `EquilibriumResult` опциональным
-   полем с двойственными потенциалами (не ломающее существующих
-   потребителей; это изменение production-кода — предмет отдельного
-   подэтапа реализации с собственным ревью).
-2. Восстановление pi в новой точке x решением взвешенной
-   задачи наименьших квадратов min_pi SUM_i w_i (SUM_j pi_j c_ji - mu_i/(RT))^2
-   с весами w_i = n_tot x_i (мольные количества); невязка
-   стационарности тогда = max_i |SUM_j pi_j c_ji - mu_i/(RT)|.
+    dualProjection_i = SUM_j pi_j · c_ji   (редуцированный базис решателя)
+    muIdeal_i/(RT)   = g_i_deg/(RT) + ln(x_i) + ln(P/p_deg)
+    stationarityResidual_i = muIdeal_i − dualProjection_i
 
-Реализация выбирает один путь явно; смешение путей в одном результате
-запрещено (в результате фиксируется, каким способом получены lambda).
+Никакого восстановления pi через least squares не выполняется:
+необходимые pi и reduced уже существуют внутри решателя, а общий
+внутренний путь (private helper) исключает дублирование алгоритма.
+Рассматривавшиеся ранее пути ОТКЛОНЕНЫ: опциональное поле в
+`EquilibriumResult` меняло бы публичный контракт идеального
+решателя; восстановление pi взвешенным least-squares
+(min_pi SUM_i w_i (SUM_j pi_j c_ji − mu_i/(RT))^2, w_i = n_tot·x_i)
+плохо обусловлено при почти линейно зависимых строках балансов и
+восстанавливало бы базис, которым решатель не пользовался.
+
+Границы честности диагностики: `dualProjectionOverRT` — правая часть
+условия стационарности на фактическом базисе решателя, а НЕ
+самостоятельный химический потенциал; диагностика доступна только
+при статусе converged и конечных числах (неконечность — null, не
+фиктивные значения); для видов, исключённых нулевыми итогами
+элементов, ln(0) не вычисляется (только inactiveSpeciesIds).
 
 ### 3.3 Частичное покрытие каталога PR
 
@@ -392,7 +413,14 @@ unsupported_eos_data) вводятся только там, где семант�
       lnPhiFixedPointResidual: number;    // max_i |ln phi_i(x_final) - lnPhiUsed_i|
       outerIterations; innerIterations;   // внешние и последнего внутреннего решения
       convergence: { outerTolerance; achievedLnPhiChange; finalDamping; innerTolerance };
-      dualsSource: exposed_potentials | recovered_least_squares;  // §3.2
+      stationarityDiagnostics: EquilibriumStationarityDiagnostics | null;
+        // Stage 4.4.4.8-B1 (§3.2): фактический диагностический API
+        // solveEquilibriumWithDiagnostics — dualProjectionOverRT /
+        // idealChemicalPotentialOverRT / stationarityResidualOverRT /
+        // maxAbsStationarityResidualOverRT / activeSpeciesIds /
+        // inactiveSpeciesIds / basisRowNames на ФАКТИЧЕСКОМ
+        // редуцированном базисе внутреннего решателя;
+        // recovered_least_squares не используется
       gibbsEnergy: PhysicalQuantity | null;
         // G/(RT) = n_tot SUM x_i (g_i_deg/(RT) + ln x_i + ln(P/p_deg) + ln phi_i)
       eosProvenance: { componentParameters; binaryInteractionParameters };
@@ -452,10 +480,26 @@ candidate_converged требует ОДНОВРЕМЕННО:
 условия mu_i/(RT) = SUM_j lambda_j c_ji (§3.2): и неподвижная точка по
 phi, и нулевые балансы, и нулевая Ньютон-невязка внутреннего решателя
 по отдельности не доказывают стационарность полной нелинейной задачи.
-Допуск невязки стационарности — outerTolerance; её превышение при
-выполненных пп. 1–4 — numerical_failure (несогласованность путей,
-например при recovered_least_squares с плохо обусловленной матрицей
-c_ji).
+
+Реализованный диагностический механизм (Stage 4.4.4.8-B1):
+`solveEquilibriumWithDiagnostics` публикует для внутреннего
+идеальногазового решения фактическую двойственную проекцию
+dualProjection_i = SUM_j pi_j·c_ji на редуцированном базисе решателя
+и невязку stationarityResidual_i = muIdeal_i − dualProjection_i.
+Будущий PR-решатель сравнивает ФАКТИЧЕСКИЙ PR-химический потенциал
+muPR_i/(RT) = g_i_deg/(RT) + ln(x_i·P/p_deg) + ln(phi_i(x_final)) с
+этой проекцией: max_i |muPR_i − dualProjection_i| — полная невязка
+стационарности PR-задачи; отдельно контролируется fixed-point остаток
+по lnPhi (§7.1 п. 4).
+
+ГРАНИЦА ЧЕСТНОСТИ: эта диагностика проверяет стационарность
+ВНУТРЕННЕЙ идеальногазовой задачи с заданным effective g
+(согласованность состава, потенциалов и базиса), а НЕ стационарность
+полной PR-задачи; для полной задачи дополнительно требуются
+fixed-point остаток по lnPhi и приведённое выше сравнение muPR с
+проекцией. Допуск невязки стационарности — outerTolerance; её
+превышение при выполненных пп. 1–4 §7.1 — numerical_failure
+(несогласованность путей).
 
 ### 7.5 Дополнительные меры обнаружения ложной сходимости
 
@@ -579,10 +623,13 @@ c_ji).
 5. Независимая экспериментальная проверка kij отсутствует: численные
    сверки валидируют реализацию при каталожных kij, а не сами kij
    (наследуется от 4.4.4.6).
-6. Восстановление lambda через least squares (§3.2, путь 2) плохо
-   обусловлено при почти линейно зависимых строках балансов; путь 1
-   (экспозиция потенциалов) — изменение production-кода, требующее
-   отдельного ревью.
+6. Диагностика стационарности (Stage 4.4.4.8-B1) экспонирует
+   двойственную проекцию ФАКТИЧЕСКИХ потенциалов решателя
+   (`solveEquilibriumWithDiagnostics`, §3.2); восстановление lambda
+   через least squares НЕ используется (плохо обусловлено при почти
+   линейно зависимых строках балансов). Диагностика проверяет
+   внутреннюю идеальногазовую задачу с заданным effective g и сама
+   по себе не доказывает стационарность полной PR-задачи.
 7. Смеси, где PR-каталог покрывает лишь часть химически значимых видов
    (сернистые соединения, ионы и т.п.), неполны: реактивная задача на
    таких наборах честно отказывает, а не деградирует к идеальному газу
@@ -594,7 +641,10 @@ c_ji).
 
 ---
 
-*Файл — design-артефакт Stage 4.4.4.8-A. Production runtime, EOS/BIP
-каталоги, solveEquilibrium, flash, TPD-поиск, golden baseline, main и
-история Git этим документом не менялись. Реализация — отдельный
-подэтап с собственным design review.*
+*Файл — design-артефакт Stage 4.4.4.8-A, ревизия Stage 4.4.4.8-B1
+(реализован только диагностический API solveEquilibriumWithDiagnostics
+и его тесты). PR-решатель не реализован: production runtime
+(кроме указанной добавляющей диагностической функции), EOS/BIP
+каталоги, контракт и поведение solveEquilibrium, flash, TPD-поиск,
+golden baseline, main и история Git не менялись. Полная реализация —
+отдельный подэтап с собственным design review.*

@@ -179,6 +179,91 @@ export interface EquilibriumResult {
 }
 
 // ============================================
+// 1.1 ДИАГНОСТИКА СТАЦИОНАРНОСТИ (Stage 4.4.4.8-B1)
+// ============================================
+
+/**
+ * Внутренние данные решателя, необходимые диагностике
+ * стационарности (Stage 4.4.4.8-B1): фактические значения, на
+ * которых сошёлся production-алгоритм, - без повторного решения
+ * и без восстановления базиса заново.
+ */
+interface EquilibriumSolverInternals {
+  /** Финальные элементные потенциалы pi (копия; порядок строк редукции). */
+  potentials: number[];
+  /** Редуцированные строки балансов в порядке решателя (копии). */
+  reducedRows: { name: string; coefficients: number[] }[];
+  /** Активные виды в каноническом порядке решателя. */
+  activeSpeciesIds: string[];
+  /** Виды, исключённые нулевыми итогами элементов. */
+  inactiveSpeciesIds: string[];
+  /** Финальные молярные доли активных видов (копия). */
+  fractions: number[];
+  /** ln(p°/P) валидированной задачи (знак согласован с решателем). */
+  logPressureRatio: number;
+  /** g°/(R·T) активных видов в порядке решателя (копия). */
+  gStandardOverRT: number[];
+}
+
+/** Результат общего внутреннего пути: результат + internals. */
+interface EquilibriumInternalSolution {
+  result: EquilibriumResult;
+  internals: EquilibriumSolverInternals | null;
+}
+
+/**
+ * Диагностика стационарности ВНУТРЕННЕЙ идеальногазовой задачи
+ * с заданным effective g (Stage 4.4.4.8-B1). Проверяет, что
+ * сообщённый состав согласован с фактическими потенциалами и
+ * редуцированным базисом решателя; сама по себе НЕ доказывает
+ * стационарность полной PR-задачи (для неё нужен отдельный
+ * fixed-point остаток по ln phi).
+ */
+export interface EquilibriumStationarityDiagnostics {
+  /** Активные виды в каноническом порядке решателя. */
+  activeSpeciesIds: readonly string[];
+  /** Виды, исключённые нулевыми итогами элементов (без ln(0)). */
+  inactiveSpeciesIds: readonly string[];
+  /** Имена строк редуцированного базиса (порядок решателя). */
+  basisRowNames: readonly string[];
+  /**
+   * SUM_j pi_j·c_ji по редуцированному базису для каждого
+   * активного вида. Это правая часть условия стационарности,
+   * вычисленная на фактическом базисе решателя, а НЕ
+   * самостоятельный химический потенциал.
+   */
+  dualProjectionOverRT: Readonly<Record<string, number>>;
+  /**
+   * g°/(R·T) + ln(x_i) + ln(P/p°) для каждого активного вида
+   * (ln(P/p°) = -logPressureRatio, знак согласован с решателем).
+   */
+  idealChemicalPotentialOverRT: Readonly<Record<string, number>>;
+  /** idealChemicalPotential − dualProjection по каждому виду. */
+  stationarityResidualOverRT: Readonly<Record<string, number>>;
+  /** max |stationarityResidual| по активным видам. */
+  maxAbsStationarityResidualOverRT: number;
+}
+
+/**
+ * Детализированный результат: тот же EquilibriumResult, что у
+ * solveEquilibrium (без изменений контракта), плюс диагностика.
+ */
+export interface EquilibriumDetailedSolution {
+  /** Тот же результат, что возвращает solveEquilibrium. */
+  result: EquilibriumResult;
+  /**
+   * Диагностика только при status = 'converged' И конечных
+   * диагностических числах; иначе null (фиктивные двойственные
+   * значения не вычисляются).
+   */
+  stationarityDiagnostics: EquilibriumStationarityDiagnostics | null;
+  /** Причина недоступности диагностики (когда она равна null). */
+  diagnosticsUnavailableReason?:
+    | 'status_not_converged'
+    | 'non_finite_diagnostics';
+}
+
+// ============================================
 // 2. ПРОВЕРКА ВХОДА (FAIL-CLOSED)
 // ============================================
 
@@ -739,8 +824,16 @@ function failedResult(
  * поиском по 2-норме невязки балансов. Повреждённый вход и
  * несовместные балансы - EquilibriumError; несходимость - честный
  * статус в EquilibriumResult, без ложного converged.
+ *
+ * Stage 4.4.4.8-B1: общий внутренний путь solveEquilibrium и
+ * solveEquilibriumWithDiagnostics. Арифметика Ньютона, критерии
+ * сходимости, линейный поиск, reduceRows и initialPotentials не
+ * менялись; публичный solveEquilibrium ниже возвращает тот же
+ * результат, что и прежняя монолитная реализация.
  */
-export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult {
+function solveEquilibriumInternal(
+  problem: EquilibriumProblem
+): EquilibriumInternalSolution {
   const validated = validateProblem(problem);
   const { maxIterations, tolerance } = parseOptions(problem);
   // C1 (Stage 4.4.3): полнота элементных ограничений. Контролируемое
@@ -826,13 +919,16 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
   const logPressureRatio = validated.logPressureRatio;
   const pi = initialPotentials(reduced, gOverRT, logPressureRatio);
   if (pi === null) {
-    return failedResult(
-      validated.elementTotals,
-      validated.chargeTotal,
-      'numerical_failure',
-      0,
-      'инициализация не удержала аргументы экспонент в допустимом диапазоне'
-    );
+    return {
+      result: failedResult(
+        validated.elementTotals,
+        validated.chargeTotal,
+        'numerical_failure',
+        0,
+        'инициализация не удержала аргументы экспонент в допустимом диапазоне'
+      ),
+      internals: null
+    };
   }
   let totalMoles = Math.max(1e-6, reduced.reduce((sum, row) => sum + row.total, 0));
 
@@ -884,13 +980,16 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
   let iterations = 0;
   while (!(state.maxRelative < tolerance)) {
     if (iterations >= maxIterations) {
-      return failedResult(
-        validated.elementTotals,
-        validated.chargeTotal,
-        'max_iterations',
-        iterations,
-        `достигнут предел итераций Ньютона (${maxIterations}), относительная невязка ${state.maxRelative}`
-      );
+      return {
+        result: failedResult(
+          validated.elementTotals,
+          validated.chargeTotal,
+          'max_iterations',
+          iterations,
+          `достигнут предел итераций Ньютона (${maxIterations}), относительная невязка ${state.maxRelative}`
+        ),
+        internals: null
+      };
     }
     const size = rowCount + 1;
     const jacobian: number[][] = [];
@@ -922,7 +1021,10 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     jacobian.push(lastRow);
     const step = solveLinearSystem(jacobian, state.equations.map((v) => -v));
     if (step === null) {
-      return failedResult(validated.elementTotals, validated.chargeTotal, 'numerical_failure', iterations, 'система Ньютона вырождена');
+      return {
+        result: failedResult(validated.elementTotals, validated.chargeTotal, 'numerical_failure', iterations, 'система Ньютона вырождена'),
+        internals: null
+      };
     }
 
     let accepted = false;
@@ -945,13 +1047,16 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
       t /= 2;
     }
     if (!accepted) {
-      return failedResult(
-        validated.elementTotals,
-        validated.chargeTotal,
-        'line_search_stalled',
-        iterations,
-        'линейный поиск не уменьшил норму невязки'
-      );
+      return {
+        result: failedResult(
+          validated.elementTotals,
+          validated.chargeTotal,
+          'line_search_stalled',
+          iterations,
+          'линейный поиск не уменьшил норму невязки'
+        ),
+        internals: null
+      };
     }
     iterations++;
   }
@@ -1000,23 +1105,29 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     const residual = elementResiduals[name] ?? 0;
     const total = validated.elementTotals[name] ?? 0;
     if (Math.abs(residual) > tolerance * Math.max(1, Math.abs(total))) {
-      return failedResult(
+      return {
+        result: failedResult(
+          validated.elementTotals,
+          validated.chargeTotal,
+          'numerical_failure',
+          iterations,
+          `невязка баланса элемента «${name}» (${residual} моль) превышает критерий tolerance·max(1, |итог|) = ${tolerance}·max(1, ${total}) исходных ограничений`
+        ),
+        internals: null
+      };
+    }
+  }
+  if (Math.abs(chargeResidual) > tolerance * Math.max(1, Math.abs(validated.chargeTotal))) {
+    return {
+      result: failedResult(
         validated.elementTotals,
         validated.chargeTotal,
         'numerical_failure',
         iterations,
-        `невязка баланса элемента «${name}» (${residual} моль) превышает критерий tolerance·max(1, |итог|) = ${tolerance}·max(1, ${total}) исходных ограничений`
-      );
-    }
-  }
-  if (Math.abs(chargeResidual) > tolerance * Math.max(1, Math.abs(validated.chargeTotal))) {
-    return failedResult(
-      validated.elementTotals,
-      validated.chargeTotal,
-      'numerical_failure',
-      iterations,
-      `невязка баланса заряда (${chargeResidual}) превышает критерий tolerance·max(1, |итог|) = ${tolerance}·max(1, ${validated.chargeTotal}) исходных ограничений`
-    );
+        `невязка баланса заряда (${chargeResidual}) превышает критерий tolerance·max(1, |итог|) = ${tolerance}·max(1, ${validated.chargeTotal}) исходных ограничений`
+      ),
+      internals: null
+    };
   }
   let gibbsSum = 0;
   for (let i = 0; i < speciesCount; i++) {
@@ -1041,18 +1152,125 @@ export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult
     (excludedSpecies.length > 0
       ? `; исключены виды с нулевыми итогами элементов: ${excludedSpecies.map((s) => s.id).join(', ')} (их количества - ровно ноль)`
       : '');
+  // Stage 4.4.4.8-B1: снапшот фактических внутренних значений
+  // сошедшегося решателя (копии - internals не разделяет мутабельное
+  // состояние); порядок видов и строк - канонический порядок
+  // решателя, без восстановления базиса заново.
+  const internals: EquilibriumSolverInternals = {
+    potentials: pi.slice(),
+    reducedRows: reduced.map((row) => ({ name: row.name, coefficients: row.coefficients.slice() })),
+    activeSpeciesIds: species.map((s) => s.id),
+    inactiveSpeciesIds: excludedSpecies.map((s) => s.id),
+    fractions: state.fractions.slice(),
+    logPressureRatio,
+    gStandardOverRT: gOverRT.slice()
+  };
   return {
-    status: 'converged',
-    model: 'ideal_gas',
-    iterations,
-    totalMoles,
-    moleFractions,
-    speciesMoles,
-    elementResiduals,
-    chargeResidual,
-    gibbsEnergy,
-    assumptions,
-    message
+    result: {
+      status: 'converged',
+      model: 'ideal_gas',
+      iterations,
+      totalMoles,
+      moleFractions,
+      speciesMoles,
+      elementResiduals,
+      chargeResidual,
+      gibbsEnergy,
+      assumptions,
+      message
+    },
+    internals
+  };
+}
+
+/**
+ * Публичный решатель равновесия идеального газа (Stage 4.4.1):
+ * контракт и численное поведение прежние - тонкая обёртка над
+ * общим внутренним путём (Stage 4.4.4.8-B1), возвращающая только
+ * EquilibriumResult.
+ */
+export function solveEquilibrium(problem: EquilibriumProblem): EquilibriumResult {
+  return solveEquilibriumInternal(problem).result;
+}
+
+/**
+ * Диагностический путь (Stage 4.4.4.8-B1): тот же результат, что у
+ * solveEquilibrium (общий внутренний путь, без дублирования
+ * алгоритма), плюс диагностика стационарности внутренней
+ * идеальногазовой задачи.
+ *
+ * Для каждого активного вида i вычисляется:
+ *   dualProjection_i = SUM_j pi_j·c_ji (по редуцированному базису);
+ *   muIdeal_i/(RT)   = g°_i/(RT) + ln(x_i) + ln(P/p°);
+ *   residual_i       = muIdeal_i − dualProjection_i.
+ *
+ * Границы честности:
+ * - диагностика доступна только при status = 'converged'; для
+ *   max_iterations / line_search_stalled / numerical_failure
+ *   возвращается null без фиктивных двойственных значений;
+ * - все диагностические числа обязаны быть конечными; неконечность
+ *   не выдаётся за успешную диагностику (null + причина);
+ * - проверяется стационарность внутренней задачи с заданным
+ *   effective g, а НЕ полной PR-задачи.
+ */
+export function solveEquilibriumWithDiagnostics(
+  problem: EquilibriumProblem
+): EquilibriumDetailedSolution {
+  const internal = solveEquilibriumInternal(problem);
+  if (internal.result.status !== 'converged' || internal.internals === null) {
+    return {
+      result: internal.result,
+      stationarityDiagnostics: null,
+      diagnosticsUnavailableReason: 'status_not_converged'
+    };
+  }
+  const internals = internal.internals;
+  const dualProjectionOverRT: Record<string, number> = {};
+  const idealChemicalPotentialOverRT: Record<string, number> = {};
+  const stationarityResidualOverRT: Record<string, number> = {};
+  let maxAbs = 0;
+  let allFinite = true;
+  for (let i = 0; i < internals.activeSpeciesIds.length; i++) {
+    const id = internals.activeSpeciesIds[i];
+    // Правая часть условия стационарности на фактическом
+    // редуцированном базисе решателя: SUM_j pi_j·c_ji.
+    let projection = 0;
+    for (let j = 0; j < internals.potentials.length; j++) {
+      projection += internals.potentials[j] * internals.reducedRows[j].coefficients[i];
+    }
+    // ln(P/p°) = -logPressureRatio: в ValidatedProblem
+    // logPressureRatio = ln(p°/P), знак не меняется.
+    const x = internals.fractions[i];
+    const mu = internals.gStandardOverRT[i] + Math.log(x) - internals.logPressureRatio;
+    const residual = mu - projection;
+    dualProjectionOverRT[id] = projection;
+    idealChemicalPotentialOverRT[id] = mu;
+    stationarityResidualOverRT[id] = residual;
+    if (!Number.isFinite(projection) || !Number.isFinite(mu) || !Number.isFinite(residual)) {
+      allFinite = false;
+    } else if (Math.abs(residual) > maxAbs) {
+      maxAbs = Math.abs(residual);
+    }
+  }
+  if (!allFinite || !Number.isFinite(maxAbs)) {
+    // Неконечная диагностика не выдаётся за успешную.
+    return {
+      result: internal.result,
+      stationarityDiagnostics: null,
+      diagnosticsUnavailableReason: 'non_finite_diagnostics'
+    };
+  }
+  return {
+    result: internal.result,
+    stationarityDiagnostics: {
+      activeSpeciesIds: internals.activeSpeciesIds.slice(),
+      inactiveSpeciesIds: internals.inactiveSpeciesIds.slice(),
+      basisRowNames: internals.reducedRows.map((row) => row.name),
+      dualProjectionOverRT,
+      idealChemicalPotentialOverRT,
+      stationarityResidualOverRT,
+      maxAbsStationarityResidualOverRT: maxAbs
+    }
   };
 }
 
@@ -1228,163 +1446,3 @@ export function buildEquilibriumProblemFromCatalog(
       declaredPressure,
       PRESSURE_DIMENSION,
       'Pa',
-      op,
-      `давление стандартного состояния данных вида «${id}»`
-    );
-    if (Math.abs(declared.value - taskStandardStatePa) > 1e-6 * Math.max(1, Math.abs(declared.value))) {
-      throw new EquilibriumError({
-        code: 'invalid_input',
-        operation: op,
-        message: `давление стандартного состояния задачи (${taskStandardStatePa} Pa) не совпадает с конвенцией p° данных вида «${id}» (${declared.value} Pa)`,
-        details: 'коэффициенты отнесены к p° данных NASA CEA (идеальный газ, 1 бар); пересчёт g° на другое p° не реализован - задайте p° задачи равным конвенции данных'
-      });
-    }
-    let gStandardOverRT: number;
-    try {
-      gStandardOverRT = speciesStandardGibbsEnergyOverRT(thermodynamics, config.temperature);
-    } catch (error) {
-      if (error instanceof ThermoFunctionsError) {
-        if (error.code === 'no_thermodynamic_data') {
-          throw new EquilibriumError({
-            code: 'species_data_missing',
-            operation: op,
-            message: `у вида «${id}» нет NASA-7 параметризации теплоёмкости`,
-            details: error.message
-          });
-        }
-        throw new EquilibriumError({
-          code: 'invalid_input',
-          operation: op,
-          message: `не удалось вычислить g°/(R·T) вида «${id}» при заданной температуре`,
-          details: error.message
-        });
-      }
-      throw error;
-    }
-    species.push({ id, elements, charge, gStandardOverRT });
-  }
-  if (missing.length > 0) {
-    throw new EquilibriumError({
-      code: 'species_data_missing',
-      operation: op,
-      message: 'виды отсутствуют в каталоге, не газ или без блока термодинамики',
-      details: `виды: ${missing.join(', ')}`
-    });
-  }
-  const elementTotals: Record<string, number> = {};
-  let chargeTotal = 0;
-  if (hasAmounts) {
-    // C1 (Stage 4.4.3): кандидаты speciesIds без начального
-    // количества вносят нулевые итоги своих элементов: элемент
-    // вида-кандидата не может остаться без явного итога, иначе
-    // решатель способен создать его из ничего. Нулевой запас -
-    // явный ноль (соответствующие виды исключаются из активной
-    // задачи решателем).
-    for (const s of species) {
-      const amount = amounts[s.id] ?? 0;
-      for (const element of Object.keys(s.elements)) {
-        elementTotals[element] = (elementTotals[element] ?? 0) + amount * s.elements[element];
-      }
-      chargeTotal += amount * s.charge;
-    }
-  } else {
-    const given = config.elementTotals as Readonly<Record<string, number>>;
-    validateElements(given, op, 'итоги элементов');
-    for (const element of Object.keys(given)) {
-      elementTotals[element] = given[element];
-    }
-    if (config.chargeTotal !== undefined) {
-      if (typeof config.chargeTotal !== 'number' || !Number.isFinite(config.chargeTotal)) {
-        throw new EquilibriumError({
-          code: 'invalid_input',
-          operation: op,
-          message: `итоговый заряд должен быть конечным числом, получено ${String(config.chargeTotal)}`
-        });
-      }
-      chargeTotal = config.chargeTotal;
-    }
-  }
-  return {
-    temperature: config.temperature,
-    pressure: config.pressure,
-    standardStatePressure: config.standardStatePressure,
-    species,
-    elementTotals,
-    chargeTotal,
-    options: config.options
-  };
-}
-
-/**
- * Итоги элементов и заряда из начальных количеств видов каталога:
- * точные суммы amount·(состав вида) и amount·charge. Отсутствующие
- * в каталоге виды - ошибка species_data_missing со всем списком.
- *
- * Итоги строятся только по видам с положительными количествами:
- * если вызывающая сторона выбирает дополнительные виды-кандидаты,
- * она обязана сама добавить явные нулевые итоги их элементов
- * (или использовать buildEquilibriumProblemFromCatalog, который
- * делает это автоматически) - элемент вида-кандидата без итога
- * решатель не контролирует молча (Stage 4.4.3, C1).
- */
-export function elementTotalsFromCatalogAmounts(
-  catalog: EquilibriumCatalogLike,
-  amounts: Readonly<Record<string, number>>
-): { elementTotals: Record<string, number>; chargeTotal: number } {
-  const op = 'elementTotalsFromCatalogAmounts';
-  if (catalog === null || typeof catalog !== 'object' || typeof catalog.get !== 'function') {
-    throw new EquilibriumError({ code: 'invalid_input', operation: op, message: 'каталог должен иметь метод get(id)' });
-  }
-  if (amounts === null || typeof amounts !== 'object' || Array.isArray(amounts)) {
-    throw new EquilibriumError({ code: 'invalid_input', operation: op, message: 'amounts должна быть записью «id вида → моль»' });
-  }
-  const elementTotals: Record<string, number> = {};
-  let chargeTotal = 0;
-  const missing: string[] = [];
-  for (const id of Object.keys(amounts)) {
-    const amount = amounts[id];
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-      throw new EquilibriumError({
-        code: 'invalid_input',
-        operation: op,
-        message: `количество вида «${id}» должно быть конечным положительным числом, получено ${String(amount)}`
-      });
-    }
-    const record = readCatalogSpecies(catalog, id);
-    if (record === null) {
-      missing.push(id);
-      continue;
-    }
-    const elements = asElementRecord(record.elements, op, `состав вида «${id}» каталога`);
-    validateElements(elements, op, `состав вида «${id}» каталога`);
-    if (typeof record.charge !== 'number' || !Number.isInteger(record.charge)) {
-      throw new EquilibriumError({
-        code: 'invalid_input',
-        operation: op,
-        message: `заряд вида «${id}» в каталоге должен быть целым числом, получено ${String(record.charge)}`
-      });
-    }
-    for (const element of Object.keys(elements)) {
-      elementTotals[element] = (elementTotals[element] ?? 0) + amount * elements[element];
-    }
-    chargeTotal += amount * record.charge;
-  }
-  if (missing.length > 0) {
-    throw new EquilibriumError({
-      code: 'species_data_missing',
-      operation: op,
-      message: 'виды отсутствуют в каталоге, не газ или без блока термодинамики',
-      details: `виды: ${missing.join(', ')}`
-    });
-  }
-  return { elementTotals, chargeTotal };
-}
-
-// ============================================
-// 7. ГРАНИЦЫ МОДУЛЯ
-// ============================================
-//
-// Stage 4.4.1 - решатель и адаптер каталога. Интеграция в
-// Scheduler/CoreWorldState, конденсированные фазы (равновесный
-// flash), неидеальные EOS и кинетика - вне объёма этого подэтапа
-// (см. docs/science/IMPLEMENTATION_ROADMAP.md §4.4).
