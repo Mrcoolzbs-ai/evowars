@@ -74,7 +74,7 @@ describe('Stage 4.4.4.8-B1: диагностика стационарности'
         temperature: T1000,
         pressure: P1BAR,
         standardStatePressure: P1BAR,
-        species: [sp('Na', {}, 0, 1), sp('Cl', {}, 0, -1), sp('Ar', {}, 2)],
+        species: [sp('Na', { Na: 1 }, 0, 1), sp('Cl', { Cl: 1 }, 0, -1), sp('Ar', { Ar: 1 }, 2)],
         elementTotals: { Na: 1, Cl: 1, Ar: 10 },
         chargeTotal: 0
       }
@@ -283,7 +283,7 @@ describe('Stage 4.4.4.8-B1: диагностика стационарности'
       temperature: T1000,
       pressure: P1BAR,
       standardStatePressure: P1BAR,
-      species: [sp('Na', {}, 0, 1), sp('Cl', {}, 0, -1), sp('Ar', {}, 2)],
+      species: [sp('Na', { Na: 1 }, 0, 1), sp('Cl', { Cl: 1 }, 0, -1), sp('Ar', { Ar: 1 }, 2)],
       elementTotals: { Na: 1, Cl: 1, Ar: 10 },
       chargeTotal: 0
     };
