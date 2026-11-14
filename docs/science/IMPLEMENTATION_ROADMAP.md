@@ -2240,7 +2240,7 @@ CI #24); контракты ядра покрыты 401 тестом; интер
   задавались); скрининг фаз — план; конденсированные фазы, кинетика
   (4.5) — вне 4.4.
 
-### 4.4.4 — Реальное EOS многокомпонентной смеси — ЧАСТИЧНО РЕАЛИЗОВАНО (4.4.4.1–4.4.4.4.2; multi-start поиск минимумов TPD реализован — без validated error bound; фазовые verdicts, flash/VLE/LLE, PPR78 и интеграция с solveEquilibrium — НЕ РЕАЛИЗОВАНЫ)
+### 4.4.4 — Реальное EOS многокомпонентной смеси — ЧАСТИЧНО РЕАЛИЗОВАНО (4.4.4.1–4.4.4.4.2, 4.4.4.6, 4.4.4.7; multi-start поиск минимумов TPD, изотермо-изобарный VLE flash Peng–Robinson и его явная интеграция в PhaseEquilibrium реализованы — без validated error bound; фазовые verdicts stable, LLE, PPR78 и интеграция с solveEquilibrium — НЕ РЕАЛИЗОВАНЫ)
 
 - **Статус раздела (05.11.2026, корректировка согласованности
   документации): частичная реализация, а не полное отсутствие
@@ -2679,6 +2679,52 @@ TPD-оракул. Phase 4.4.4 и подэтап 4.4.4.4 НЕ объявляют�
   golden baseline не изменились, кроме исправления branch coverage /
   verdict в траекториях с реальной бифуркацией (в binary64-фикстурах
   недостижимой).
+
+- **Статус (2026-11-14, Stage 4.4.4.6 выполнен: изотермо-изобарный
+  многокомпонентный VLE flash Peng–Robinson реализован и сверен с
+  CoolProp PQ)** (`src/modules/Core/pengRobinsonFlash.ts` — чистая
+  математика: Wilson-старт, Рачфорд–Райс, последовательные замены K
+  по PR-фугитивностям, TPD-скрининг; экспорт `Core/index.ts`;
+  каталоговый фасад `src/modules/Data/pengRobinsonFlashFacade.ts` —
+  computePengRobinsonFlashFromCatalog, fail-closed lookup каталогов
+  4.4.4.1/4.4.4.3; тесты `Tests/pengRobinsonFlash.test.ts`,
+  `Tests/pengRobinsonFlashFacade.test.ts`,
+  `Tests/pengRobinsonFlashBenchmarkDump.test.ts`). Две контрольные
+  точки сверены с независимым CoolProp PQ-расчётом в отдельном
+  benchmark workflow (scripts/benchmarks/peng_robinson_coolprop.py):
+  бинарная co2|ch4 (230 K, 2 МПа, z=(0.75, 0.25), β ≈ 0.434788) и
+  тройная co2|n2|ar (250 K, 4 МПа, z=(0.6, 0.3, 0.1), β ≈ 0.864075);
+  сверка охватывает T насыщения, составы фаз и фугитивности при
+  каталожных kij. Семантика честности: сверка валидирует РЕАЛИЗАЦИЮ
+  алгоритма при каталожных kij, а НЕ сами значения kij (независимая
+  экспериментальная проверка kij остаётся открытой); недоступность
+  CoolProp-точки фиксируется как unavailable с точной причиной и НЕ
+  трактуется ни как PASS, ни как провал. Verdict stable НЕ
+  предусмотрен: результат — two_phase_candidate со stability
+  'indeterminate' | 'two_phase_split_indicated'. Детали источников —
+  DATA_PROVENANCE.md §2.33.
+
+- **Статус (2026-11-14, Stage 4.4.4.7 выполнен: PR-based VLE
+  интегрирован в PhaseEquilibrium как ЯВНЫЙ отдельный API)**
+  (`src/modules/PhaseEquilibrium/pengRobinsonVle.ts` —
+  analyzeVleWithPengRobinson по явному термодинамическому входу
+  {temperatureK, pressurePa, composition, evidencePolicy, настройки
+  TPD-скрининга} и адаптер analyzeAtmosphereVleWithPengRobinson над
+  AtmospherePhysicalModel; ре-экспорт PhaseEquilibrium/index.ts;
+  тесты `Tests/pengRobinsonPhaseEquilibriumIntegration.test.ts`).
+  Архитектура: Atmosphere / явный вход → PhaseEquilibrium →
+  Data/pengRobinsonFlashFacade → Core/pengRobinsonFlash → результат
+  с provenance и предупреждениями. Границы интеграции: legacy
+  Antoine-скрининг НЕ изменён; Peng–Robinson НЕ активируется
+  автоматически; отсутствующий kij — fail-closed отказ (kij = 0
+  молча НЕ подставляется); evidence-статусы каталогов НЕ повышаются;
+  provenance передаётся без изменений; недоступное давление/состав
+  атмосферы — явная диагностика, значения НЕ выводятся из игровых
+  допущений; two_phase_candidate НЕ превращается в доказанный
+  стабильный результат; indeterminate НЕ превращается в stable.
+  Phase 4.4.4 остаётся ЧАСТИЧНО РЕАЛИЗОВАННОЙ; открытыми остаются
+  LLE, PPR78, непрерывный validated TPD error bound, интеграция с
+  solveEquilibrium и независимая экспериментальная проверка kij.
 
 ## 4.5 Химическая кинетика
 

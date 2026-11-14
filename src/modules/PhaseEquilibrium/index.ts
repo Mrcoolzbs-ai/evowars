@@ -502,6 +502,31 @@ export function raoultScreening(
   };
 }
 
+// ============================================
+// 4a. STAGE 4.4.4.7: ЯВНЫЙ PR-BASED VLE АНАЛИЗ (отдельный API)
+// ============================================
+//
+// Ре-экспорт интеграционного слоя PhaseEquilibrium ->
+// Data/pengRobinsonFlashFacade -> Core/pengRobinsonFlash.
+// Legacy-функции выше НЕ изменены: Antoine-скрининг остаётся
+// единственным автоматическим поведением; Peng–Robinson доступен
+// ТОЛЬКО через явный вызов (см. pengRobinsonVle.ts).
+
+export {
+  analyzeVleWithPengRobinson,
+  analyzeAtmosphereVleWithPengRobinson,
+  PR_VLE_EXPLICIT_API_NOTE,
+  PR_VLE_CANDIDATE_NOTE,
+  PR_VLE_INDETERMINATE_NOTE,
+  PR_VLE_PROVENANCE_NOTE
+} from './pengRobinsonVle';
+export type {
+  PengRobinsonVleRequest,
+  PengRobinsonVleResult,
+  PengRobinsonVleEvidencePolicy,
+  AtmosphereVleOptions
+} from './pengRobinsonVle';
+
 export const EOS_NOT_IMPLEMENTED_NOTE =
   'Уравнения состояния (Peng–Robinson, SRK) и модель равновесия смеси не реализованы: ' +
   'результаты фазового анализа являются скрининговыми оценками, а не точным расчётом.';

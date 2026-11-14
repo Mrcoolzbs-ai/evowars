@@ -2807,6 +2807,40 @@ CO2–N2 с kij = −0.017 — МОДЕЛЬНЫЙ сценарий с огран
 TPD-оракул не использовался. golden baseline не менялся; Phase 4.4.4
 и подэтап 4.4.4.4 НЕ объявляются завершёнными.
 
+### 2.33 VLE flash Peng–Robinson и интеграция в PhaseEquilibrium (Stages 4.4.4.6–4.4.4.7)
+
+**Реализация (2026-11-14)**: `src/modules/Core/pengRobinsonFlash.ts`
+(чистая математика flash: Wilson-старт, Рачфорд–Райс, замены K,
+TPD-скрининг; статус stable НЕ предусмотрен) и
+`src/modules/Data/pengRobinsonFlashFacade.ts`
+(computePengRobinsonFlashFromCatalog: fail-closed lookup каталогов
+§2.29 и §2.31 — отсутствующая пара kij даёт явный отказ
+missing_binary_interaction, kij = 0 молча НЕ подставляется).
+Интеграция (4.4.4.7): `src/modules/PhaseEquilibrium/pengRobinsonVle.ts`
+— явный API analyzeVleWithPengRobinson /
+analyzeAtmosphereVleWithPengRobinson; legacy Antoine-скрининг
+PhaseEquilibrium не изменён; Peng–Robinson не активируется
+автоматически; недоступные давление/состав атмосферы — явная
+диагностика (atmosphere_pressure_unavailable / invalid_input),
+величины НЕ выводятся из игровых допущений; evidence-статусы
+каталогов не повышаются; provenance чистых параметров и kij
+прикрепляется из результата фасада без изменений.
+
+**Независимая сверка**: две контрольные точки — бинарная co2|ch4
+(230 K, 2 МПа, z=(0.75, 0.25), β ≈ 0.434788) и тройная co2|n2|ar
+(250 K, 4 МПа, z=(0.6, 0.3, 0.1), β ≈ 0.864075) — сверены с CoolProp
+PQ-расчётом (scripts/benchmarks/peng_robinson_coolprop.py, отдельный
+workflow): T насыщения (rtol 2e-4), составы фаз и фугитивности
+(rtol 5e-4) при каталожных kij. ОГОВОРКА ЧЕСТНОСТИ: сверка валидирует
+реализацию алгоритма при каталожных kij, а НЕ сами значения kij —
+независимая экспериментальная проверка kij остаётся открытой.
+Недоступность CoolProp-точки (исключение / однофазный результат /
+не-конечные значения) фиксируется как unavailable с точной причиной
+и НЕ трактуется ни как PASS, ни как провал. Новых числовых данных НЕ
+импортировано. Phase 4.4.4 НЕ завершена; открытыми остаются LLE,
+PPR78, непрерывный validated TPD error bound, интеграция с
+solveEquilibrium.
+
 ## 3. Сравнительная матрица: своя реализация / внешняя библиотека / внешний сервис
 
 | Возможность | Своя TS-реализация | Внешняя библиотека (WASM/офлайн) | Внешний сервис |

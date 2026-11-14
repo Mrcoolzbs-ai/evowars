@@ -139,6 +139,30 @@
 > остаются unknown (no_kinetic_data, fail-closed). Этапы 4.5.4/4.5.5
 > в полном объёме не завершены.
 
+> Ревизия Stage 4.4.4.6 / 4.4.4.7 (2026-11-14 — VLE flash
+> Peng–Robinson и его явная интеграция в PhaseEquilibrium):
+> реализован изотермо-изобарный многокомпонентный VLE flash
+> (Core/pengRobinsonFlash.ts: Wilson-старт, Рачфорд–Райс,
+> последовательные замены K, TPD-скрининг; каталоговый фасад
+> Data/pengRobinsonFlashFacade.ts — fail-closed lookup каталогов
+> 4.4.4.1/4.4.4.3, kij = 0 молча НЕ подставляется) и ЯВНЫЙ
+> интеграционный API PhaseEquilibrium/pengRobinsonVle.ts
+> (analyzeVleWithPengRobinson / analyzeAtmosphereVleWithPengRobinson):
+> Peng–Robinson НЕ активируется автоматически, legacy Antoine-скрининг
+> не изменён, недоступное давление/состав атмосферы дают явную
+> диагностику (значения НЕ выводятся из игровых допущений),
+> two_phase_candidate — кандидат равновесия, а НЕ доказанный
+> стабильный результат; indeterminate НЕ трактуется как stable;
+> evidence-статусы каталогов не повышаются, provenance передаётся
+> как есть. Две контрольные точки (co2|ch4 230 K / 2 МПа;
+> co2|n2|ar 250 K / 4 МПа) сверены с CoolProp PQ в отдельном
+> benchmark workflow — сверка валидирует реализацию, НЕ значения kij.
+> Статус 'stable' НЕ предусмотрен. Открытыми остаются: LLE, PPR78,
+> непрерывный validated TPD error bound, интеграция с
+> solveEquilibrium, независимая экспериментальная проверка kij.
+> Phase 4.4.4 НЕ завершена. Подробности — DATA_PROVENANCE.md §2.33;
+> статус — IMPLEMENTATION_ROADMAP.md §4.4.4.
+
 ## 1. Принципы
 
 1. Равновесие, кинетика и стехиометрия — ТРИ РАЗНЫЕ подсистемы, которые не
