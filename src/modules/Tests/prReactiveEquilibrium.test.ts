@@ -754,7 +754,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
 
   it('22. дублированные species ID и пары отклоняются', () => {
     const dupSpecies = abRequest(1);
-    (dupSpecies as { species: PrReactiveEquilibriumSpecies[] }).species = [
+    (dupSpecies as unknown as { species: PrReactiveEquilibriumSpecies[] }).species = [
       spPR('A', { X: 1 }, 0, syntheticEos(300, 4e6, 0.1)),
       spPR('A', { X: 1 }, 1, syntheticEos(420, 3.4e6, 0.25))
     ];
