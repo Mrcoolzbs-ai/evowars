@@ -53,6 +53,7 @@ import {
 import type {
   PrReactiveEquilibriumSpecies,
   PrReactiveGasEquilibriumRequest,
+  PrReactiveGasEquilibriumFailure,
   PrReactiveGasEquilibriumResult,
   PrReactiveGasEquilibriumSuccess
 } from '../Core/prReactiveEquilibrium';
@@ -181,6 +182,17 @@ function asSuccess(r: PrReactiveGasEquilibriumResult): PrReactiveGasEquilibriumS
   if (r.status !== 'candidate_converged') {
     const f = r as { code?: string; message?: string };
     throw new Error(`ожидался candidate_converged, получен ${r.status}: ${f.code} ${f.message}`);
+  }
+  return r;
+}
+
+function asFailure(
+  r: PrReactiveGasEquilibriumResult,
+  expectedStatus: PrReactiveGasEquilibriumFailure['status']
+): PrReactiveGasEquilibriumFailure {
+  expect(r.status).toBe(expectedStatus);
+  if (r.status === 'candidate_converged') {
+    throw new Error(`ожидался ${expectedStatus}, получен candidate_converged`);
   }
   return r;
 }
@@ -395,15 +407,21 @@ describe('Stage 4.4.4.8-B2: алгоритм и физические преде�
 
 describe('Stage 4.4.4.8-B2: сходимость', () => {
   it('9. candidate_converged невозможен, когда внутренний решатель не сошёлся', () => {
-    const innerStalled = solveReactiveGasEquilibriumWithPengRobinson(
-      abRequest(1, { options: { innerOptions: { maxIterations: 1 } } })
+    const innerStalled = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson(
+        abRequest(1, { options: { innerOptions: { maxIterations: 1 } } })
+      ),
+      'numerical_failure'
     );
     expect(innerStalled.status).toBe('numerical_failure');
     expect(innerStalled.code).toBe('inner:max_iterations');
     expect(innerStalled.innerStatus).toBe('max_iterations');
     expect(innerStalled.innerResultMessage).not.toBeNull();
 
-    const innerFailed = solveReactiveGasEquilibriumWithPengRobinson(abRequest(5000));
+    const innerFailed = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson(abRequest(5000)),
+      'numerical_failure'
+    );
     expect(innerFailed.status).toBe('numerical_failure');
     expect(innerFailed.code).toBe('inner:numerical_failure');
     expect(innerFailed.innerStatus).toBe('numerical_failure');
@@ -412,8 +430,11 @@ describe('Stage 4.4.4.8-B2: сходимость', () => {
   it('10. candidate_converged невозможен при fixed-point остатке выше допуска', () => {
     // Допуск ниже достижимого машинного пола остатка: бюджет
     // исчерпывается честно, состав не выдаётся за равновесный.
-    const r = solveReactiveGasEquilibriumWithPengRobinson(
-      abRequest(1, { options: { outerTolerance: 1e-25, stagnationEpsilon: 1e-30, maxOuterIterations: 30 } })
+    const r = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson(
+        abRequest(1, { options: { outerTolerance: 1e-25, stagnationEpsilon: 1e-30, maxOuterIterations: 30 } })
+      ),
+      'max_iterations'
     );
     expect(r.status).toBe('max_iterations');
     expect(r.lastFixedPointResidual).not.toBeNull();
@@ -489,15 +510,18 @@ describe('Stage 4.4.4.8-B2: сходимость', () => {
     // outerTolerance ниже достижимого пола остатка; когда изменение
     // вектора падает ниже stagnationEpsilon при остатке >= допуска,
     // решатель честно останавливается со статусом stagnated.
-    const r = solveReactiveGasEquilibriumWithPengRobinson(
-      abRequest(1, {
-        options: {
-          outerTolerance: 1e-20,
-          stagnationEpsilon: 1e-10,
-          stagnationWindow: 5,
-          maxOuterIterations: 100
-        }
-      })
+    const r = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson(
+        abRequest(1, {
+          options: {
+            outerTolerance: 1e-20,
+            stagnationEpsilon: 1e-10,
+            stagnationWindow: 5,
+            maxOuterIterations: 100
+          }
+        })
+      ),
+      'stagnated'
     );
     expect(r.status).toBe('stagnated');
     expect(r.code).toBe('stagnated');
@@ -511,8 +535,11 @@ describe('Stage 4.4.4.8-B2: сходимость', () => {
   });
 
   it('14. исчерпание бюджета внешних итераций даёт max_iterations', () => {
-    const r = solveReactiveGasEquilibriumWithPengRobinson(
-      abRequest(1, { options: { maxOuterIterations: 1 } })
+    const r = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson(
+        abRequest(1, { options: { maxOuterIterations: 1 } })
+      ),
+      'max_iterations'
     );
     expect(r.status).toBe('max_iterations');
     expect(r.outerIterations).toBe(1);
@@ -573,14 +600,14 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
       crossChecks: [],
       limitations: ['синтетические тестовые параметры']
     };
-    const r = solveReactiveGasEquilibriumWithPengRobinson(missing);
+    const r = asFailure(solveReactiveGasEquilibriumWithPengRobinson(missing), 'unsupported_eos_data');
     expect(r.status).toBe('unsupported_eos_data');
     expect(r.deficiencies.length).toBeGreaterThan(0);
     expect(r.deficiencies.some((d) => d.kind === 'invalid_component_parameters' && d.subject === 'A')).toBe(true);
 
     const nanTc = abRequest(1);
     (nanTc.species[1] as { eos: Record<string, unknown> }).eos = syntheticEos(Number.NaN, 3.4e6, 0.25);
-    const r2 = solveReactiveGasEquilibriumWithPengRobinson(nanTc);
+    const r2 = asFailure(solveReactiveGasEquilibriumWithPengRobinson(nanTc), 'unsupported_eos_data');
     expect(r2.status).toBe('unsupported_eos_data');
     expect(r2.deficiencies.some((d) => d.kind === 'invalid_component_parameters' && d.subject === 'B')).toBe(true);
   });
@@ -597,7 +624,10 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
     const withoutAC = missing.binaryInteractions.filter(
       (b) => !((b.componentA === 'A' && b.componentB === 'C') || (b.componentA === 'C' && b.componentB === 'A'))
     );
-    const r = solveReactiveGasEquilibriumWithPengRobinson({ ...missing, binaryInteractions: withoutAC });
+    const r = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson({ ...missing, binaryInteractions: withoutAC }),
+      'unsupported_eos_data'
+    );
     expect(r.status).toBe('unsupported_eos_data');
     expect(
       r.deficiencies.some(
@@ -611,7 +641,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
     const active = abRequest(1);
     (active.species[0] as { eos: Record<string, unknown> }).eos = syntheticEos(300, 4e6, 0.1);
     (active.species[0] as { eos: { evidence: unknown } }).eos.evidence = PARTIAL_EVIDENCE;
-    const rActive = solveReactiveGasEquilibriumWithPengRobinson(active);
+    const rActive = asFailure(solveReactiveGasEquilibriumWithPengRobinson(active), 'unsupported_eos_data');
     expect(rActive.status).toBe('unsupported_eos_data');
     expect(
       rActive.deficiencies.some((d) => d.kind === 'component_evidence_not_accepted' && d.subject === 'A')
@@ -621,7 +651,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
     const inactive = abcRequest();
     const cSpecies = inactive.species.find((s) => s.id === 'C') as PrReactiveEquilibriumSpecies;
     (cSpecies as { eos: unknown }).eos = { ...syntheticEos(500, 3e6, 0.3), evidence: PARTIAL_EVIDENCE };
-    const rInactive = solveReactiveGasEquilibriumWithPengRobinson(inactive);
+    const rInactive = asFailure(solveReactiveGasEquilibriumWithPengRobinson(inactive), 'unsupported_eos_data');
     expect(rInactive.status).toBe('unsupported_eos_data');
     expect(
       rInactive.deficiencies.some((d) => d.kind === 'component_evidence_not_accepted' && d.subject === 'C')
@@ -632,7 +662,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
     const activePair = abRequest(1, {
       binaryInteractions: [bip('A', 'B', 0.05, { minTemperatureK: 500, maxTemperatureK: 600 })]
     });
-    const rActive = solveReactiveGasEquilibriumWithPengRobinson(activePair);
+    const rActive = asFailure(solveReactiveGasEquilibriumWithPengRobinson(activePair), 'unsupported_eos_data');
     expect(rActive.status).toBe('unsupported_eos_data');
     expect(
       rActive.deficiencies.some((d) => d.kind === 'binary_interaction_applicability')
@@ -644,7 +674,10 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
         ? { ...b, applicabilityRangeK: { minTemperatureK: 500, maxTemperatureK: 600 } }
         : b
     );
-    const rInactive = solveReactiveGasEquilibriumWithPengRobinson({ ...inactivePair, binaryInteractions: withRange });
+    const rInactive = asFailure(
+      solveReactiveGasEquilibriumWithPengRobinson({ ...inactivePair, binaryInteractions: withRange }),
+      'unsupported_eos_data'
+    );
     expect(rInactive.status).toBe('unsupported_eos_data');
     expect(
       rInactive.deficiencies.some(
@@ -714,7 +747,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
     expectEquilibriumError(() => solveReactiveGasEquilibriumWithPengRobinson(broken), 'invalid_input');
     // Повреждённая запись kij: NaN.
     const nanKij = abRequest(1, { binaryInteractions: [bip('A', 'B', Number.NaN)] });
-    const r = solveReactiveGasEquilibriumWithPengRobinson(nanKij);
+    const r = asFailure(solveReactiveGasEquilibriumWithPengRobinson(nanKij), 'unsupported_eos_data');
     expect(r.status).toBe('unsupported_eos_data');
     expect(r.deficiencies.some((d) => d.kind === 'invalid_binary_interaction_parameters')).toBe(true);
   });
@@ -729,31 +762,31 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
 
     // Точная дубликация пары - даже при согласованном kij.
     const dupPair = abRequest(1, { binaryInteractions: [bip('A', 'B', 0.05), bip('A', 'B', 0.05)] });
-    const rDup = solveReactiveGasEquilibriumWithPengRobinson(dupPair);
+    const rDup = asFailure(solveReactiveGasEquilibriumWithPengRobinson(dupPair), 'unsupported_eos_data');
     expect(rDup.status).toBe('unsupported_eos_data');
     expect(rDup.deficiencies.some((d) => d.kind === 'duplicate_binary_interaction')).toBe(true);
 
     // Обратный порядок той же пары - тоже дубликат (канонический смысл).
     const dupPairRev = abRequest(1, { binaryInteractions: [bip('A', 'B', 0.05), bip('B', 'A', 0.05)] });
-    const rDupRev = solveReactiveGasEquilibriumWithPengRobinson(dupPairRev);
+    const rDupRev = asFailure(solveReactiveGasEquilibriumWithPengRobinson(dupPairRev), 'unsupported_eos_data');
     expect(rDupRev.status).toBe('unsupported_eos_data');
     expect(rDupRev.deficiencies.some((d) => d.kind === 'duplicate_binary_interaction')).toBe(true);
 
     // Противоречивый kij той же пары.
     const contradictory = abRequest(1, { binaryInteractions: [bip('A', 'B', 0.05), bip('B', 'A', 0.07)] });
-    const rContr = solveReactiveGasEquilibriumWithPengRobinson(contradictory);
+    const rContr = asFailure(solveReactiveGasEquilibriumWithPengRobinson(contradictory), 'unsupported_eos_data');
     expect(rContr.status).toBe('unsupported_eos_data');
     expect(rContr.deficiencies.some((d) => d.kind === 'contradictory_binary_interaction')).toBe(true);
 
     // Неизвестный ID в паре.
     const unknown = abRequest(1, { binaryInteractions: [bip('A', 'Z', 0.05)] });
-    const rUnknown = solveReactiveGasEquilibriumWithPengRobinson(unknown);
+    const rUnknown = asFailure(solveReactiveGasEquilibriumWithPengRobinson(unknown), 'unsupported_eos_data');
     expect(rUnknown.status).toBe('unsupported_eos_data');
     expect(rUnknown.deficiencies.some((d) => d.kind === 'unknown_component_in_binary_interaction')).toBe(true);
 
     // Самопара.
     const selfPair = abRequest(1, { binaryInteractions: [bip('A', 'A', 0.05)] });
-    const rSelf = solveReactiveGasEquilibriumWithPengRobinson(selfPair);
+    const rSelf = asFailure(solveReactiveGasEquilibriumWithPengRobinson(selfPair), 'unsupported_eos_data');
     expect(rSelf.status).toBe('unsupported_eos_data');
     expect(rSelf.deficiencies.some((d) => d.kind === 'self_pair')).toBe(true);
   });
@@ -828,7 +861,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
       crossChecks: [],
       limitations: ['синтетические тестовые параметры']
     };
-    const r = solveReactiveGasEquilibriumWithPengRobinson(missing);
+    const r = asFailure(solveReactiveGasEquilibriumWithPengRobinson(missing), 'unsupported_eos_data');
     expect(r.status).toBe('unsupported_eos_data');
     const deficiency = r.deficiencies.find((d) => d.subject === 'A');
     expect(deficiency).toBeDefined();
@@ -842,7 +875,7 @@ describe('Stage 4.4.4.8-B2: fail-closed и численная целостнос
       crossChecks: [],
       limitations: ['синтетические тестовые параметры']
     };
-    const r2 = solveReactiveGasEquilibriumWithPengRobinson(noEvidence);
+    const r2 = asFailure(solveReactiveGasEquilibriumWithPengRobinson(noEvidence), 'unsupported_eos_data');
     expect(r2.status).toBe('unsupported_eos_data');
     expect(r2.deficiencies.some((d) => d.subject === 'B')).toBe(true);
   });

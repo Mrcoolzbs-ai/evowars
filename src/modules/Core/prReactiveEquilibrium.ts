@@ -623,7 +623,7 @@ export function solveReactiveGasEquilibriumWithPengRobinson(
   let prevLnPhiUsed: Record<string, number> | null = null;
   // Предупреждения последнего успешного PR-вызова (финальный состав).
   let lastPrWarnings: PrReactiveGasEquilibriumWarning[] = [];
-  let lastBinaryInteractionsUsed: PengRobinsonMixtureBinaryInteractionUsed[] = [];
+  let lastBinaryInteractionsUsed: readonly PengRobinsonMixtureBinaryInteractionUsed[] = [];
 
   const buildProblem = (): EquilibriumProblem => ({
     temperature: request.temperature,
