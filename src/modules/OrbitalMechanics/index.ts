@@ -502,6 +502,7 @@ export function solarConstantCheck(): number | null {
 
 export {
   integrateNBodyLeapfrog,
+  integrateNBodyWithEvents,
   computeStateDiagnostics,
   toBarycentricFrame,
   canonicalBodyOrder,
@@ -530,7 +531,6 @@ export {
 // радиусами НЕ является доказательством безопасности.
 
 export {
-  integrateNBodyWithEvents,
   sortDetectionEvents,
   segmentClosestPoint,
   segmentSphereCrossing,
