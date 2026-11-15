@@ -535,7 +535,7 @@ describe('обнаружение не зависит от частоты сни�
     closeApproachDistanceM: 5e9
   });
 
-  it('collision_detected при одном snapshot'е', () => {
+  it('collision_detected при одном снимке', () => {
     expect(result.status).toBe('collision_detected');
     const run = requireCollision(result);
     expect(run.snapshots).toHaveLength(1);
