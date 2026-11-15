@@ -493,6 +493,34 @@ export function solarConstantCheck(): number | null {
   return incidentFlux(3.828e26, AU_M);
 }
 
+// ============================================
+// Ре-экспорт детерминированной N-body динамики (Stage 4.6.1-A)
+// ============================================
+// Чистый интегратор: leapfrog KDK без softening/адаптивного шага/
+// перенормировки энергии. Успешное завершение прогона НЕ является
+// вердиктом устойчивости — каталог это не использует.
+
+export {
+  integrateNBodyLeapfrog,
+  computeStateDiagnostics,
+  toBarycentricFrame,
+  canonicalBodyOrder,
+  NBODY_LEAPFROG_LIMITATION,
+  NBODY_SINGULARITY_DISTANCE_M,
+  NBODY_DEFAULT_MAX_STEPS,
+  type Vector3,
+  type OrbitalBodyState,
+  type NBodyInitialState,
+  type NBodyIntegrationOptions,
+  type NBodyStateSnapshot,
+  type NBodyStateDiagnostics,
+  type NBodyConservationReport,
+  type NBodyIntegrationSuccess,
+  type NBodyValidationIssue,
+  type NBodyIntegrationFailure,
+  type NBodyIntegrationResult
+} from './dynamics';
+
 export default {
   ORBIT_BANDS,
   MOON_ORBIT_BAND_PARENT_RADII,
@@ -505,3 +533,4 @@ export default {
   solarConstantCheck,
   unknownValue
 };
+"
