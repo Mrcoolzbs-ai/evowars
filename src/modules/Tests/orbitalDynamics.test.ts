@@ -218,14 +218,14 @@ describe('эллипс e=0.5, сходимость к кеплеровой тр�
       };
       errors.push(Math.hypot(rel.x - analytic.x, rel.y - analytic.y) / Math.hypot(analytic.x, analytic.y));
     }
-    // измерено: 5.54e-4 → 1.39e-4 → 3.46e-5
+    // измерено: 5.54e-4 → 1.39e-4 → 3.46e-5 (отношение ~4 при удвоении разрешения)
     expect(errors[0]).toBeLessThan(1e-3);
     expect(errors[1]).toBeLessThan(3e-4);
     expect(errors[2]).toBeLessThan(8e-5);
-    expect(errors[1] / errors[0]).toBeGreaterThan(3.5);
-    expect(errors[1] / errors[0]).toBeLessThan(4.5);
-    expect(errors[2] / errors[1]).toBeGreaterThan(3.5);
-    expect(errors[2] / errors[1]).toBeLessThan(4.5);
+    expect(errors[0] / errors[1]).toBeGreaterThan(3.5);
+    expect(errors[0] / errors[1]).toBeLessThan(4.5);
+    expect(errors[1] / errors[2]).toBeGreaterThan(3.5);
+    expect(errors[1] / errors[2]).toBeLessThan(4.5);
   });
 });
 
