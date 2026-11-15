@@ -521,6 +521,30 @@ export {
   type NBodyIntegrationResult
 } from './dynamics';
 
+// ============================================
+// Ре-экспорт обнаружения сближений и столкновений (Stage 4.6.1-B)
+// ============================================
+// Событийный слой поверх того же KDK-движка: обнаружение на
+// drift-отрезке каждого шага. completed НЕ является вердиктом
+// устойчивости; отсутствие collision-события у пар с неизвестными
+// радиусами НЕ является доказательством безопасности.
+
+export {
+  integrateNBodyWithEvents,
+  sortDetectionEvents,
+  segmentClosestPoint,
+  segmentSphereCrossing,
+  type CloseApproachEvent,
+  type CollisionEvent,
+  type NBodyDetectionEvent,
+  type NBodyEventDetectionMetadata,
+  type NBodyEventIntegrationOptions,
+  type NBodyEventsRunCompleted,
+  type NBodyEventsRunCollisionDetected,
+  type NBodyEventsRunIntegrationFailed,
+  type NBodyEventIntegrationResult
+} from './events';
+
 export default {
   ORBIT_BANDS,
   MOON_ORBIT_BAND_PARENT_RADII,

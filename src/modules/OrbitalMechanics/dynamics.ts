@@ -1,5 +1,5 @@
 // ============================================
-// DYNAMICS - Детерминированная N-body динамика (Stage 4.6.1-A)
+// DYNAMICS - Детерминированная N-body динамика (Stage 4.6.1-A/B)
 // ============================================
 //
 // Чистый гравитационный N-body интегратор: метод leapfrog KDK
@@ -9,16 +9,34 @@
 // - БЕЗ смягчения (softening): чистый ньютоновский потенциал 1/r;
 // - БЕЗ адаптивного шага: timestep фиксирован на весь прогон;
 // - БЕЗ перенормировки энергии: дрейф энергии честно измеряется;
-// - БЕЗ обработки сближений/столкновений/выбросов: сближение ближе
-//   порога — отказ singular_configuration, а не столкновение;
 // - успешное завершение прогона НЕ является вердиктом устойчивости
 //   орбиты (статусы stable/unstable интегратор не выдаёт).
+//
+// Stage 4.6.1-B: поверх ТОГО ЖЕ движка добавлено обнаружение тесных
+// сближений и физических столкновений внутри drift-шага (см. events.ts).
+// Оба публичных API — integrateNBodyLeapfrog и integrateNBodyWithEvents —
+// используют один общий внутренний KDK-движок runKdkCore: алгоритм
+// интегрирования НЕ скопирован во вторую реализацию. Без событийного
+// хука движок выполняет ровно те же операции в том же порядке, что и
+// в этапе 4.6.1-A (численные результаты побитово совпадают).
+// Столкновение останавливает прогон ДО второго kick контактного шага;
+// слияния/отскоки/фрагментации/передача энергии НЕ моделируются.
 //
 // Детерминизм: все суммы и вычисления выполняются в каноническом
 // порядке тел (сортировка по id) — результат побитово не зависит от
 // порядка тел во входном массиве и воспроизводим бит в бит.
 
 import { G } from '../Units';
+import {
+  createEventCollector,
+  sortDetectionEvents,
+  type CollisionEvent,
+  type EventCollectorHalt,
+  type NBodyDetectionEvent,
+  type NBodyEventDetectionMetadata,
+  type NBodyEventIntegrationOptions,
+  type NBodyEventIntegrationResult
+} from './events';
 
 // ============================================
 // 1. ТИПЫ
@@ -169,10 +187,15 @@ export interface NBodySingularFailure {
   timeS: number;
 }
 
-/** Отказ: нечисловые значения в диагностике (переполнение/NaN). */
+/**
+ * Отказ: нечисловые значения (переполнение/NaN). Причины:
+ * nonfinite_diagnostics — диагностика состояния; nonfinite_geometry —
+ * нечисловая геометрия drift-отрезка в событийном слое (Stage 4.6.1-B,
+ * аддитивное расширение перечисления причин).
+ */
 export interface NBodyNumericalFailure {
   status: 'numerical_failure';
-  reason: 'nonfinite_diagnostics';
+  reason: 'nonfinite_diagnostics' | 'nonfinite_geometry';
   stepsCompleted: number;
   timeS: number;
 }
@@ -460,21 +483,60 @@ function closestPair(bodies: readonly OrbitalBodyState[]): { distance: number; a
 }
 
 // ============================================
-// 7. ИНТЕГРИРОВАНИЕ: LEAPFROG KDK
+// 7. ОБЩИЙ KDK-ДВИЖОК И ДВА ПУБЛИЧНЫХ API
 // ============================================
 
 /**
- * Детерминированное N-body интегрирование методом leapfrog KDK:
- *   v(t + dt/2) = v(t) + a(x(t))·dt/2   — kick
- *   x(t + dt)   = x(t) + v(t + dt/2)·dt — drift
- *   v(t + dt)   = v(t + dt/2) + a(x(t + dt))·dt/2 — kick
- * Симплектический метод 2-го порядка; энергия осциллирует вокруг
- * точного значения без систематического дрейфа.
+ * Остановка прогона, запрошенная событийным слоем (Stage 4.6.1-B).
+ * kind 'collision' — физический контакт поверхностей (терминальный);
+ * kind 'singularity' — пересечение порога численной сингулярности
+ * внутри drift-отрезка; kind 'nonfinite_geometry' — нечисловая
+ * геометрия отрезка.
  */
-export function integrateNBodyLeapfrog(
+export type KdkHaltInfo = EventCollectorHalt;
+
+/** Событийный хук общего движка: вызывается после drift, до второго kick. */
+export interface KdkEventHook {
+  onAfterDrift(
+    /** Индекс шага (с 1). */
+    step: number,
+    /** Время начала шага, с. */
+    timeStartS: number,
+    /** Длительность шага, с. */
+    dtS: number,
+    /** Позиции тел до drift (канонический порядок), м. */
+    prevPositions: readonly Vector3[],
+    /** Позиции тел после drift (канонический порядок), м. */
+    nextPositions: readonly Vector3[]
+  ): { halt: false } | { halt: true; haltInfo: KdkHaltInfo };
+}
+
+/**
+ * Внутренний результат движка при остановке хуком. lastCompletedState —
+ * состояние на начало остановленного шага (конец предыдущего полностью
+ * завершённого шага), НЕ интерполяция на событие.
+ */
+export interface KdkHaltedRun {
+  halted: true;
+  halt: KdkHaltInfo;
+  /** Число полностью завершённых шагов (до остановленного). */
+  stepsCompleted: number;
+  /** Время начала остановленного шага, с. */
+  timeStartS: number;
+  lastCompletedSnapshot: NBodyStateSnapshot;
+  snapshots: NBodyStateSnapshot[];
+}
+
+/**
+ * Общий внутренний KDK-движок обоих публичных API. hook === null —
+ * чистый режим этапа 4.6.1-A: ровно те же операции в том же порядке,
+ * без дополнительных вычислений.
+ */
+function runKdkCore(
   initialState: NBodyInitialState,
-  options: NBodyIntegrationOptions
-): NBodyIntegrationResult {
+  options: NBodyIntegrationOptions,
+  hook: KdkEventHook | null
+): NBodyIntegrationResult | KdkHaltedRun {
   // --- Валидация входа ---
   const issues = validateInput(initialState, options);
   if (issues.length > 0) {
@@ -549,8 +611,16 @@ export function integrateNBodyLeapfrog(
 
   let acc = computeAccelerations(bodies);
 
+  // Состояние последнего полностью завершённого шага (для событийного
+  // слоя: терминальное событие возвращает его отдельно от оценки
+  // момента события). Заполняется только при активном хуке.
+  let lastCompletedBodies: OrbitalBodyState[] | null = null;
+
   // --- Основной цикл шагов ---
   for (let step = 1; step <= totalSteps; step++) {
+    if (hook) {
+      lastCompletedBodies = cloneBodies(bodies);
+    }
     // kick (полшага)
     for (let i = 0; i < bodies.length; i++) {
       bodies[i].velocityMPerS = vec(
@@ -559,6 +629,10 @@ export function integrateNBodyLeapfrog(
         bodies[i].velocityMPerS.z + acc[i].z * timeStepS * 0.5
       );
     }
+    // Позиции до drift (для проверки drift-отрезка событийным слоем).
+    const prevPositions: ReadonlyArray<Vector3> | null = hook
+      ? bodies.map((b) => b.positionM)
+      : null;
     // drift (полный шаг)
     for (let i = 0; i < bodies.length; i++) {
       bodies[i].positionM = vec(
@@ -566,6 +640,35 @@ export function integrateNBodyLeapfrog(
         bodies[i].positionM.y + bodies[i].velocityMPerS.y * timeStepS,
         bodies[i].positionM.z + bodies[i].velocityMPerS.z * timeStepS
       );
+    }
+    // --- Событийный слой (Stage 4.6.1-B): проверка drift-отрезков
+    // всех пар ДО второго kick. Терминальное событие останавливает
+    // шаг: второй kick для остановленного шага не выполняется. ---
+    if (hook && prevPositions) {
+      const nextPositions = bodies.map((b) => b.positionM);
+      const outcome = hook.onAfterDrift(
+        step,
+        time0 + (step - 1) * timeStepS,
+        timeStepS,
+        prevPositions,
+        nextPositions
+      );
+      if (outcome.halt) {
+        const timeStartS = time0 + (step - 1) * timeStepS;
+        const completedBodies = lastCompletedBodies ?? cloneBodies(bodies);
+        return {
+          halted: true,
+          halt: outcome.haltInfo,
+          stepsCompleted: step - 1,
+          timeStartS,
+          lastCompletedSnapshot: {
+            timeS: timeStartS,
+            bodies: completedBodies,
+            diagnostics: computeStateDiagnostics({ timeS: timeStartS, bodies: completedBodies })
+          },
+          snapshots
+        };
+      }
     }
     // Проверка сингулярности после дрейфа, до второго kick:
     // ускорение при нулевом зазоре не вычисляется.
@@ -635,6 +738,200 @@ export function integrateNBodyLeapfrog(
       maxAngularMomentumDriftRelative: maxAngularDrift,
       maxCenterOfMassDriftM: maxComDrift
     }
+  };
+}
+
+/**
+ * Детерминированное N-body интегрирование методом leapfrog KDK:
+ *   v(t + dt/2) = v(t) + a(x(t))·dt/2   — kick
+ *   x(t + dt)   = x(t) + v(t + dt/2)·dt — drift
+ *   v(t + dt)   = v(t + dt/2) + a(x(t + dt))·dt/2 — kick
+ * Симплектический метод 2-го порядка; энергия осциллирует вокруг
+ * точного значения без систематического дрейфа. Чистый режим этапа
+ * 4.6.1-A: без обнаружения событий (общий движок с runKdkCore).
+ */
+export function integrateNBodyLeapfrog(
+  initialState: NBodyInitialState,
+  options: NBodyIntegrationOptions
+): NBodyIntegrationResult {
+  const raw = runKdkCore(initialState, options, null);
+  if ('halted' in raw) {
+    // Недостижимо: без событийного хука движок не останавливается.
+    throw new Error('kdk: остановка движка без событийного хука невозможна');
+  }
+  return raw;
+}
+
+/** Метаданные покрытия обнаружения для набора тел. */
+function buildEventDetectionMetadata(
+  bodies: readonly OrbitalBodyState[],
+  closeApproachEnabled: boolean,
+  closeApproachThresholdM: number | null,
+  stepsProcessed: number
+): NBodyEventDetectionMetadata {
+  let bothKnown = 0;
+  let unknownRadius = 0;
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      if (bodies[i].radiusM !== null && bodies[j].radiusM !== null) {
+        bothKnown += 1;
+      } else {
+        unknownRadius += 1;
+      }
+    }
+  }
+  return {
+    closeApproachDetectionEnabled: closeApproachEnabled,
+    closeApproachThresholdM: closeApproachThresholdM,
+    pairsCheckedTotal: (bodies.length * (bodies.length - 1)) / 2,
+    pairsWithBothRadiiKnown: bothKnown,
+    pairsWithUnknownRadius: unknownRadius,
+    collisionDetectionPossible: bothKnown > 0,
+    stepsWithEventDetection: stepsProcessed
+  };
+}
+
+/**
+ * Событийное N-body интегрирование (Stage 4.6.1-B): тот же общий KDK
+ * движок, что и integrateNBodyLeapfrog, с проверкой каждого drift-
+ * отрезка всех пар: физический контакт поверхностей (R_A + R_B,
+ * терминальный), порог численной сингулярности и, при переданном
+ * closeApproachDistanceM, эпизоды тесного сближения. Обнаружение
+ * выполняется на КАЖДОМ шаге независимо от sampleEverySteps, поэтому
+ * события доступны даже при редких снимках.
+ *
+ * Границы: столкновение только останавливает прогон (без слияния,
+ * отскока, фрагментации, передачи энергии); radiusM null означает
+ * неизвестный радиус, для таких пар столкновение не ищется, и его
+ * отсутствие НЕ доказательство безопасности; геометрия события
+ * опирается на численный drift-отрезок, ошибка времени зависит от
+ * timestep. Статус completed по-прежнему означает только завершение
+ * интегрирования, а не устойчивость системы.
+ */
+export function integrateNBodyWithEvents(
+  initialState: NBodyInitialState,
+  options: NBodyEventIntegrationOptions
+): NBodyEventIntegrationResult {
+  const thresholdRaw = options.closeApproachDistanceM;
+  const thresholdProvided = thresholdRaw !== undefined;
+
+  // --- Валидация: базовая + событийная опция ---
+  const issues = validateInput(initialState, options);
+  if (thresholdProvided && (!isFiniteNumber(thresholdRaw) || thresholdRaw <= 0)) {
+    issues.push({
+      code: 'invalid_close_approach_distance',
+      message: 'closeApproachDistanceM, если задан, обязан быть конечным строго положительным числом'
+    });
+  }
+  const canonical: OrbitalBodyState[] = Array.isArray(initialState.bodies)
+    ? canonicalBodyOrder(initialState.bodies)
+    : [];
+  if (issues.length > 0) {
+    return {
+      status: 'integration_failed',
+      failure: { status: 'invalid_input', issues },
+      events: [],
+      detection: buildEventDetectionMetadata(canonical, false, null, 0)
+    };
+  }
+  const threshold = thresholdProvided && isFiniteNumber(thresholdRaw) && thresholdRaw > 0 ? thresholdRaw : null;
+
+  // --- Коллектор событий и хук общего движка ---
+  const collector = createEventCollector({
+    bodies: canonical.map((b) => ({ id: b.id, radiusM: b.radiusM })),
+    initialPositions: canonical.map((b) => b.positionM),
+    initialTimeS: initialState.timeS,
+    closeApproachThresholdM: threshold,
+    singularityThresholdM: NBODY_SINGULARITY_DISTANCE_M
+  });
+  const hook: KdkEventHook = {
+    onAfterDrift: (step, timeStartS, dtS, prevPositions, nextPositions) =>
+      collector.processStep(step, timeStartS, dtS, prevPositions, nextPositions)
+  };
+
+  const raw = runKdkCore(initialState, options, hook);
+  const detection = buildEventDetectionMetadata(
+    canonical,
+    threshold !== null,
+    threshold,
+    collector.stepsProcessed
+  );
+
+  if ('halted' in raw) {
+    const halt = raw.halt;
+    if (halt.kind === 'collision') {
+      const collisionEvent: CollisionEvent = {
+        type: 'collision',
+        pairIdA: halt.pairIdA,
+        pairIdB: halt.pairIdB,
+        contactRadiusM: halt.contactRadiusM,
+        contactTimeS: halt.contactTimeS,
+        contactStepFraction: halt.contactStepFraction,
+        minimumDistanceM: halt.minimumDistanceM
+      };
+      const events: NBodyDetectionEvent[] = sortDetectionEvents([
+        ...collector.finalize(),
+        collisionEvent
+      ]);
+      return {
+        status: 'collision_detected',
+        pairIdA: halt.pairIdA,
+        pairIdB: halt.pairIdB,
+        contactTimeS: halt.contactTimeS,
+        contactStepFraction: halt.contactStepFraction,
+        lastCompletedState: raw.lastCompletedSnapshot,
+        snapshots: raw.snapshots,
+        events,
+        detection
+      };
+    }
+    if (halt.kind === 'singularity') {
+      const failure: NBodySingularFailure = {
+        status: 'singular_configuration',
+        pairIdA: halt.pairIdA,
+        pairIdB: halt.pairIdB,
+        distanceM: halt.distanceM,
+        thresholdM: halt.thresholdM,
+        stepsCompleted: raw.stepsCompleted,
+        timeS: halt.timeS
+      };
+      return {
+        status: 'integration_failed',
+        failure,
+        events: sortDetectionEvents(collector.finalize()),
+        detection
+      };
+    }
+    const failure: NBodyNumericalFailure = {
+      status: 'numerical_failure',
+      reason: 'nonfinite_geometry',
+      stepsCompleted: raw.stepsCompleted,
+      timeS: halt.timeS
+    };
+    return {
+      status: 'integration_failed',
+      failure,
+      events: sortDetectionEvents(collector.finalize()),
+      detection
+    };
+  }
+
+  if (raw.status === 'completed') {
+    return {
+      status: 'completed',
+      stepsCompleted: raw.stepsCompleted,
+      timeS: raw.timeS,
+      snapshots: raw.snapshots,
+      conservation: raw.conservation,
+      events: sortDetectionEvents(collector.finalize()),
+      detection
+    };
+  }
+  return {
+    status: 'integration_failed',
+    failure: raw,
+    events: sortDetectionEvents(collector.finalize()),
+    detection
   };
 }
 
