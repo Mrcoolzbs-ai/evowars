@@ -34,7 +34,7 @@
 // указано в limitations каждого вида.
 
 import { describe, it, expect } from 'vitest';
-import { quantity } from '../Core/physicalQuantity';
+import { convert, quantity } from '../Core/physicalQuantity';
 import type { PhysicalQuantity } from '../Core/physicalQuantity';
 import {
   EquilibriumError,
@@ -166,8 +166,9 @@ function prAt(
       binaryInteractions: request.binaryInteractions
     },
     {
-      temperatureK: 400,
-      pressurePa: 1e6,
+      // T и P берутся из запроса (хелпер используется и при T = T*).
+      temperatureK: request.temperature.value,
+      pressurePa: convert(request.pressure, 'Pa').value,
       root: 'vapor',
       evidencePolicy: request.evidencePolicy
     }
@@ -294,9 +295,9 @@ describe('Stage 4.4.4.8-B2: алгоритм и физические преде�
     expect(r.model).toBe('peng_robinson_vapor');
     expect(r.root).toBe('vapor');
     expect(r.status).toBe('candidate_converged');
-    // Контрольное значение прототипа (синтетические параметры).
-    expect(r.moleFractions.B).toBeCloseTo(0.28448006885573, 9);
-    expect(r.moleFractions.A).toBeCloseTo(1 - 0.28448006885573, 9);
+    // Контрольное значение: согласовано с независимым 1-D оракулом (тест 5).
+    expect(r.moleFractions.B).toBeCloseTo(0.2843935840462538, 9);
+    expect(r.moleFractions.A).toBeCloseTo(1 - 0.2843935840462538, 9);
     expect(r.lnPhiFixedPointResidual).toBeLessThan(1e-9);
     expect(r.outerIterations).toBeGreaterThanOrEqual(1);
     expect(r.outerIterations).toBeLessThanOrEqual(20);
@@ -428,18 +429,21 @@ describe('Stage 4.4.4.8-B2: сходимость', () => {
   });
 
   it('10. candidate_converged невозможен при fixed-point остатке выше допуска', () => {
-    // Допуск ниже достижимого машинного пола остатка: бюджет
-    // исчерпывается честно, состав не выдаётся за равновесный.
+    // Допуск 1e-25 заведомо не достигается за 2 внешние итерации
+    // (старт lnPhiUsed = 0 даёт первый остаток порядка 1e-1): бюджет
+    // исчерпывается честно, сообщённый остаток остаётся выше допуска,
+    // состав не выдаётся за равновесный.
     const r = asFailure(
       solveReactiveGasEquilibriumWithPengRobinson(
-        abRequest(1, { options: { outerTolerance: 1e-25, stagnationEpsilon: 1e-30, maxOuterIterations: 30 } })
+        abRequest(1, { options: { outerTolerance: 1e-25, stagnationEpsilon: 1e-30, maxOuterIterations: 2 } })
       ),
       'max_iterations'
     );
     expect(r.status).toBe('max_iterations');
     expect(r.lastFixedPointResidual).not.toBeNull();
     expect(r.lastFixedPointResidual as number).toBeGreaterThanOrEqual(1e-25);
-    expect(r.outerIterations).toBe(30);
+    expect(r.outerIterations).toBe(2);
+    expect(r.innerStatus).toBe('converged');
   });
 
   it('11. PR stationarity residual = внутренняя (B1) невязка + lnPhiTarget - lnPhiUsed (при ненулевых lnPhi)', () => {
@@ -507,16 +511,19 @@ describe('Stage 4.4.4.8-B2: сходимость', () => {
   });
 
   it('13. застой выше допуска даёт stagnated и НЕ выдаётся за сходимость', () => {
-    // outerTolerance ниже достижимого пола остатка; когда изменение
-    // вектора падает ниже stagnationEpsilon при остатке >= допуска,
-    // решатель честно останавливается со статусом stagnated.
+    // stagnationEpsilon = 0.5 больше первого изменения вектора
+    // (lambda·fp1 ~ 1e-1), поэтому детектор отсчитывает окно с первой
+    // же итерации; за stagnationWindow = 3 итерации остаток снижается
+    // лишь до ~1e-3, т.е. остаётся >= outerTolerance: решатель честно
+    // останавливается со статусом stagnated, не выдавая состав за
+    // равновесный.
     const r = asFailure(
       solveReactiveGasEquilibriumWithPengRobinson(
         abRequest(1, {
           options: {
             outerTolerance: 1e-20,
-            stagnationEpsilon: 1e-10,
-            stagnationWindow: 5,
+            stagnationEpsilon: 0.5,
+            stagnationWindow: 3,
             maxOuterIterations: 100
           }
         })
@@ -525,6 +532,7 @@ describe('Stage 4.4.4.8-B2: сходимость', () => {
     );
     expect(r.status).toBe('stagnated');
     expect(r.code).toBe('stagnated');
+    expect(r.outerIterations).toBe(3);
     expect(r.lastFixedPointResidual).not.toBeNull();
     expect(r.lastFixedPointResidual as number).toBeGreaterThanOrEqual(1e-20);
     expect(r.lastLnPhiUsed).not.toBeNull();

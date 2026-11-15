@@ -431,9 +431,11 @@ function mapMixtureWarning(w: PengRobinsonMixtureWarning): PrReactiveGasEquilibr
  *
  * - рост нормы fixed-point остатка относительно предыдущей итерации —
  *   lambda делится пополам (эскалация);
- * - осцилляция «вниз-вверх» (невязка выросла после локального
- *   минимума два шага назад) — ещё одно деление пополам и флаг
- *   oscillationDetected;
+ * - осцилляция «вниз-вверх» (невязка выросла И вернулась не ниже уровня
+ *   два шага назад, т.е. после локального минимума два шага назад
+ *   остаток превысил его значение) — ещё одно деление пополам и флаг
+ *   oscillationDetected; рост после глубокого спада (например,
+ *   9 → 0.25 → 0.5) осцилляцией НЕ считается;
  * - lambda не опускается ниже minDamping.
  */
 export function prReactiveDampingUpdate(
@@ -451,7 +453,7 @@ export function prReactiveDampingUpdate(
     next = Math.max(next / 2, minDamping);
     escalated = true;
   }
-  if (growth && previousResidual < residualTwoStepsAgo) {
+  if (growth && previousResidual < residualTwoStepsAgo && residual >= residualTwoStepsAgo) {
     oscillation = true;
     next = Math.max(next / 2, minDamping);
   }
