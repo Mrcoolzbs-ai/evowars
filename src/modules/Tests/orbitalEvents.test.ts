@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   integrateNBodyLeapfrog,
+  integrateNBodyWithEvents,
   type NBodyInitialState,
   type OrbitalBodyState,
   type Vector3
@@ -116,7 +117,6 @@ const ECC_E = 0.5;
 const ECC_M = 5e29;
 const ECC_GM = G * (2 * ECC_M);
 const ECC_P = 2 * Math.PI * Math.sqrt((ECC_A * ECC_A * ECC_A) / ECC_GM);
-const ECC_Q = ECC_A * (1 - ECC_E);
 const ECC_QA = ECC_A * (1 + ECC_E);
 const ECC_VAPO = Math.sqrt((ECC_GM * (1 - ECC_E)) / (ECC_A * (1 + ECC_E)));
 function eccentricPair(): NBodyInitialState {
