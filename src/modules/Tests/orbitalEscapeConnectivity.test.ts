@@ -116,19 +116,23 @@ describe('Stage 4.6.1-C: детекция выброса', () => {
       })
     );
     const ej = ejections(result.events);
-    expect(ej).toHaveLength(1);
-    expect(ej[0].type).toBe('ejection_candidate');
-    expect(ej[0].bodyId).toBe('ship');
-    expect(ej[0].primaryBodyId).toBe('sun');
+    const cands = ej.filter((e) => e.type === 'ejection_candidate');
+    expect(cands).toHaveLength(1);
+    // Горизонт 5e6 с МЕНЬШЕ crossing + confirmation duration (≈ 5.18e6 с):
+    // неподтверждённый параметрами горизонта кандидат честно дополняется
+    // ejection_pending_at_horizon (это НЕ ejection_confirmed, п. 3.3).
+    expect(ej.filter((e) => e.type === 'ejection_pending_at_horizon')).toHaveLength(1);
+    expect(cands[0].bodyId).toBe('ship');
+    expect(cands[0].primaryBodyId).toBe('sun');
     // Измерено: crossing ≈ 4.17–4.19e6 с при dt = 1e4.
-    expect(ej[0].crossingTimeS).toBeGreaterThan(4.0e6);
-    expect(ej[0].crossingTimeS).toBeLessThan(4.35e6);
-    expect(ej[0].escapeRadiusM).toBe(4e11);
+    expect(cands[0].crossingTimeS).toBeGreaterThan(4.0e6);
+    expect(cands[0].crossingTimeS).toBeLessThan(4.35e6);
+    expect(cands[0].escapeRadiusM).toBe(4e11);
     // Measured: eps ≈ +6.88e8 Дж/кг, v_r > 0 на пересечении.
-    expect(ej[0].specificOrbitalEnergyAtCrossingJPerKg).toBeGreaterThan(1e8);
-    expect(ej[0].radialVelocityAtCrossingMPerS).toBeGreaterThan(0);
-    expect(ej[0].confirmationTimeS).toBeNull();
-    expect(ej[0].cancelReason).toBeNull();
+    expect(cands[0].specificOrbitalEnergyAtCrossingJPerKg).toBeGreaterThan(1e8);
+    expect(cands[0].radialVelocityAtCrossingMPerS).toBeGreaterThan(0);
+    expect(cands[0].confirmationTimeS).toBeNull();
+    expect(cands[0].cancelReason).toBeNull();
     expect(result.detection.escapeDetectionEnabled).toBe(true);
     expect(result.detection.primaryBodyId).toBe('sun');
     expect(result.detection.escapeRadiusM).toBe(4e11);
