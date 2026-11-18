@@ -735,6 +735,7 @@ function runKdkCore(
       if (outcome.halt) {
         // Шаг ПОЛНОСТЬЮ завершён (в отличие от остановки после drift):
         // последнее завершённое состояние — конец этого шага.
+        const timeStartS = time0 + (step - 1) * timeStepS;
         const timeEndS = time0 + step * timeStepS;
         return {
           halted: true,
@@ -1021,7 +1022,7 @@ export function integrateNBodyWithEvents(
             ejectionEnergyToleranceJPerKg: escapeToleranceJPerKg
           }
         : null,
-    connectivity: connectivityEnabled ? { energyToleranceJPerKg: options.bindingEnergyToleranceJPerKg } : null
+    connectivity: connectivityEnabled ? { energyToleranceJPerKg: options.bindingEnergyToleranceJPerKg as number } : null
   });
   const hook: KdkEventHook = {
     onAfterDrift: (step, timeStartS, dtS, prevPositions, nextPositions) =>
