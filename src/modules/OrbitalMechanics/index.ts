@@ -523,19 +523,34 @@ export {
 } from './dynamics';
 
 // ============================================
-// Ре-экспорт обнаружения сближений и столкновений (Stage 4.6.1-B)
+// Ре-экспорт обнаружения сближений, столкновений (4.6.1-B) и
+// выброса/связности (Stage 4.6.1-C)
 // ============================================
 // Событийный слой поверх того же KDK-движка: обнаружение на
-// drift-отрезке каждого шага. completed НЕ является вердиктом
-// устойчивости; отсутствие collision-события у пар с неизвестными
-// радиусами НЕ является доказательством безопасности.
+// drift-отрезке каждого шага; escape/connectivity — на каждом согласо-
+// ванном конце шага. completed НЕ является вердиктом устойчивости;
+// отсутствие collision-события у пар с неизвестными радиусами НЕ
+// является доказательством безопасности; ejection_candidate НЕ
+// подтверждённый физический выброс; pairwise-binding graph связности —
+// диагностическое приближение, а не доказательство связанности.
 
 export {
   sortDetectionEvents,
   segmentClosestPoint,
   segmentSphereCrossing,
+  relativePairEnergy,
+  bindingGraphEdges,
+  componentsFromEdges,
   type CloseApproachEvent,
   type CollisionEvent,
+  type EjectionEvent,
+  type EjectionStateType,
+  type EjectionCancelReason,
+  type ConnectivityEvent,
+  type ConnectivityEdgeChange,
+  type ConnectivityCriterionModel,
+  type EscapeDetectionConfig,
+  type RelativePairEnergy,
   type NBodyDetectionEvent,
   type NBodyEventDetectionMetadata,
   type NBodyEventIntegrationOptions,
@@ -557,3 +572,4 @@ export default {
   solarConstantCheck,
   unknownValue
 };
+

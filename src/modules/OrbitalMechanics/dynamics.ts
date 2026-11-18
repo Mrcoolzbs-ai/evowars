@@ -22,12 +22,19 @@
 // Столкновение останавливает прогон ДО второго kick контактного шага;
 // слияния/отскоки/фрагментации/передача энергии НЕ моделируются.
 //
+// Stage 4.6.1-C: движок получил НЕобязательный второй хук конца шага
+// (после второго kick) для escape/connectivity детекции events.ts.
+// Хук не выполняет ни одной операции над числами, когда он не задан:
+// чистый путь 4.6.1-A и путь 4.6.1-B остаются побитово неизменными.
+//
 // Детерминизм: все суммы и вычисления выполняются в каноническом
 // порядке тел (сортировка по id) — результат побитово не зависит от
 // порядка тел во входном массиве и воспроизводим бит в бит.
 
 import { G } from '../Units';
 import {
+  bindingGraphEdges,
+  componentsFromEdges,
   createEventCollector,
   sortDetectionEvents,
   type CollisionEvent,
@@ -191,11 +198,13 @@ export interface NBodySingularFailure {
  * Отказ: нечисловые значения (переполнение/NaN). Причины:
  * nonfinite_diagnostics — диагностика состояния; nonfinite_geometry —
  * нечисловая геометрия drift-отрезка в событийном слое (Stage 4.6.1-B,
- * аддитивное расширение перечисления причин).
+ * аддитивное расширение перечисления причин); nonfinite_step_state —
+ * нечисловое согласованное состояние на конце шага в escape/connectivity
+ * детекции (Stage 4.6.1-C, аддитивное расширение).
  */
 export interface NBodyNumericalFailure {
   status: 'numerical_failure';
-  reason: 'nonfinite_diagnostics' | 'nonfinite_geometry';
+  reason: 'nonfinite_diagnostics' | 'nonfinite_geometry' | 'nonfinite_step_state';
   stepsCompleted: number;
   timeS: number;
 }
@@ -509,6 +518,21 @@ export interface KdkEventHook {
     /** Позиции тел после drift (канонический порядок), м. */
     nextPositions: readonly Vector3[]
   ): { halt: false } | { halt: true; haltInfo: KdkHaltInfo };
+  /**
+   * Stage 4.6.1-C: НЕобязательный хук КОНЦА шага — вызывается после
+   * второго kick, когда позиции и скорости согласованы (оба — на
+   * t + dt). Нужен детекции выброса и связности: энергии и радиальные
+   * скорости осмысленны только для согласованного состояния. Если
+   * отсутствует, движок ведёт себя ровно как в этапе 4.6.1-B.
+   */
+  onAfterStepEnd?(
+    step: number,
+    timeStartS: number,
+    dtS: number,
+    prevPositions: readonly Vector3[],
+    nextPositions: readonly Vector3[],
+    nextVelocities: readonly Vector3[]
+  ): { halt: false } | { halt: true; haltInfo: KdkHaltInfo };
 }
 
 /**
@@ -694,6 +718,39 @@ function runKdkCore(
       );
     }
 
+    // --- Событийный слой, конец шага (Stage 4.6.1-C): согласованные
+    // позиции и скорости после второго kick. Хук необязателен; без него
+    // и без него числа не изменяются (этап 4.6.1-B побитово совпадает). ---
+    if (hook && hook.onAfterStepEnd && prevPositions) {
+      const nextPositions = bodies.map((b) => b.positionM);
+      const nextVelocities = bodies.map((b) => b.velocityMPerS);
+      const outcome = hook.onAfterStepEnd(
+        step,
+        time0 + (step - 1) * timeStepS,
+        timeStepS,
+        prevPositions,
+        nextPositions,
+        nextVelocities
+      );
+      if (outcome.halt) {
+        // Шаг ПОЛНОСТЬЮ завершён (в отличие от остановки после drift):
+        // последнее завершённое состояние — конец этого шага.
+        const timeEndS = time0 + step * timeStepS;
+        return {
+          halted: true,
+          halt: outcome.haltInfo,
+          stepsCompleted: step,
+          timeStartS,
+          lastCompletedSnapshot: {
+            timeS: timeEndS,
+            bodies: cloneBodies(bodies),
+            diagnostics: computeStateDiagnostics({ timeS: timeEndS, bodies })
+          },
+          snapshots
+        };
+      }
+    }
+
     const timeK = time0 + step * timeStepS;
 
     // Контрольный снимок: по периоду и всегда финальный.
@@ -767,7 +824,20 @@ function buildEventDetectionMetadata(
   bodies: readonly OrbitalBodyState[],
   closeApproachEnabled: boolean,
   closeApproachThresholdM: number | null,
-  stepsProcessed: number
+  stepsProcessed: number,
+  escape: {
+    enabled: boolean;
+    primaryId: string | null;
+    escapeRadiusM: number | null;
+    confirmationDurationS: number | null;
+    energyToleranceJPerKg: number | null;
+  },
+  connectivity: {
+    enabled: boolean;
+    energyToleranceJPerKg: number | null;
+    checksTotal: number;
+    initialComponents: number | null;
+  }
 ): NBodyEventDetectionMetadata {
   let bothKnown = 0;
   let unknownRadius = 0;
@@ -787,26 +857,43 @@ function buildEventDetectionMetadata(
     pairsWithBothRadiiKnown: bothKnown,
     pairsWithUnknownRadius: unknownRadius,
     collisionDetectionPossible: bothKnown > 0,
-    stepsWithEventDetection: stepsProcessed
+    stepsWithEventDetection: stepsProcessed,
+    escapeDetectionEnabled: escape.enabled,
+    primaryBodyId: escape.primaryId,
+    escapeRadiusM: escape.escapeRadiusM,
+    escapeConfirmationDurationS: escape.confirmationDurationS,
+    escapeEnergyToleranceJPerKg: escape.energyToleranceJPerKg,
+    connectivityDetectionEnabled: connectivity.enabled,
+    connectivityEnergyToleranceJPerKg: connectivity.energyToleranceJPerKg,
+    connectivityChecksTotal: connectivity.checksTotal,
+    initialConnectivityComponents: connectivity.initialComponents
   };
 }
 
 /**
- * Событийное N-body интегрирование (Stage 4.6.1-B): тот же общий KDK
- * движок, что и integrateNBodyLeapfrog, с проверкой каждого drift-
- * отрезка всех пар: физический контакт поверхностей (R_A + R_B,
+ * Событийное N-body интегрирование (Stage 4.6.1-B + 4.6.1-C): тот же
+ * общий KDK движок, что и integrateNBodyLeapfrog, с проверкой каждого
+ * drift-отрезка всех пар: физический контакт поверхностей (R_A + R_B,
  * терминальный), порог численной сингулярности и, при переданном
- * closeApproachDistanceM, эпизоды тесного сближения. Обнаружение
- * выполняется на КАЖДОМ шаге независимо от sampleEverySteps, поэтому
- * события доступны даже при редких снимках.
+ * closeApproachDistanceM, эпизоды тесного сближения. Дополнительно
+ * (Stage 4.6.1-C), при ЯВНО заданной конфигурации, на каждом конце
+ * шага оцениваются: детекция выброса относительно primaryBodyId
+ * (осциллирующая двухтельная энергия + радиальная скорость + явный
+ * escapeRadiusM, подтверждение за escapeConfirmationDurationS) и
+ * pairwise osculating-binding граф связности с явным
+ * bindingEnergyToleranceJPerKg. Обнаружение выполняется на КАЖДОМ
+ * шаге независимо от sampleEverySteps, поэтому события доступны даже
+ * при редких снимках.
  *
  * Границы: столкновение только останавливает прогон (без слияния,
  * отскока, фрагментации, передачи энергии); radiusM null означает
  * неизвестный радиус, для таких пар столкновение не ищется, и его
  * отсутствие НЕ доказательство безопасности; геометрия события
  * опирается на численный drift-отрезок, ошибка времени зависит от
- * timestep. Статус completed по-прежнему означает только завершение
- * интегрирования, а не устойчивость системы.
+ * timestep. двухтельные энергии выброса и pairwise graph связности —
+ * диагностические приближения, а не доказательства. Статус completed
+ * по-прежнему означает только завершение интегрирования, а не
+ * устойчивость системы.
  */
 export function integrateNBodyWithEvents(
   initialState: NBodyInitialState,
@@ -815,7 +902,7 @@ export function integrateNBodyWithEvents(
   const thresholdRaw = options.closeApproachDistanceM;
   const thresholdProvided = thresholdRaw !== undefined;
 
-  // --- Валидация: базовая + событийная опция ---
+  // --- Валидация: базовая + событийные опции (Stage 4.6.1-B/C) ---
   const issues = validateInput(initialState, options);
   if (thresholdProvided && (!isFiniteNumber(thresholdRaw) || thresholdRaw <= 0)) {
     issues.push({
@@ -826,35 +913,153 @@ export function integrateNBodyWithEvents(
   const canonical: OrbitalBodyState[] = Array.isArray(initialState.bodies)
     ? canonicalBodyOrder(initialState.bodies)
     : [];
+
+  // --- Stage 4.6.1-C: escape-конфигурация ЯВНА и ПОЛНА, либо выключена ---
+  const escapeRequested =
+    options.primaryBodyId !== undefined ||
+    options.escapeRadiusM !== undefined ||
+    options.escapeConfirmationDurationS !== undefined;
+  if (escapeRequested) {
+    if (options.primaryBodyId === undefined) {
+      issues.push({
+        code: 'missing_escape_option',
+        message: 'primaryBodyId обязателен для детекции выброса (не подбирается автоматически)'
+      });
+    }
+    if (options.escapeRadiusM === undefined) {
+      issues.push({
+        code: 'missing_escape_option',
+        message: 'escapeRadiusM обязателен для детекции выброса (не определяется из системы)'
+      });
+    }
+    if (options.escapeConfirmationDurationS === undefined) {
+      issues.push({
+        code: 'missing_escape_option',
+        message: 'escapeConfirmationDurationS обязателен для детекции выброса'
+      });
+    }
+    if (options.primaryBodyId !== undefined && (typeof options.primaryBodyId !== 'string' || options.primaryBodyId.length === 0)) {
+      issues.push({
+        code: 'invalid_primary_body_id',
+        message: 'primaryBodyId обязан быть непустой строкой'
+      });
+    } else if (
+      typeof options.primaryBodyId === 'string' &&
+      options.primaryBodyId.length > 0 &&
+      Array.isArray(initialState.bodies) &&
+      !canonical.some((b) => b.id === options.primaryBodyId)
+    ) {
+      issues.push({
+        code: 'invalid_primary_body_id',
+        message: `primaryBodyId '${options.primaryBodyId}' отсутствует среди тел системы`,
+        bodyId: options.primaryBodyId
+      });
+    }
+    if (options.escapeRadiusM !== undefined && (!isFiniteNumber(options.escapeRadiusM) || options.escapeRadiusM <= 0)) {
+      issues.push({
+        code: 'invalid_escape_radius_m',
+        message: 'escapeRadiusM, если задан, обязан быть конечным строго положительным числом'
+      });
+    }
+    if (options.escapeConfirmationDurationS !== undefined && (!isFiniteNumber(options.escapeConfirmationDurationS) || options.escapeConfirmationDurationS <= 0)) {
+      issues.push({
+        code: 'invalid_escape_confirmation_duration_s',
+        message: 'escapeConfirmationDurationS, если задан, обязан быть конечным строго положительным числом'
+      });
+    }
+  }
+  if (options.ejectionEnergyToleranceJPerKg !== undefined && (!isFiniteNumber(options.ejectionEnergyToleranceJPerKg) || options.ejectionEnergyToleranceJPerKg < 0)) {
+    issues.push({
+      code: 'invalid_ejection_energy_tolerance_j_per_kg',
+      message: 'ejectionEnergyToleranceJPerKg, если задан, обязан быть конечным неотрицательным числом'
+    });
+  }
+  if (options.bindingEnergyToleranceJPerKg !== undefined && (!isFiniteNumber(options.bindingEnergyToleranceJPerKg) || options.bindingEnergyToleranceJPerKg < 0)) {
+    issues.push({
+      code: 'invalid_binding_energy_tolerance',
+      message: 'bindingEnergyToleranceJPerKg, если задан, обязан быть конечным неотрицательным числом'
+    });
+  }
+
   if (issues.length > 0) {
     return {
       status: 'integration_failed',
       failure: { status: 'invalid_input', issues },
       events: [],
-      detection: buildEventDetectionMetadata(canonical, false, null, 0)
+      detection: buildEventDetectionMetadata(
+        canonical,
+        false,
+        null,
+        0,
+        { enabled: false, primaryId: null, escapeRadiusM: null, confirmationDurationS: null, energyToleranceJPerKg: null },
+        { enabled: false, energyToleranceJPerKg: null, checksTotal: 0, initialComponents: null }
+      )
     };
   }
+
   const threshold = thresholdProvided && isFiniteNumber(thresholdRaw) && thresholdRaw > 0 ? thresholdRaw : null;
+  const escapeEnabled = escapeRequested;
+  const escapeToleranceJPerKg = escapeEnabled ? (options.ejectionEnergyToleranceJPerKg ?? 0) : null;
+  const connectivityEnabled = options.bindingEnergyToleranceJPerKg !== undefined;
 
   // --- Коллектор событий и хук общего движка ---
   const collector = createEventCollector({
     bodies: canonical.map((b) => ({ id: b.id, radiusM: b.radiusM })),
     initialPositions: canonical.map((b) => b.positionM),
+    initialVelocities: canonical.map((b) => b.velocityMPerS),
     initialTimeS: initialState.timeS,
     closeApproachThresholdM: threshold,
-    singularityThresholdM: NBODY_SINGULARITY_DISTANCE_M
+    singularityThresholdM: NBODY_SINGULARITY_DISTANCE_M,
+    massesKg: canonical.map((b) => b.massKg),
+    escape:
+      escapeEnabled && options.primaryBodyId !== undefined && options.escapeRadiusM !== undefined && options.escapeConfirmationDurationS !== undefined && isFiniteNumber(escapeToleranceJPerKg)
+        ? {
+            primaryIndex: canonical.findIndex((b) => b.id === options.primaryBodyId),
+            primaryId: options.primaryBodyId,
+            escapeRadiusM: options.escapeRadiusM,
+            escapeConfirmationDurationS: options.escapeConfirmationDurationS,
+            ejectionEnergyToleranceJPerKg: escapeToleranceJPerKg
+          }
+        : null,
+    connectivity: connectivityEnabled ? { energyToleranceJPerKg: options.bindingEnergyToleranceJPerKg } : null
   });
   const hook: KdkEventHook = {
     onAfterDrift: (step, timeStartS, dtS, prevPositions, nextPositions) =>
-      collector.processStep(step, timeStartS, dtS, prevPositions, nextPositions)
+      collector.processStep(step, timeStartS, dtS, prevPositions, nextPositions),
+    onAfterStepEnd: (step, timeStartS, dtS, prevPositions, nextPositions, nextVelocities) =>
+      collector.processStepEnd(step, timeStartS, dtS, prevPositions, nextPositions, nextVelocities)
   };
 
   const raw = runKdkCore(initialState, options, hook);
+  const initialComponentsCount = connectivityEnabled
+    ? componentsFromEdges(
+        canonical.map((b) => b.id),
+        bindingGraphEdges(
+          canonical.map((b) => b.positionM),
+          canonical.map((b) => b.velocityMPerS),
+          canonical.map((b) => b.massKg),
+          options.bindingEnergyToleranceJPerKg as number
+        )
+      ).length
+    : null;
   const detection = buildEventDetectionMetadata(
     canonical,
     threshold !== null,
     threshold,
-    collector.stepsProcessed
+    collector.stepsProcessed,
+    {
+      enabled: escapeEnabled,
+      primaryId: escapeEnabled ? (options.primaryBodyId ?? null) : null,
+      escapeRadiusM: escapeEnabled ? (options.escapeRadiusM ?? null) : null,
+      confirmationDurationS: escapeEnabled ? (options.escapeConfirmationDurationS ?? null) : null,
+      energyToleranceJPerKg: escapeToleranceJPerKg
+    },
+    {
+      enabled: connectivityEnabled,
+      energyToleranceJPerKg: connectivityEnabled ? (options.bindingEnergyToleranceJPerKg ?? null) : null,
+      checksTotal: collector.connectivityChecksTotal,
+      initialComponents: initialComponentsCount
+    }
   );
 
   if ('halted' in raw) {
@@ -902,9 +1107,11 @@ export function integrateNBodyWithEvents(
         detection
       };
     }
+    // nonfinite_geometry (drift-отрезок) либо nonfinite_step_state
+    // (согласованное состояние, Stage 4.6.1-C) — аддитивные причины.
     const failure: NBodyNumericalFailure = {
       status: 'numerical_failure',
-      reason: 'nonfinite_geometry',
+      reason: halt.kind === 'nonfinite_geometry' ? 'nonfinite_geometry' : 'nonfinite_step_state',
       stepsCompleted: raw.stepsCompleted,
       timeS: halt.timeS
     };
@@ -923,7 +1130,7 @@ export function integrateNBodyWithEvents(
       timeS: raw.timeS,
       snapshots: raw.snapshots,
       conservation: raw.conservation,
-      events: sortDetectionEvents(collector.finalize()),
+      events: sortDetectionEvents(collector.finalize({ finalTimeS: raw.timeS, emitPendingEjections: true })),
       detection
     };
   }
@@ -998,3 +1205,4 @@ function cloneBodies(bodies: readonly OrbitalBodyState[]): OrbitalBodyState[] {
     velocityMPerS: vec(b.velocityMPerS.x, b.velocityMPerS.y, b.velocityMPerS.z)
   }));
 }
+
