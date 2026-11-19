@@ -316,15 +316,15 @@ describe('Stage 4.6.1-D: осциллирующие элементы', () => {
     expect(ghostPrimary.issues.map((i) => i.code)).toContain('primary_body_not_found');
 
     const noTol = allScreens();
-    delete (noTol as Record<string, unknown>).orbitIntersectionToleranceM;
+    delete (noTol as unknown as Record<string, unknown>).orbitIntersectionToleranceM;
     expect(requireInvalid(screenOrbitalStability(okState(), noTol)).issues.map((i) => i.code)).toContain('missing_intersection_tolerance');
 
     const badTol = allScreens({ orbitIntersectionToleranceM: 0 });
     expect(requireInvalid(screenOrbitalStability(okState(), badTol)).issues.map((i) => i.code)).toContain('invalid_intersection_tolerance');
 
     const noHill = allScreens();
-    delete (noHill as Record<string, unknown>).classicHillMaxEccentricity;
-    delete (noHill as Record<string, unknown>).classicHillMaxRelativeInclinationRad;
+    delete (noHill as unknown as Record<string, unknown>).classicHillMaxEccentricity;
+    delete (noHill as unknown as Record<string, unknown>).classicHillMaxRelativeInclinationRad;
     expect(requireInvalid(screenOrbitalStability(okState(), noHill)).issues.map((i) => i.code).filter((c) => c === 'missing_hill_classic_option')).toHaveLength(2);
 
     const badHill = allScreens({ classicHillMaxEccentricity: 0, classicHillMaxRelativeInclinationRad: 0 });
@@ -333,15 +333,15 @@ describe('Stage 4.6.1-D: осциллирующие элементы', () => {
     expect(badHillCodes).toContain('invalid_hill_classic_max_inclination');
 
     const noRoche = allScreens();
-    delete (noRoche as Record<string, unknown>).rocheLimitModel;
+    delete (noRoche as unknown as Record<string, unknown>).rocheLimitModel;
     expect(requireInvalid(screenOrbitalStability(okState(), noRoche)).issues.map((i) => i.code)).toContain('missing_roche_model');
 
     const badRoche = allScreens({ rocheLimitModel: 'gas' as unknown as 'fluid' });
     expect(requireInvalid(screenOrbitalStability(okState(), badRoche)).issues.map((i) => i.code)).toContain('invalid_roche_model');
 
     const noRes = allScreens();
-    delete (noRes as Record<string, unknown>).resonanceRelativeTolerance;
-    delete (noRes as Record<string, unknown>).maxResonanceInteger;
+    delete (noRes as unknown as Record<string, unknown>).resonanceRelativeTolerance;
+    delete (noRes as unknown as Record<string, unknown>).maxResonanceInteger;
     expect(requireInvalid(screenOrbitalStability(okState(), noRes)).issues.map((i) => i.code).filter((c) => c === 'missing_resonance_option')).toHaveLength(2);
 
     const badRes = allScreens({ resonanceRelativeTolerance: -1, maxResonanceInteger: 0 });
