@@ -960,8 +960,9 @@ export function screenOrbitalStability(
   }
 
   // --- 5. Критерии Хилла ---
-  if (options.hillScreeningEnabled === true) {
   const individualHill: IndividualHillResult[] = [];
+  const mutualHill: MutualHillResult[] = [];
+  if (options.hillScreeningEnabled === true) {
   for (const el of elements) {
     if (el.trajectoryKind === 'elliptic' && el.semiMajorAxisM !== null) {
       const rh = el.semiMajorAxisM * (1 - el.eccentricity) * Math.cbrt((massById.get(el.bodyId) as number) / (3 * primary.massKg));
@@ -971,7 +972,6 @@ export function screenOrbitalStability(
       pushIssue('hill_not_evaluated', 'индивидуальный радиус Хилла требует эллиптической коники', [el.bodyId]);
     }
   }
-  const mutualHill: MutualHillResult[] = [];
   for (let i = 0; i < elements.length; i++) {
     for (let j = i + 1; j < elements.length; j++) {
       const elA = elements[i];
@@ -1023,9 +1023,9 @@ export function screenOrbitalStability(
   }
 
   // --- 6. Предел Роша ---
-  if (options.rocheScreeningEnabled === true) {
-  const rocheModel: RocheLimitModel = options.rocheLimitModel === 'rigid' ? 'rigid' : options.rocheLimitModel === 'fluid' ? 'fluid' : (options.rocheLimitModel as RocheLimitModel);
+  const rocheModel: RocheLimitModel = options.rocheLimitModel === 'rigid' ? 'rigid' : 'fluid';
   const roche: RocheBodyResult[] = [];
+  if (options.rocheScreeningEnabled === true) {
   const densityOf = (bodyId: string): number | null => {
     const radius = radiusById.get(bodyId);
     const mass = massById.get(bodyId);
@@ -1054,7 +1054,7 @@ export function screenOrbitalStability(
       pushIssue('roche_not_evaluated', 'предел Роша требует применимой коники (нужен перицентр)', [el.bodyId]);
       continue;
     }
-    if (rhoPrimary === null || rhoSatellite === null || primaryRadius === null || !(primaryRadius > 0)) {
+    if (rhoPrimary === null || rhoSatellite === null || primaryRadius === undefined || primaryRadius === null || !(primaryRadius > 0)) {
       roche.push({
         bodyId: el.bodyId,
         primaryBodyId: el.primaryBodyId,
@@ -1094,9 +1094,9 @@ export function screenOrbitalStability(
   }
 
   // --- 7. Резонансы ---
-  if (options.resonanceScreeningEnabled === true) {
   const resonanceCandidates: ResonanceCandidate[] = [];
   const resonancePairsSkipped: ResonancePairSkip[] = [];
+  if (options.resonanceScreeningEnabled === true) {
   const gcdOf = (a: number, b: number): number => {
     let x = a;
     let y = b;
