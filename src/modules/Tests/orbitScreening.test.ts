@@ -247,6 +247,7 @@ describe('Stage 4.6.1-D: осциллирующие элементы', () => {
     const result = screenOrbitalStability(
       state(0, [
         sunBody(null),
+        circleBody('c1', 1e20, null, M_SUN, 1e11),
         body('rock', 1e23, null, { x: 1.5e11, y: 0, z: 0 }, { x: -15000, y: 0, z: 0 })
       ]),
       allScreens()
@@ -262,9 +263,13 @@ describe('Stage 4.6.1-D: осциллирующие элементы', () => {
     expect(analysis.crossings).toHaveLength(1);
     expect(analysis.crossings[0].result).toBe('indeterminate');
     expect(analysis.crossings[0].reason).toBe('zero_angular_momentum');
+    expect(analysis.crossings[0].pairIdB).toBe('rock');
+    expect(analysis.metadata.crossingPairsSkipped).toBe(1);
     expect(byId(analysis.individualHill, 'rock').status).toBe('not_evaluated');
-    expect(analysis.mutualHill).toHaveLength(0);
-    expect(analysis.roche[0].status).toBe('not_evaluated');
+    expect(analysis.mutualHill).toHaveLength(1);
+    expect(analysis.mutualHill[0].status).toBe('not_evaluated');
+    expect(analysis.mutualHill[0].classicCriterion).toBe('assumptions_unknown');
+    expect(byId(analysis.roche, 'rock').status).toBe('not_evaluated');
     expect(analysis.resonanceCandidates).toHaveLength(0);
     expect(analysis.resonancePairsSkipped).toHaveLength(1);
     expect(analysis.resonancePairsSkipped[0].reason).toBe('zero_angular_momentum');
