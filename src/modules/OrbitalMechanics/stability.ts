@@ -714,10 +714,18 @@ function summarizeBodyDiagnostics(
       break;
     }
   }
-  const bothDefined = a0 !== null && e0 !== null && Number.isFinite(a0) && Number.isFinite(e0);
-  const initialPeriod = bothDefined ? 2 * Math.PI * Math.sqrt((a0 * a0 * a0) / muM3PerS2) : null;
-  const initialPeriapsis = bothDefined ? a0 * (1 - e0) : null;
-  const initialApoapsis = bothDefined ? a0 * (1 + e0) : null;
+  const initialPeriod =
+    a0 !== null && e0 !== null && Number.isFinite(a0) && Number.isFinite(e0)
+      ? 2 * Math.PI * Math.sqrt((a0 * a0 * a0) / muM3PerS2)
+      : null;
+  const initialPeriapsis =
+    a0 !== null && e0 !== null && Number.isFinite(a0) && Number.isFinite(e0)
+      ? a0 * (1 - e0)
+      : null;
+  const initialApoapsis =
+    a0 !== null && e0 !== null && Number.isFinite(a0) && Number.isFinite(e0)
+      ? a0 * (1 + e0)
+      : null;
 
   let maxRelA: number | null = null;
   let maxAbsE: number | null = null;
@@ -1203,7 +1211,8 @@ export function assessNBodyStabilityOverHorizon(
           maxSteps: options.maxStepsPerRun,
           status: 'collision_detected',
           completedHorizon: false,
-          stepsCompleted: result.stepsCompleted,
+          // Вариант collision_detected движка НЕ содержит stepsCompleted.
+          stepsCompleted: 'stepsCompleted' in result ? result.stepsCompleted : 0,
           finalTimeS: result.lastCompletedState.timeS,
           integrationFailure: null,
           conservation: null,
