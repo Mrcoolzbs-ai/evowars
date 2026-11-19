@@ -735,7 +735,7 @@ function issueOf(code: string, message: string, bodyIds: string[]): OrbitScreeni
  * Аналитический скрининг стабильности осциллирующих орбит (Stage 4.6.1-D).
  * Чистая функция: initialState не модифицируется. Primary задаётся ЯВНО
  * (никогда не выбирается по массе). Fail-closed: недостающие данные дают
- * not_evaluated/unknown с машинной причиной. результаты診 - диагностические,
+ * not_evaluated/unknown с машинной причиной. результаты - диагностические,
  * вердикты stable/unstable не выдаются.
  */
 export function screenOrbitalStability(
@@ -894,6 +894,7 @@ export function screenOrbitalStability(
 
   // --- 4. Геометрические пересечения ---
   const crossings: OrbitCrossingPairResult[] = [];
+  if (options.orbitCrossingEnabled === true) {
   for (let i = 0; i < elements.length; i++) {
     for (let j = i + 1; j < elements.length; j++) {
       const elA = elements[i];
@@ -956,8 +957,10 @@ export function screenOrbitalStability(
       });
     }
   }
+  }
 
   // --- 5. Критерии Хилла ---
+  if (options.hillScreeningEnabled === true) {
   const individualHill: IndividualHillResult[] = [];
   for (const el of elements) {
     if (el.trajectoryKind === 'elliptic' && el.semiMajorAxisM !== null) {
@@ -1017,8 +1020,10 @@ export function screenOrbitalStability(
       }
     }
   }
+  }
 
   // --- 6. Предел Роша ---
+  if (options.rocheScreeningEnabled === true) {
   const rocheModel: RocheLimitModel = options.rocheLimitModel === 'rigid' ? 'rigid' : options.rocheLimitModel === 'fluid' ? 'fluid' : (options.rocheLimitModel as RocheLimitModel);
   const roche: RocheBodyResult[] = [];
   const densityOf = (bodyId: string): number | null => {
@@ -1086,8 +1091,10 @@ export function screenOrbitalStability(
       reason: null
     });
   }
+  }
 
   // --- 7. Резонансы ---
+  if (options.resonanceScreeningEnabled === true) {
   const resonanceCandidates: ResonanceCandidate[] = [];
   const resonancePairsSkipped: ResonancePairSkip[] = [];
   const gcdOf = (a: number, b: number): number => {
@@ -1156,6 +1163,7 @@ export function screenOrbitalStability(
       resonanceCandidates.push(...matched);
     }
   }
+  }
 
   // --- Метаданные ---
   const applicableCount = elements.filter((el) => el.conicApplicable).length;
@@ -1191,7 +1199,10 @@ export function screenOrbitalStability(
       hillPairsSkipped: mutualHill.filter((h) => h.status !== 'evaluated').length,
       rocheBodiesEvaluated: roche.filter((r) => r.status !== 'unknown' && r.status !== 'not_evaluated').length,
       rocheBodiesSkipped: roche.filter((r) => r.status === 'unknown' || r.status === 'not_evaluated').length,
-      resonancePairsEvaluated: (elements.length * (elements.length - 1)) / 2 - resonancePairsSkipped.length,
+      resonancePairsEvaluated:
+        options.resonanceScreeningEnabled === true
+          ? (elements.length * (elements.length - 1)) / 2 - resonancePairsSkipped.length
+          : 0,
       resonancePairsSkipped: resonancePairsSkipped.length,
       elementsNonApplicableCount: elements.filter((el) => !el.conicApplicable).length
     }

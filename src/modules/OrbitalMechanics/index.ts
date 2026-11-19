@@ -560,6 +560,46 @@ export {
   type NBodyEventIntegrationResult
 } from './events';
 
+// ============================================
+// Ре-экспорт аналитического скрининга орбит (Stage 4.6.1-D)
+// ============================================
+// Осциллирующие двухтельные элементы, геометрические пересечения
+// орбит, радиусы Хилла, предел Роша и кандидаты в соизмеримости
+// периодов. ЧИСТЫЙ ДИАГНОСТИЧЕСКИЙ слой: не вызывается из
+// интеграторов, входное состояние не модифицируется; НИ один
+// результат не является вердиктом stable/unstable. Геометрическое
+// пересечение орбит != временная встреча != collision-событие !=
+// потеря связности.
+
+export {
+  screenOrbitalStability,
+  computeOsculatingElements,
+  ORBIT_SCREENING_LIMITATION,
+  ROCHE_LIMITATION,
+  CLASSIC_MUTUAL_HILL_THRESHOLD,
+  ROCHE_BOUNDARY_RELATIVE_BAND,
+  type OrbitScreeningResult,
+  type OrbitScreeningAnalysis,
+  type OrbitScreeningInvalidInput,
+  type OrbitScreeningOptions,
+  type OrbitScreeningIssue,
+  type OsculatingElementsRecord,
+  type OsculatingTrajectoryKind,
+  type OrbitScreeningStatus,
+  type OrbitCrossingKind,
+  type OrbitCrossingPairResult,
+  type OrbitIntersectionPoint,
+  type IndividualHillResult,
+  type MutualHillResult,
+  type HillCriterionApplicability,
+  type RocheBodyResult,
+  type RocheScreenStatus,
+  type RocheLimitModel,
+  type ResonanceCandidate,
+  type ResonancePairSkip,
+  type OrbitScreeningMetadata
+} from './orbitScreening';
+
 export default {
   ORBIT_BANDS,
   MOON_ORBIT_BAND_PARENT_RADII,
