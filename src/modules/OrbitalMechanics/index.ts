@@ -600,6 +600,40 @@ export {
   type OrbitScreeningMetadata
 } from './orbitScreening';
 
+// ============================================
+// Ре-экспорт конечногоризонтной динамической оценки устойчивости
+// (Stage 4.6.2)
+// ============================================
+// Интеграционный уровень Stage 4.6.1-A/B/C/D: ДВЕ независимые интеграции
+// одним и тем же движком (coarse timeStepS и refined timeStepS/2) на
+// ОБЩИХ физических временах диагностики, сходимость разрешений и
+// вердикт stable | unstable | indeterminate ТОЛЬКО по ЯВНЫМ критериям
+// из options. completed интегратора НЕ означает stable; отсутствие
+// событий НЕ доказывает устойчивость. Вердикт относится только к
+// заданному конечному горизонту: бесконечная устойчивость и
+// устойчивость при произвольных возмущениях НЕ утверждаются.
+// Геометрические пересечения орбит, резонансные кандидаты и
+// pairwise-граф связности — диагностические предупреждения.
+
+export {
+  assessNBodyStabilityOverHorizon,
+  validateStabilityOptions,
+  STABILITY_ASSESSMENT_LIMITATION,
+  type StabilityVerdict,
+  type StabilityScreeningOptions,
+  type StabilityAssessmentOptions,
+  type StabilityValidationIssue,
+  type StabilityCriterionCheck,
+  type StabilityRunParameters,
+  type StabilityRunOutcome,
+  type StabilityBodyOrbitalDiagnostics,
+  type StabilityConvergenceReport,
+  type StabilityCollisionEscapeCoverage,
+  type StabilityAssessmentSuccess,
+  type StabilityAssessmentInvalidInput,
+  type StabilityAssessmentResult
+} from './stability';
+
 export default {
   ORBIT_BANDS,
   MOON_ORBIT_BAND_PARENT_RADII,
@@ -612,4 +646,5 @@ export default {
   solarConstantCheck,
   unknownValue
 };
+
 
