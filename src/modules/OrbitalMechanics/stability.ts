@@ -1211,8 +1211,10 @@ export function assessNBodyStabilityOverHorizon(
           maxSteps: options.maxStepsPerRun,
           status: 'collision_detected',
           completedHorizon: false,
-          // Вариант collision_detected движка НЕ содержит stepsCompleted.
-          stepsCompleted: 'stepsCompleted' in result ? result.stepsCompleted : 0,
+          // Вариант collision_detected движка НЕ содержит stepsCompleted:
+          // честно фиксируем 0, реальный прогресс прогона отражает
+          // finalTimeS = lastCompletedState.timeS.
+          stepsCompleted: 0,
           finalTimeS: result.lastCompletedState.timeS,
           integrationFailure: null,
           conservation: null,
