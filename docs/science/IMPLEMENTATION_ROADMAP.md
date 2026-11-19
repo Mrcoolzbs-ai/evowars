@@ -679,3 +679,74 @@
 > maxSteps/maxNewtonIterations, неотрицательность y0,
 > покомпонентный допуск линейных инвариантов
 > (absTolerance/relTolerance), честная статистика шагов
+
+
+> ---
+> [Примечание о целостности документа, добавлено 2026-11-19, Stage 4.6.1-D]
+> Файл в HEAD обрывается на предыдущем абзаце (середина записи о корректирующей
+> ревизии Stage 4.5.3): в коммите 30cb473 («Stage 4.6.1-C: детекция выброса и
+> связности системы», ветка stage-3-planetary-physics) из ЭТОГО файла удалено
+> 3687 строк без добавлений, из-за чего описания подэтапов 4.5.4–4.5.5 и блоки
+> реализаций Stage 4.6.1-A/B/C в дорожной карте утеряны (сохраняются только в
+> истории коммитов и в PHYSICS_ARCHITECTURE §3.2). Хвост домыслом не
+> восстанавливался; ниже добавляется только фактически проверенная запись.
+> ---
+
+> **Stage 4.6.1-D (2026-11-19): аналитический скрининг орбит (orbit crossings
+> and analytical stability screening) — реализован.** Чистый диагностический
+> модуль src/modules/OrbitalMechanics/orbitScreening.ts (публичный API
+> `screenOrbitalStability(state, options)` и `computeOsculatingElements`;
+> реэкспорт из OrbitalMechanics/index.ts; константы
+> CLASSIC_MUTUAL_HILL_THRESHOLD = 2*sqrt(3), ROCHE_BOUNDARY_RELATIVE_BAND = 1e-9,
+> строки ограничений ORBIT_SCREENING_LIMITATION, ROCHE_LIMITATION). Тесты:
+> src/modules/Tests/orbitScreening.test.ts — ровно 20 пронумерованных сценариев;
+> CI run #402 (workflow «Этап 3») зелёный. Содержание:
+> - осциллирующие двухтельные элементы пары (тело, primary) на эпохе
+>   state.timeS: mu_i = G(M_p + m_i), eps_i = v^2/2 - mu/r, h_i = r x v,
+>   e_i = (v x h)/mu - r/|r|, a = -mu/(2 eps) и P = 2*pi*sqrt(a^3/mu) —
+>   ТОЛЬКО для эллипса; параболическим и гиперболическим траекториям период
+>   и большая полуось эллипса НЕ присваиваются (без выдуманных значений);
+> - геометрические пересечения орбит в 3D: узловая линия n1 x n2 для
+>   некомпланарных коник; для копланарных — аналитическое решение
+>   A + B*cos(theta) + C*sin(theta) = 0 (два пересечения / касание /
+>   совпадающие орбиты); угловая сетка НЕ используется; допуск задан ЯВНО
+>   (orbitIntersectionToleranceM);
+> - индивидуальный R_H,i = a(1-e)*(m_i/(3*M_p))^(1/3) и взаимный
+>   R_H,m = ((m_i+m_j)/(3*M_p))^(1/3) * (a_i+a_j)/2 радиусы Хилла,
+>   Delta = |a_j - a_i| / R_H,m; классический порог Delta > 2*sqrt(3) выдаётся
+>   ТОЛЬКО при проверенных допущениях (ЯВНЫЕ классические пределы
+>   эксцентриситета classicHillMaxEccentricity и взаимного наклонения
+>   classicHillMaxRelativeInclinationRad), иначе criterion_not_applicable:
+>   Delta сохранён, порог и deltaExceedsClassicThreshold = null;
+> - предел Роша d = C_model * R_p * (rho_p/rho_s)^(1/3) при ЯВНОМ выборе модели
+>   в опциях (fluid C = 2.44 / rigid C = 1.26; автоподбор модели запрещён);
+>   плотности ТОЛЬКО из заданных массы и радиуса: radiusM null → unknown +
+>   missing_physical_parameters, типичные плотности НЕ подставляются;
+>   полоса at_roche_boundary: |q/d - 1| <= 1e-9;
+> - кандидаты соизмеримостей периодов: P_out/P_in ↔ p/q по взаимно простым
+>   отношениям (включая 1:1) при ЯВНЫХ resonanceRelativeTolerance и
+>   maxResonanceInteger; статус строго near_mean_motion_commensurability —
+>   близость периодов НЕ является подтверждённым резонансом;
+> - fail-closed: невалидный ввод → invalid_input с машинными кодами
+>   (bodies_too_few; invalid_time_s; invalid_body_id; duplicate_body_id;
+>   invalid_body_mass; invalid_body_radius; invalid_body_position;
+>   invalid_body_velocity; invalid_primary_body_id; primary_body_not_found;
+>   invalid_screening_flag; missing/invalid_intersection_tolerance;
+>   missing_hill_classic_option; invalid_hill_classic_max_eccentricity;
+>   invalid_hill_classic_max_inclination; missing/invalid_roche_model;
+>   missing_resonance_option; invalid_resonance_tolerance;
+>   invalid_max_resonance_integer); primary задаётся ЯВНО и НИКОГДА не
+>   выбирается по массе; входное состояние не модифицируется; результаты
+>   детерминированы и инвариантны к порядку входа; радиальные и вырожденные
+>   траектории → not_evaluated/unknown/indeterminate с машинной причиной,
+>   NaN/Infinity в JSON-форме результата отсутствуют.
+> ГРАНИЦЫ ЭТАПА: Stage 4.6.1 и Stage 4.6 в целом остаются ЧАСТИЧНО
+> РЕАЛИЗОВАНА. НЕ реализовано и НЕ заявляется: подтверждение резонансов
+> исследованием либрации резонансных углов во времени; реакция на
+> столкновения (collision response); валидация аналитических критериев
+> против эталонных N-body конфигураций; учёт многотельных возмущений
+> за пределами диагностичности осциллирующих элементов; итоговая
+> классификация stable/unstable на явном горизонте. НИ ОДИН результат
+> скрининга не является вердиктом stable/unstable: геометрическое
+> пересечение орбит НЕ означает временной встречи тел, не является
+> collision-событием и не влияет на связность.
