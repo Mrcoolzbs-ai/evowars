@@ -253,7 +253,9 @@ describe('Stage 4.6.1-D: осциллирующие элементы', () => {
       allScreens()
     );
     const analysis = requireAnalysis(result);
-    expect(analysis.status).toBe('indeterminate');
+    // Общий статус 'completed': коника c1 применима; неоценённость радиальной rock
+    // несем не статусом, а машинными причинами на записях и issues.
+    expect(analysis.status).toBe('completed');
     const el = byId(analysis.elements, 'rock');
     expect(el.trajectoryKind).toBe('radial');
     expect(el.conicApplicable).toBe(false);
