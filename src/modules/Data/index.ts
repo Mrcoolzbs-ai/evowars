@@ -424,3 +424,25 @@ export {
   type RadiogenicUncertaintyRecord,
   type RadiogenicNuclideRecord
 } from './radiogenicNuclides';
+
+// ============================================
+// Stage 4.8.1: вертикальная гидростатическая структура атмосферы.
+// Доступ к каталогу газов по gasId (null — вида нет, не нулевая
+// молярная масса) и независимые референсные профили/якоря
+// (USSA 1976; Венера VIRA-ориентиры not_verifiable; Титан HASI).
+// ============================================
+export { tryGetGasSpecies } from './gases';
+export {
+  USSA_1976_PROVENANCE,
+  USSA_1976_CONSTANTS,
+  USSA_1976_LAYERS,
+  USSA_1976_CHECK_NODES,
+  USSA_1976_EQUIVALENT_BODY_MASS_KG,
+  USSA_1976_DRY_AIR_COMPOSITION,
+  VENUS_VIRA_ORIENTATION,
+  TITAN_HASI_SURFACE_ANCHOR,
+  geopotentialToGeometricM,
+  type ReferenceVerificationStatus,
+  type Ussa1976LayerRecord,
+  type Ussa1976CheckNode
+} from './atmosphericReferenceProfiles';
