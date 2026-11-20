@@ -81,28 +81,41 @@ describe('Stage 4.7.2: однородная сфера (аналитическа
     assertRel(nodes[nodes.length - 1].gravityMS2, GRAVITATIONAL_CONSTANT_M3_KG_S2 * analyticMass / (R * R), 9);
     expect(nodes[0].gravityMS2).toBe(0);
     expect(nodes[0].radiusM).toBe(0);
-    // P(R) = поверхностное, P монотонно растёт к центру
+    // P(R) = поверхностное, P монотонно растёт к центру (узлы — по
+    // возрастанию радиуса, поэтому при росте индекса P строго убывает)
     expect(nodes[nodes.length - 1].pressurePa).toBe(0);
     for (let i = 1; i < nodes.length; i++) {
       if (nodes[i].onLayerBoundary) continue; // дубликаты границ имеют равное P
-      expect(nodes[i].pressurePa).toBeGreaterThan(nodes[i - 1].pressurePa);
+      expect(nodes[i].pressurePa).toBeLessThan(nodes[i - 1].pressurePa);
     }
   });
 
-  it('сценарий H2: сходимость по шагу: Pc уже при умеренном шаге близко к аналитике', () => {
-    const rho = 8000;
-    const R = 5000000;
-    const analyticPc = ((2 * Math.PI) / 3) * GRAVITATIONAL_CONSTANT_M3_KG_S2 * rho * rho * R * R;
-    const coarse = solveHydrostaticInterior([uniformSphereLayer(rho, R)], { stepsPerLayer: 32 });
-    const fine = solveHydrostaticInterior([uniformSphereLayer(rho, R)], { stepsPerLayer: 512 });
+  it('сценарий H2: сходимость шага RK4 ~ h⁴ на неполиномиальном профиле плотности', () => {
+    // ВАЖНО: для кусочно-полиномиальной плотности RK4 точен (правая часть —
+    // полином ≤ 4-й степени), поэтому проверка сходимости по измельчению шага
+    // выполняется на гладком НЕполиномиальном профиле ρ(r) = ρc·exp(−3r/R).
+    // Порядок схемы 4: при измельчении шага в 4 раза ошибка падает в ~256 раз.
+    const rhoC = 12000;
+    const R = 6371000;
+    const expLayer: HydrostaticLayer = {
+      id: 'exp-profile',
+      displayName: 'Экспоненциальный профиль плотности (тест сходимости)',
+      radiusMinM: 0,
+      radiusMaxM: R,
+      densityKgM3At: (r: number) => rhoC * Math.exp((-3 * r) / R)
+    };
+    const coarse = solveHydrostaticInterior([expLayer], { stepsPerLayer: 32 });
+    const mid = solveHydrostaticInterior([expLayer], { stepsPerLayer: 128 });
+    const fine = solveHydrostaticInterior([expLayer], { stepsPerLayer: 512 });
     assertCompleted(coarse);
+    assertCompleted(mid);
     assertCompleted(fine);
-    const errCoarse = Math.abs(coarse.centralPressurePa - analyticPc) / analyticPc;
-    const errFine = Math.abs(fine.centralPressurePa - analyticPc) / analyticPc;
-    // RK4: ошибка уменьшается при измельчении_step и при 512 шагах исчезающе мала
-    expect(errFine).toBeLessThan(errCoarse);
-    expect(errFine).toBeLessThan(1e-9);
-    expect(coarse.convergence.converged || fine.convergence.converged).toBe(true);
+    const errCoarse = Math.abs(coarse.centralPressurePa - fine.centralPressurePa) / fine.centralPressurePa;
+    const errMid = Math.abs(mid.centralPressurePa - fine.centralPressurePa) / fine.centralPressurePa;
+    expect(errCoarse).toBeGreaterThan(1e-7);
+    expect(errMid).toBeLessThan(1e-7);
+    expect(errCoarse / errMid).toBeGreaterThan(32);
+    expect(coarse.convergence.converged || mid.convergence.converged || fine.convergence.converged).toBe(true);
   });
 });
 
@@ -211,7 +224,15 @@ describe('Stage 4.7.2: модуль PREM (данные Table I)', () => {
     const cmbTop = nodes[2 * 257 - 1]; // конец слоя внешнего ядра (слой 2, индекс 1 → 2*257−1)
     const cmbBottom = nodes[2 * 257]; // первый узел слоя-D″ (дубликат той же точки)
     expect(cmbBottom.layerId).toBe('prem-lower-mantle-dpp');
-    assertRel(cmbBottom.densityKgM3, premDensityKgM3(3480000) as number, 12);
+    // ВАЖНО: premDensityKgM3 на точной границе слоя приписывает значение
+    // ВНЕШНЕМУ (предыдущему) слою (конвенция r <= radiusMaxM при скане от
+    // центра), поэтому для узла D″ ожидаемая плотность берётся из полинома
+    // самого D″-слоя в точке CMB, а для cmbTop — из полинома внешнего ядра
+    // (то есть premDensityKgM3(3480000)).
+    const dppLayer = PREM_LAYERS.find((l) => l.id === 'prem-lower-mantle-dpp');
+    if (!dppLayer) throw new Error('слой prem-lower-mantle-dpp отсутствует в каталоге');
+    const xCMB = 3480000 / PREM_MEAN_RADIUS_M;
+    assertRel(cmbBottom.densityKgM3, premDensityGcm3(xCMB, dppLayer.densityPolyCoefficientsGcm3) * 1000, 12);
     assertRel(cmbTop.densityKgM3, 9903.438401183957, 9);
     // при этом m и P совпадают (непрерывны)
     assertRel(cmbTop.massKg, cmbBottom.massKg, 12);
