@@ -253,10 +253,10 @@ export function solvePremHydrostaticInterior(
 ): HydrostaticInteriorResult {
   const catalogIssues = validatePremCatalog();
   if (catalogIssues.length > 0) {
-    return { status: 'numerical_failure', reason: 'каталог PREM не валиден', stage: 'catalog_validation', issues: catalogIssues };
+    return { status: 'numerical_failure', reason: 'каталог PREM не валиден', stage: 'catalog_validation' };
   }
   return solveHydrostaticInterior(premHydrostaticLayers(), options, {
-    source: PREM_REFERENCE_SOURCE.sourceName,
+    sourceName: PREM_REFERENCE_SOURCE.sourceName,
     sourceDetail:
       'PREM: Dziewonski & Anderson (1981), DOI 10.1016/0031-9201(81)90046-7, Table I. ' +
       'Гидростатическая реконструкция по заданному профилю плотности, НЕ EOS-предсказание.'
