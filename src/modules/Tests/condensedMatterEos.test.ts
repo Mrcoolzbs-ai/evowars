@@ -126,7 +126,9 @@ describe('Stage 4.7.1: прямая задача P(ρ) и контракт BM3',
       const p0 = bm3PressureAtCompressionRatio(1, params) as number;
       const p1 = bm3PressureAtCompressionRatio(1 + dEta, params) as number;
       const finiteDifference = (p1 - p0) / (dEta / 1);
-      assertRel(finiteDifference, K0, 9);
+      // односторонняя разность имеет ошибку отсечения O(dEta) ≈ 1.9e-7 относительной
+      // при dEta = 1e-7, поэтому только 6 знаков; аналитика уже проверена до 12 знаков
+      assertRel(finiteDifference, K0, 6);
     }
   });
 
@@ -190,6 +192,12 @@ describe('Stage 4.7.1: прямая задача P(ρ) и контракт BM3',
         const reference = bm3ReferenceImplementation(eta * rho0, rho0, K0, K0p, P0) as number;
         expect(kernel).not.toBeNull();
         // оба числа в Pa на шкале сжатия; сверка с относительным допуском
+        if (eta === 1) {
+          // при η = 1 ядро тождественно 0: относительная сверка 0/0 не определена, сверяем точное равенство
+          expect(kernel).toBe(0);
+          expect(reference).toBe(0);
+          continue;
+        }
         assertRel(kernel as number, reference, 12);
       }
     }
@@ -234,7 +242,8 @@ describe('Stage 4.7.1: обратная задача ρ(P)', () => {
     expect(result.compressionRatio).toBeCloseTo(etaFromSource, 2);
     expect(result.compressionRatio).toBeLessThanOrEqual(BM3_MAX_SUPPORTED_COMPRESSION_RATIO);
     expect(Math.abs(result.residualPa)).toBeLessThanOrEqual(result.tolerancePa);
-    expect(result.pressurePa).toBeCloseTo(280e9, 0);
+    // давление, восстановленное из решённой плотности, сходится к целевому в пределах объявленного допуска решателя
+    expect(Math.abs(result.pressurePa - 280e9)).toBeLessThanOrEqual(result.tolerancePa);
   });
 
   it('сценарий 11: обратная задача бриджманита при 100 GPa с явным bracket (эталон 5246.246 сек. кг/м³)', () => {
@@ -299,7 +308,8 @@ describe('Stage 4.7.1: fail-closed применимость', () => {
     const result = solveCondensedMatterDensity(FE, -1e8, 300);
     expect(result.status).toBe('out_of_applicability');
     if (result.status === 'out_of_applicability') {
-      expect(result.reason).toContain('ниже опорного');
+      // P < 0 отклоняется раньше всего барьером подтверждённого диапазона [0, 280] GPa записи Fe
+      expect(result.reason).toContain('вне подтверждённого диапазона записи');
     }
   });
 
@@ -326,9 +336,14 @@ describe('Stage 4.7.1: fail-closed применимость', () => {
     ];
     for (const [rho, t] of pair) {
       expect(evaluateCondensedMatterPressure(FE, rho, t).status).toBe('invalid_input');
-      expect(solveCondensedMatterDensity(FE, Number.NaN, 300).status).toBe('invalid_input');
+    }
+    // обратная задача: некорректная температура тоже блокирует вход (включая нулевую и отрицательную)
+    for (const t of [Number.NaN, Number.POSITIVE_INFINITY, 0, -10]) {
+      expect(solveCondensedMatterDensity(FE, Number.NaN, t).status).toBe('invalid_input');
       expect(solveCondensedMatterDensity(FE, 100e9, t).status).toBe('invalid_input');
     }
+    // контроль: при полностью корректных входных данных тот же вызов завершается успешно
+    expect(solveCondensedMatterDensity(FE, 100e9, 300).status).toBe('completed');
   });
 
   it('сценарий 21: граница ядра BM3 по η честная: η→1000 считается и конечна, η>1000 и нечисловое — null', () => {
