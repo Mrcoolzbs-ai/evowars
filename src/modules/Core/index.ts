@@ -91,6 +91,8 @@ export * from './tidalHeating';
 export * from './interiorThermalEvolution';
 // Stage 4.7.3: аддитивный классификатор теплового бюджета по явным порогам (Часть D).
 export * from './heatBudgetClassification';
+// Stage 4.8.1: вертикальная гидростатическая структура атмосферы (колонка P(z), T(z), rho, g, H, столбы).
+export * from './hydrostaticAtmosphere';
 
 
 
