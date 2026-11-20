@@ -17,7 +17,8 @@ import {
   HYDROSTATIC_COLUMN_DEFAULTS,
   type AtmosphereLayerSpec,
   type HydrostaticColumnInput,
-  type HydrostaticColumnCompleted
+  type HydrostaticColumnCompleted,
+  type GasMoleFraction
 } from '../Core/hydrostaticAtmosphere';
 import { tryGetGasSpecies } from '../Data/gases';
 import {
@@ -35,14 +36,14 @@ import {
 // ПОМОЩНИКИ ВХОДА
 // ============================================
 
-const DRY_AIR = USSA_1976_DRY_AIR_COMPOSITION.gases.map((g) => ({ ...g }));
+const DRY_AIR: readonly GasMoleFraction[] = USSA_1976_DRY_AIR_COMPOSITION.gases.map((g) => ({ ...g }));
 
 function isothermalLayer(
   layerId: string,
   bottomM: number,
   topM: number,
   temperatureK: number,
-  gases = DRY_AIR
+  gases: readonly GasMoleFraction[] = DRY_AIR
 ): AtmosphereLayerSpec {
   return {
     layerId,
@@ -541,7 +542,7 @@ describe('Гидростатическая атмосфера 4.8.1: fail-closed
   });
 
   it('23. отсутствие температурного профиля не заменяется произвольным значением', () => {
-    const layerWithTemperature = isothermalLayer('noT', 0, 30000, 250) as Record<string, unknown>;
+    const layerWithTemperature = isothermalLayer('noT', 0, 30000, 250) as unknown as Record<string, unknown>;
     delete layerWithTemperature.temperature;
     const input = isothermalInput();
     const bad: HydrostaticColumnInput = {
