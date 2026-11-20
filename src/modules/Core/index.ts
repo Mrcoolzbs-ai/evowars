@@ -79,6 +79,8 @@ export * from './prTangentPlaneDistanceSearch';
 export * from './pengRobinsonFlash';
 export * from './migrations';
 export * from './adapters';
+// Stage 4.7.1: ядро изотермического BM3 EOS конденсированных материалов.
+export * from './condensedMatterEos';
 
 
 

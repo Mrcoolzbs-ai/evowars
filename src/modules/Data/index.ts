@@ -364,3 +364,20 @@ export type {
   PengRobinsonFlashComponentProvenance,
   PengRobinsonFlashBinaryProvenance
 } from './pengRobinsonFlashFacade';
+
+// ============================================
+// Stage 4.7.1: каталог EOS конденсированных материалов планетных недр.
+// Новый аддитивный блок: данные, per-parameter provenance, runtime
+// -валидация и fail-closed lookup. Формулы BM3, прямая P(ρ) и обратная
+// ρ(P) задачи — в Core/condensedMatterEos.ts. Газовый каталог
+// Peng–Robinson (eosParameters.ts) не затронут и не переиспользуется.
+// ============================================
+export {
+  PlanetaryEosLookupError,
+  PLANETARY_EOS_CATALOG_SCOPE_NOTE,
+  PLANETARY_EOS_RECORDS,
+  validatePlanetaryEosCatalog,
+  listPlanetaryEosMaterialIds,
+  getPlanetaryEosRecord,
+  tryGetPlanetaryEosRecord
+} from './planetaryEos';
