@@ -800,10 +800,16 @@ export function solveInteriorThermalEvolution(input: InteriorThermalEvolutionInp
   }
   for (let p = 0; p < pairLinks.length; p++) {
     const idx = pairAccIndexByLink.get(p);
+    // Аккумулятор парной связи интегрирует приток К РЕЗЕРВУАРУ a:
+    // rate_acc = k·(T_b − T_a). Для отчёта знак инвертируется:
+    // energyJ — энергия, ПЕРЕДАННАЯ от a к b (k·(T_a − T_b) в
+    // интеграле), положительная при физическом потоке a → b
+    // (a горячее b) и отрицательная при обратном потоке.
+    const accForLink = idx !== undefined ? finalState[idx] : 0;
     pairEnergies.push({
       a: String(pairLinks[p].reservoirIdA),
       b: String(pairLinks[p].reservoirIdB),
-      energyJ: idx !== undefined ? finalState[idx] : 0
+      energyJ: -accForLink
     });
   }
   for (let b = 0; b < boundaryLinks.length; b++) {
