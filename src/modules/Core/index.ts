@@ -83,6 +83,14 @@ export * from './adapters';
 export * from './condensedMatterEos';
 // Stage 4.7.2: гидростатическая структура сферического тела (dm/dr, dP/dr, g).
 export * from './hydrostaticInterior';
+// Stage 4.7.3: радиогенный нагрев (Часть A).
+export * from './radiogenicHeating';
+// Stage 4.7.3: приливная диссипация синхронного спутника (Часть B).
+export * from './tidalHeating';
+// Stage 4.7.3: многорезервуарная тепловая эволюция (Часть C).
+export * from './interiorThermalEvolution';
+// Stage 4.7.3: аддитивный классификатор теплового бюджета по явным порогам (Часть D).
+export * from './heatBudgetClassification';
 
 
 
