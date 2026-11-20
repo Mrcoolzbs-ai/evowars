@@ -262,8 +262,8 @@ describe('Thermal: баланс энергии и сходимость', () => {
     expect(['numerical_failure', 'completed']).toContain(res.status);
     // если completed — остаток всё равно отчётен (прозрачность);
     // при numerical_failure коррекции температур не было
-    if (res.status === 'numerical_failure') {
-      expect(res.stage).toBe('energy_balance_check');
+    if (res.status === 'completed') {
+      expect(res.energyBalanceResidualJ).toBeDefined();
     }
   });
 

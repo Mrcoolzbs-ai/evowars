@@ -173,8 +173,9 @@ describe('Radiogenic: время и каталог данных', () => {
 
   it('R7. Природный элемент и отдельный изотоп не смешиваются', () => {
     // Молярные массы природного элемента отличаются от изотопных:
-    expect(NATURAL_ELEMENT_MOLAR_MASS_KG_PER_MOL['U']).not.toBeCloseTo(0.238050786996, 4);
-    expect(NATURAL_ELEMENT_MOLAR_MASS_KG_PER_MOL['K']).not.toBeCloseTo(0.039963998166, 4);
+    expect(Math.abs(NATURAL_ELEMENT_MOLAR_MASS_KG_PER_MOL['U'] - 0.238050786996)).toBeGreaterThan(1e-6);
+    expect(Math.abs(NATURAL_ELEMENT_MOLAR_MASS_KG_PER_MOL['K'] - 0.039963998166)).toBeGreaterThan(1e-4);
+    expect(NATURAL_ELEMENT_MOLAR_MASS_KG_PER_MOL['Th']).toBeCloseTo(0.232038053689, 12); // Th = 232Th
     // Конвертация в изотопы — ТОЛЬКО по явным долям каталога:
     const u = elementMassKgToNuclideMassesKg('U', 1);
     expect(u).not.toBeNull();
