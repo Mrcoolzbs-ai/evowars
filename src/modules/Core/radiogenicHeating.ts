@@ -304,10 +304,15 @@ export function elementMassKgToNuclideMassesKg(
   if (!rules || rules.length === 0 || !Number.isFinite(elementMassKg) || elementMassKg <= 0) {
     return null;
   }
-  const fractions = rules.map((r) => r.fraction).reduce((a, b) => a + b, 0);
-  if (Math.abs(fractions - 1) > 1e-4) {
-    // доли природной смеси обязаны образовывать 1 (U: 0.9928+0.0072)
-    return null;
+  // Каждая доля — конечное значение в (0, 1]. Сумма долей НЕ обязана
+  // равняться 1: для U перечислен весь природный изотопный состав
+  // (0.9928 + 0.0072 = 1, это снежется каталог-валидатором), для K —
+  // только РАДИОГЕННАЯ доля 40K в природном калии (1.28e-4), а
+  // нерадиогенные изотопы 39K/41K не участвуют в тепловом бюджете.
+  for (const rule of rules) {
+    if (!Number.isFinite(rule.fraction) || rule.fraction <= 0 || rule.fraction > 1) {
+      return null;
+    }
   }
   return rules.map((rule) => ({ nuclideId: rule.nuclideId, massKg: elementMassKg * rule.fraction }));
 }

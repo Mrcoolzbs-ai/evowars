@@ -55,10 +55,14 @@ describe('HeatBudgetClassification: честность классификаци�
 
   it('D4. Нормировка per_volume отличима от per_mass', () => {
     const res = classifyHeatBudgetByThresholds({
-      powerW: 20e12, volumeM3: 1e21, thresholds: thresholds(), basis: 'per_volume'
+      // 20e12 / 1e22 = 2e-9 W/m^3 — в пределах шкалы порогов (moderate)
+      powerW: 20e12, volumeM3: 1e22, thresholds: thresholds(), basis: 'per_volume'
     });
     expect(res.status).toBe('classified');
-    if (res.status === 'classified') expect(res.unitBasis).toBe('W/m^3');
+    if (res.status === 'classified') {
+      expect(res.unitBasis).toBe('W/m^3');
+      expect(res.level).toBe('moderate');
+    }
   });
 
   it('D5. Значение выше шкалы порогов => not_classified, а не «high»', () => {

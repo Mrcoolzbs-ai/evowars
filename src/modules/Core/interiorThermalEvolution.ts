@@ -827,8 +827,21 @@ export function solveInteriorThermalEvolution(input: InteriorThermalEvolutionInp
   // знаками и обязаны сократиться (проверка ниже — численная).
   const residual = systemDU - (totalSources - totalLosses);
 
-  // масштаб бюджета для относительного остатка: максимум из |dU|, притоков и оттоков
-  const budgetScale = Math.max(Math.abs(systemDU), Math.abs(totalSources), Math.abs(totalLosses), Number.MIN_VALUE);
+  // масштаб бюджета для относительного остатка: максимум из |dU|,
+  // притоков, оттоков и ВЕЛИЧИНЫ внутренних парных переносов.
+  // Величина парных переносов нужна в знаменателе для конфигураций
+  // с чисто внутренним обменом (аналитически dU = 0 и приток/отток = 0):
+  // без неё относительный остаток считался бы от почти нулевого dU и
+  // мог бы дать фиктивный numerical_failure; фактический переносимый
+  // объём энергии через систему — именно парные потоки.
+  const internalPairTransferMagnitudeJ = pairEnergies.reduce((s, p) => s + Math.abs(p.energyJ), 0);
+  const budgetScale = Math.max(
+    Math.abs(systemDU),
+    Math.abs(totalSources),
+    Math.abs(totalLosses),
+    internalPairTransferMagnitudeJ,
+    Number.MIN_VALUE
+  );
   const relResidual = Math.abs(residual) / Math.max(budgetScale, Number.EPSILON);
 
   if (!(relResidual <= energyBalanceTolerance)) {

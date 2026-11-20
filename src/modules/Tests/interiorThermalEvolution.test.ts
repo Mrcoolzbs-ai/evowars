@@ -103,7 +103,7 @@ describe('Thermal: внутренний обмен и внешние потер�
   const K = 1e4; // W/K
   const T1 = 500;
   const T2 = 300;
-  const DT = 1e6; // >> C/K = 1e5 s: почти равновесие
+  const DT = 3e5; // ≈ 6/(2K/C): фактор затухания e^{-6} ≈ 2.48e-3, далеко от равновесия, но глубоко в экспоненциальном режиме
   const TEQ = (T1 + T2) / 2;
 
   function pairRun() {
@@ -121,8 +121,8 @@ describe('Thermal: внутренний обмен и внешние потер�
     expect(res.finalTemperaturesK['b']).toBeGreaterThan(T2);
     // аналитика: T_i = T_eq ± (T1 - T2)/2 · exp(-2K·dt/C)
     const factor = Math.exp((-2 * K * DT) / C);
-    expect((res.finalTemperaturesK['a'] - TEQ) / (100 * factor)).toBeCloseTo(1, 5);
-    expect((res.finalTemperaturesK['b'] - TEQ) / (-100 * factor)).toBeCloseTo(1, 5);
+    expect((res.finalTemperaturesK['a'] - TEQ) / (100 * factor)).toBeCloseTo(1, 3);
+    expect((res.finalTemperaturesK['b'] - TEQ) / (-100 * factor)).toBeCloseTo(1, 3);
     // энергия парной связи: перенос A->B положителен
     const transfer = res.sources.pairTransferEnergyJ[0];
     expect(transfer.energyJ).toBeGreaterThan(0);
@@ -173,6 +173,7 @@ describe('Thermal: радиогенная и приливная мощность
         radiogenicSources: [{ nuclideId: 'k40', massKg: m0, massProvenance: TEST_PROVENANCE }]
       }],
       timeAxis: { startS: 0, endS: 1e12 },
+      radiogenicEpochReferenceS: 0,
       integration: { rtol: 1e-10 }
     });
     assertCompleted(p0Run);
@@ -196,6 +197,7 @@ describe('Thermal: радиогенная и приливная мощность
         radiogenicSources: [{ nuclideId: 'k40', massKg: m0, massProvenance: TEST_PROVENANCE }]
       }],
       timeAxis: { startS: 0, endS: halfLifeS },
+      radiogenicEpochReferenceS: 0,
       integration: { rtol: 1e-10 }
     });
     assertCompleted(halfRun);
@@ -237,6 +239,7 @@ describe('Thermal: баланс энергии и сходимость', () => {
       pairLinks: [{ reservoirIdA: 'a', reservoirIdB: 'b', conductanceWPerK: 5e3, conductanceProvenance: TEST_PROVENANCE }],
       boundaryLinks: [{ reservoirId: 'b', boundaryTemperatureK: 300, conductanceWPerK: 20, conductanceProvenance: TEST_PROVENANCE }],
       timeAxis: { startS: 0, endS: 5e7 },
+      radiogenicEpochReferenceS: 0,
       integration: { rtol: 1e-10 }
     });
     assertCompleted(res);

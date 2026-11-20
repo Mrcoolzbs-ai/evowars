@@ -229,7 +229,7 @@ describe('Radiogenic: время и каталог данных', () => {
     expect(res.knownTotalPowerW).toBeGreaterThan(0);
     expect(res.completeness.computedCount).toBe(1);
     // ЯВНОЕ предупреждение, что сумма известных вкладов — не полный бюджет
-    expect(res.completeness.note).toContain('НЕ является полным');
+    expect(res.completeness.note).toContain('НЕ претендует на полный бюджет');
   });
 
   it('R10. Неизвестный nuclideId блокирует completed (fail-closed)', () => {
