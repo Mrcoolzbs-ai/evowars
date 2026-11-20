@@ -81,6 +81,8 @@ export * from './migrations';
 export * from './adapters';
 // Stage 4.7.1: ядро изотермического BM3 EOS конденсированных материалов.
 export * from './condensedMatterEos';
+// Stage 4.7.2: гидростатическая структура сферического тела (dm/dr, dP/dr, g).
+export * from './hydrostaticInterior';
 
 
 

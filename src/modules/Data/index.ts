@@ -381,3 +381,24 @@ export {
   getPlanetaryEosRecord,
   tryGetPlanetaryEosRecord
 } from './planetaryEos';
+
+// ============================================
+// Stage 4.7.2: справочная модель плотности PREM (Dziewonski & Anderson,
+// 1981, Table I) и гидростатическая реконструкция поверх неё через
+// Core/hydrostaticInterior. Реконструкция по ЗАДАННОМУ профилю плотности,
+// НЕ EOS-предсказание горячей Земли.
+// ============================================
+export {
+  PREM_MEAN_RADIUS_M,
+  PREM_CENTRAL_PRESSURE_PUBLISHED_PA,
+  PREM_TOTAL_MASS_CONSTRAINT_KG,
+  PREM_MOMENT_OF_INERTIA_FACTOR_CONSTRAINT,
+  PREM_REFERENCE_SOURCE,
+  PREM_LAYERS,
+  premDensityGcm3,
+  premDensityKgM3,
+  premHydrostaticLayers,
+  validatePremCatalog,
+  solvePremHydrostaticInterior,
+  type PremLayerSpec
+} from './premReference';
