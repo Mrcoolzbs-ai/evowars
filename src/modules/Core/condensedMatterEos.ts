@@ -1100,7 +1100,6 @@ export function solveCondensedMatterDensity(
 
   let iterations = 0;
   let answerDensity: number | null = null;
-  let answerResidual = Number.NaN;
   while (iterations < maxIterations) {
     const mid = 0.5 * (lo + hi);
     const pMid = bm3Pressure(mid, params);
@@ -1115,7 +1114,6 @@ export function solveCondensedMatterDensity(
     const intervalConverged = hi - lo <= 1e-14 * Math.max(lo, hi);
     if (intervalConverged || Math.abs(residual) <= tolerancePa) {
       answerDensity = mid;
-      answerResidual = residual;
       iterations += 1;
       break;
     }
