@@ -1078,7 +1078,6 @@ export function solveCondensedMatterDensity(
 
   // 3. Температурная применимость — как в прямой задаче: только
   // подтверждённый диапазон записи; машинный epsilon НЕ расширяет её.
-  const t0 = record.referenceTemperatureK.value;
   const tempFailure = temperatureApplicabilityFailure(record, temperatureK);
   if (tempFailure !== null) {
     return { status: 'out_of_applicability', reason: tempFailure.reason, detail: tempFailure.detail };

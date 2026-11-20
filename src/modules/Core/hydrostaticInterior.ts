@@ -180,7 +180,7 @@ interface ResolvedHydrostaticOptions {
 
 function resolveHydrostaticOptions(
   options?: HydrostaticSolverOptions
-): ResolvedHydrostaticOptions | readonly string[] {
+): ResolvedHydrostaticOptions | string[] {
   const issues: string[] = [];
   const stepsPerLayer = options?.stepsPerLayer ?? DEFAULT_STEPS_PER_LAYER;
   const refinementFactor = options?.refinementFactor ?? DEFAULT_REFINEMENT_FACTOR;
@@ -428,8 +428,8 @@ export function solveHydrostaticInterior(
   if (issues.length > 0) return { status: 'invalid_input', issues };
 
   const resolved = resolveHydrostaticOptions(options);
-  if (typeof resolved === 'string' || Array.isArray(resolved)) {
-    return { status: 'invalid_input', issues: resolved as readonly string[] };
+  if (Array.isArray(resolved)) {
+    return { status: 'invalid_input', issues: resolved };
   }
   const gConst = GRAVITATIONAL_CONSTANT_M3_KG_S2;
 
