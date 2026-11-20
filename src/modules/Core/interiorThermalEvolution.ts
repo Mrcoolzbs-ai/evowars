@@ -701,7 +701,7 @@ export function solveInteriorThermalEvolution(input: InteriorThermalEvolutionInp
     ...(input.timeAxis.outputTimesS !== undefined ? { tEval: input.timeAxis.outputTimesS } : {})
   };
 
-  const solved = solveOdeWithRadauIia(problem, options);
+  let solved: ReturnType<typeof solveOdeWithRadauIia>;
   try {
     solved = solveOdeWithRadauIia(problem, options);
   } catch (err) {
@@ -779,9 +779,9 @@ export function solveInteriorThermalEvolution(input: InteriorThermalEvolutionInp
       finalTemperatureK: finalState[i],
       heatCapacityJK: capacities[i],
       internalEnergyChangeJ: dU,
-      radiogenicMassEntriesKg: (reservoirs[i].radiogenicSources ?? [])
-        .filter((s) => finite(s.massKg) && s.massKg > 0)
-        .map((s) => ({ nuclideId: String(s.nuclideId), massKg: s.massKg })),
+      radiogenicMassEntriesKg: ((reservoirs[i].radiogenicSources ?? []) as readonly { nuclideId?: string; massKg?: number | null }[])
+        .filter((s) => finite(s.massKg as number) && (s.massKg as number) > 0)
+        .map((s) => ({ nuclideId: String(s.nuclideId), massKg: s.massKg as number })),
       constantTidalPowerW: reservoirs[i].constantTidalSource?.powerW ?? null,
       constantExternalLossPowerW: reservoirs[i].constantExternalLoss?.powerW ?? null,
       boundaryLinkIds: boundaryLinks

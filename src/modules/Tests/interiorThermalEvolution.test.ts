@@ -182,6 +182,7 @@ describe('Thermal: радиогенная и приливная мощность
       * (1 - Math.exp(-lambda * 1e12));
     expect(p0Run.sources.radiogenicEnergyJByReservoir['m'] / analyticIntegral).toBeCloseTo(1, 8);
     // убывание: интеграл строго меньше P_0·dt и строго больше P(dt)·dt
+    const halfLifeS = Math.LN2 / lambda;
     const p0W = (m0 / k40.molarMassKgPerMol) * 6.02214076e23
       * k40.heatEffectiveDecayEnergyKeV * 1.602176634e-16 * lambda; // P_0 = N_0·E_H·lambda
     const pEnd = p0W * Math.exp(-lambda * 1e12);
