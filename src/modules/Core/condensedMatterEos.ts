@@ -179,8 +179,117 @@ export interface CondensedMatterEosRecord {
 export const BM3_MAX_SUPPORTED_COMPRESSION_RATIO = 1e3;
 export const BM3_MIN_SUPPORTED_COMPRESSION_RATIO = 1;
 
-/** Допуск сравнения переданной температуры с изотермой записи, K. */
-export const BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K = 10;
+// МАШИННЫЕ допуски сравнения границ применимости. Это чисто числовые
+// эпсилоны плавающей точки: они НЕ расширяют физическую область
+// применимости и не документируются как «±X K» или «±X Pa».
+/** Абсолютный пол машинного допуска по температуре, K. */
+const BM3_TEMPERATURE_ABSOLUTE_EPSILON_K = 1e-9;
+/** Абсолютный пол машинного допуска по давлению, Pa. */
+const BM3_PRESSURE_ABSOLUTE_EPSILON_PA = 1e-6;
+/** Относительная компонента машинного допуска сравнения границ. */
+const BM3_BOUNDARY_RELATIVE_EPSILON = 1e-12;
+
+function boundaryEpsilon(referenceMagnitude: number, absoluteFloor: number): number {
+  return Math.max(absoluteFloor, BM3_BOUNDARY_RELATIVE_EPSILON * Math.abs(referenceMagnitude));
+}
+
+/** Структурированный отказ применимости (общая форма прямой и обратной задач). */
+interface Bm3ApplicabilityFailure {
+  readonly reason: string;
+  readonly detail: Readonly<Record<string, number | string | boolean | null>>;
+}
+
+/**
+ * Температурная применимость: разрешены ТОЛЬКО температуры внутри
+ * подтверждённого temperatureRangeK конкретной записи (границы
+ * включительны, сравнение с машинным epsilon). Для текущих записей
+ * диапазон {300, 300} K — приемлема только изотерма 300 K.
+ * Отсутствие подтверждённого диапазона — отказ (fail-closed).
+ */
+function temperatureApplicabilityFailure(
+  record: CondensedMatterEosRecord,
+  temperatureK: number
+): Bm3ApplicabilityFailure | null {
+  const t0 = record.referenceTemperatureK.value;
+  const temperatureRange = record.applicability.temperatureRangeK;
+  if (record.applicability.temperatureRangeKnown !== true || temperatureRange === undefined) {
+    return {
+      reason: `температурная область применимости записи не подтверждена (temperatureRangeKnown = false), а изотермическое ядро BM3 не вычисляет тепловых поправок: расчёт при ${temperatureK} K невозможен (fail-closed)`,
+      detail: {
+        requestedTemperatureK: temperatureK,
+        referenceTemperatureK: t0,
+        temperatureRangeKnown: record.applicability.temperatureRangeKnown
+      }
+    };
+  }
+  const epsilonK = boundaryEpsilon(Math.abs(t0), BM3_TEMPERATURE_ABSOLUTE_EPSILON_K);
+  if (temperatureK < temperatureRange.min - epsilonK || temperatureK > temperatureRange.max + epsilonK) {
+    return {
+      reason: `переданная температура ${temperatureK} K вне подтверждённого температурного диапазона записи [${temperatureRange.min}, ${temperatureRange.max}] K; изотермическое ядро разрешает только подтверждённый диапазон (тепловая поправка на этапе 4.7.1 отсутствует); допускается лишь машинная погрешность сравнения ${epsilonK} K`,
+      detail: {
+        requestedTemperatureK: temperatureK,
+        temperatureRangeKnown: true,
+        temperatureRangeMinK: temperatureRange.min,
+        temperatureRangeMaxK: temperatureRange.max,
+        machineEpsilonK: epsilonK
+      }
+    };
+  }
+  return null;
+}
+
+/**
+ * Барическая применимость по КОНКРЕТНОМУ давлению: оно обязано лежать
+ * внутри подтверждённого pressureRangePa записи (границы включительны,
+ * машинный epsilon сравнения). Неизвестный диапазон
+ * (pressureRangeKnown = false) — ОТКАЗ, в том числе для обратной задачи
+ * с явным densityBracketKgM3: bracket — численный инструмент поиска
+ * корня, а НЕ доказательство физической применимости.
+ */
+function pressureRangeApplicabilityFailure(
+  record: CondensedMatterEosRecord,
+  pressurePa: number,
+  context: 'computed_forward' | 'requested_inverse',
+  numericTolerancePa?: number
+): Bm3ApplicabilityFailure | null {
+  const pressureRange = record.applicability.pressureRangePa;
+  if (record.applicability.pressureRangeKnown !== true || pressureRange === undefined) {
+    return {
+      reason:
+        'барическая область применимости записи не подтверждена (pressureRangeKnown = false): ' +
+        'давление не может быть проверено против подтверждённого диапазона записи — расчёт отклоняется (fail-closed). ' +
+        'Явный densityBracketKgM3 (если передан) — численный инструмент поиска корня, а НЕ доказательство применимости',
+      detail: {
+        pressurePa,
+        pressureRangeKnown: record.applicability.pressureRangeKnown,
+        checkOrigin: context
+      }
+    };
+  }
+  const epsilonPa = boundaryEpsilon(
+    Math.max(Math.abs(pressureRange.min), Math.abs(pressureRange.max), Math.abs(pressurePa)),
+    BM3_PRESSURE_ABSOLUTE_EPSILON_PA
+  );
+  // numericTolerancePa — НЕ расширение применимости, а собственный численный
+  // допуск решателя: итог обратной задачи воспроизводит целевое давление
+  // только с точностью tolerancePa, поэтому пограничные артефакты бисекции
+  // сопоставляются с диапазоном с учётом этого допуска.
+  const boundarySlackPa = Math.max(epsilonPa, numericTolerancePa ?? 0);
+  if (pressurePa < pressureRange.min - boundarySlackPa || pressurePa > pressureRange.max + boundarySlackPa) {
+    return {
+      reason: `давление ${pressurePa} Pa вне подтверждённого диапазона записи [${pressureRange.min}, ${pressureRange.max}] Pa`,
+      detail: {
+        pressurePa,
+        checkOrigin: context,
+        checkedComputedPressure: context === 'computed_forward',
+        pressureRangeKnown: true,
+        confirmedPressureMinPa: pressureRange.min,
+        confirmedPressureMaxPa: pressureRange.max
+      }
+    };
+  }
+  return null;
+}
 
 /**
  * Санитарные границы параметров BM3 (валидация контракта): большинство
@@ -708,22 +817,12 @@ export function evaluateCondensedMatterPressure(
   }
   if (inputIssues.length > 0) return { status: 'invalid_input', issues: inputIssues };
 
-  // 3. Температура: только подтверждённая изотерма записи.
+  // 3. Температура: только подтверждённый диапазон записи (для текущих
+  // записей — ровно 300 K). Машинный epsilon НЕ расширяет применимость.
   const t0 = record.referenceTemperatureK.value;
-  if (Math.abs(temperatureK - t0) > BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K) {
-    const range = record.applicability.temperatureRangeK;
-    return {
-      status: 'out_of_applicability',
-      reason: `переданная температура ${temperatureK} K вне подтверждённой изотермы записи (${t0} K ± ${BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K} K); тепловая поправка на этапе 4.7.1 отсутствует`,
-      detail: {
-        requestedTemperatureK: temperatureK,
-        referenceTemperatureK: t0,
-        temperatureToleranceK: BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K,
-        temperatureRangeKnown: record.applicability.temperatureRangeKnown,
-        temperatureRangeMinK: range ? range.min : null,
-        temperatureRangeMaxK: range ? range.max : null
-      }
-    };
+  const tempFailure = temperatureApplicabilityFailure(record, temperatureK);
+  if (tempFailure !== null) {
+    return { status: 'out_of_applicability', reason: tempFailure.reason, detail: tempFailure.detail };
   }
 
   // 4. Плотность: подтверждённый диапазон записи.
@@ -774,6 +873,14 @@ export function evaluateCondensedMatterPressure(
       reason: 'ядро BM3 не смогло вычислить конечное давление (переполнение или некорректные параметры)',
       stage: 'bm3_pressure_evaluation'
     };
+  }
+
+  // 5.5. Барическая применимость по ВЫЧИСЛЕННОМУ давлению (не только по
+  // входной плотности): подтверждённый диапазон записи, границы
+  // включительны; неизвестный диапазон — отказ (fail-closed).
+  const pressureFailure = pressureRangeApplicabilityFailure(record, pressurePa, 'computed_forward');
+  if (pressureFailure !== null) {
+    return { status: 'out_of_applicability', reason: pressureFailure.reason, detail: pressureFailure.detail };
   }
 
   // 6. Результат с полным контекстом происхождения и ограничений.
@@ -969,40 +1076,26 @@ export function solveCondensedMatterDensity(
   }
   if (inputIssues.length > 0) return { status: 'invalid_input', issues: inputIssues };
 
-  // 3. Температурная применимость — как в прямой задаче.
+  // 3. Температурная применимость — как в прямой задаче: только
+  // подтверждённый диапазон записи; машинный epsilon НЕ расширяет её.
   const t0 = record.referenceTemperatureK.value;
-  if (Math.abs(temperatureK - t0) > BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K) {
-    const range = record.applicability.temperatureRangeK;
-    return {
-      status: 'out_of_applicability',
-      reason: `переданная температура ${temperatureK} K вне подтверждённой изотермы записи (${t0} K ± ${BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K} K); тепловая поправка на этапе 4.7.1 отсутствует`,
-      detail: {
-        requestedTemperatureK: temperatureK,
-        referenceTemperatureK: t0,
-        temperatureToleranceK: BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K,
-        temperatureRangeKnown: record.applicability.temperatureRangeKnown,
-        temperatureRangeMinK: range ? range.min : null,
-        temperatureRangeMaxK: range ? range.max : null
-      }
-    };
+  const tempFailure = temperatureApplicabilityFailure(record, temperatureK);
+  if (tempFailure !== null) {
+    return { status: 'out_of_applicability', reason: tempFailure.reason, detail: tempFailure.detail };
   }
 
-  // 4. Барическая применимость записи (без экстраполяции).
+  // 4. Барическая применимость записи ДО построения bracket (без
+  // экстраполяции): неизвестный диапазон блокирует расчёт даже при явно
+  // переданном densityBracketKgM3 — bracket ищет численный корень, но
+  // не доказывает подтверждённость барической применимости. Границы
+  // подтверждённого диапазона включительны (машинный epsilon).
   const p0 = record.referencePressurePa.value;
-  const pressureRange = record.applicability.pressureRangePa;
-  if (
-    record.applicability.pressureRangeKnown &&
-    pressureRange !== undefined &&
-    (pressurePa < pressureRange.min || pressurePa > pressureRange.max)
-  ) {
+  const pressureFailureInverse = pressureRangeApplicabilityFailure(record, pressurePa, 'requested_inverse');
+  if (pressureFailureInverse !== null) {
     return {
       status: 'out_of_applicability',
-      reason: `давление ${pressurePa} Pa вне подтверждённого диапазона записи [${pressureRange.min}, ${pressureRange.max}] Pa`,
-      detail: {
-        requestedPressurePa: pressurePa,
-        confirmedPressureMinPa: pressureRange.min,
-        confirmedPressureMaxPa: pressureRange.max
-      }
+      reason: pressureFailureInverse.reason,
+      detail: pressureFailureInverse.detail
     };
   }
   if (pressurePa < p0) {
@@ -1169,6 +1262,13 @@ export function solveCondensedMatterDensity(
         confirmedDensityMaxKgM3: record.applicability.densityRangeKgM3.max
       }
     };
+  }
+  // Найденное (восстановленное) давление также обязано лежать внутри
+  // подтверждённого барического диапазона записи (fail-closed на
+  // пограничные численные артефакты бисекции).
+  if (pressureRangeApplicabilityFailure(record, answerPressure, 'computed_forward', tolerancePa) !== null) {
+    const failure = pressureRangeApplicabilityFailure(record, answerPressure, 'computed_forward', tolerancePa);
+    return { status: 'out_of_applicability', reason: failure!.reason, detail: failure!.detail };
   }
   if (!bm3IsMonotonicAtDensity(answerDensity, params)) {
     return {

@@ -26,7 +26,6 @@ import {
   validateCondensedMatterEosCatalog,
   validateCondensedMatterEosRecordShape,
   getCondensedMatterEosRecordBlockingIssues,
-  BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K,
   BM3_MAX_SUPPORTED_COMPRESSION_RATIO,
   BM3_MIN_SUPPORTED_COMPRESSION_RATIO,
   BM3_VALID_K0_PRIME_RANGE,
@@ -100,17 +99,24 @@ function assertCompletedDensity(
 }
 
 describe('Stage 4.7.1: прямая задача P(ρ) и контракт BM3', () => {
-  it('сценарий 1: P(ρ0) = P0 (опорное давление, для обеих записей 0 Pa)', () => {
-    for (const record of [FE, BR]) {
-      const params = bm3ParametersFromRecord(record);
-      const result = evaluateCondensedMatterPressure(record, params.referenceDensityKgM3, 300);
-      assertCompletedPressure(result, record.materialId);
-      // P(ρ0) = P0 = 0 Pa точно (множитель (η^(7/3) − η^(5/3)) зануляет ядро)
-      expect(result.pressurePa).toBe(0);
-      expect(result.pressure.value).toBe(0);
-      expect(result.referencePressurePa).toBe(0);
-      expect(result.temperatureAssumption).toBe('isothermal_at_reference_temperature');
+  it('сценарий 1: P(ρ0) = P0 = 0 для Fe; бриджманит отклоняется (барический диапазон не подтверждён)', () => {
+    const result = evaluateCondensedMatterPressure(FE, FE_PARAMS.referenceDensityKgM3, 300);
+    assertCompletedPressure(result, FE.materialId);
+    // P(ρ0) = P0 = 0 Pa точно (множитель (η^(7/3) − η^(5/3)) зануляет ядро)
+    expect(result.pressurePa).toBe(0);
+    expect(result.pressure.value).toBe(0);
+    expect(result.referencePressurePa).toBe(0);
+    expect(result.temperatureAssumption).toBe('isothermal_at_reference_temperature');
+    // Бриджманит: даже математически корректная точка ρ0 не даёт completed,
+    // пока pressureRangeKnown = false (fail-closed, Stage 4.7.1)
+    const brResult = evaluateCondensedMatterPressure(BR, BR_PARAMS.referenceDensityKgM3, 300);
+    expect(brResult.status).toBe('out_of_applicability');
+    if (brResult.status === 'out_of_applicability') {
+      expect(brResult.reason).toContain('барическая область применимости');
+      expect(brResult.detail.pressureRangeKnown).toBe(false);
     }
+    // алгебраическое тождество P(ρ0) = 0 для ядра BM3 проверяется
+    // независимо от применимости в сценариях 2 и 6 (чистое ядро)
   });
 
   it('сценарий 2: dP/dln ρ|ρ0 = K0 — аналитически и независимо конечной разностью', () => {
@@ -222,15 +228,20 @@ describe('Stage 4.7.1: обратная задача ρ(P)', () => {
     expect(result.model).toBe('birch_murnaghan_3rd');
   });
 
-  it('сценарий 9: круговой переход бриджманита с ЯВНЫМ bracket (диапазон плотности не подтверждён)', () => {
-    const pressure = (bm3Pressure(BR.referenceDensityKgM3.value * 1.2, BR_PARAMS) as number);
+  it('сценарий 9: ЯВНЫЙ bracket не заменяет подтверждённый барический диапазон (fail-closed)', () => {
+    // Численно задача корректна (root внутри bracket существует), но
+    // pressureRangeKnown = false: bracket — численный инструмент поиска корня,
+    // а НЕ доказательство применимости.
+    const pressure = bm3Pressure(BR.referenceDensityKgM3.value * 1.2, BR_PARAMS) as number;
     const result = solveCondensedMatterDensity(BR, pressure, 300, {
       densityBracketKgM3: { min: BR.referenceDensityKgM3.value, max: 2 * BR.referenceDensityKgM3.value }
     });
-    assertCompletedDensity(result, 'mgso3_bridgmanite_300k');
-    expect(result.bracketSource).toBe('user_provided');
-    assertRel(result.densityKgM3, BR.referenceDensityKgM3.value * 1.2, 9);
-    expect(Math.abs(result.residualPa)).toBeLessThanOrEqual(result.tolerancePa);
+    expect(result.status).toBe('out_of_applicability');
+    if (result.status === 'out_of_applicability') {
+      expect(result.reason).toContain('не подтверждена');
+      expect(result.reason).toContain('НЕ доказательство');
+      expect(result.detail.pressureRangeKnown).toBe(false);
+    }
   });
 
   it('сценарий 10: обратная задача hcp-Fe на границе подтверждённого диапазона (280 GPa → 13516.49 кг/м³)', () => {
@@ -246,14 +257,35 @@ describe('Stage 4.7.1: обратная задача ρ(P)', () => {
     expect(Math.abs(result.pressurePa - 280e9)).toBeLessThanOrEqual(result.tolerancePa);
   });
 
-  it('сценарий 11: обратная задача бриджманита при 100 GPa с явным bracket (эталон 5246.246 сек. кг/м³)', () => {
+  it('сценарий 11: обратная задача бриджманита при 100 GPa → out_of_applicability даже с bracket; положительный контроль на синтетической записи', () => {
     const result = solveCondensedMatterDensity(BR, 100e9, 300, {
       densityBracketKgM3: { min: BR.referenceDensityKgM3.value, max: 2 * BR.referenceDensityKgM3.value }
     });
-    assertCompletedDensity(result, 'mgso3_bridgmanite_300k');
-    assertRel(result.densityKgM3, 5246.246089503775, 9);
-    expect(result.compressionRatio).toBeCloseTo(5246.246089503775 / BR.referenceDensityKgM3.value, 6);
-    expect(Math.abs(result.residualPa)).toBeLessThanOrEqual(result.tolerancePa);
+    expect(result.status).toBe('out_of_applicability');
+    if (result.status === 'out_of_applicability') {
+      expect(result.detail.pressureRangeKnown).toBe(false);
+    }
+    // Положительный контроль той же численной задачи: СИНТЕТИЧЕСКАЯ запись
+    // (НЕ каталог, НЕ источник) с ГИПОТЕТИЧЕСКИ подтверждённым барическим
+    // диапазоном и непресданным диапазоном плотности. Явный bracket здесь
+    // разрешён, и корень сходится к независимому эталону.
+    const synthetic: CondensedMatterEosRecord = {
+      ...BR,
+      materialId: 'mgso3_bridgmanite_300k_synthetic_positive_control',
+      applicability: {
+        ...BR.applicability,
+        pressureRangeKnown: true,
+        pressureRangePa: { min: 0, max: 101e9 }
+      }
+    };
+    const positive = solveCondensedMatterDensity(synthetic, 100e9, 300, {
+      densityBracketKgM3: { min: BR.referenceDensityKgM3.value, max: 2 * BR.referenceDensityKgM3.value }
+    });
+    assertCompletedDensity(positive, 'mgso3_bridgmanite_300k_synthetic_positive_control');
+    expect(positive.bracketSource).toBe('user_provided');
+    assertRel(positive.densityKgM3, 5246.246089503775, 9);
+    expect(positive.compressionRatio).toBeCloseTo(5246.246089503775 / BR.referenceDensityKgM3.value, 6);
+    expect(Math.abs(positive.residualPa)).toBeLessThanOrEqual(positive.tolerancePa);
   });
 
   it('сценарий 12: ужесточение допуска требует больше итераций и даёт меньшую невязку', () => {
@@ -296,12 +328,44 @@ describe('Stage 4.7.1: fail-closed применимость', () => {
     }
   });
 
-  it('сценарий 16: допуск ±10 K честный: 308 K принимается, 315 K отклоняется', () => {
-    expect(BM3_ISOTHERMAL_TEMPERATURE_TOLERANCE_K).toBe(10);
-    const at308 = evaluateCondensedMatterPressure(FE, FE.referenceDensityKgM3.value * 1.05, 308);
-    expect(at308.status).toBe('completed');
-    const at315 = evaluateCondensedMatterPressure(FE, FE.referenceDensityKgM3.value * 1.05, 315);
-    expect(at315.status).toBe('out_of_applicability');
+  it('сценарий 16: строгая изотерма: только 300 K (+ машинный epsilon); 300.001/308/315 K отклоняются в обеих задачах', () => {
+    // Температурная применимость = принадлежность temperatureRangeK записи.
+    // Обе записи: {300, 300} K. Разрешена только машинная погрешность
+    // сравнения max(1e-9 K, 1e-12·|T0|) — она НЕ расширяет физическую область.
+    const machineEpsilonK = Math.max(1e-9, 1e-12 * 300);
+    const atMachineEps = evaluateCondensedMatterPressure(
+      FE,
+      FE.referenceDensityKgM3.value * 1.05,
+      300 + machineEpsilonK
+    );
+    expect(atMachineEps.status).toBe('completed');
+    for (const badT of [300.001, 308, 315]) {
+      const forward = evaluateCondensedMatterPressure(FE, FE.referenceDensityKgM3.value * 1.05, badT);
+      expect(forward.status).toBe('out_of_applicability');
+      if (forward.status === 'out_of_applicability') {
+        expect(forward.reason).toContain('температурного диапазона');
+        expect(forward.detail.requestedTemperatureK).toBe(badT);
+      }
+      const inverse = solveCondensedMatterDensity(FE, 100e9, badT);
+      expect(inverse.status).toBe('out_of_applicability');
+      if (inverse.status === 'out_of_applicability') {
+        expect(inverse.detail.requestedTemperatureK).toBe(badT);
+      }
+    }
+    // точная граница диапазона включительна
+    const at300 = solveCondensedMatterDensity(FE, 100e9, 300);
+    assertCompletedDensity(at300, 'fe_hcp_300k');
+    // и для бриджманита: 300 K сейчас всё равно блокируется барическим гейтом
+    // (pressureRangeKnown = false), но температура 300.001 K отклоняется
+    // своей температурной проверкой при гипотетической проверке — проверяем
+    // через прямую задачу: причина обязана быть температурной ИЛИ барической
+    // (панель причинов фиксируется в регрессии сценария 32)
+    const brNearBoundary = evaluateCondensedMatterPressure(
+      BR,
+      BR.referenceDensityKgM3.value * 1.05,
+      300 + 2 * machineEpsilonK
+    );
+    expect(brNearBoundary.status).toBe('out_of_applicability');
   });
 
   it('сценарий 17: обратная задача ниже опорного давления (растяжение) отклоняется', () => {
@@ -393,12 +457,104 @@ describe('Stage 4.7.1: fail-closed применимость', () => {
     expect(FE.referenceDensityKgM3.uncertainty).toBeUndefined();
   });
 
-  it('сценарий 24: запись без подтверждённого диапазона плотности не решается без явного bracket', () => {
+  it('сценарий 24: запись без подтверждённых диапазонов не решается: барический гейт срабатывает раньше bracket-логики', () => {
     expect(BR.applicability.densityRangeKnown).toBe(false);
     const result = solveCondensedMatterDensity(BR, 100e9, 300);
     expect(result.status).toBe('out_of_applicability');
     if (result.status === 'out_of_applicability') {
-      expect(result.reason).toContain('bracket');
+      expect(result.reason).toContain('барическая область применимости');
+      expect(result.detail.pressureRangeKnown).toBe(false);
+    }
+  });
+
+  it('сценарий 32: прямая задача проверяет ВЫЧИСЛЕННОЕ давление, а не только плотность', () => {
+    // СИНТЕТИЧЕСКИ широкий диапазон плотности (НЕ каталог, НЕ источник):
+    // изолируем барический гейт. Точку ищем numerically: η для 285 GPa
+    // (ядро — численный инструмент, не доказательство применимости).
+    let lo = 1;
+    let hi = 1.7;
+    for (let k = 0; k < 60; k++) {
+      const mid = 0.5 * (lo + hi);
+      const pAtMid = bm3PressureAtCompressionRatio(mid, FE_PARAMS) as number;
+      if (pAtMid < 285e9) lo = mid;
+      else hi = mid;
+    }
+    const eta285 = 0.5 * (lo + hi);
+    const syntheticWide: CondensedMatterEosRecord = {
+      ...FE,
+      materialId: 'fe_hcp_300k_synthetic_wide_density',
+      applicability: { ...FE.applicability, densityRangeKgM3: { min: 8269.5, max: 30000 } }
+    };
+    const result = evaluateCondensedMatterPressure(
+      syntheticWide,
+      FE.referenceDensityKgM3.value * eta285,
+      300
+    );
+    // плотность внутри (широкого синтетического) диапазона, но вычисленное
+    // давление 285 GPa вне подтверждённого барического [0, 280] GPa
+    expect(result.status).toBe('out_of_applicability');
+    if (result.status === 'out_of_applicability') {
+      expect(result.reason).toContain('вне подтверждённого диапазона записи');
+      expect(result.detail.checkedComputedPressure).toBe(true);
+      expect(result.detail.confirmedPressureMaxPa).toBe(280e9);
+    }
+  });
+
+  it('сценарий 33: границы барического диапазона Fe включительны, чуть за границей — отклонение', () => {
+    const atZero = solveCondensedMatterDensity(FE, 0, 300);
+    assertCompletedDensity(atZero, 'fe_hcp_300k');
+    expect(atZero.densityKgM3).toBeCloseTo(FE.referenceDensityKgM3.value, 6);
+    const at280 = solveCondensedMatterDensity(FE, 280e9, 300);
+    assertCompletedDensity(at280, 'fe_hcp_300k');
+    const above280 = solveCondensedMatterDensity(FE, 280e9 + 1e7, 300);
+    expect(above280.status).toBe('out_of_applicability');
+    if (above280.status === 'out_of_applicability') {
+      expect(above280.reason).toContain('вне подтверждённого диапазона записи');
+    }
+    // прямая задача: та же включительность (точка глубоко внутри диапазона
+    // и точное значение 280 GPa через обратную задачу уже проверено выше)
+    const forwardInside = evaluateCondensedMatterPressure(FE, FE.referenceDensityKgM3.value * 1.2, 300);
+    assertCompletedPressure(forwardInside, 'fe_hcp_300k');
+  });
+
+  it('сценарий 34: плотность проверяется независимо от давления', () => {
+    // ρ = 13600 kg/m³ вне подтверждённого диапазона плотности [8269.5, 13516.5]:
+    // отклонение обязано сослаться на ПЛОТНОСТЬ, ещё до вычисления давления
+    const result = evaluateCondensedMatterPressure(FE, 13600, 300);
+    expect(result.status).toBe('out_of_applicability');
+    if (result.status === 'out_of_applicability') {
+      expect(result.reason).toContain('плотность');
+    }
+    // точка внутри диапазона плотности с давлением глубоко внутри барического
+    // диапазона обязана завершаться успешно
+    const inside = evaluateCondensedMatterPressure(FE, FE.referenceDensityKgM3.value * 1.2, 300);
+    assertCompletedPressure(inside, 'fe_hcp_300k');
+  });
+
+  it('сценарий 35: синтетический положительный контроль: bracket разрешён при известном давлении и неизвестной плотности', () => {
+    const syntheticNoDensity: CondensedMatterEosRecord = {
+      ...FE,
+      materialId: 'fe_hcp_300k_synthetic_no_density_range',
+      applicability: { ...FE.applicability, densityRangeKnown: false, densityRangeKgM3: undefined }
+    };
+    const result = solveCondensedMatterDensity(syntheticNoDensity, 100e9, 300, {
+      densityBracketKgM3: { min: FE.referenceDensityKgM3.value, max: 2 * FE.referenceDensityKgM3.value }
+    });
+    assertCompletedDensity(result, 'fe_hcp_300k_synthetic_no_density_range');
+    expect(result.bracketSource).toBe('user_provided');
+    expect(Math.abs(result.residualPa)).toBeLessThanOrEqual(result.tolerancePa);
+    // контраст: та же структура с НЕИЗВЕСТНЫМ давлением — отказ даже с bracket
+    const syntheticNoPressure: CondensedMatterEosRecord = {
+      ...FE,
+      materialId: 'fe_hcp_300k_synthetic_no_pressure_range',
+      applicability: { ...FE.applicability, pressureRangeKnown: false, pressureRangePa: undefined }
+    };
+    const blocked = solveCondensedMatterDensity(syntheticNoPressure, 100e9, 300, {
+      densityBracketKgM3: { min: FE.referenceDensityKgM3.value, max: 2 * FE.referenceDensityKgM3.value }
+    });
+    expect(blocked.status).toBe('out_of_applicability');
+    if (blocked.status === 'out_of_applicability') {
+      expect(blocked.detail.pressureRangeKnown).toBe(false);
     }
   });
 });
@@ -446,12 +602,14 @@ describe('Stage 4.7.1: каталог материалов', () => {
     expect(forward.provenance.referenceDensityKgM3).toBe(FE.referenceDensityKgM3.provenance);
     expect(forward.literature).toBe(FE.literature);
     expect(forward.scopeNotes.join(' ')).toContain('300 K');
-    const inverse = solveCondensedMatterDensity(BR, 100e9, 300, {
-      densityBracketKgM3: { min: BR.referenceDensityKgM3.value, max: 2 * BR.referenceDensityKgM3.value }
-    });
-    assertCompletedDensity(inverse, 'mgso3_bridgmanite_300k');
-    expect(inverse.provenance.bulkModulusPa.evidence).toBe('PARTIALLY_VERIFIED');
-    expect(inverse.provenance.bulkModulusPa.sourceName).toContain('Myhill');
+    // бриджманит: обратная задача отклонена (pressureRangeKnown = false),
+    // поэтому provenance фиксируется на положительном контроле Fe
+    const inverse = solveCondensedMatterDensity(FE, 100e9, 300);
+    assertCompletedDensity(inverse, 'fe_hcp_300k');
+    expect(inverse.provenance.bulkModulusPa.sourceName).toBe(FE.bulkModulusPa.provenance.sourceName);
+    // provenance записи Myhill (2018) при этом сохранён на уровне записи
+    expect(BR.bulkModulusPa.provenance.evidence).toBe('PARTIALLY_VERIFIED');
+    expect(BR.bulkModulusPa.provenance.sourceName).toContain('Myhill');
   });
 
   it('сценарий 28: неопределённости как «неизвестные», а не нули, и их сохранение в результате', () => {
@@ -464,10 +622,12 @@ describe('Stage 4.7.1: каталог материалов', () => {
       expect(forwardFe.parameterUncertainties.bulkModulusPa.sigma).toBeGreaterThan(0);
       expect(validateUncertainty(forwardFe.parameterUncertainties.bulkModulusPa)).toHaveLength(0);
     }
-    const forwardBr = evaluateCondensedMatterPressure(BR, BR.referenceDensityKgM3.value * 1.2, 300);
-    assertCompletedPressure(forwardBr, 'mgso3_bridgmanite_300k');
-    const brRho0Unc = forwardBr.parameterUncertainties.referenceDensityKgM3;
-    expect(brRho0Unc?.kind).toBe('interval');
+    // Бриджманит: прямая задача отклонена (pressureRangeKnown = false),
+    // поэтому проверяем неопределённости записи напрямую
+    expect(BR.referenceDensityKgM3.uncertainty?.kind).toBe('interval');
+    expect(BR.bulkModulusPa.uncertainty?.kind).toBe('stddev');
+    const brBlocked = evaluateCondensedMatterPressure(BR, BR.referenceDensityKgM3.value * 1.2, 300);
+    expect(brBlocked.status).toBe('out_of_applicability');
   });
 
   it('сценарий 29: каталог иммутабелен (deep-frozen): мутация отбрасывается или бросает', () => {
