@@ -402,3 +402,25 @@ export {
   solvePremHydrostaticInterior,
   type PremLayerSpec
 } from './premReference';
+
+// ============================================
+// Stage 4.7.3: каталог радиогенных нуклидов (Korenaga 2008 полураспады
+// и изотопные доли; Ruedas 2017 Table 4 энергии распада, молярные массы,
+// удельные теплопродукции). Нейтрино исключены из E_H; базы масс
+// (изотоп vs природный элемент) разделены.
+// ============================================
+export {
+  RADIOGENIC_NUCLIDE_RECORDS,
+  ELEMENT_TO_NUCLIDE_CONVERSIONS,
+  NATURAL_ELEMENT_MOLAR_MASS_KG_PER_MOL,
+  KORENAGA_2008_PROVENANCE,
+  RUEDAS_2017_PROVENANCE,
+  CHAIN_Q_CONFIRMATION_PROVENANCE,
+  NUBASE2016_VIA_RUEDAS_PROVENANCE,
+  tryGetRadiogenicNuclide,
+  validateRadiogenicNuclideCatalog,
+  type RadiogenicNuclideId,
+  type HeatEnergyAccounting,
+  type RadiogenicUncertaintyRecord,
+  type RadiogenicNuclideRecord
+} from './radiogenicNuclides';
