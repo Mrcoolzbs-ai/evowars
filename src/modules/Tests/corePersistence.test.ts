@@ -151,19 +151,20 @@ function starWorld(): LegacyWorldInput {
 // ============================================
 
 describe('Stage 4.1 Persistence: миграции сохранений', () => {
-  it('миграция 1.0 → 1.7 проходит всю цепочку с честным следом', () => {
+  it('миграция 1.0 → 1.8 проходит всю цепочку с честным следом', () => {
     const save = makeLegacySave('1.0');
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.0');
-    expect(result.to).toBe('1.7');
-    expect(result.world.version).toBe('1.7');
+    expect(result.to).toBe('1.8');
+    expect(result.world.version).toBe('1.8');
     // две записи от 1.0→1.1, по одной от 1.1→1.2, 1.2→1.3, 1.3→1.4,
-    // 1.4→1.5, 1.5→1.6 и 1.6→1.7
-    expect(result.notes.length).toBe(8);
+    // 1.4→1.5, 1.5→1.6, 1.6→1.7 и 1.7→1.8
+    expect(result.notes.length).toBe(9);
     expect(result.notes[4]).toContain('reactionLedger');
     expect(result.notes[5]).toContain('kineticExperiment');
     expect(result.notes[6]).toContain('kineticExperiment');
     expect(result.notes[7]).toContain('геохимический контекст');
+    expect(result.notes[8]).toContain('геохимический контекст атрибуции реакций');
     expect(result.world.migration?.from).toBe('1.0');
     expect(result.world.migration?.notes).toEqual(result.notes);
     // coreWorldState НЕ создаётся задним числом: отсутствие = «не инициализировано»
@@ -176,26 +177,27 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.world.atmosphere.totalPressure).toBeNull();
   });
 
-  it('миграция 1.1 → 1.7 добавляет записи о coreWorldState, scheduling, reactionLedger и kineticExperiment', () => {
+  it('миграция 1.1 → 1.8 добавляет записи о coreWorldState, scheduling, reactionLedger, kineticExperiment и реакционном контексте', () => {
     const save = makeLegacySave('1.1');
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.1');
-    expect(result.notes.length).toBe(6);
+    expect(result.notes.length).toBe(7);
     expect(result.notes[0]).toContain('coreWorldState');
     expect(result.notes[1]).toContain('scheduling');
     expect(result.notes[2]).toContain('reactionLedger');
     expect(result.notes[3]).toContain('kineticExperiment');
     expect(result.notes[4]).toContain('kineticExperiment');
     expect(result.notes[5]).toContain('геохимический контекст');
-    expect(result.world.version).toBe('1.7');
+    expect(result.notes[6]).toContain('геохимический контекст атрибуции реакций');
+    expect(result.world.version).toBe('1.8');
     expect(result.world.coreWorldState).toBeUndefined();
   });
 
   it('миграция идемпотентна: мир схемы текущей версии не переписывается повторно', () => {
-    const save = makeLegacySave('1.7');
+    const save = makeLegacySave('1.8');
     const result = migrateSavedWorld(save);
-    expect(result.from).toBe('1.7');
-    expect(result.to).toBe('1.7');
+    expect(result.from).toBe('1.8');
+    expect(result.to).toBe('1.8');
     expect(result.notes).toEqual([]);
     // объект не копируется и не обрабатывается повторно
     expect(result.world).toBe(save);
@@ -209,9 +211,9 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     // сохранение из будущего/прошлого формата — честная ошибка.
     // Stage 4.2.3.3: '1.4' стала поддерживаемой.
     // Stage 4.5.5: '1.5' стала поддерживаемой; срез трассируемости
-    // добавил '1.6'; Stage 4.9a.1 добавил '1.7';
-    // будущей остаётся '1.8'.
-    for (const version of ['0.9', '1.8', '2.0']) {
+    // добавил '1.6'; Stage 4.9a.1 добавил '1.7'; Stage 4.9b добавил
+    // '1.8'; будущей остаётся '1.9'.
+    for (const version of ['0.9', '1.9', '2.0']) {
       const save = makeLegacySave(version);
       try {
         migrateSavedWorld(save);
@@ -251,7 +253,7 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.0');
     expect(result.world.migration?.notes[0]).toContain('не указана');
-    expect(result.world.version).toBe('1.7');
+    expect(result.world.version).toBe('1.8');
   });
 
   it('легаси-записи истории миграции сохраняются, новые дописываются', () => {
@@ -261,13 +263,14 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     const result = migrateSavedWorld(save);
     const notes = result.world.migration?.notes ?? [];
     expect(notes[0]).toBe('старая запись миграции');
-    expect(notes.length).toBe(7);
+    expect(notes.length).toBe(8);
     expect(notes[1]).toContain('coreWorldState');
     expect(notes[2]).toContain('scheduling');
     expect(notes[3]).toContain('reactionLedger');
     expect(notes[4]).toContain('kineticExperiment');
     expect(notes[5]).toContain('kineticExperiment');
     expect(notes[6]).toContain('геохимический контекст');
+    expect(notes[7]).toContain('геохимический контекст атрибуции реакций');
   });
 
   it('миграции детерминированы: два прогона дают одинаковый результат', () => {
@@ -283,13 +286,13 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
   });
 
   it('версии схемы и Storage согласованы', () => {
-    expect(CURRENT_SAVE_SCHEMA_VERSION).toBe('1.7');
-    expect([...SAVE_SCHEMA_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7']);
-    expect(STORAGE_FORMAT_VERSION).toBe('1.7');
-    expect([...SUPPORTED_SAVE_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7']);
+    expect(CURRENT_SAVE_SCHEMA_VERSION).toBe('1.8');
+    expect([...SAVE_SCHEMA_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8']);
+    expect(STORAGE_FORMAT_VERSION).toBe('1.8');
+    expect([...SUPPORTED_SAVE_VERSIONS]).toEqual(['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8']);
   });
 
-  it('Stage 4.2.1/4.2.3.3: миграция 1.2 → 1.7 не создаёт scheduling, reactionLedger создаётся пустым', () => {
+  it('Stage 4.2.1/4.2.3.3: миграция 1.2 → 1.8 не создаёт scheduling, reactionLedger создаётся пустым', () => {
     const save = makeLegacySave('1.2', {
       coreWorldState: {
         schemaVersion: '1.0.0',
@@ -306,11 +309,11 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     });
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.2');
-    expect(result.to).toBe('1.7');
+    expect(result.to).toBe('1.8');
     // scheduling (1.2→1.3) не создаётся; reactionLedger (1.3→1.4)
     // создаётся пустым, схема ядра поднимается до 1.3.0, затем
-    // 1.6→1.7 поднимает её до 1.4.0 (две записи в следе)
-    expect(result.notes.length).toBe(7);
+    // 1.6→1.7 поднимает её до 1.4.0 и 1.7→1.8 — до 1.5.0 (три записи)
+    expect(result.notes.length).toBe(8);
     expect(result.notes[0]).toContain('scheduling');
     expect(result.notes[1]).toContain('1.3.0');
     expect(result.notes[2]).toContain('reactionLedger');
@@ -318,6 +321,7 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.notes[4]).toContain('kineticExperiment');
     expect(result.notes[5]).toContain('1.4.0');
     expect(result.notes[6]).toContain('не переписаны');
+    expect(result.notes[7]).toContain('1.5.0');
     const core = (result.world as { coreWorldState?: { scheduling?: unknown; reactionLedger?: { records: unknown[] }; clock: { localTimeS: number; stepCount: number } } }).coreWorldState;
     expect(core).toBeDefined();
     // поле scheduling НЕ создаётся: отсутствие = «планировщик не инициализирован»
@@ -354,14 +358,16 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     });
     const result = migrateSavedWorld(save);
     // scheduling не перезаписан; миграция 1.3→1.4 добавила пустой
-    // журнал реакций существующему coreWorldState (Stage 4.2.3.3)
-    expect(result.notes.length).toBe(6);
+    // журнал реакций существующему coreWorldState (Stage 4.2.3.3);
+    // 1.6→1.7 и 1.7→1.8 поднимают схему ядра без правки данных
+    expect(result.notes.length).toBe(7);
     expect(result.notes[0]).toContain('1.3.0');
     expect(result.notes[1]).toContain('reactionLedger');
     expect(result.notes[2]).toContain('kineticExperiment');
     expect(result.notes[3]).toContain('kineticExperiment');
     expect(result.notes[4]).toContain('1.4.0');
     expect(result.notes[5]).toContain('не переписаны');
+    expect(result.notes[6]).toContain('1.5.0');
     const core = (result.world as { coreWorldState?: { scheduling?: unknown; reactionLedger?: { records: unknown[] } } }).coreWorldState;
     expect(core?.scheduling).toEqual(scheduling);
     expect(core?.reactionLedger?.records).toEqual([]);
@@ -922,11 +928,11 @@ describe('Stage 4.1.1 Storage: изоляция ошибок и защита н�
     localStorage.clear();
   });
 
-  it('четыре нормальных мира (1.0/1.1/1.2/1.3) загружаются и мигрируются к 1.7', () => {
+  it('четыре нормальных мира (1.0/1.1/1.2/1.3) загружаются и мигрируются к 1.8', () => {
     writeRawEntries([rawEntry('w1', '1.0'), rawEntry('w2', '1.1'), rawEntry('w3', '1.2'), rawEntry('w4', '1.3')]);
     const worlds = getAllWorlds();
     expect(worlds.map((w) => w.id)).toEqual(['w1', 'w2', 'w3', 'w4']);
-    expect(worlds.every((w) => w.version === '1.7')).toBe(true);
+    expect(worlds.every((w) => w.version === '1.8')).toBe(true);
   });
 
   it('несовместимый мир (версия 2.0) не прячет остальные', () => {
@@ -953,7 +959,7 @@ describe('Stage 4.1.1 Storage: изоляция ошибок и защита н�
   it('saveWorld не уничтожает несовместимую запись', () => {
     writeRawEntries([rawEntry('w1', '1.0'), rawEntry('future', '2.0')]);
     const saved = saveWorld(makeGeneratedWorld('w-new'), fixtureSettings);
-    expect(saved.version).toBe('1.7');
+    expect(saved.version).toBe('1.8');
     // запись из будущего формата сохранена как есть
     const raw = readRawEntries();
     expect(raw.some((e) => e['id'] === 'future' && e['version'] === '2.0')).toBe(true);
@@ -1105,13 +1111,13 @@ describe('Stage 4.2.3.3 Persistence: reactionLedger в миграциях и rou
   it('миграция 1.3 → 1.4 без coreWorldState не создаёт ядро; след честен', () => {
     const result = migrateSavedWorld(makeLegacySave('1.3'));
     expect(result.from).toBe('1.3');
-    expect(result.to).toBe('1.7');
-    expect(result.world.version).toBe('1.7');
+    expect(result.to).toBe('1.8');
+    expect(result.world.version).toBe('1.8');
     expect(result.world.coreWorldState).toBeUndefined();
     expect(result.notes.some((n) => n.includes('reactionLedger'))).toBe(true);
   });
 
-  it('миграция 1.3 → 1.4 создаёт пустой журнал у существующего ядра и поднимает его схему (до 1.4.0 в полной цепочке)', () => {
+  it('миграция 1.3 → 1.4 создаёт пустой журнал у существующего ядра и поднимает его схему (до 1.5.0 в полной цепочке)', () => {
     const save = makeLegacySave('1.3', {
       coreWorldState: {
         schemaVersion: '1.2.0',
@@ -1127,9 +1133,9 @@ describe('Stage 4.2.3.3 Persistence: reactionLedger в миграциях и rou
       }
     });
     const result = migrateSavedWorld(save);
-    expect(result.to).toBe('1.7');
+    expect(result.to).toBe('1.8');
     const core = (result.world as { coreWorldState?: { schemaVersion: string; reactionLedger?: { records: unknown[] }; clock: { localTimeS: number } } }).coreWorldState;
-    expect(core?.schemaVersion).toBe('1.4.0');
+    expect(core?.schemaVersion).toBe('1.5.0');
     expect(core?.reactionLedger?.records).toEqual([]);
     expect(core?.clock.localTimeS).toBe(7);
     expect(result.notes.some((n) => n.includes('1.3.0'))).toBe(true);
@@ -1541,7 +1547,7 @@ describe('Stage 4.2.3.3.2 Persistence: явный null и форма coreWorldSt
     const migrated = migrateSavedWorld(save);
     const core = (migrated.world as { coreWorldState?: { reactionLedger?: unknown; schemaVersion?: string } }).coreWorldState;
     expect(core?.reactionLedger).toBeNull();
-    expect(core?.schemaVersion).toBe('1.4.0');
+    expect(core?.schemaVersion).toBe('1.5.0');
     // Storage не возвращает такое сохранение как валидный мир
     writeRawEntries([save, validSavedWorld('w-good')]);
     expect(getAllWorlds().map((w) => w.id)).toEqual(['w-good']);
@@ -1633,7 +1639,7 @@ describe('Stage 4.2.3.3.3 Persistence: миграция внешней схем�
   it('миграция 1.3 с coreWorldState: null — без TypeError; null не превращается в отсутствие или пустой объект', () => {
     const save = makeLegacySave('1.3', { coreWorldState: null });
     const migrated = migrateSavedWorld(save);
-    expect((migrated.world as { version?: string }).version).toBe('1.7');
+    expect((migrated.world as { version?: string }).version).toBe('1.8');
     expect((migrated.world as { coreWorldState?: unknown }).coreWorldState).toBeNull();
     expect(migrated.notes.some((n) => n.includes('null'))).toBe(true);
     expect(migrated.notes.some((n) => n.includes('оставлено без изменений'))).toBe(true);
@@ -1728,12 +1734,12 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     } as unknown as SavedWorld;
   }
 
-  /** Мир с экспериментом в актуальной схеме сохранений 1.7 (миграция не перезаписывает audit). */
+  /** Мир с экспериментом в актуальной схеме сохранений 1.8 (миграция не перезаписывает audit). */
   function worldWithMigratedExperiment(id: string, experiment: KineticExperimentState): SavedWorld {
     return {
       ...makeGeneratedWorld(id),
       savedAt: '2024-01-01T00:00:00.000Z',
-      version: '1.7',
+      version: '1.8',
       settings: fixtureSettings,
       kineticExperiment: experiment
     } as unknown as SavedWorld;
@@ -1758,12 +1764,12 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     };
   }
 
-  it('миграция 1.4 → 1.7 сохраняет отсутствие кинетического поля как отсутствие', () => {
+  it('миграция 1.4 → 1.8 сохраняет отсутствие кинетического поля как отсутствие', () => {
     const save = makeLegacySave('1.4');
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.4');
-    expect(result.to).toBe('1.7');
-    expect(result.world.version).toBe('1.7');
+    expect(result.to).toBe('1.8');
+    expect(result.world.version).toBe('1.8');
     // пустой эксперимент НЕ создаётся: отсутствие = «не настроен»
     expect((result.world as { kineticExperiment?: unknown }).kineticExperiment).toBeUndefined();
     // миграции цепочки оставили честный след
@@ -1771,30 +1777,32 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(result.notes[0]).toContain('kineticExperiment');
     expect(result.notes[1]).toContain('kineticExperiment');
     expect(result.notes[2]).toContain('геохимический контекст');
+    expect(result.notes[3]).toContain('геохимический контекст атрибуции реакций');
     // остальные поля мира не пересчитываются и не переписываются
     expect(result.world.customMarker).toBe('unique-value-42');
     expect(result.world.atmosphere.totalPressure).toBeNull();
   });
 
-  it('миграция 1.5 → 1.7 сохраняет отсутствие кинетического поля как отсутствие', () => {
+  it('миграция 1.5 → 1.8 сохраняет отсутствие кинетического поля как отсутствие', () => {
     const save = makeLegacySave('1.5');
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.5');
-    expect(result.to).toBe('1.7');
-    expect(result.world.version).toBe('1.7');
+    expect(result.to).toBe('1.8');
+    expect(result.world.version).toBe('1.8');
     expect((result.world as { kineticExperiment?: unknown }).kineticExperiment).toBeUndefined();
-    expect(result.notes.length).toBe(2);
+    expect(result.notes.length).toBe(3);
     expect(result.notes[0]).toContain('kineticExperiment');
     expect(result.notes[1]).toContain('геохимический контекст');
+    expect(result.notes[2]).toContain('геохимический контекст атрибуции реакций');
     expect(result.world.customMarker).toBe('unique-value-42');
   });
 
-  it('миграция 1.4 → 1.7 поднимает схему старого эксперимента до 1.1.0 и добавляет только маркеры unavailable_legacy', () => {
+  it('миграция 1.4 → 1.8 поднимает схему старого эксперимента до 1.1.0 и добавляет только маркеры unavailable_legacy', () => {
     const experiment = validKineticExperiment();
     const save = makeLegacySave('1.4', { kineticExperiment: experiment });
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.4');
-    expect(result.to).toBe('1.7');
+    expect(result.to).toBe('1.8');
     const migrated = (result.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment;
     expect(migrated?.schemaVersion).toBe('1.1.0');
     const audit = migrated?.history[0].segments[0].audit;
@@ -1823,7 +1831,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(result.notes.some((n) => n.includes('unavailable_legacy'))).toBe(true);
     // повторная миграция идемпотентна
     const again = migrateSavedWorld(result.world as unknown as SavedWorld);
-    expect(again.to).toBe('1.7');
+    expect(again.to).toBe('1.8');
     expect(again.notes).toEqual([]);
     expect((again.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment).toEqual(migrated);
   });
@@ -1864,7 +1872,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     const save = makeLegacySave('1.4', { kineticExperiment: conflicted });
     const result = migrateSavedWorld(save);
     expect(result.from).toBe('1.4');
-    expect(result.to).toBe('1.7');
+    expect(result.to).toBe('1.8');
     // эксперимент НЕ поднят до 1.1.0, маркеры НЕ добавлены:
     // чужое поле не затирается и не нормализуется
     const migrated = (result.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment;
@@ -1875,7 +1883,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(result.notes.some((n) => n.includes('не перезаписываются'))).toBe(true);
     // повторная миграция идемпотентна: конфликтное состояние не меняется
     const again = migrateSavedWorld(result.world as unknown as SavedWorld);
-    expect(again.to).toBe('1.7');
+    expect(again.to).toBe('1.8');
     expect(again.notes).toEqual([]);
     const stillExperiment = (again.world as { kineticExperiment?: KineticExperimentState }).kineticExperiment;
     expect(stillExperiment?.schemaVersion).toBe('1.0.0');
@@ -1946,7 +1954,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(imported.reason).toBeNull();
     const restored = imported.world as { kineticExperiment?: KineticExperimentState; version?: string };
     // миграция подняла схему состояния до 1.1.0 и добавила маркер
-    expect(restored.version).toBe('1.7');
+    expect(restored.version).toBe('1.8');
     expect(restored.kineticExperiment?.schemaVersion).toBe('1.1.0');
     const audit = restored.kineticExperiment?.history[0].segments[0].audit;
     expect(audit?.kind).toBe('unavailable_legacy');
@@ -1971,7 +1979,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     const saved = {
       ...world,
       savedAt: '2024-01-01T00:00:00.000Z',
-      version: '1.7',
+      version: '1.8',
       settings: fixtureSettings
     } as unknown as SavedWorld;
     const json = exportWorldToJSON(saved);
@@ -1979,7 +1987,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(imported.world).not.toBeNull();
     expect(imported.reason).toBeNull();
     const restored = imported.world as { kineticExperiment?: KineticExperimentState; version?: string };
-    expect(restored.version).toBe('1.7');
+    expect(restored.version).toBe('1.8');
     // снимок пережил сериализацию целиком: значения не пересчитаны
     expect(restored.kineticExperiment).toEqual(experiment);
     const audit = restored.kineticExperiment?.history[0].segments[0].audit;
@@ -2029,7 +2037,7 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     const saved = {
       ...world,
       savedAt: '2024-01-01T00:00:00.000Z',
-      version: '1.7',
+      version: '1.8',
       settings: fixtureSettings
     } as unknown as SavedWorld;
     const md = exportWorldToMarkdown(saved);
@@ -2286,7 +2294,7 @@ describe('Stage 4.9a.1 Persistence: геохимический контекст 
     } as SavedWorld;
   }
 
-  it('миграция 1.6 → 1.7 поднимает схему ядра до 1.4.0 и НЕ переписывает записи потоков', () => {
+  it('миграция 1.6 → 1.8 поднимает схему ядра до 1.5.0 и НЕ переписывает записи потоков', () => {
     const record = legacyFluxRecord('flux-legacy-1');
     const save = legacySave16WithFluxLedger('w-geo-mig', [record]);
     const result = migrateSavedWorld(save);
@@ -2294,7 +2302,7 @@ describe('Stage 4.9a.1 Persistence: геохимический контекст 
     expect(result.to).toBe(CURRENT_SAVE_SCHEMA_VERSION);
     expect(result.world.version).toBe(CURRENT_SAVE_SCHEMA_VERSION);
     const core = (result.world as { coreWorldState?: { schemaVersion?: string; fluxLedger?: { records: unknown[] } } }).coreWorldState;
-    expect(core?.schemaVersion).toBe('1.4.0');
+    expect(core?.schemaVersion).toBe('1.5.0');
     // легаси-запись не переписана: поле geochemical не появилось,
     // содержимое записи сохранено как есть
     expect(core?.fluxLedger?.records).toEqual([record]);

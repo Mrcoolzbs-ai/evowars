@@ -439,10 +439,11 @@ describe('Stage 4.2.2: профиль температур атмосферы', 
 describe('Stage 4.2.2: CoreWorldState и валидация', () => {
   // Stage 4.2.3.3: версия схемы ядра поднята до 1.3.0 (опциональное
   // поле reactionLedger); Stage 4.9a.1: до 1.4.0 (опциональное поле
-  // FluxRecord.geochemical); контракт 4.2.2 (тепловое состояние) не
-  // изменён.
+  // FluxRecord.geochemical); Stage 4.9b: до 1.5.0 (опциональное поле
+  // ReactionRecord.geochemical); контракт 4.2.2 (тепловое состояние)
+  // не изменён.
   it('текущая версия схемы с тепловым состоянием валидна', () => {
-    expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.4.0');
+    expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.5.0');
     const state = thermalWorld();
     expect(validateWorldState(state)).toEqual([]);
   });
