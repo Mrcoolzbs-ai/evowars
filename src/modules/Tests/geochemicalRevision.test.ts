@@ -668,8 +668,10 @@ describe('Stage 4.9a.1 (E): конверсии, provenance, атомарност
       subject: { subjectType: 'substance' as const, speciesId: 'co2', quantityKind: 'integrated' as const, amount: 1, basis: 'column_amount' as const },
       time: null, status: 'pending' as const
     };
-    registerFlux(ledger, fluxRecord);
-    expect(() => registerFlux(ledger, fluxRecord)).toThrowError(FluxLedgerError);
+    // прямой дубликат id через registerFlux (функция иммутабельна:
+    // дубликат ищется в ВОЗВРАЩАЁМОМ журнале)
+    const registered = registerFlux(createFluxLedger(), fluxRecord);
+    expect(() => registerFlux(registered, fluxRecord)).toThrowError(FluxLedgerError);
   });
 
   it('(23) элементный аудит после чистого внутреннего переноса остаётся balanced', () => {
@@ -694,14 +696,17 @@ describe('Stage 4.9a.1 (E): конверсии, provenance, атомарност
   it('(24) внешний перенос без проверяемой границы не объявляется balanced', () => {
     const catalog = mergedCatalog();
     const before = makeReservoirs();
-    // внешний вход co2 7.5 mol/m² зафиксирован в журнале,
-    // но состояние резервуаров «после» НЕ отражает поступление
-    const ledger = registerFlux(createFluxLedger(), {
+    // внешний вход co2 7.5 mol/m² зафиксирован в журнале как ПРИМЕНЁННЫЙ
+    // поток, но состояние резервуаров «после» НЕ отражает поступление
+    // (проверяемая граница отсутствует — контекст не записан)
+    const registered = registerFlux(createFluxLedger(), {
       id: 'fx-rev-ext', kind: 'external_input', from: 'external', to: 'atmosphere',
       subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 7.5, basis: 'column_amount' },
       time: TIME
     });
-    const audit = auditGeochemicalElements(catalog, ledger, before, before);
+    const applied = applyFlux(registered, before, 'fx-rev-ext');
+    // аудит: состояние «после» не отражает внешний вход (явно before)
+    const audit = auditGeochemicalElements(catalog, applied.ledger, before, before);
     expect(audit.status).not.toBe('balanced');
     expect(audit.balanced).toBe(false);
     // диагностика видит чистый внешний приход и расхождение по C/O

@@ -1133,7 +1133,8 @@ export function importWorldFromJSONDetailed(json: string): WorldImportResult {
     // время, история запусков); отсутствующее поле проходит насквозь.
     const problems = [
       ...reactionLedgerProblemsOfWorld(migrated),
-      ...kineticExperimentProblemsOfWorld(migrated)
+      ...kineticExperimentProblemsOfWorld(migrated),
+      ...geochemicalFluxContextProblemsOfWorld(migrated)
     ];
     if (problems.length > 0) {
       return { world: null, reason: 'некорректное состояние мира: ' + problems.join('; ') };
