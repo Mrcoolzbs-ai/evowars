@@ -80,7 +80,7 @@ import type { ReservoirRecord } from '../Core/reservoir';
 import { auditReactionStoichiometry } from '../Core/reactionLedger';
 import type { ReactionRecord } from '../Core/reactionLedger';
 import { validateFluxGeochemicalContext } from '../Core/geochemicalFluxContext';
-import { mergeGeochemicalSpeciesIntoCatalog } from '../Core/geochemicalSpecies';
+import { buildSpeciesCatalogFromDefinitions, mergeGeochemicalSpeciesIntoCatalog } from '../Core/geochemicalSpecies';
 import type { GeochemicalSpeciesDefinition } from '../Core/geochemicalSpecies';
 
 // ============================================
@@ -575,7 +575,7 @@ describe('Stage 4.9a.1 (D): структурная атрибуция геохи
     // контекст у легаси-записи не синтезируется и не появляется при валидации
     const revalidated = validateFluxLedger(record ? { records: [record] } : { records: [] });
     expect(revalidated).toEqual([]);
-    expect((record as Record<string, unknown>).geochemical).toBeUndefined();
+    expect((record as unknown as Record<string, unknown>).geochemical).toBeUndefined();
   });
 });
 
@@ -615,7 +615,6 @@ describe('Stage 4.9a.1 (E): конверсии, provenance, атомарност
   });
 
   it('(20b) runtime-валидация provenance: некорректные типы и пустые идентификаторы отклоняются', () => {
-    const base = transportSpec();
     // числовая скорость без provenance-источника
     const noSource = validateGeochemicalProcessSpec(transportSpec({
       rate: { status: 'known', unit: GEOCHEMICAL_RATE_UNIT, molPerM2PerYear: 1, provenance: { note: 'без источника' } }
@@ -700,7 +699,7 @@ describe('Stage 4.9a.1 (E): конверсии, provenance, атомарност
     const ledger = registerFlux(createFluxLedger(), {
       id: 'fx-rev-ext', kind: 'external_input', from: 'external', to: 'atmosphere',
       subject: { subjectType: 'substance', speciesId: 'co2', quantityKind: 'integrated', amount: 7.5, basis: 'column_amount' },
-      time: TIME, status: 'applied'
+      time: TIME
     });
     const audit = auditGeochemicalElements(catalog, ledger, before, before);
     expect(audit.status).not.toBe('balanced');

@@ -2265,7 +2265,7 @@ describe('Stage 4.9a.1 Persistence: геохимический контекст 
 
   /** Сохранение схемы 1.6 с ядром известной схемы 1.3.0 и заданным журналом потоков. */
   function legacySave16WithFluxLedger(id: string, records: unknown[]): LegacySaveFixture {
-    const core = coreWorldStateFromLegacyWorld(starWorld()) as Record<string, unknown>;
+    const core = coreWorldStateFromLegacyWorld(starWorld()) as unknown as Record<string, unknown>;
     // имитация состояния на момент схемы 1.6: ядро ещё 1.3.0
     core.schemaVersion = '1.3.0';
     core.fluxLedger = { records };
