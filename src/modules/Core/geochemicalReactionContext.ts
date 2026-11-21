@@ -53,13 +53,15 @@ export interface ReactionFluxTime {
    * (FluxTime из Core/fluxLedger.ts: segmentIndex + localTimeS)
    * поля kind не имеет; kind задаёт только формы, его явно указавшие
    * (например, wallclock-отметки за пределами симуляции).
+   * Строчная индекс-сигнатура НЕ используется: интерфейс без неё
+   * структурно совместим с меткой времени ядра FluxTime; имена
+   * полей фиксированы контрактом.
    */
   readonly kind?: 'simulation' | 'wallclock';
   readonly year?: number | null;
   readonly second?: number | null;
   readonly segmentIndex?: number;
   readonly localTimeS?: number;
-  readonly [key: string]: unknown;
 }
 
 /**

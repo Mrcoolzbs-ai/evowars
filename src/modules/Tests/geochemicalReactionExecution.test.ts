@@ -51,7 +51,6 @@ import {
   migrateSavedWorld
 } from '../Core/migrations';
 import {
-  GEOCHEMICAL_ORGANIC_CARBON_SPECIES_ID,
   validateGeochemicalReactionDefinition,
   planGeochemicalReaction,
   executeGeochemicalReaction,
@@ -273,8 +272,8 @@ describe('Stage 4.9b: атомарное применение к материа�
     // набор ключей полной среды сохраняется
     expect(Object.keys(res.reservoirs).sort()).toEqual(['atmosphere', 'crust', 'mantle', 'ocean']);
     // незатронутые резервуары — те же объекты, что во входе (разделение по ссылке)
-    expect(res.reservoirs.crust.entries.caco3).toBe(30);
-    expect(res.reservoirs.mantle.entries.co2).toBe(10000);
+    expect(res.reservoirs.crust.material!.entries.caco3).toBe(30);
+    expect(res.reservoirs.mantle.material!.entries.co2).toBe(10000);
     expect(res.reservoirs.mantle).toBe(env.reservoirs.mantle);
     expect(res.reservoirs.crust).toBe(env.reservoirs.crust);
     // затронутые — новые объекты
@@ -645,6 +644,7 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
       processId: 'legacy'
     };
     const save17 = {
+      savedAt: '2026-01-01T00:00:00.000Z',
       version: '1.7',
       coreWorldState: {
         schemaVersion: '1.4.0',
@@ -664,7 +664,7 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
     expect(SAVE_SCHEMA_VERSIONS).toContain('1.8');
     expect(SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS).toContain('1.5.0');
     expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.5.0');
-    const { world, notes, from, to } = migrateSavedWorld(save17 as never);
+    const { world, notes, from, to } = migrateSavedWorld(save17);
     expect(from).toBe('1.7');
     expect(to).toBe('1.8');
     expect(world.version).toBe('1.8');
@@ -677,7 +677,7 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
     expect(notesJoined).toContain('1.7');
     expect(notesJoined).toContain('1.8');
     // идемпотентность
-    const second = migrateSavedWorld(world as never);
+    const second = migrateSavedWorld(world);
     expect(second.world).toEqual(world);
   });
 
@@ -688,9 +688,10 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
     for (const key of Object.keys(envB.reservoirs).reverse()) {
       reversed[key] = envB.reservoirs[key]!;
     }
-    envB.reservoirs = reversed;
+    // readonly-поле не переопределяется мутированием: среда пересобирается
+    const envBRev: GeochemicalReactionExecutionEnvironment = { ...envB, reservoirs: reversed };
     const resA = executeGeochemicalReaction(co2Dissolution(), envA, makeInput() as never);
-    const resB = executeGeochemicalReaction(co2Dissolution(), envB, makeInput() as never);
+    const resB = executeGeochemicalReaction(co2Dissolution(), envBRev, makeInput() as never);
     expect(resA.status).toBe('applied');
     expect(resB.status).toBe('applied');
     if (resA.status !== 'applied' || resB.status !== 'applied') return;
