@@ -446,3 +446,25 @@ export {
   type Ussa1976LayerRecord,
   type Ussa1976CheckNode
 } from './atmosphericReferenceProfiles';
+
+// ============================================
+// Stage 4.8.2.1: спектральная непрозрачность - справочные данные.
+// Константы формул HITRAN (c2 и пр.), верифицированный фрагмент
+// molparam.txt (распространённость, Q(296K), gj, молярная масса),
+// статус line-by-line записей (not_verifiable) и БУДУЩИЕ контракты
+// континуумов CIA/MT_CKD (без коэффициентов).
+// ============================================
+export {
+  HITRAN_SPECTRAL_CONSTANTS,
+  HITRAN_CONSTANTS_PROVENANCE,
+  secondRadiationConstantCmK,
+  speedOfLightMs,
+  sqrtLn2,
+  MOLPARAM_FRAGMENT,
+  MOLPARAM_FRAGMENT_BY_ISO,
+  HITRAN_LINE_LIST_STATUS,
+  HITRAN_CIA_CONTRACT,
+  MT_CKD_CONTRACT,
+  type MolparamIsotopologueRecord,
+  type SpectralReferenceStatus
+} from './spectralOpacityReferenceData';

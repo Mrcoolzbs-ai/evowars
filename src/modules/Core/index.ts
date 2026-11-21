@@ -93,6 +93,8 @@ export * from './interiorThermalEvolution';
 export * from './heatBudgetClassification';
 // Stage 4.8.1: вертикальная гидростатическая структура атмосферы (колонка P(z), T(z), rho, g, H, столбы).
 export * from './hydrostaticAtmosphere';
+// Stage 4.8.2.1: спектральная непрозрачность (line-by-line: S(T), Doppler, Lorentz, Voigt, sigma, alpha).
+export * from './spectralOpacity';
 
 
 
