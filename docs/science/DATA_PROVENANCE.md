@@ -1172,6 +1172,28 @@ DataProvenance (known-скорость требует идентифициров
 миграция сохранений 1.6 → 1.7 (schemaVersion CoreWorldState 1.4.0)
 фиксирует это note'ами и идемпотентна.
 
+**Структурная атрибуция геохимических реакций**
+(`src/modules/Core/geochemicalReactionContext.ts`, Stage 4.9b):
+применённые исполнителем геохимические реакции записывают в
+`ReactionRecord` сериализуемый контекст `GeochemicalReactionContext`
+(собственная версия схемы
+GEOCHEMICAL_REACTION_CONTEXT_SCHEMA_VERSION `1.0.0`): processId,
+reactionId, механизм `reaction`, extent в mol/m² с единицей
+`mol_m2` и основанием `column_amount`, ОБЯЗАТЕЛЬНЫЙ provenance
+extent (идентифицированный источник значения завершённой степени
+протекания: `sourceName|sourceId|datasetId|reference`), ОБЯЗАТЕЛЬНЫЙ
+provenance определения реакции (откуда стехиометрия, описание,
+условия), временная отметка, assumptions, applicability и
+limitations. Валидация контекста fail-closed и включена в
+validateReactionRecord/validateReactionLedger; JSON round-trip
+сохраняет контекст посимвольно. Легаси-записи ReactionRecord без
+поля `geochemical` остаются валидными: происхождение для них НЕ
+синтезируется; миграция сохранений 1.7 → 1.8 (schemaVersion
+CoreWorldState 1.5.0) записи реакций не переписывает и идемпотентна.
+Численные extents в тестах — синтетические величины фикстур
+(`synthetic test fixture`), в научный каталог не вводятся: каталог
+процессов по-прежнему не содержит скоростей и равновесий.
+
 ## 2. Каталог научных ресурсов
 
 Формат записи соответствует ТЗ §19.7 (14 полей, компактно).
