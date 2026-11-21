@@ -245,7 +245,8 @@ describe('Уширение линий', () => {
             lines: [syntheticLine({ lineId: 'L1', broadening: { n2: { gammaCm1PerAtmAtRef: 0.08, temperatureExponent: 0.6 } } })]
           })
         ],
-        broadeners: [{ gasId: 'n2', moleFraction: pAtm }]
+        // Доля h2o = 0: self-вклад отсутствует, концентрация поглотителя известна (ноль).
+        broadeners: [{ gasId: 'h2o', moleFraction: 0 }, { gasId: 'n2', moleFraction: pAtm }]
       })
     );
     expect(selfOnly.status).toBe('completed');
@@ -283,7 +284,8 @@ describe('Уширение линий', () => {
     if (result.status === 'out_of_applicability') {
       expect(result.reason).toContain('коэффициенты уширения');
       expect(result.missingParameters?.join(' ')).toContain('co2');
-      expect(JSON.stringify(result)).not.toContain('air');
+      // В отсутствующих параметрах нет замены на air-broadening.
+      expect(result.missingParameters?.join(' ')).not.toContain('air');
     }
   });
 
@@ -304,9 +306,10 @@ describe('Уширение линий', () => {
     );
     expect(withShift.status).toBe('completed');
     if (withShift.status === 'completed') {
-      // n2: -0.02*0.75 = -0.015; self: -0.01*0.01 = -0.0001; итого -0.0151 cm-1.
-      expect(withShift.linesUsed[0].pressureShiftCm1).toBeCloseTo(-0.0151, 12);
-      expect(withShift.linesUsed[0].wavenumberCm1Shifted).toBeCloseTo(1000 - 0.0151, 12);
+      // pressureShift линии переопределён только ключом n2, поэтому вклад даёт
+      // один n2: -0.02*0.75 = -0.015 cm-1 (self-коэффициент сдвига у этой линии не задан).
+      expect(withShift.linesUsed[0].pressureShiftCm1).toBeCloseTo(-0.015, 12);
+      expect(withShift.linesUsed[0].wavenumberCm1Shifted).toBeCloseTo(1000 - 0.015, 12);
       expect(withShift.applicabilityDiagnostics.join(' ')).not.toContain('коэффициенты сдвига давления в записи отсутствуют');
     }
     expect(withoutShift.status).toBe('completed');
@@ -398,20 +401,24 @@ describe('Профиль Фойгта', () => {
       baseInput({
         species: [h2o, co2],
         broadeners: [
-          { gasId: 'h2o', moleFraction: 0.01 },
-          { gasId: 'co2', moleFraction: 0.02 },
+          // Обе доли ниже порога существенности 0.01: у фикс-линий нет
+          // взаимных co2/h2o-коэффициентов, и sub-пороговый вклад легален.
+          { gasId: 'h2o', moleFraction: 0.005 },
+          { gasId: 'co2', moleFraction: 0.005 },
           { gasId: 'n2', moleFraction: 0.73 },
           { gasId: 'o2', moleFraction: 0.24 }
         ]
       })
     );
     // Одинаковый состав уширителей (n2, o2) в обоих прогонах: тогда sigma_h2o
-    // в 'both' и 'h2oOnly' совпадает и сумма строго аддитивна.
+    // в 'both' и 'h2oOnly' совпадает и сумма строго аддитивна. Доля co2 = 0.005
+    // (ниже порога существенного уширителя 0.01): у линии h2o нет co2-коэффициента,
+    // но при sub-пороговой доле отсутствие коэффициента не является ошибкой применимости.
     const h2oOnly = computeSpectralOpacity(
       baseInput({
         species: [h2o],
         broadeners: [
-          { gasId: 'h2o', moleFraction: 0.01 },
+          { gasId: 'h2o', moleFraction: 0.005 },
           { gasId: 'n2', moleFraction: 0.73 },
           { gasId: 'o2', moleFraction: 0.24 }
         ]
@@ -421,7 +428,7 @@ describe('Профиль Фойгта', () => {
       baseInput({
         species: [co2],
         broadeners: [
-          { gasId: 'co2', moleFraction: 0.02 },
+          { gasId: 'co2', moleFraction: 0.005 },
           { gasId: 'n2', moleFraction: 0.73 },
           { gasId: 'o2', moleFraction: 0.24 }
         ]
@@ -458,7 +465,9 @@ describe('Сечение и объёмный коэффициент поглощ
           ]
         })
       ],
-      broadeners: [{ gasId: 'n2', moleFraction: 1.0 }],
+      // Доля h2o = 0: self-вклад отсутствует, но концентрация поглотителя
+      // известна (ноль), поэтому расчёт completed, а gamma идёт только от n2.
+      broadeners: [{ gasId: 'h2o', moleFraction: 0 }, { gasId: 'n2', moleFraction: 1.0 }],
       grid: { startWavenumberCm1: 999.5, endWavenumberCm1: 1000.5, stepCm1: 0.0005 }
     });
   }
@@ -486,6 +495,15 @@ describe('Сечение и объёмный коэффициент поглощ
       baseInput({
         pressurePa: 5e4,
         temperatureK: 250,
+        // Partition sum с диапазоном, покрывающим и T = 250 K, и T_ref = 296 K.
+        species: [
+          speciesH2o({
+            partitionSum: rangedPartitionSum('161', [
+              { temperatureK: 200, partitionSum: 120 },
+              { temperatureK: 300, partitionSum: 210 }
+            ])
+          })
+        ],
         broadeners: [{ gasId: 'h2o', moleFraction: 0.02 }, { gasId: 'n2', moleFraction: 0.98 }]
       })
     );
@@ -505,8 +523,9 @@ describe('Сечение и объёмный коэффициент поглощ
   });
 
   it('18. удвоение концентрации поглотителя удваивает коэффициент поглощения', () => {
-    // Двойная доля h2o (0.004 -> 0.008); у линии НЕТ self-коэффициента, а доля h2o
-    // ниже порога существенного уширителя, поэтому форма sigma НЕ меняется,
+    // Двойная доля h2o (0.004 -> 0.008); доля n2 фиксирована (0.9): у линии НЕТ
+    // self-коэффициента и сдвига, доля h2o ниже порога существенного уширителя,
+    // поэтому частичные давления уширителей и форма sigma НЕ меняются,
     // меняется только n_i: alpha = n_i*sigma ровно удваивается на каждом узле.
     const low = computeSpectralOpacity(
       baseInput({
@@ -521,7 +540,7 @@ describe('Сечение и объёмный коэффициент поглощ
             ]
           })
         ],
-        broadeners: [{ gasId: 'h2o', moleFraction: 0.004 }, { gasId: 'n2', moleFraction: 0.996 }]
+        broadeners: [{ gasId: 'h2o', moleFraction: 0.004 }, { gasId: 'n2', moleFraction: 0.9 }]
       })
     );
     const high = computeSpectralOpacity(
@@ -537,7 +556,7 @@ describe('Сечение и объёмный коэффициент поглощ
             ]
           })
         ],
-        broadeners: [{ gasId: 'h2o', moleFraction: 0.008 }, { gasId: 'n2', moleFraction: 0.992 }]
+        broadeners: [{ gasId: 'h2o', moleFraction: 0.008 }, { gasId: 'n2', moleFraction: 0.9 }]
       })
     );
     expect(low.status).toBe('completed');
@@ -613,7 +632,12 @@ describe('Валидация входа', () => {
             lines: [
               syntheticLine({
                 lineId: 'L1',
-                broadening: { n2: { gammaCm1PerAtmAtRef: Number.NaN, temperatureExponent: 0.5 } }
+                // self-коэффициент известен (доля h2o 0.01 существенна), а NaN
+                // сидит в n2-коэффициенте: gamma_L = NaN -> numerical_failure.
+                broadening: {
+                  self: { gammaCm1PerAtmAtRef: 0.1, temperatureExponent: 0.5 },
+                  n2: { gammaCm1PerAtmAtRef: Number.NaN, temperatureExponent: 0.5 }
+                }
               })
             ]
           })
@@ -721,7 +745,8 @@ describe('Реальные данные и независимые проверк
 
   it('28. профиль Фойгта против независимой квадратуры ядра K(x,y)', () => {
     // Независимый эталон: K(x,y) = (y/pi)*int e^{-t^2}/((x-t)^2+y^2) dt (Simpson),
-    // f_V = K * sqrt(ln2/pi) / alpha_D, x = sqrt(ln2)*(nu-nu0)/alpha_D.
+    // f_V = K * sqrt(ln2/pi) / alpha_D, где x = sqrt(ln2)*(nu-nu0)/alpha_D,
+    // т.е. смещение в cm-1: nu - nu0 = x * alpha_D / sqrt(ln2).
     const alphaD = 0.05;
     const gammaL = 0.05;
     const y = (gammaL / alphaD) * Math.sqrt(Math.LN2);
@@ -739,7 +764,11 @@ describe('Реальные данные и независимые проверк
     };
     for (const x of [-1.2, -0.4, 0, 0.4, 1.2, 2.5]) {
       const reference = (fK(x) * Math.sqrt(Math.LN2 / Math.PI)) / alphaD;
-      const ours = voigtProfileCm({ offsetCm1: x * alphaD, dopplerHwhmCm1: alphaD, lorentzHwhmCm1: gammaL });
+      const ours = voigtProfileCm({
+        offsetCm1: (x * alphaD) / Math.sqrt(Math.LN2),
+        dopplerHwhmCm1: alphaD,
+        lorentzHwhmCm1: gammaL
+      });
       expect(Math.abs(ours - reference) / reference).toBeLessThan(1e-4);
     }
   });

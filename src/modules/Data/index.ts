@@ -459,6 +459,7 @@ export {
   HITRAN_CONSTANTS_PROVENANCE,
   secondRadiationConstantCmK,
   speedOfLightMs,
+  ln2,
   sqrtLn2,
   MOLPARAM_FRAGMENT,
   MOLPARAM_FRAGMENT_BY_ISO,

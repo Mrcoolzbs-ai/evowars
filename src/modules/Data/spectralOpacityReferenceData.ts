@@ -65,7 +65,10 @@ export const HITRAN_SPECTRAL_CONSTANTS = {
 /** Скорость света в вакууме, m/s (точно, по определению СИ). */
 export const speedOfLightMs = 2.99792458e8;
 
-/** sqrt(ln 2) — используется в удвоении ширины Гаусса (HWHM <-> std). */
+/** ln 2 — входит в формулу доплеровской ширины alpha_D = nu0/c*sqrt(2*kB*T*ln2/m). */
+export const ln2 = Math.LN2;
+
+/** sqrt(ln 2) — используется в пересчёте ширины Гаусса (HWHM <-> std). */
 export const sqrtLn2 = Math.sqrt(Math.LN2);
 
 export const HITRAN_CONSTANTS_PROVENANCE: DataProvenance = {

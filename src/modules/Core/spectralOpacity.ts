@@ -59,8 +59,8 @@ import { tryGetGasSpecies } from '../Data/gases';
 import {
   HITRAN_SPECTRAL_CONSTANTS,
   MOLPARAM_FRAGMENT_BY_ISO,
-  speedOfLightMs,
-  sqrtLn2
+  ln2,
+  speedOfLightMs
 } from '../Data/spectralOpacityReferenceData';
 
 // ============================================
@@ -302,7 +302,7 @@ export function dopplerHwhmCm1(input: {
     return NaN;
   }
   const velocityWidthMs = Math.sqrt(
-    (2 * UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * input.temperatureK * sqrtLn2 * 1000) / input.molarMassGPerMol
+    (2 * UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * input.temperatureK * ln2 * 1000) / input.molarMassGPerMol
   );
   return (input.wavenumberCm1 * velocityWidthMs) / speedOfLightMs;
 }
