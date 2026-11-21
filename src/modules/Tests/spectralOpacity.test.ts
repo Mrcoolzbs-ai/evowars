@@ -499,7 +499,7 @@ describe('Сечение и объёмный коэффициент поглощ
         expect(Math.abs(c.absorptionCoefficientPerM[i] / (c.numberDensityPerM3 * s) - 1)).toBeLessThan(1e-12);
       });
       result.absorptionCoefficientPerM.forEach((a, i) => {
-        expect(a).toBe(c.contributions[0].absorptionCoefficientPerM[i]);
+        expect(a).toBe(c.absorptionCoefficientPerM[i]);
       });
     }
   });

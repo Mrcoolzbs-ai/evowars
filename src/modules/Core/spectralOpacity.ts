@@ -792,7 +792,6 @@ export function computeSpectralOpacity(input: SpectralOpacityInput): SpectralOpa
         temperatureExponent: number;
         partialPressureAtm: number;
       }[] = [];
-      const broadenersUsed: { gasId: string; partialPressureAtm: number; gammaCm1: number }[] = [];
       const missingBroadeners: string[] = [];
 
       // (a) self — parциальная доля самого поглощающего газа.
