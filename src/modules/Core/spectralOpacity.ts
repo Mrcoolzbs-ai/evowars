@@ -629,8 +629,11 @@ export function computeSpectralOpacity(input: SpectralOpacityInput): SpectralOpa
 
   const significant = defaults.significantBroadenerMoleFraction;
   const partialAtmByGasId = new Map<string, number>();
+  // Молярные доли (НЕ парциальные давления) — для концентраций n_i = x_i*n_total.
+  const moleFractionByGasId = new Map<string, number>();
   for (const b of input.broadeners) {
     partialAtmByGasId.set(b.gasId, (b.moleFraction * pressurePa) / ATM_TO_PA);
+    moleFractionByGasId.set(b.gasId, b.moleFraction);
   }
 
   const isotopeMode = input.isotopicScaleMode ?? 'terrestrial-assumption';
@@ -952,9 +955,9 @@ export function computeSpectralOpacity(input: SpectralOpacityInput): SpectralOpa
     });
   }
 
-  // Доля каждого поглотителя (для n_i) — из списка уширителей.
+  // Молярная доля каждого поглотителя (для n_i) — из списка уширителей.
   for (const spRes of preparedSpecies) {
-    const xSelf = partialAtmByGasId.get(spRes.gasId);
+    const xSelf = moleFractionByGasId.get(spRes.gasId);
     if (xSelf === undefined) {
       return {
         status: 'invalid_input',

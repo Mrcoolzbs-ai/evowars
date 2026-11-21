@@ -636,7 +636,8 @@ describe('Валидация входа', () => {
                 // сидит в n2-коэффициенте: gamma_L = NaN -> numerical_failure.
                 broadening: {
                   self: { gammaCm1PerAtmAtRef: 0.1, temperatureExponent: 0.5 },
-                  n2: { gammaCm1PerAtmAtRef: Number.NaN, temperatureExponent: 0.5 }
+                  n2: { gammaCm1PerAtmAtRef: Number.NaN, temperatureExponent: 0.5 },
+                  o2: { gammaCm1PerAtmAtRef: 0.05, temperatureExponent: 0.65 }
                 }
               })
             ]
