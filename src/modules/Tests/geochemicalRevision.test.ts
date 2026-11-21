@@ -662,7 +662,6 @@ describe('Stage 4.9a.1 (E): конверсии, provenance, атомарност
     // повторное применение applied-записи к резервуарам запрещено контрактом ядра
     expect(() => applyFlux(first.ledger, first.reservoirs, 'fx-rev-double')).toThrowError(/уже применён/);
     // прямой дубликат id через registerFlux
-    const ledger = createFluxLedger();
     const fluxRecord = {
       id: 'fx-rev-direct', kind: 'internal_transfer' as const, from: 'ocean', to: 'atmosphere',
       subject: { subjectType: 'substance' as const, speciesId: 'co2', quantityKind: 'integrated' as const, amount: 1, basis: 'column_amount' as const },
