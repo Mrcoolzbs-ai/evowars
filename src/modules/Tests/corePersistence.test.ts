@@ -311,9 +311,10 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.from).toBe('1.2');
     expect(result.to).toBe('1.8');
     // scheduling (1.2→1.3) не создаётся; reactionLedger (1.3→1.4)
-    // создаётся пустым, схема ядра поднимается до 1.3.0, затем
-    // 1.6→1.7 поднимает её до 1.4.0 и 1.7→1.8 — до 1.5.0 (три записи)
-    expect(result.notes.length).toBe(8);
+    // создаётся пустым, схема ядра поднимается до 1.3.0; 1.4→1.5 и
+    // 1.5→1.6 оставляют по записи, 1.6→1.7 поднимает ядро до 1.4.0
+    // (две записи) и 1.7→1.8 — до 1.5.0 (две записи)
+    expect(result.notes.length).toBe(9);
     expect(result.notes[0]).toContain('scheduling');
     expect(result.notes[1]).toContain('1.3.0');
     expect(result.notes[2]).toContain('reactionLedger');
@@ -322,6 +323,7 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.notes[5]).toContain('1.4.0');
     expect(result.notes[6]).toContain('не переписаны');
     expect(result.notes[7]).toContain('1.5.0');
+    expect(result.notes[8]).toContain('не переписаны');
     const core = (result.world as { coreWorldState?: { scheduling?: unknown; reactionLedger?: { records: unknown[] }; clock: { localTimeS: number; stepCount: number } } }).coreWorldState;
     expect(core).toBeDefined();
     // поле scheduling НЕ создаётся: отсутствие = «планировщик не инициализирован»
@@ -360,7 +362,8 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     // scheduling не перезаписан; миграция 1.3→1.4 добавила пустой
     // журнал реакций существующему coreWorldState (Stage 4.2.3.3);
     // 1.6→1.7 и 1.7→1.8 поднимают схему ядра без правки данных
-    expect(result.notes.length).toBe(7);
+    // (замечание: scheduling уже имелся, запись не добавляется)
+    expect(result.notes.length).toBe(8);
     expect(result.notes[0]).toContain('1.3.0');
     expect(result.notes[1]).toContain('reactionLedger');
     expect(result.notes[2]).toContain('kineticExperiment');
@@ -368,6 +371,7 @@ describe('Stage 4.1 Persistence: миграции сохранений', () => {
     expect(result.notes[4]).toContain('1.4.0');
     expect(result.notes[5]).toContain('не переписаны');
     expect(result.notes[6]).toContain('1.5.0');
+    expect(result.notes[7]).toContain('не переписаны');
     const core = (result.world as { coreWorldState?: { scheduling?: unknown; reactionLedger?: { records: unknown[] } } }).coreWorldState;
     expect(core?.scheduling).toEqual(scheduling);
     expect(core?.reactionLedger?.records).toEqual([]);
@@ -1772,8 +1776,9 @@ describe('Stage 4.5.5 Persistence: кинетический эксперимен
     expect(result.world.version).toBe('1.8');
     // пустой эксперимент НЕ создаётся: отсутствие = «не настроен»
     expect((result.world as { kineticExperiment?: unknown }).kineticExperiment).toBeUndefined();
-    // миграции цепочки оставили честный след
-    expect(result.notes.length).toBe(3);
+    // миграции цепочки оставили честный след: 1.4→1.5, 1.5→1.6,
+    // 1.6→1.7 и 1.7→1.8 — по одной-две записи на шаг
+    expect(result.notes.length).toBe(4);
     expect(result.notes[0]).toContain('kineticExperiment');
     expect(result.notes[1]).toContain('kineticExperiment');
     expect(result.notes[2]).toContain('геохимический контекст');
@@ -2421,3 +2426,4 @@ describe('Stage 4.9a.1 Persistence: геохимический контекст 
     expect(imported.reason).toContain('null');
   });
 });
+

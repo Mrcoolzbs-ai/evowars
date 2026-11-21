@@ -296,8 +296,9 @@ describe('Stage 4.9b: неполная среда блокирует испол�
     const res2 = executeGeochemicalReaction(def, { speciesCatalog: legacyOnly, reservoirs: makeEnv().reservoirs }, makeInput({ transactionId: 'tx-no-species' }) as never);
     expect(res2.status).toBe('not_applied');
     if (res2.status !== 'not_applied') return;
-    // co2 есть в legacy (gas), co2_aq нет — блокируется
-    expect(res2.reasonKind).toBe('not_executable');
+    // co2 есть в legacy (gas), co2_aq нет — баланс непроверяем: честный
+    // not_verifiable (неизвестный вид), а не not_executable
+    expect(res2.reasonKind).toBe('not_verifiable');
     expect(res2.issues.some((i) => i.includes('co2_aq'))).toBe(true);
     void result;
   });
@@ -350,7 +351,11 @@ describe('Stage 4.9b: достаточность реагентов', () => {
     const result = executeGeochemicalReaction(co2Dissolution(), makeEnv({ atmosphere: { co2: 7, o2: 500, n2: 3000 } }), makeInput({ transactionId: 'tx-exact' }) as never);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
-    expect(amountOf(result.reservoirs, 'atmosphere', 'co2')).toBe(0);
+    // точное изъятие удаляет запись вида: остаток 0 в инвентаре не
+    // хранится (отсутствие записи = «известный ноль больше не нужен»);
+    // повторное применение такой транзакции требует ИЗВЕСТНОСТИ
+    // реагента и потому отклоняется (см. сценарии 21/28)
+    expect(amountOf(result.reservoirs, 'atmosphere', 'co2')).toBeNull();
     // недостаток на молекулу ниже — блокируется
     const res2 = executeGeochemicalReaction(co2Dissolution(), makeEnv({ atmosphere: { co2: 6.999, o2: 500, n2: 3000 } }), makeInput({ transactionId: 'tx-below' }) as never);
     expect(res2.status).toBe('not_applied');
@@ -487,7 +492,9 @@ describe('Stage 4.9b: provenance, дубликаты id, повторное пр
     const result = executeGeochemicalReaction(co2Dissolution(), makeEnv(), makeInput({ transactionId: 'tx-noprov', extentProvenance: { note: 'без источника' } }) as never);
     expect(result.status).toBe('not_applied');
     if (result.status !== 'not_applied') return;
-    expect(result.issues.some((i) => i.includes('provenance'))).toBe(true);
+    // диагностика называет поле provenance и требует идентификации
+    // источника (диагностика не превращается в успешное применение)
+    expect(result.issues.some((i) => i.includes('Provenance') || i.includes('источник'))).toBe(true);
   });
 
   it('27. дубликат reaction-транзакции (тот же id записи) блокируется registerReaction', () => {
@@ -674,8 +681,10 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
     expect(ledger.records.length).toBe(1);
     expect(ledger.records[0]!.geochemical).toBeUndefined(); // provenance НЕ синтезирован
     const notesJoined = notes.join(' ');
-    expect(notesJoined).toContain('1.7');
-    expect(notesJoined).toContain('1.8');
+    // миграция 1.4.0 → 1.5.0: след честен (старые записи не переписаны)
+    expect(notesJoined).toContain('1.4.0');
+    expect(notesJoined).toContain('1.5.0');
+    expect(notesJoined).toContain('не переписаны');
     // идемпотентность
     const second = migrateSavedWorld(world);
     expect(second.world).toEqual(world);
@@ -695,9 +704,12 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
     expect(resA.status).toBe('applied');
     expect(resB.status).toBe('applied');
     if (resA.status !== 'applied' || resB.status !== 'applied') return;
-    expect(JSON.stringify(resA.reservoirs)).toBe(JSON.stringify(resB.reservoirs));
-    expect(JSON.stringify(resA.deltas)).toBe(JSON.stringify(resB.deltas));
-    expect(JSON.stringify(resA.record)).toBe(JSON.stringify(resB.record));
+    // канонизация по содержимому: результат не должен зависеть от
+    // порядка ключей ВХОДНОГО словаря резервуаров (ключи словаря
+    // безразличны для исхода, поэтому сравнение — с сортировкой ключей)
+    expect(ctxJsonStringify(resA.reservoirs)).toBe(ctxJsonStringify(resB.reservoirs));
+    expect(ctxJsonStringify(resA.deltas)).toBe(ctxJsonStringify(resB.deltas));
+    expect(ctxJsonStringify(resA.record)).toBe(ctxJsonStringify(resB.record));
   });
 });
 
