@@ -537,7 +537,12 @@ describe('Stage 4.9a: геохимический адаптер element conserva
     expect(audit.status).toBe('not_verifiable');
     expect(audit.balanced).toBe(false);
     expect(audit.excludedSpecies).toContain('mystery_x');
-    expect(audit.elementDiagnostics).toEqual([]);
+    // Диагностика по элементам существует только для ИЗВЕСТНЫХ видов (residual 0);
+    // элементы вида mystery_x НЕ входят в диагностику — состав неизвестен и не выдумывается.
+    expect(audit.elementDiagnostics.length).toBeGreaterThan(0);
+    for (const d of audit.elementDiagnostics) {
+      expect(d.residual).toBeCloseTo(0, 9);
+    }
     // Что подтверждаю: непосредственно в ядре тот же вердикт.
     expect(auditElementConservation(catalog, applied.ledger, before, applied.reservoirs).status).toBe('not_verifiable');
   });
