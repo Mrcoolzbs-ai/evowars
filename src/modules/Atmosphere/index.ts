@@ -17,7 +17,10 @@ import gases from '../Data/gases';
 
 // Пресет "Метаново-этановая атмосфера"
 // ВАЖНО: исходные концентрации и следовые компоненты пресета сохранены
-// без изменений; нормализация не должна переписывать эти значения.
+// байт-в-байт (историческая модель original ВПИ); нормализация не должна
+// переписывать эти значения.
+// Параметры 1.5 atm и 95 K не имеют отдельного источника и помечены
+// как неподтверждённые игровые допущения (presetKind: historical_game).
 const methaneEthanePreset: AtmosphereState = {
   components: [
     { gasId: 'ch4', percentage: 60, isTrace: false, uncertainty: 'Приблизительно', warnings: [] },
@@ -33,9 +36,14 @@ const methaneEthanePreset: AtmosphereState = {
     { gasId: 'ne', percentage: 0.02, isTrace: true, uncertainty: 'Следы', warnings: [] },
     { gasId: 'o2', percentage: 0.001, isTrace: true, uncertainty: 'Следы', warnings: ['Высоко реактивен'] }
   ],
-  totalPressure: 1.5, // atm
-  temperature: 95, // K (типично для Титана)
-  notes: 'Метаново-этановая атмосфера, аналогичная атмосфере Титана'
+  totalPressure: 1.5, // atm (игровое допущение, см. presetNotes)
+  temperature: 95, // K (игровое допущение, см. presetNotes)
+  notes: 'Исторический игровой сценарий с метаново-этановой атмосферой',
+  presetKind: 'historical_game',
+  presetNotes:
+    'Исторический игровой сценарий (исходная ВПИ). Параметры 1.5 atm и 95 K — ' +
+    'неподтверждённые игровые допущения без отдельного источника. Пресет НЕ является ' +
+    'точной копией атмосферы Титана; наблюдательный ориентир см. в пресете titan_reference.'
 };
 
 // Пресет "Земная атмосфера"
@@ -53,7 +61,9 @@ const earthAtmospherePreset: AtmosphereState = {
   ],
   totalPressure: 1.0, // atm
   temperature: 288, // K
-  notes: 'Современная земная атмосфера'
+  notes: 'Современная земная атмосфера',
+  presetKind: 'observational_reference',
+  presetNotes: 'Наблюдательный справочный сценарий: значения соответствуют современной атмосфере Земли.'
 };
 
 // Пресет "Венера атмосфера"
@@ -70,7 +80,9 @@ const venusAtmospherePreset: AtmosphereState = {
   ],
   totalPressure: 92, // atm
   temperature: 737, // K
-  notes: 'Атмосфера Венеры - плотная CO2 атмосфера с высоким давлением'
+  notes: 'Атмосфера Венеры - плотная CO2 атмосфера с высоким давлением',
+  presetKind: 'observational_reference',
+  presetNotes: 'Наблюдательный справочный сценарий: значения соответствуют атмосфере Венеры.'
 };
 
 // Пресет "Марс атмосфера"
@@ -86,7 +98,30 @@ const marsAtmospherePreset: AtmosphereState = {
   ],
   totalPressure: 0.006, // atm
   temperature: 210, // K
-  notes: 'Тонкая атмосфера Марса'
+  notes: 'Тонкая атмосфера Марса',
+  presetKind: 'observational_reference',
+  presetNotes: 'Наблюдательный справочный сценарий: значения соответствуют современной атмосфере Марса.'
+};
+
+// Пресет "Титан — наблюдательный ориентир" (этап 3, ТЗ §16).
+// Справочные характеристики реального небесного тела:
+// температура поверхности ~94 K, поверхностное давление ~1.5 bar
+// (1.4804 atm), преимущественно азотная атмосфера (~95% N₂, ~5% CH₄).
+// Минорные компоненты НЕ выдуманы: справочник хранит только
+// опубликованные основные характеристики.
+const titanReferencePreset: AtmosphereState = {
+  components: [
+    { gasId: 'n2', percentage: 95, isTrace: false, uncertainty: 'Приблизительно', warnings: [] },
+    { gasId: 'ch4', percentage: 5, isTrace: false, uncertainty: 'Приблизительно', warnings: [] }
+  ],
+  totalPressure: 1.4804, // atm (= 1.5 bar; справочное давление поверхности Титана)
+  temperature: 94, // K (справочная температура поверхности)
+  notes: 'Титан — наблюдательный ориентир',
+  presetKind: 'observational_reference',
+  presetNotes:
+    'Справочный ориентир на основе наблюдений реального небесного тела. ' +
+    'Не является универсальным шаблоном для всех метановых планет. ' +
+    'Минорные компоненты намеренно не указаны: опубликованные данные о них не входят в этот справочник.'
 };
 
 // Хранилище пресетов
@@ -94,7 +129,8 @@ const atmospherePresets: Record<string, AtmosphereState> = {
   methane_ethane: methaneEthanePreset,
   earth: earthAtmospherePreset,
   venus: venusAtmospherePreset,
-  mars: marsAtmospherePreset
+  mars: marsAtmospherePreset,
+  titan_reference: titanReferencePreset
 };
 
 // ============================================
@@ -308,6 +344,13 @@ export function createAtmosphere(presetId: string, rng?: any): AtmosphereState {
     components: preset.components.map(c => ({ ...c }))
   };
 
+  // Наблюдательный справочный пресет не рандомизируется:
+  // его значения — зафиксированные характеристики реального объекта.
+  // Исторические и гипотетические пресеты сохраняют вариации этапа 2.
+  if (presetId === 'titan_reference') {
+    return normalizeAtmosphere(copy);
+  }
+
   // Если есть RNG, добавляем небольшие случайные вариации
   if (rng) {
     return addRandomVariations(copy, rng);
@@ -500,6 +543,178 @@ export function updateComponentPercentage(
   );
 }
 
+// ============================================
+// ФИЗИЧЕСКАЯ МОДЕЛЬ АТМОСФЕРЫ (ЭТАП 3)
+// ============================================
+
+import type { AtmospherePhysicalModel, PhysValue } from '../../types';
+import { atmToPa } from '../Units';
+
+export interface ComputePhysicalModelOptions {
+  /** Поверхностная гравитация, м/с²; null — неизвестна */
+  surfaceGravityMs2?: number | null;
+}
+
+/**
+ * Физическая модель атмосферы: молярные доли, поверхностное давление
+ * (Па), парциальные давления p_i = x_i·P (приближение идеального газа),
+ * атмосферный столб m = P/g и n = P/(g·M).
+ *
+ * НИЧЕГО не выдумывается:
+ * - без давления → парциальные давления и столб неизвестны (null);
+ * - без гравитации → столб неизвестен;
+ * - при компоненте с неизвестной молярной массой (в том числе
+ *   'unidentified') средняя молярная масса не рассчитывается;
+ * - молярные доли хранятся в диапазоне 0..1 и не смешиваются
+ *   с массовыми долями.
+ */
+export function computeAtmospherePhysicalModel(
+  atmosphere: AtmosphereState,
+  options: ComputePhysicalModelOptions = {}
+): AtmospherePhysicalModel {
+  const gravity = options.surfaceGravityMs2 ?? null;
+
+  // 1. Молярные доли x_i = percentage_i / Σ percentage: доли обязаны
+  // суммироваться в 1, даже если каталог задаёт состав с погрешностью
+  // округления суммы процентов (например, справочный пресет Венеры 100.0276%).
+  const percentageSum = atmosphere.components.reduce((sum, c) => sum + c.percentage, 0);
+  const molarFractions: Record<string, number> = {};
+  for (const component of atmosphere.components) {
+    molarFractions[component.gasId] =
+      percentageSum > 0 ? component.percentage / percentageSum : 0;
+  }
+
+  // 2. Поверхностное давление в Па (миграция легаси-поля atm → Pa).
+  const totalPressureAtm = atmosphere.totalPressure;
+  const surfacePressurePa: PhysValue | null =
+    totalPressureAtm === null
+      ? null
+      : {
+          value: atmToPa(totalPressureAtm),
+          unit: 'Па',
+          confidence: 'derived',
+          method: 'перевод легаси-значения давления из atm в Па',
+          formula: 'P(Па) = P(atm) × 101325',
+          parameters: { 'P (atm)': totalPressureAtm },
+          note:
+            atmosphere.presetKind === 'historical_game'
+              ? 'исходное давление — неподтверждённое игровое допущение исторического пресета'
+              : undefined
+        };
+
+  const totalPressurePaValue = surfacePressurePa?.value ?? null;
+
+  // 3. Средняя молярная масса смеси M = Σ x_i·M_i (кг/моль).
+  // Не рассчитывается, если хотя бы один компонент неизвестен.
+  let meanMolarMassKgMol: number | null = 0;
+  for (const [gasId, x] of Object.entries(molarFractions)) {
+    if (x <= 0) continue;
+    const gas = gases.find(g => g.id === gasId);
+    if (!gas || gas.molarMass === null) {
+      meanMolarMassKgMol = null;
+      break;
+    }
+    meanMolarMassKgMol += x * (gas.molarMass / 1000);
+  }
+
+  // 4. Парциальные давления p_i = x_i × P_total (идеальный газ).
+  const partialPressuresPa: Record<string, PhysValue> = {};
+  for (const [gasId, x] of Object.entries(molarFractions)) {
+    partialPressuresPa[gasId] = {
+      value: totalPressurePaValue === null ? null : x * totalPressurePaValue,
+      unit: 'Па',
+      confidence: totalPressurePaValue === null ? 'unknown' : 'derived',
+      method: 'p_i = x_i × P_total (приближение идеального газа)',
+      formula: 'p_i = x_i × P',
+      parameters: { 'x_i': x }
+    };
+  }
+
+  // 5. Атмосферный столб: m = P/g, n = P/(g·M) (гидростатическое приближение).
+  const columnMassKgM2: PhysValue | null =
+    totalPressurePaValue !== null && gravity !== null && gravity > 0
+      ? {
+          value: totalPressurePaValue / gravity,
+          unit: 'кг/м²',
+          confidence: 'derived',
+          method: 'масса атмосферного столба на единицу площади',
+          formula: 'm_column = P / g',
+          parameters: { 'P (Па)': totalPressurePaValue, 'g (м/с²)': gravity }
+        }
+      : null;
+
+  const columnMolM2: PhysValue | null =
+    totalPressurePaValue !== null && gravity !== null && gravity > 0 && meanMolarMassKgMol !== null && meanMolarMassKgMol > 0
+      ? {
+          value: totalPressurePaValue / (gravity * meanMolarMassKgMol),
+          unit: 'моль/м²',
+          confidence: 'derived',
+          method: 'количество вещества в атмосферном столбе на единицу площади',
+          formula: 'n_column = P / (g × M)',
+          parameters: {
+            'P (Па)': totalPressurePaValue,
+            'g (м/с²)': gravity,
+            'M (кг/моль)': meanMolarMassKgMol
+          }
+        }
+      : null;
+
+  // 6. Минимальная вертикальная структура (расширяемая).
+  const temperatureK = atmosphere.temperature;
+  const layers = [
+    {
+      layerId: 'surface_boundary',
+      altitudeRangeM: { min: 0, max: null },
+      temperatureK,
+      pressurePa: totalPressurePaValue,
+      composition: atmosphere.components.map(c => c.gasId),
+      densityKgM3: null,
+      cloudiness: null,
+      radiativeConditions: null,
+      note:
+        'известен только приземный слой; состав — молярные доли у поверхности. ' +
+        'Тропосфера, стратосфера, мезосфера, термосфера и экзосфера на данном этапе не моделируются.'
+    }
+  ];
+
+  // Средняя молярная масса как PhysValue: значение + степень достоверности.
+  const meanMolarMassValue: PhysValue | null = meanMolarMassKgMol === null ? null : {
+    value: meanMolarMassKgMol,
+    unit: 'кг/моль',
+    confidence: 'derived',
+    method: 'средняя молярная масса смеси по молярным долям',
+    formula: 'M = Σ x_i·M_i',
+    note: 'не рассчитывается при компонентах с неизвестной молярной массой (в том числе unidentified)'
+  };
+
+  return {
+    molarFractions,
+    surfacePressurePa,
+    meanMolarMassKgMol: meanMolarMassValue,
+    partialPressuresPa,
+    columnMassKgM2,
+    columnMolM2,
+    idealGasAssumption: true,
+    idealGasNote:
+      'используется приближение идеального газа: p_i = x_i·P. Для реальных газов при высоких ' +
+      'давлениях и низких температурах это приближение неточно.',
+    fugacityNote:
+      'коэффициенты фугитивности и другие поправки на неидеальность НЕ учитываются: ' +
+      'результаты при высоких давлениях (десятки бар и выше) и низких температурах — ' +
+      'приближение, а не точный физический результат.',
+    layers,
+    layersNote:
+      'модель вертикальной структуры минимальна: хранится только поверхностный слой. ' +
+      'Полный профиль (тропосфера/стратосфера/мезосфера/термосфера/экзосфера) требует данных, ' +
+      'которых генератор не имеет; слои добавляются по мере появления данных.',
+    notes: [
+      'молярные доли хранятся в диапазоне 0..1 и не смешиваются с массовыми долями',
+      "компонент 'unidentified' входит в доли как неизвестный остаток: его молярная масса неизвестна, поэтому средняя молярная масса смеси не рассчитывается",
+      'обмен с поверхностью и вертикальный перенос не моделируются'
+    ]
+  };
+}
+
 export default {
   createAtmosphere,
   normalizeAtmosphere,
@@ -512,5 +727,6 @@ export default {
   addComponent,
   removeComponent,
   updateComponentPercentage,
-  getGasById
+  getGasById,
+  computeAtmospherePhysicalModel
 };

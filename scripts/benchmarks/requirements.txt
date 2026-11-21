@@ -1,0 +1,7 @@
+# Stage 4.4.4.2.1 — зависимости ИСКЛЮЧИТЕЛЬНО benchmark-оракула
+# (scripts/benchmarks/peng_robinson_coolprop.py). В runtime-зависимости
+# TypeScript-приложения (package.json) эти пакеты НЕ входят и попадать
+# не должны; запуск — отдельный workflow
+# .github/workflows/peng-robinson-benchmark.yml (Python 3.12).
+CoolProp==8.0.0
+mpmath==1.3.0
