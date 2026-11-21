@@ -62,8 +62,13 @@ import { validateBodyThermalState } from './thermalState';
  * записывал — пустой журнал честно отражает этот факт, ни одна
  * транзакция не выдумывается). Записи журнала НЕ применяются к
  * инвентарям: ledger фиксирует транзакции, но не исполняет их.
+ * 1.4.0 (Stage 4.9a.1): опциональное поле FluxRecord.geochemical
+ * (машиночитаемый контекст атрибуции геохимических потоков,
+ * FluxGeochemicalContext). Миграция 1.6 → 1.7 записи потоков НЕ
+ * переписывает: поле появляется только в новых записях (легаси-записи
+ * остаются без контекста, никакого provenance для них не синтезируется).
  */
-export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.3.0';
+export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.4.0';
 
 /**
  * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
@@ -71,7 +76,7 @@ export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.3.0';
  * списку, а не только на непустоту: неизвестная версия — это
  * version_mismatch, а не молчаливое «сойдёт любая».
  */
-export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0'];
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0'];
 
 export const BODY_KINDS: readonly BodyKind[] = [
   'star',
@@ -393,4 +398,5 @@ export function createCoreWorldState(worldId: string): CoreWorldState {
     legacy: {}
   };
 }
+
 

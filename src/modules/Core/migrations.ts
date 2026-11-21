@@ -136,11 +136,25 @@ export function createDatasetRegistry(): DatasetRegistry {
  *         расписание, предупреждения и предпосылки не пересчитываются;
  *         состояния с неизвестной или повреждённой формой миграцией
  *         не «лечатся» (fail-closed остаётся за валидацией
- *         загрузки/импорта).
+ *         загрузки/импорта);
+ * - 1.7 — этап 4.9a.1 (машиночитаемая атрибуция геохимических потоков):
+ *         опциональное поле FluxRecord.geochemical
+ *         (FluxGeochemicalContext — структурный sidecar ВНУТРИ записи
+ *         потока, второй реестр не создаётся). Подъём версии схемы
+ *         состояния ядра 1.3.0 → 1.4.0 для ЯДРА С ИЗВЕСТНОЙ схемой.
+ *         Миграция записи потоков НЕ переписывает: geochemical-поля у
+ *         существующих записей НЕТ, и оно не создаётся — легаси-запись
+ *         остаётся легаси-записью, никакого provenance для неё не
+ *         синтезируется; отсутствие контекста трактуется валидаторами
+ *         как «не геохимическая запись», а не как незнание, требующее
+ *         достройки. Инвентари, время, расписание и прочие поля не
+ *         пересчитываются; состояние с НЕИЗВЕСТНОЙ версией схемы ядра
+ *         не изменяется вообще (правило безопасного подъёма не
+ *         доказано — состояние диагностируется валидацией ядра).
  */
-export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6'] as const;
+export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7'] as const;
 export type SaveSchemaVersion = (typeof SAVE_SCHEMA_VERSIONS)[number];
-export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.6';
+export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.7';
 
 export function isKnownSchemaVersion(version: string): boolean {
   return (SAVE_SCHEMA_VERSIONS as readonly string[]).includes(version);
@@ -507,7 +521,68 @@ const migrate15to16: SaveMigration<any> = {
   }
 };
 
-const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15, migrate15to16];
+/**
+ * Миграция 1.6 → 1.7 (этап 4.9a.1: геохимический контекст атрибуции).
+ *
+ * Подъём версии формата сохранения и версии схемы состояния ядра
+ * (1.3.0 → 1.4.0 для ядра с ИЗВЕСТНОЙ схемой). Записи потоков НЕ
+ * переписываются: поле geochemical у существующих записей НЕТ и оно
+ * НЕ создаётся (легаси-запись не получает синтезированного provenance;
+ * отсутствие контекста означает «не геохимическая/старая запись»).
+ * Сохранение без coreWorldState остаётся без него; null/не-объект не
+ * «чинится»; неизвестная версия схемы ядра не изменяется вообще
+ * (безопасное правило подъёма не доказано — незнание не подменяется,
+ * состояние будет диагностировано валидацией ядра version_mismatch).
+ * Инвентари, время, расписание, кинетический эксперимент и прочие
+ * поля мира не пересчитываются.
+ */
+const migrate16to17: SaveMigration<any> = {
+  from: '1.6',
+  to: '1.7',
+  migrate(world: any): SaveMigrationResult<any> {
+    const core = world.coreWorldState;
+    if (core === undefined) {
+      return {
+        world: { ...world, version: '1.7' },
+        notes: [
+          'версия схемы сохранений поднята до 1.7 (геохимический контекст атрибуции потоков): ядро мира не инициализировано, поля не создаются, значения не пересоздаются'
+        ]
+      };
+    }
+    if (core === null || typeof core !== 'object') {
+      return {
+        world: { ...world, version: '1.7' },
+        notes: [
+          'coreWorldState равно null или не является объектом-состоянием ядра: значение оставлено без изменений (это не отсутствие ядра) — некорректная форма будет диагностирована валидацией Storage'
+        ]
+      };
+    }
+    const knownCoreVersions = ['1.0.0', '1.1.0', '1.2.0', '1.3.0'];
+    if (core.schemaVersion === '1.4.0') {
+      // Уже новая схема (например, частично обновлённое сохранение) —
+      // чужие данные не перезаписываются, идемпотентный результат.
+      return { world: { ...world, version: '1.7' }, notes: [] };
+    }
+    const known = typeof core.schemaVersion === 'string' && knownCoreVersions.includes(core.schemaVersion);
+    if (!known) {
+      return {
+        world: { ...world, version: '1.7' },
+        notes: [
+          'версия схемы состояния ядра «' + String(core.schemaVersion) + '» не распознана: безопасное правило подъёма ядра не доказано — coreWorldState оставлен без изменений; состояние будет диагностировано валидацией ядра (version_mismatch)'
+        ]
+      };
+    }
+    return {
+      world: { ...world, version: '1.7', coreWorldState: { ...core, schemaVersion: '1.4.0' } },
+      notes: [
+        'версия схемы состояния ядра поднята с 1.3.0 до 1.4.0 (опциональное поле geochemical у записей потоков)',
+        'записи потоков не переписаны: у существующих записей геохимического контекста нет и он не синтезируется (легаси-записи остаются легаси-записями, provenance не выдумывается)'
+      ]
+    };
+  }
+};
+
+const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15, migrate15to16, migrate16to17];
 
 /**
  * Полная цепочка миграций. Детерминирована: одна и та же входная
@@ -604,3 +679,4 @@ export function migrateSavedWorld<T extends MigrationTarget>(world: T, target: S
     to: target
   };
 }
+

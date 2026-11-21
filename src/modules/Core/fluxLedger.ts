@@ -119,6 +119,12 @@ import { addMaterial, describeRecordCandidate, isKnownBasis, isPlainRecord, remo
 import type { SpeciesCatalog } from './species';
 import { chargeTotal, elementTotals as speciesElementTotals } from './species';
 import { comparePoints } from './simulationClock';
+// Stage 4.9a.1: опциональный аддитивный геохимический контекст записи потока.
+// Runtime-валидатор импортируется ЗНАЧЕНИЕМ (validateFluxGeochemicalContext);
+// сам geochemicalFluxContext.ts импортирует из geochemicalFluxes.ts только
+// ТИПЫ (type-only), поэтому цикла по времени исполнения нет.
+import { validateFluxGeochemicalContext } from './geochemicalFluxContext';
+import type { FluxGeochemicalContext } from './geochemicalFluxContext';
 
 // ============================================
 // 1. ТИПЫ ПОТОКОВ
@@ -197,6 +203,15 @@ export interface FluxRecord {
   time: FluxTime | null;
   status: FluxStatus;
   note?: string;
+  /**
+   * Опциональный геохимический контекст атрибуции (Stage 4.9a.1):
+   * машиночитаемый сериализуемый sidecar, связанный с fluxId вложенностью
+   * в саму запись (второй FluxLedger не создаётся). Отсутствие поля —
+   * легаси-запись (Stage 4.9a и ранее): она валидируется как есть,
+   * никакого provenance для неё не синтезируется. Форма контекста
+   * проверяется валидатором geochemicalFluxContext (fail-closed).
+   */
+  geochemical?: FluxGeochemicalContext;
 }
 
 export interface FluxLedger {
@@ -270,6 +285,8 @@ export function registerFlux(ledger: FluxLedger, record: {
   subject: FluxSubject;
   time?: FluxTime | null;
   note?: string;
+  /** Опциональный геохимический контекст атрибуции (Stage 4.9a.1). */
+  geochemical?: FluxGeochemicalContext;
 }): FluxLedger {
   if (record.id.trim() === '') {
     throw new FluxLedgerError('invalid_flux', 'id потока не может быть пустым', null);
@@ -313,7 +330,7 @@ export function registerFlux(ledger: FluxLedger, record: {
   return {
     records: [
       ...ledger.records,
-      { id: record.id, kind: record.kind, from: record.from, to: record.to, subject: record.subject, time: record.time ?? null, status: 'pending', note: record.note }
+      { id: record.id, kind: record.kind, from: record.from, to: record.to, subject: record.subject, time: record.time ?? null, status: 'pending', note: record.note, geochemical: record.geochemical }
     ]
   };
 }
@@ -1934,6 +1951,16 @@ export function validateFluxLedger(ledger: unknown, opts?: { reservoirIds?: read
         }
       }
     }
+    // Stage 4.9a.1: факультативный геохимический контекст атрибуции.
+    // Отсутствие поля — легаси-запись, это НЕ ошибка (никакой
+    // provenance для неё не синтезируется). Присутствующее поле
+    // проверяется fail-closed валидатором контекста: повреждённый
+    // контекст делает состояние невалидным, а не «тихо» отбрасывается.
+    if (r.geochemical !== undefined) {
+      for (const issue of validateFluxGeochemicalContext(r.geochemical)) {
+        problems.push(at(`геохимический контекст: ${issue}`));
+      }
+    }
   });
   return problems;
 }
@@ -1964,5 +1991,6 @@ export function validateReservoirInventories(reservoirs: Record<string, Reservoi
   }
   return problems;
 }
+
 
 

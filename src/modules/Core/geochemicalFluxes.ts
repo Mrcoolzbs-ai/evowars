@@ -93,6 +93,12 @@ import type { SpeciesCatalog } from './species';
 import { elementTotals as speciesElementTotals } from './species';
 import type { DataProvenance } from './scientificValue';
 import { isPlainRecord } from './reservoir';
+import {
+  GEOCHEMICAL_FLUX_CONTEXT_SCHEMA_VERSION,
+  CONTEXT_RATE_UNIT_EXTERNAL,
+  CONTEXT_RATE_UNIT_INTERNAL
+} from './geochemicalFluxContext';
+import type { FluxGeochemicalContext } from './geochemicalFluxContext';
 
 // ============================================
 // 1. КОНСТАНТЫ ГОДА И ЕДИНИЦ
@@ -178,7 +184,15 @@ export function molPerM2SecondToPerYear(molPerM2PerSecond: number): number {
   if (molPerM2PerSecond < 0) {
     throw new GeochemicalFluxError('invalid_rate', `скорость не может быть отрицательной: обратное направление задаётся from/to, а не знаком; получено ${String(molPerM2PerSecond)} ${FLUX_RATE_UNIT}`, null);
   }
-  return molPerM2PerSecond * GEOCHEMICAL_YEAR_S;
+  // Stage 4.9a.1: КОНЕЧНЫЙ вход может дать бесконечный результат при
+  // переполнении умножения (конечность входа не гарантирует конечность
+  // произведения). Переполнение — явная ошибка, а не «правдоподобное»
+  // Infinity в расчётах.
+  const perYear = molPerM2PerSecond * GEOCHEMICAL_YEAR_S;
+  if (!Number.isFinite(perYear)) {
+    throw new GeochemicalFluxError('invalid_rate', `конверсия ${FLUX_RATE_UNIT} → ${GEOCHEMICAL_RATE_UNIT} переполнилась: конечный вход ${molPerM2PerSecond.toExponential()} × ${GEOCHEMICAL_YEAR_S} не представим конечным числом — результат отброшен вместо бесконечного значения`, null);
+  }
+  return perYear;
 }
 
 // ============================================
@@ -215,6 +229,70 @@ export const GEOCHEMICAL_PROCESS_TYPES: readonly GeochemicalProcessType[] = [
   'subduction',
   'other'
 ];
+
+// ============================================
+// 3.1 МЕХАНИЗМ ПРОЦЕССА ПЕРЕНОС/ПРЕВРАЩЕНИЕ (Stage 4.9a.1, проблема C)
+// ============================================
+
+/**
+ * Механизм геохимического процесса (корректирующая ревизия Stage 4.9a.1):
+ * до этой ревизии несколько ХИМИЧЕСКИХ превращений (выветривание,
+ * растворение с фазовым переходом, осаждение, окисление, дегазация)
+ * были описаны как обычные переносы одного неизменного speciesId —
+ * физически некорректно. Разделение стало строгим:
+ * - 'transport' — физический перенос ОДНОГО И ТОГО ЖЕ вещества между
+ *   резервуарами или через внешнюю границу; допускает исполнение через
+ *   существующий FluxLedger;
+ * - 'reaction'  — химическое или фазовое превращение с заданными
+ *   реагентами и продуктами; требует корректной стехиометрической
+ *   записи ReactionLedger и НЕ может исполняться через FluxLedger;
+ * - 'coupled'   — атомарная последовательность «реакция → перенос»;
+ *   допускается ТОЛЬКО при явно описанной последовательности
+ *   (couplingSequence) и исполняется как согласованная пара
+ *   ReactionLedger + FluxLedger (запись через один только FluxLedger
+ *   запрещена). Не может выполняться через перевозку.
+ */
+export type GeochemicalProcessMechanism = 'transport' | 'reaction' | 'coupled';
+
+export const GEOCHEMICAL_PROCESS_MECHANISMS: readonly GeochemicalProcessMechanism[] = ['transport', 'reaction', 'coupled'];
+
+/**
+ * Статус готовности процесса к исполнению в текущей реализации.
+ * - 'executable'        — процесс может быть исполнен текущим исполнителем
+ *   (для этого этапа — ТОЛЬКО transport-процессы через FluxLedger);
+ * - 'reaction_required' — физика определена, но для исполнения требуется
+ *   корректная стехиометрическая запись ReactionLedger (её пока нет);
+ * - 'not_implemented'   — превращение ещё не реализовано (стехиометрия,
+ *   кинетика или физическое уравнение отсутствуют).
+ *
+ * Определённо ЗАПРЕЩЕНО: изображать нереализованный процесс
+ * нулевой скоростью — «не реализовано» ≠ «не происходит».
+ */
+export type GeochemicalImplementationStatus = 'executable' | 'reaction_required' | 'not_implemented';
+
+export const GEOCHEMICAL_IMPLEMENTATION_STATUSES: readonly GeochemicalImplementationStatus[] = [
+  'executable',
+  'reaction_required',
+  'not_implemented'
+];
+
+/**
+ * Явное описание намеченного превращения (обязательно для
+ * mechanism 'reaction' и 'coupled'). Это ДАННЫЕ о намерении, не
+ * исполняемая запись: запись в ReactionLedger появится только в
+ * следующих срезах Stage 4.9, со стехиометрией и provenance.
+ * Химические формы, отсутствующие в каталоге видов, честно
+ * именуются в свободном тексте (никакие фиктивные speciesId
+ * не вводятся ради «типизации»).
+ */
+export interface GeochemicalReactionIntent {
+  /** Физическое описание превращения. */
+  readonly note: string;
+  /** Исходные химические формы (текст; неизвестные формы именуются честно). */
+  readonly reactantsNote?: string;
+  /** Конечные химические формы (текст). */
+  readonly productsNote?: string;
+}
 
 /**
  * Внешняя граница системы: любая внешняя скорость/поступление обязана
@@ -271,6 +349,27 @@ export interface GeochemicalProcessSpec {
   readonly processType: GeochemicalProcessType;
   /** Человекочитаемое физическое описание. */
   readonly description: string;
+  /**
+   * Механизм процесса (Stage 4.9a.1): 'transport' — перенос того же
+   * вещества (FluxLedger); 'reaction' — превращение (ReactionLedger);
+   * 'coupled' — явная последовательность реакция → перенос.
+   */
+  readonly mechanism: GeochemicalProcessMechanism;
+  /**
+   * Статус готовности к исполнению. Реакционные и сопряжённые процессы
+   * в этом срезе имеют 'reaction_required'/'not_implemented' и поток
+   * НЕ создают (отсутствие реализации не изображается нулевой скоростью).
+   */
+  readonly implementationStatus: GeochemicalImplementationStatus;
+  /** Намеченное превращение (обязательно для reaction и coupled). */
+  readonly reactionIntent?: GeochemicalReactionIntent;
+  /**
+   * Явная атомарная последовательность «реакция → перенос»
+   * (обязательна для coupled, запрещена «перевозке реакций»).
+   */
+  readonly couplingSequence?: string;
+  /** Пояснение нереализованности (для reaction_required/not_implemented). */
+  readonly implementationNote?: string;
   /** Переносимое вещество: speciesId из SpeciesCatalog. */
   readonly speciesId: string;
   /** Направление переноса (positive velocity + явные from/to). */
@@ -317,6 +416,46 @@ export function validateGeochemicalProcessSpec(spec: unknown): string[] {
   }
   if (typeof spec.description !== 'string' || spec.description.trim() === '') {
     errors.push('description должен быть непустой строкой (физическое описание процесса)');
+  }
+
+  // Механизм и статус готовности (Stage 4.9a.1): перенос и превращение
+  // не смешиваются; нереализованность не изображается исполнимым.
+  if (typeof spec.mechanism !== 'string' || !(GEOCHEMICAL_PROCESS_MECHANISMS as readonly string[]).includes(spec.mechanism)) {
+    errors.push('mechanism должен быть одним из: ' + GEOCHEMICAL_PROCESS_MECHANISMS.join(', ') + ' (перенос и превращение не смешиваются)');
+  }
+  if (typeof spec.implementationStatus !== 'string' || !(GEOCHEMICAL_IMPLEMENTATION_STATUSES as readonly string[]).includes(spec.implementationStatus)) {
+    errors.push('implementationStatus должен быть одним из: ' + GEOCHEMICAL_IMPLEMENTATION_STATUSES.join(', '));
+  } else {
+    if (spec.mechanism === 'reaction' || spec.mechanism === 'coupled') {
+      if (spec.implementationStatus === 'executable') {
+        errors.push("механизм «reaction»/«coupled» не может иметь implementationStatus «executable»: превращение не исполняется переносом через FluxLedger (только 'reaction_required' или 'not_implemented')");
+      }
+      if (!isPlainRecord(spec.reactionIntent)) {
+        errors.push('механизм «reaction»/«coupled» обязан нести явное описание превращения (reactionIntent с непустым note)');
+      } else {
+        if (typeof spec.reactionIntent.note !== 'string' || spec.reactionIntent.note.trim() === '') {
+          errors.push('reactionIntent.note должен быть непустой строкой (физическое описание превращения)');
+        }
+        for (const key of ['reactantsNote', 'productsNote'] as const) {
+          if (spec.reactionIntent[key] !== undefined && typeof spec.reactionIntent[key] !== 'string') {
+            errors.push(`reactionIntent.${key} должен быть строкой, если задан`);
+          }
+        }
+      }
+    }
+    if (spec.mechanism === 'coupled') {
+      if (typeof spec.couplingSequence !== 'string' || spec.couplingSequence.trim() === '') {
+        errors.push("механизм «coupled» допускается только при явно описанной атомарной последовательности реакции и переноса (couplingSequence — непустая строка)");
+      }
+    }
+    if (spec.mechanism === 'transport' && spec.implementationStatus === 'reaction_required') {
+      errors.push("механизм «transport» не может иметь implementationStatus «reaction_required»: перенос не превращается в реакцию (допустимо 'executable' или 'not_implemented')");
+    }
+  }
+  for (const key of ['couplingSequence', 'implementationNote'] as const) {
+    if (spec[key] !== undefined && typeof spec[key] !== 'string') {
+      errors.push(`«${key}» должен быть строкой, если задан`);
+    }
   }
   if (typeof spec.speciesId !== 'string' || spec.speciesId.trim() === '') {
     errors.push('speciesId должен быть непустой строкой');
@@ -379,11 +518,30 @@ export function validateGeochemicalProcessSpec(spec: unknown): string[] {
     if (!isPlainRecord(rate.provenance)) {
       errors.push('известная скорость обязана нести provenance (DataProvenance с идентифицированным источником)');
     } else {
-      const sName = rate.provenance.sourceName;
-      const sId = rate.provenance.sourceId;
+      const p: Record<string, unknown> = rate.provenance;
+      const sName = p.sourceName;
+      const sId = p.sourceId;
       const sourceKnown = (typeof sName === 'string' && sName.trim() !== '') || (typeof sId === 'string' && sId.trim() !== '');
       if (!sourceKnown) {
         errors.push('provenance известной скорости обязан идентифицировать источник (sourceName или sourceId)');
+      }
+      // Runtime-валидация provenance (Stage 4.9a.1, раздел 4 промпта):
+      // некорректные типы и пустые идентификаторы — диагностические
+      // ошибки, а не «сойдёт и так». Поля provenance опциональны, но
+      // если заданы — обязаны быть строками; непустые идентификаторы
+      // не могут быть пустыми/пробельными.
+      const provenanceStringFields: readonly string[] = [
+        'sourceName', 'sourceId', 'datasetId', 'datasetVersion', 'recordId',
+        'reference', 'retrievedAt', 'method', 'applicability', 'limitations',
+        'conditions', 'modelVersion', 'license', 'note'
+      ];
+      for (const field of provenanceStringFields) {
+        const value = p[field];
+        if (value !== undefined && value !== null && typeof value !== 'string') {
+          errors.push(`provenance.${field} должен быть строкой, получено значение типа ${typeof value}`);
+        } else if (typeof value === 'string' && value.trim() === '') {
+          errors.push(`provenance.${field}, если задан, не может быть пустой или пробельной строкой (пустая строка скрывает отсутствие данных)`);
+        }
       }
     }
   } else if (rate.status === 'unknown') {
@@ -484,6 +642,20 @@ export type GeochemicalFluxPlanResult =
       readonly diagnostics: readonly string[];
     }
   | {
+      /**
+       * Механизм не поддерживается текущим исполнителем: reaction/coupled
+       * не исполняются через FluxLedger; процесс с implementationStatus
+       * 'reaction_required'/'not_implemented' не исполняется вовсе
+       * (отсутствие реализации не изображается нулевой скоростью).
+       */
+      readonly status: 'unsupported_mechanism';
+      readonly processId: string;
+      readonly mechanism: GeochemicalProcessMechanism;
+      readonly implementationStatus: GeochemicalImplementationStatus;
+      readonly reason: string;
+      readonly diagnostics: readonly string[];
+    }
+  | {
       readonly status: 'not_executable';
       readonly processId: string | null;
       readonly reason: string;
@@ -492,7 +664,9 @@ export type GeochemicalFluxPlanResult =
 
 /**
  * Построить план геохимического потока:
- * 1) runtime-валидация описания; 2) известность вещества; 3) известность
+ * 1) runtime-валидация описания; 1а) механизм и статус готовности
+ * (reaction/coupled и нереализованные процессы НЕ доходят до FluxLedger —
+ * Stage 4.9a.1); 2) известность вещества; 3) известность
  * резервуаров; 4) совместимость основания инвентаря (column_amount);
  * 5) конечность/единицы скорости; 6) provenance числовых значений.
  * План НЕ содержит исполненного переноса: применение — отдельный шаг
@@ -511,6 +685,33 @@ export function createGeochemicalFluxPlan(spec: GeochemicalProcessSpec, env: Geo
   }
   const processId: string = spec.processId;
   const diagnostics: string[] = [];
+
+  // 1а. Механизм и готовность (Stage 4.9a.1): перенос и превращение
+  // разведены. Исполнитель этого среза умеет ТОЛЬКО transport:
+  // reaction-процесс не может «проехать» через FluxLedger как перенос
+  // того же вида, а нереализованный процесс не изображается нулевой
+  // скоростью. Проверка стоит ДО поиска вещества/резервуаров: механизм
+  // определён описанием процесса, а не средой исполнения.
+  if (spec.mechanism !== 'transport' || spec.implementationStatus !== 'executable') {
+    const reason =
+      spec.mechanism === 'reaction'
+        ? 'химическое/фазовое превращение требует корректной стехиометрической записи ReactionLedger: отправить его в FluxLedger как перенос одного вида запрещено'
+        : spec.mechanism === 'coupled'
+          ? 'сопряжённый процесс требует явной атомарной последовательности «реакция → перенос» и согласованного исполнения ReactionLedger + FluxLedger: запись через один FluxLedger запрещена'
+          : `процесс не готов к исполнению (implementationStatus «${spec.implementationStatus}»): отсутствие реализации не изображается переносом или нулевой скоростью`;
+    return {
+      status: 'unsupported_mechanism',
+      processId,
+      mechanism: spec.mechanism,
+      implementationStatus: spec.implementationStatus,
+      reason,
+      diagnostics: [
+        `механизм процесса: ${spec.mechanism}`,
+        `статус готовности: ${spec.implementationStatus}`,
+        ...(spec.reactionIntent ? [`намеченное превращение: ${spec.reactionIntent.note}`] : [])
+      ]
+    };
+  }
 
   // 2. Известность вещества.
   if (!env.speciesCatalog.has(spec.speciesId)) {
@@ -648,6 +849,17 @@ export type GeochemicalExecutionResult =
     };
 
 /**
+ * Сужение скорости до известной: готовый план обязан нести числовую
+ * скорость с provenance; вспомогательная проверка, а не «тихий» fallback.
+ */
+function requireKnownRate(rate: GeochemicalRate): Extract<GeochemicalRate, { status: 'known' }> {
+  if (rate.status !== 'known') {
+    throw new GeochemicalFluxError('not_executable', 'контекст атрибуции строится только для известной скорости: готовый план обязан нести числовую скорость с provenance', null);
+  }
+  return rate;
+}
+
+/**
  * Исполнить геохимический процесс: план → явная интеграция скорости за
  * durationS → регистрация integrated-потока → applyFlux (контракты ядра).
  *
@@ -656,7 +868,11 @@ export type GeochemicalExecutionResult =
  *   выполнении (все операции иммутабельны; при исключении возвращается
  *   not_applied, исходные резервуары и журнал остаются нетронутыми);
  * - rate к инвентарю напрямую не применяется;
- * - при нехватке вещества applyFlux отклоняет применение (insufficient).
+ * - при нехватке вещества applyFlux отклоняет применение (insufficient);
+ * - reaction/coupled процессы НЕ отправляются в FluxLedger
+ *   (unsupported_mechanism, Stage 4.9a.1);
+ * - применённая запись несёт структурный геохимический контекст
+ *   (FluxGeochemicalContext), связанный с fluxId вложенностью в запись.
  */
 export function executeGeochemicalProcess(
   spec: GeochemicalProcessSpec,
@@ -696,7 +912,9 @@ export function executeGeochemicalProcess(
           ? 'нулевая скорость: перенос отсутствует, фиктивная запись потока не создаётся'
           : plan.status === 'unknown_rate'
             ? `скорость неизвестна: ${plan.reason}`
-            : `процесс неисполним: ${plan.reason}`,
+            : plan.status === 'unsupported_mechanism'
+              ? `механизм «${plan.mechanism}» не исполняется через FluxLedger (${plan.implementationStatus}): ${plan.reason}`
+              : `процесс неисполним: ${plan.reason}`,
       issues: plan.status === 'not_executable' ? plan.issues : [],
       error: null
     };
@@ -705,6 +923,35 @@ export function executeGeochemicalProcess(
   try {
     const { subject, integratedMolPerM2 } = integrateGeochemicalProcess(plan, opts.durationS);
     const baseLedger = env.ledgerInput ?? createFluxLedger();
+    // Структурная атрибуция геохимического события (Stage 4.9a.1):
+    // машиночитаемый сериализуемый контекст ВНУТРИ записи потока,
+    // связанный с fluxId самим фактом вложенности. Это НЕ второй
+    // FluxLedger и не длинная строка note.
+    const geochemicalContext: FluxGeochemicalContext = {
+      contextSchemaVersion: GEOCHEMICAL_FLUX_CONTEXT_SCHEMA_VERSION,
+      processId: plan.processId,
+      processType: spec.processType,
+      mechanism: spec.mechanism,
+      speciesId: plan.candidate.rateSubject.speciesId,
+      basis: GEOCHEMICAL_INVENTORY_BASIS,
+      rateUnitExternal: CONTEXT_RATE_UNIT_EXTERNAL,
+      rateUnitInternal: CONTEXT_RATE_UNIT_INTERNAL,
+      molPerM2PerYear: plan.ratePerYear,
+      rateProvenance: requireKnownRate(spec.rate).provenance,
+      integrationDurationS: opts.durationS,
+      boundary:
+        spec.direction.kind === 'internal_transfer'
+          ? null
+          : { id: spec.direction.boundary.id, physicalJustification: spec.direction.boundary.physicalJustification },
+      assumptions: [
+        'механизм transport: перенос одного и того же вида (изменение химической формы потоком не выполняется)',
+        'скорость постоянна на интервале интегрирования',
+        ...(spec.applicability ? [`применимость: ${spec.applicability}`] : []),
+        ...(spec.conditions ? [`условия: ${spec.conditions}`] : [])
+      ],
+      applicability: spec.applicability ?? null,
+      conditions: spec.conditions ?? null
+    };
     const registered = registerFlux(baseLedger, {
       id: opts.fluxId,
       kind: plan.candidate.kind,
@@ -712,7 +959,8 @@ export function executeGeochemicalProcess(
       to: plan.candidate.to,
       subject,
       time: opts.time ?? null,
-      note: opts.note ?? `geochemical: ${plan.processId} (${spec.processType}), интегрировано за ${opts.durationS} с`
+      note: opts.note ?? `geochemical: ${plan.processId} (${spec.processType}), интегрировано за ${opts.durationS} с`,
+      geochemical: geochemicalContext
     });
     const applied = applyFlux(registered, env.reservoirs, opts.fluxId);
     return {

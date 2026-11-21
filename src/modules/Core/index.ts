@@ -98,3 +98,15 @@ export * from './spectralOpacity';
 // Stage 4.9a: фундамент геохимических потоков (контракт процесса mol/m2/yr,
 // конверсия года 31 557 600 s, исполнение через FluxLedger, адаптер element conservation).
 export * from './geochemicalFluxes';
+
+// Stage 4.9a.1: машиночитаемый геохимический контекст атрибуции записи потока
+// (FluxGeochemicalContext, валидатор fail-closed; sidecar внутри FluxRecord).
+export * from './geochemicalFluxContext';
+// Stage 4.9a.1: аддитивная модель геохимических веществ (проблема A):
+// определения GeochemicalSpeciesDefinition, сборка и слияние с производственным
+// SpeciesCatalog (второй системы видов нет).
+export * from './geochemicalSpecies';
+// Stage 4.9a.1: типизированный справочник геохимических резервуаров (проблема B):
+// стабильные id, явные правила соответствия легаси-резервуарам, builder
+// createGeochemicalReservoirs (автосоздание и суррогаты запрещены).
+export * from './geochemicalReservoirs';
