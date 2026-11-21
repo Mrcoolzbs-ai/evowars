@@ -13,7 +13,7 @@ import type {
 import type { DataProvenance } from '../Core/scientificValue';
 
 // Миграции сохранений ведутся реестром научного ядра
-// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6
+// (Core/migrations.ts): цепочка 1.0 → 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6 → 1.7
 // детерминирована, «нет поля» остаётся «неизвестно», provenance
 // не теряется.
 import {
@@ -24,6 +24,9 @@ import {
 } from '../Core/migrations';
 import { validateReactionLedger } from '../Core/reactionLedger';
 import { kineticExperimentStateProblems } from '../ChemicalEvolution/kineticWorldAdapter';
+// Stage 4.9a.1: runtime-валидатор геохимического контекста атрибуции
+// записей потоков (fail-closed; отсутствие поля — легаси-запись, не ошибка).
+import { validateFluxGeochemicalContext } from '../Core/geochemicalFluxContext';
 
 const STORAGE_KEY = 'evowars_worlds';
 const SETTINGS_KEY = 'evowars_settings';
@@ -74,7 +77,15 @@ const SETTINGS_KEY = 'evowars_settings';
  *   recorded (фактический результат вычислителя: константа,
  *   единица, диапазон, provenance, fall-off-диагностика,
  *   концентрация N₂) и проверяются валидатором при загрузке и
- *   импорте; отсутствующий эксперимент остаётся отсутствующим.
+ *   импорте; отсутствующий эксперимент остаётся отсутствующим;
+ * - 1.7 (этап 4.9a.1) — машиночитаемая атрибуция геохимических
+ *   потоков: опциональное поле FluxRecord.geochemical
+ *   (FluxGeochemicalContext внутри записи потока — sidecar, второй
+ *   реестр не создаётся); схема состояния ядра поднимается до 1.4.0
+ *   для ядра с известной схемой; записи потоков НЕ переписываются,
+ *   легаси-записи остаются без контекста и без синтезированного
+ *   provenance; повреждённый контекст отклоняется при загрузке и
+ *   импорте, инвентари/время не пересчитываются.
  */
 export const STORAGE_FORMAT_VERSION: string = CURRENT_SAVE_SCHEMA_VERSION;
 
@@ -181,6 +192,50 @@ function kineticExperimentProblemsOfWorld(world: SavedWorld): string[] {
 }
 
 /**
+ * Проблемы геохимических контекстов атрибуции записей потоков
+ * (Stage 4.9a.1). Проверяются ТОЛЬКО ЯВНО заданные
+ * FluxRecord.geochemical: форма контекста определяется fail-closed
+ * валидатором geochemicalFluxContext. Отсутствие поля — легаси-запись
+ * (Stage 4.9a и ранее): это НЕ ошибка и НЕ незнание, требующее
+ * достройки — никакого provenance для неё не синтезируется, запись
+ * не переписывается. Повреждённый контекст делает сохранение
+ * невалидным (fail-closed), а не молчаливо отброшенным.
+ */
+function geochemicalFluxContextProblemsOfWorld(world: SavedWorld): string[] {
+  const core: unknown = (world as { coreWorldState?: unknown }).coreWorldState;
+  if (typeof core !== 'object' || core === null || Array.isArray(core)) {
+    return [];
+  }
+  const coreRecord = core as Record<string, unknown>;
+  const ledger: unknown = coreRecord.fluxLedger;
+  if (typeof ledger !== 'object' || ledger === null || Array.isArray(ledger)) {
+    return [];
+  }
+  const rawRecords: unknown = (ledger as Record<string, unknown>).records;
+  if (!Array.isArray(rawRecords)) {
+    return [];
+  }
+  const problems: string[] = [];
+  for (const entry of rawRecords) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const rec = entry as Record<string, unknown>;
+    if (rec.geochemical === undefined) {
+      continue;
+    }
+    if (rec.geochemical === null) {
+      problems.push('coreWorldState.fluxLedger: геохимический контекст записи потока равен null — отсутствие контекста выражается отсутствием поля, а не null (некорректная форма: ' + (typeof rec.id === 'string' ? 'поток «' + rec.id + '»' : 'запись без id') + ')');
+      continue;
+    }
+    for (const issue of validateFluxGeochemicalContext(rec.geochemical)) {
+      problems.push('coreWorldState.fluxLedger: геохимический контекст: ' + issue);
+    }
+  }
+  return problems;
+}
+
+/**
  * Миграция + проверка журнала реакций (Stage 4.2.3.3.1) и
  * кинетического эксперимента (Stage 4.5.5): некорректный
  * reactionLedger или kineticExperiment не может незаметно
@@ -195,7 +250,8 @@ function migrateAndCheckWorld(entry: Record<string, unknown>): SavedWorld {
   const migrated = migrateWorld(entry as unknown as SavedWorld);
   const problems = [
     ...reactionLedgerProblemsOfWorld(migrated),
-    ...kineticExperimentProblemsOfWorld(migrated)
+    ...kineticExperimentProblemsOfWorld(migrated),
+    ...geochemicalFluxContextProblemsOfWorld(migrated)
   ];
   if (problems.length > 0) {
     throw new Error('некорректное состояние мира: ' + problems.join('; '));
@@ -1247,4 +1303,5 @@ export default {
   getStorageStats,
   getStorageHealth
 };
+
 
