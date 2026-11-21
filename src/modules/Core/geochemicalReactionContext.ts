@@ -48,9 +48,17 @@ export interface ReactionDataProvenance {
 
 /** Временная отметка (структурно: FluxTime ядра, plain-JSON форма). */
 export interface ReactionFluxTime {
-  readonly kind: 'simulation' | 'wallclock';
+  /**
+   * Маркер формы времени. ОПЦИОНАЛЕН: метка времени ядра
+   * (FluxTime из Core/fluxLedger.ts: segmentIndex + localTimeS)
+   * поля kind не имеет; kind задаёт только формы, его явно указавшие
+   * (например, wallclock-отметки за пределами симуляции).
+   */
+  readonly kind?: 'simulation' | 'wallclock';
   readonly year?: number | null;
   readonly second?: number | null;
+  readonly segmentIndex?: number;
+  readonly localTimeS?: number;
   readonly [key: string]: unknown;
 }
 
@@ -151,8 +159,20 @@ export function validateGeochemicalReactionContext(value: unknown): string[] {
   if (t !== null && t !== undefined && !isPlainRecord(t)) {
     issues.push('time должен быть plain-JSON отметкой времени либо null');
   }
-  if (t !== null && t !== undefined && isPlainRecord(t) && t.kind !== 'simulation' && t.kind !== 'wallclock') {
-    issues.push('time.kind должен быть «simulation» или «wallclock»');
+  if (t !== null && t !== undefined && isPlainRecord(t)) {
+    if (t.kind === undefined) {
+      // Форма метки времени ядра (FluxTime из Core/fluxLedger.ts):
+      // segmentIndex и localTimeS обязательны, конечны и неотрицательны.
+      const segment = t.segmentIndex;
+      const local = t.localTimeS;
+      const okSegment = typeof segment === 'number' && Number.isInteger(segment) && segment >= 0;
+      const okLocal = typeof local === 'number' && Number.isFinite(local) && local >= 0;
+      if (!okSegment || !okLocal) {
+        issues.push('time без kind должен быть меткой времени ядра (FluxTime): корректные segmentIndex и localTimeS');
+      }
+    } else if (t.kind !== 'simulation' && t.kind !== 'wallclock') {
+      issues.push('time.kind должен быть «simulation» или «wallclock»');
+    }
   }
   if (c.assumptions !== undefined && !Array.isArray(c.assumptions)) {
     issues.push('assumptions должен быть массивом строк');
@@ -205,3 +225,4 @@ export function makeSimpleProvenance(sourceName: string): ReactionDataProvenance
     note: 'происхождение задаёт вызывающий код этапа 4.9b; исполнитель не синтезирует источники'
   };
 }
+

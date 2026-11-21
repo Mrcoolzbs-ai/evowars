@@ -43,7 +43,7 @@ import {
   GEOCHEMICAL_REACTION_EXTENT_BASIS,
   validateGeochemicalReactionContext
 } from '../Core/geochemicalReactionContext';
-import { CORE_WORLD_STATE_SCHEMA_VERSION, SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS } from '../Core/worldState';
+import { CORE_WORLD_STATE_SCHEMA_VERSION, SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS, validateWorldState } from '../Core/worldState';
 import {
   CURRENT_SAVE_SCHEMA_VERSION,
   SAVE_SCHEMA_VERSIONS,
@@ -54,12 +54,14 @@ import {
   GEOCHEMICAL_ORGANIC_CARBON_SPECIES_ID,
   validateGeochemicalReactionDefinition,
   planGeochemicalReaction,
-  executeGeochemicalReaction
+  executeGeochemicalReaction,
+  executeGeochemicalReactionOnWorld
 } from '../Core/geochemicalReactionExecution';
 import type {
   GeochemicalReactionDefinition,
   GeochemicalReactionExecutionEnvironment
 } from '../Core/geochemicalReactionExecution';
+import type { CoreWorldState } from '../Core/worldState';
 
 // ============================================
 // ФИКСТУРЫ (производственные каталоги + синтетические инвентари)
@@ -699,6 +701,108 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
 });
 
 // ============================================
+// РАЗДЕЛ L: иммутабельное обновление CoreWorldState (сценарии 37-40)
+// ============================================
+
+describe('Stage 4.9b: executeGeochemicalReactionOnWorld (иммутабельное обновление ядра мира)', () => {
+  /** Корректное состояние ядра мира с синтетическими столбовыми резервуарами. */
+  function makeCoreWorldState(): CoreWorldState {
+    return {
+      schemaVersion: CORE_WORLD_STATE_SCHEMA_VERSION,
+      worldId: 'w-4-9b',
+      clock: { segmentIndex: 3, localTimeS: 900, priorSegmentsS: 100, stepCount: 5, representableStepS: null },
+      cosmicAge: null,
+      bodies: [],
+      gravity: {},
+      radiationSources: [],
+      reservoirs: Object.values(makeEnv().reservoirs),
+      fluxLedger: { records: [] },
+      reactionLedger: { records: [] },
+      legacy: {}
+    };
+  }
+
+  it('37. применяется к ядру: резервуары обновлены, порядок массива сохранён, вход не mutated', () => {
+    const core = makeCoreWorldState();
+    const order = core.reservoirs.map((r) => r.id);
+    const result = executeGeochemicalReactionOnWorld(core, catalog(), co2Dissolution(), makeInput({ transactionId: 'tx-world-1' }) as never);
+    expect(result.status).toBe('applied');
+    if (result.status !== 'applied') return;
+    // порядок резервуаров сохранён
+    expect(result.core.reservoirs.map((r) => r.id)).toEqual(order);
+    // затронутые обновлены точно по coefficient × extent
+    const atmosphere = result.core.reservoirs.find((r) => r.id === 'atmosphere')!;
+    const ocean = result.core.reservoirs.find((r) => r.id === 'ocean')!;
+    expect(atmosphere.material!.entries.co2).toBe(100 - 7);
+    expect(ocean.material!.entries.co2_aq).toBe(20 + 7);
+    // входной CoreWorldState не мутирован
+    expect(core.reservoirs.find((r) => r.id === 'atmosphere')!.material!.entries.co2).toBe(100);
+    expect(core.reservoirs.find((r) => r.id === 'ocean')!.material!.entries.co2_aq).toBe(20);
+    // часы, тела, gravity, radiationSources, fluxLedger — те же ссылки (не тронуты)
+    expect(result.core.clock).toBe(core.clock);
+    expect(result.core.bodies).toBe(core.bodies);
+    expect(result.core.gravity).toBe(core.gravity);
+    expect(result.core.radiationSources).toBe(core.radiationSources);
+    expect(result.core.fluxLedger).toBe(core.fluxLedger);
+    // результирующее ядро валидно штатной валидацией
+    expect(validateWorldState(result.core)).toEqual([]);
+  });
+
+  it('38. существующий журнал не удаляется: успешное применение добавляет ровно одну запись с контекстом', () => {
+    const core = makeCoreWorldState();
+    const result = executeGeochemicalReactionOnWorld(core, catalog(), co2Dissolution(), makeInput({ transactionId: 'tx-world-2' }) as never);
+    expect(result.status).toBe('applied');
+    if (result.status !== 'applied') return;
+    expect(result.core.reactionLedger).toBeDefined();
+    expect(result.core.reactionLedger!.records.length).toBe(1);
+    expect(result.core.reactionLedger!.records[0]!.geochemical).toBeDefined();
+    expect(result.core.reactionLedger!.records[0]!.geochemical!.mechanism).toBe('reaction');
+    expect(validateReactionLedger(result.core.reactionLedger!)).toEqual([]);
+  });
+
+  it('39. журнал создаётся только при первом успешном применении (у ядра без reactionLedger)', () => {
+    const core = makeCoreWorldState();
+    delete (core as { reactionLedger?: unknown }).reactionLedger;
+    // до применения журнал отсутствует: «реакции не записывались»
+    expect(core.reactionLedger).toBeUndefined();
+    const result = executeGeochemicalReactionOnWorld(core, catalog(), co2Dissolution(), makeInput({ transactionId: 'tx-world-3' }) as never);
+    expect(result.status).toBe('applied');
+    if (result.status !== 'applied') return;
+    expect(result.core.reactionLedger).toBeDefined();
+    expect(result.core.reactionLedger!.records.map((r) => r.id)).toEqual(['tx-world-3']);
+    expect(result.core.reactionLedger!.records[0]!.geochemical!.extentMolPerM2).toBe(7);
+  });
+
+  it('40. отказ исполнения не мутирует входной CoreWorldState (нехватка реагента)', () => {
+    const core = makeCoreWorldState();
+    const atmosphereBefore = core.reservoirs.find((r) => r.id === 'atmosphere')!.material!.entries.co2;
+    const result = executeGeochemicalReactionOnWorld(
+      core,
+      catalog(),
+      co2Dissolution(),
+      makeInput({ transactionId: 'tx-world-fail', extentMolPerM2: 1000 }) as never
+    );
+    expect(result.status).toBe('not_applied');
+    if (result.status !== 'not_applied') return;
+    expect(result.reasonKind).toBe('not_executable');
+    expect(result.issues.length).toBeGreaterThan(0);
+    // состав ядра не изменился, журнал не появился
+    expect(core.reservoirs.find((r) => r.id === 'atmosphere')!.material!.entries.co2).toBe(atmosphereBefore);
+    expect(core.reactionLedger!.records.length).toBe(0);
+  });
+
+  it('40b. дубликат id резервуаров в ядре блокирует применение (молчаливое затирание запрещено)', () => {
+    const core = makeCoreWorldState();
+    const dup = makeRes('atmosphere', { co2: 1 });
+    (core.reservoirs as ReservoirRecord[]).push(dup);
+    const result = executeGeochemicalReactionOnWorld(core, catalog(), co2Dissolution(), makeInput({ transactionId: 'tx-world-dup' }) as never);
+    expect(result.status).toBe('not_applied');
+    if (result.status !== 'not_applied') return;
+    expect(result.issues.some((i) => i.includes('дублирующийся id'))).toBe(true);
+  });
+});
+
+// ============================================
 // РАЗДЕЛ K: валидация определения и контекста (дополнительно)
 // ============================================
 
@@ -741,3 +845,4 @@ function ctxJsonStringify(value: unknown): string {
   const keys = Object.keys(rec).sort();
   return '{' + keys.map((k) => JSON.stringify(k) + ':' + ctxJsonStringify(rec[k])).join(',') + '}';
 }
+

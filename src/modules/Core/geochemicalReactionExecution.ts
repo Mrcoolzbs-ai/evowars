@@ -47,6 +47,8 @@
 import { addMaterial, isPlainRecord, removeMaterial, validateMaterialInventory, validateReservoirRecord } from './reservoir';
 import type { ReservoirRecord } from './reservoir';
 import type { FluxTime } from './fluxLedger';
+import type { CoreWorldState } from './worldState';
+import { validateWorldState } from './worldState';
 import type { ReactionLedger, ReactionParticipant, ReactionRecord } from './reactionLedger';
 import {
   auditReactionStoichiometry,
@@ -343,8 +345,10 @@ export function planGeochemicalReaction(
 
   // 2. Форма входа.
   const inputIssues: string[] = [];
-  const raw = input as unknown as Record<string, unknown> | undefined;
-  if (!isPlainRecord(input)) {
+  const raw: Record<string, unknown> | undefined = isPlainRecord(input)
+    ? (input as unknown as Record<string, unknown>)
+    : undefined;
+  if (raw === undefined) {
     inputIssues.push('вход исполнения должен быть объектом-записью (plain record)');
   } else {
     if (typeof raw.transactionId !== 'string' || raw.transactionId.trim() === '') {
@@ -369,9 +373,10 @@ export function planGeochemicalReaction(
     }
   }
   if (inputIssues.length > 0) {
+    const extentRaw = raw !== undefined ? raw.extentMolPerM2 : undefined;
     return {
       status: 'blocked',
-      reasonKind: typeof raw.extentMolPerM2 === 'number' && !Number.isFinite(raw.extentMolPerM2) ? 'not_verifiable' : 'not_executable',
+      reasonKind: typeof extentRaw === 'number' && !Number.isFinite(extentRaw) ? 'not_verifiable' : 'not_executable',
       reactionId,
       reason: 'вход исполнения не проходит валидацию: extent должен быть известной завершённой величиной с происхождением',
       issues: inputIssues
@@ -696,6 +701,124 @@ export function executeGeochemicalReaction(
 }
 
 // ============================================
+// 4.1. ИММУТАБЕЛЬНОЕ ОБНОВЛЕНИЕ COREWORLDSTATE (Stage 4.9b, §5.1)
+// ============================================
+
+/** Результат применения реакции к состоянию ядра (CoreWorldState). */
+export type GeochemicalReactionWorldExecutionResult =
+  | {
+      readonly status: 'applied';
+      /** НОВОЕ состояние ядра; входной CoreWorldState не мутируется. */
+      readonly core: CoreWorldState;
+      readonly reactionId: string;
+      readonly processId: string;
+      readonly transactionId: string;
+      readonly record: ReactionRecord;
+      readonly deltas: ReactionInventoryDeltas;
+      readonly diagnostics: readonly string[];
+    }
+  | {
+      readonly status: 'not_applied';
+      readonly reasonKind: GeochemicalReactionBlockKind;
+      readonly reactionId: string | null;
+      readonly reason: string;
+      readonly issues: readonly string[];
+      readonly error: string | null;
+    };
+
+/**
+ * Иммутабельно применить геохимическую реакцию К ЯДРУ МИРА весь целиком
+ * (Stage 4.9b §5.1). Обязательства:
+ * - порядок существующих резервуаров сохраняется; обновляются ТОЛЬКО
+ *   затронутые резервуары (незатронутые разделяются по ссылке);
+ * - часы, тела, gravity, radiationSources, scheduling и прочие данные
+ *   ядра не трогаются (spread переносит их как есть);
+ * - существующий журнал реакций не удаляется; journal создаётся
+ *   ТОЛЬКО первым успешным применением (у ядра без теплой записи —
+ *   новый журнал с одной транзакцией);
+ * - результирующее состояние проверяется штатной validateWorldState;
+ *   любая проблема = not_applied, входной CoreWorldState не изменён.
+ * Дубликат id резервуара в массиве ядра — не построение словаря поверх
+ * него, а явный отказ (молчаливая перезапись дубликата запрещена).
+ */
+export function executeGeochemicalReactionOnWorld(
+  core: CoreWorldState,
+  speciesCatalog: SpeciesCatalog,
+  definition: GeochemicalReactionDefinition,
+  input: GeochemicalReactionExecutionInput
+): GeochemicalReactionWorldExecutionResult {
+  const notApplied = (
+    reasonKind: GeochemicalReactionBlockKind,
+    reactionId: string | null,
+    reason: string,
+    issues: readonly string[],
+    error: string | null = null
+  ): GeochemicalReactionWorldExecutionResult => ({ status: 'not_applied', reasonKind, reactionId, reason, issues, error });
+
+  // Среда из ядра: словарь резервуаров строится с ЯВНОЙ проверкой
+  // уникальности id (дубликат — отказ, а не молчаливое затирание).
+  const reservoirsById: Record<string, ReservoirRecord> = {};
+  for (const reservoir of core.reservoirs) {
+    if (reservoirsById[reservoir.id] !== undefined) {
+      return notApplied(
+        'not_executable',
+        null,
+        'в состоянии ядра резервуары с повторяющимся id — построение словаря среды отказа: перезапись дубликата молча запрещена',
+        ['reservoirs: дублирующийся id резервуара «' + reservoir.id + '»']
+      );
+    }
+    reservoirsById[reservoir.id] = reservoir;
+  }
+
+  const env: GeochemicalReactionExecutionEnvironment = {
+    speciesCatalog,
+    reservoirs: reservoirsById,
+    // Отсутствие журнала в ядре — «реакции не записывались»: исполнитель
+    // создаст журнал с одной записью при первом успешном применении.
+    ledgerInput: core.reactionLedger
+  };
+
+  const result = executeGeochemicalReaction(definition, env, input);
+  if (result.status !== 'applied') {
+    return notApplied(result.reasonKind, result.reactionId, result.reason, result.issues, result.error);
+  }
+
+  // Новый массив резервуаров с сохранением ПОРЯДКА входного массива:
+  // заменяются только обновлённые записи, остальные разделяются по ссылке.
+  const updatedReservoirs: ReservoirRecord[] = core.reservoirs.map((reservoir) => {
+    const updated = result.reservoirs[reservoir.id];
+    return updated !== undefined && updated !== reservoir ? updated : reservoir;
+  });
+
+  const updatedCore: CoreWorldState = {
+    ...core,
+    reservoirs: updatedReservoirs,
+    reactionLedger: result.ledger
+  };
+
+  const coreIssues = validateWorldState(updatedCore);
+  if (coreIssues.length > 0) {
+    return notApplied(
+      'not_executable',
+      result.reactionId,
+      'результирующее состояние ядра не прошло каноническую валидацию validateWorldState: применение откачено (входное состояние не изменялось)',
+      coreIssues.map((issue) => `${issue.code} (${issue.component}): ${issue.message}`)
+    );
+  }
+
+  return {
+    status: 'applied',
+    core: updatedCore,
+    reactionId: result.reactionId,
+    processId: result.processId,
+    transactionId: result.transactionId,
+    record: result.record,
+    deltas: result.deltas,
+    diagnostics: result.diagnostics
+  };
+}
+
+// ============================================
 // 5. СОПРЯЖЁННЫЕ ПРОЦЕССЫ (coupled) — КОНТРАКТ БУДУЩЕГО ЭТАПА
 // ============================================
 //
@@ -737,3 +860,4 @@ export interface GeochemicalCoupledTransactionContract {
   /** Явная атомарность: единая проверка исходных/конечных инвентарей и общий rollback. */
   readonly atomicity: 'single_snapshot_and_rollback';
 }
+
