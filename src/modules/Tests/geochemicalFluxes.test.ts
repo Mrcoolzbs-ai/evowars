@@ -323,7 +323,9 @@ describe('Stage 4.9a: rate ≠ количество; интеграция и о�
     const result = executeGeochemicalProcess(knownSpec(), env, { fluxId: 'fx-basis-1', durationS: GEOCHEMICAL_YEAR_S, time: TIME });
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
-    expect(result.record.subject.basis).toBe(GEOCHEMICAL_INVENTORY_BASIS);
+    // Basis живёт на substance-субъекте (union FluxSubject) — сужение явное.
+    const subj = result.record.subject;
+    expect(subj.subjectType === 'substance' ? subj.basis : undefined).toBe(GEOCHEMICAL_INVENTORY_BASIS);
     expect(result.reservoirs.atmosphere.material?.basis).toBe('column_amount');
     expect(result.reservoirs.mantle.material?.basis).toBe('column_amount');
     //mantle: 10000 → 9995; atmosphere: 100 → 105 (mol/m²)
@@ -419,6 +421,7 @@ describe('Stage 4.9a: unknown-семантика и fail-closed валидаци
     }
     const result = executeGeochemicalProcess(knownSpec({ speciesId: 'ch4x' }), env, { fluxId: 'fx-badspecies', durationS: 1000 });
     expect(result.status).toBe('not_applied');
+    if (result.status !== 'not_applied') return; // сужение union для tsc
     expect(result.error).toContain('unknown_substance');
     // Состояние мира не изменилось (тот же объект, без мутирования).
     expect(env.reservoirs).toBe(snapshotRes);
@@ -430,6 +433,7 @@ describe('Stage 4.9a: unknown-семантика и fail-closed валидаци
       direction: { kind: 'internal_transfer', fromReservoirId: 'mantle', toReservoirId: 'lithosphere' }
     }), env, { fluxId: 'fx-badres', durationS: 1000 });
     expect(result.status).toBe('not_applied');
+    if (result.status !== 'not_applied') return; // сужение union для tsc
     expect(result.error).toContain('unknown_reservoir');
     expect(env.reservoirs.lithosphere).toBeUndefined();
     expect(() => createGeochemicalFluxPlan(knownSpec({
@@ -455,6 +459,7 @@ describe('Stage 4.9a: unknown-семантика и fail-closed валидаци
     const resBefore = env.reservoirs;
     const result = executeGeochemicalProcess(unknownSpec(), env, { fluxId: 'fx-unknown-2', durationS: GEOCHEMICAL_YEAR_S, time: TIME });
     expect(result.status).toBe('not_applied');
+    if (result.status !== 'not_applied') return; // сужение union для tsc
     expect(result.reason).toContain('неизвестна');
     // В записях потока ничего нет, резервуары не изменены.
     expect(resBefore).toBe(env.reservoirs);
@@ -575,11 +580,12 @@ describe('Stage 4.9a: детерминизм, иммутабельность, к
   it('(26) ошибка применения НЕ мутирует исходное состояние (нехватка вещества)', () => {
     const catalog = makeCatalog();
     const mantleEmpty = setMaterialInventory(createReservoir('mantle', 'solid_column'), 'column_amount', { co2: 0 });
-    const reservoirs = { ...makeReservoirs(), mantle: mantleEmpty };
+    const reservoirs: Record<string, ReservoirRecord> = { ...makeReservoirs(), mantle: mantleEmpty };
     const ledger = createFluxLedger();
     const env = { speciesCatalog: catalog, reservoirs, ledgerInput: ledger };
     const result = executeGeochemicalProcess(knownSpec(), env, { fluxId: 'fx-insuf', durationS: GEOCHEMICAL_YEAR_S, time: TIME });
     expect(result.status).toBe('not_applied');
+    if (result.status !== 'not_applied') return; // сужение union для tsc
     expect(result.error).toContain('требует');
     // Исходные резервуары и журнал не тронуты.
     expect(inventoryAmount(env.reservoirs.atmosphere, 'co2')).toBe(100);
