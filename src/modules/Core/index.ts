@@ -110,3 +110,7 @@ export * from './geochemicalSpecies';
 // стабильные id, явные правила соответствия легаси-резервуарам, builder
 // createGeochemicalReservoirs (автосоздание и суррогаты запрещены).
 export * from './geochemicalReservoirs';
+// Stage 4.9b: структурная атрибуция геохимических реакций (sidecar в ReactionRecord)
+export * from './geochemicalReactionContext';
+// Stage 4.9b: атомарный исполнитель геохимических реакций (реальное применение к инвентарям)
+export * from './geochemicalReactionExecution';

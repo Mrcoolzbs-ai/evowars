@@ -67,8 +67,13 @@ import { validateBodyThermalState } from './thermalState';
  * FluxGeochemicalContext). Миграция 1.6 → 1.7 записи потоков НЕ
  * переписывает: поле появляется только в новых записях (легаси-записи
  * остаются без контекста, никакого provenance для них не синтезируется).
+ * 1.5.0 (Stage 4.9b): опциональное поле ReactionRecord.geochemical —
+ * контекст геохимической атрибуции применённой реакции
+ * (GeochemicalReactionContext,Stage 4.9b). Миграция 1.7 → 1.8 записи
+ * реакций НЕ переписывает и инвентари НЕ затрагивает: контекст
+ * появляется только в новых записях исполнителя.
  */
-export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.4.0';
+export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.5.0';
 
 /**
  * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
@@ -76,7 +81,7 @@ export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.4.0';
  * списку, а не только на непустоту: неизвестная версия — это
  * version_mismatch, а не молчаливое «сойдёт любая».
  */
-export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0'];
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0'];
 
 export const BODY_KINDS: readonly BodyKind[] = [
   'star',

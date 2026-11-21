@@ -179,10 +179,23 @@
 //   speciesId) сравнивается однозначно через JSON.stringify —
 //   конкатенация с пробелом допускала коллизии ('r x'+'y' против
 //   'r'+'x y').
+//
+// Расширение Stage 4.9b (исполнитель геохимических реакций):
+// - ReactionRecord получил опциональное поле geochemical — структурная
+//   атрибуция GeochemicalReactionContext (зеркально FluxRecord.geochemical
+//   из Stage 4.9a.1). Контейнер живёт ВНУТРИ существующей записи; второй
+//   журнал, дубль GeochemicalProcessSpec и атрибуция только строкой note
+//   не вводятся. Отсутствие поля у старых записей — легаси-состояние,
+//   provenance задним числом не синтезируется; явный null недопустим;
+// - физическое применение реакции к инвентарям — задача исполнителя
+//   (Core/geochemicalReactionExecution.ts, Stage 4.9b): ledger по-прежнему
+//   сам инвентари НЕ изменяет, контракт регистрации не менялся.
 
 import type { ConservationStatus, FluxTime } from './fluxLedger';
 import { isPlainRecord } from './reservoir';
 import type { ScientificSpecies, SpeciesCatalog } from './species';
+import { validateGeochemicalReactionContext } from './geochemicalReactionContext';
+import type { GeochemicalReactionContext } from './geochemicalReactionContext';
 
 // ============================================
 // 1. ТИПЫ
@@ -255,6 +268,16 @@ export interface ReactionRecord {
   /** Необязательная ссылка на процесс Scheduler. */
   processId?: string;
   note?: string;
+  /**
+   * Опциональная структурная атрибуция геохимической реакции
+   * (Stage 4.9b): машиночитаемый контейнер GeochemicalReactionContext
+   * ВНУТРИ существующей записи существующего журнала (не второй
+   * ReactionLedger, не дубль GeochemicalProcessSpec). Отсутствие поля
+   * у старых записей — легаси-состояние: provenance задним числом НЕ
+   * синтезируется. Явный null недопустим: «контекста нет» выражается
+   * отсутствием поля.
+   */
+  geochemical?: GeochemicalReactionContext;
 }
 
 /** Журнал реакционных транзакций — сериализуемые данные, без методов. */
@@ -349,6 +372,19 @@ export function validateReactionRecord(record: unknown): string[] {
   }
   if (r.note !== undefined && (typeof r.note !== 'string' || r.note.trim() === '')) {
     problems.push('note, если задан, должен быть непустой строкой');
+  }
+  // Stage 4.9b: опциональный геохимический контекст атрибуции. Легаси-
+  // записи поля не имеют и валидируются как раньше; явный null не
+  // маскируется под «контекста нет»; непустой контекст обязан пройти
+  // полную runtime-валидацию формы (fail-closed).
+  if (r.geochemical !== undefined) {
+    if (r.geochemical === null) {
+      problems.push('geochemical-контекст равен null: отсутствие контекста выражается отсутствием поля (легаси-записи), а не null');
+    } else {
+      for (const issue of validateGeochemicalReactionContext(r.geochemical)) {
+        problems.push('geochemical-контекст: ' + issue);
+      }
+    }
   }
   return problems;
 }
