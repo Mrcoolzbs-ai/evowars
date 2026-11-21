@@ -2329,7 +2329,9 @@ describe('Stage 4.9a.1 Persistence: геохимический контекст 
       currentSavedWorldWithFluxLedger('w-current-flux', [legacyFluxRecord('flux-old-2')]) as unknown as Record<string, unknown>
     ]);
     const worlds = getAllWorlds();
-    expect(worlds.map((w) => w.id)).toEqual(['w-current-flux', 'w-legacy-flux']);
+    // getAllWorlds отдаёт миры в порядке хранения записей raw-массива:
+    // сначала легаси-сохранение 1.6, затем текущее — порядок вставки выше.
+    expect(worlds.map((w) => w.id)).toEqual(['w-legacy-flux', 'w-current-flux']);
     for (const world of worlds) {
       const core = (world as unknown as { coreWorldState: { fluxLedger: { records: Array<Record<string, unknown>> } } }).coreWorldState;
       const rec = core.fluxLedger.records[0];
