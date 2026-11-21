@@ -488,3 +488,20 @@ export {
   type GeochemicalReservoirDescription,
   type GeochemicalBoundaryDescription
 } from './geochemicalProcessCatalog';
+
+
+// ============================================
+// Stage 4.9a.1 (корректирующая ревизия, проблема A): геохимические вещества —
+// ОТДЕЛЬНЫЙ каталог данных (Data/gases.ts остаётся каталогом газов).
+// Определения GeochemicalSpeciesDefinition (co2_aq, caco3, c_org), сборка
+// самостоятельного каталога и АДДИТИВНОЕ слияние с производственным
+// каталогом видов. Механизм — Core/geochemicalSpecies.
+// ============================================
+export {
+  GEOCHEMICAL_SPECIES_DEFINITIONS,
+  GEOCHEMICAL_SPECIES_CATALOG_PROVENANCE,
+  ORGANIC_CARBON_NOTE,
+  validateGeochemicalSpeciesDefinitions,
+  buildGeochemicalSpeciesCatalog,
+  addGeochemicalSpeciesToCatalog
+} from './geochemicalSpeciesCatalog';
