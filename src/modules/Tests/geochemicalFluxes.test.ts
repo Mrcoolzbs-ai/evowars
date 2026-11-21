@@ -130,6 +130,8 @@ function knownSpec(overrides: Partial<GeochemicalProcessSpec> = {}): Geochemical
     description: 'синтетический перенос для проверки контракта (НЕ физический сценарий)',
     speciesId: 'co2',
     direction: { kind: 'internal_transfer', fromReservoirId: 'mantle', toReservoirId: 'atmosphere' },
+    mechanism: 'transport',
+    implementationStatus: 'executable',
     rate: {
       status: 'known',
       unit: GEOCHEMICAL_RATE_UNIT,
@@ -149,6 +151,8 @@ function unknownSpec(overrides: Partial<GeochemicalProcessSpec> = {}): Geochemic
     description: 'синтетический процесс с неподтверждённой скоростью',
     speciesId: 'co2',
     direction: { kind: 'internal_transfer', fromReservoirId: 'atmosphere', toReservoirId: 'ocean' },
+    mechanism: 'transport',
+    implementationStatus: 'executable',
     rate: { status: 'unknown', reason: 'характеристическая скорость не подтверждена источником (синтетический тест незнания)' },
     basis: 'column_amount',
     ...overrides
@@ -710,3 +714,4 @@ describe('Stage 4.9a (допол.): разделение ReactionLedger и FluxL
     expect(res.ledger.records[0].subject.subjectType).toBe('substance');
   });
 });
+
