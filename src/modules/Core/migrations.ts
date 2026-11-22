@@ -160,9 +160,9 @@ export function createDatasetRegistry(): DatasetRegistry {
  *         записей поля нет и оно не создаётся, provenance не
  *         синтезируется; неизвестная версия ядра не изменяется.
  */
-export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8'] as const;
+export const SAVE_SCHEMA_VERSIONS = ['1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9'] as const;
 export type SaveSchemaVersion = (typeof SAVE_SCHEMA_VERSIONS)[number];
-export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.8';
+export const CURRENT_SAVE_SCHEMA_VERSION: SaveSchemaVersion = '1.9';
 
 export function isKnownSchemaVersion(version: string): boolean {
   return (SAVE_SCHEMA_VERSIONS as readonly string[]).includes(version);
@@ -652,7 +652,79 @@ const migrate17to18: SaveMigration<any> = {
   }
 };
 
-const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15, migrate15to16, migrate16to17, migrate17to18];
+/**
+ * Миграция 1.8 → 1.9 (Stage 4.9d, атомарные coupled-транзакции).
+ * Подъём версии схемы состояния ядра 1.5.0 → 1.6.0: у CoreWorldState
+ * появилось ОПЦИОНАЛЬНОЕ поле geochemicalTransactionLog (журнал
+ * применённых атомарных coupled-транзакций — список appliedTransactionIds,
+ * анти-replay защита от двойного применения одной транзакции).
+ * Контракт миграции:
+ * - у ядер с известной версией схемы создаётся ПУСТОЙ журнал:
+ *   ни одна прошлая транзакция не выдумывается, provenance задним
+ *   числом не синтезируется (пустой список честно отражает «не было»);
+ * - существующие записи ReactionLedger/FluxLedger, инвентари, время и
+ *   расписание НЕ пересчитываются и НЕ переписываются;
+ * - ядро с уже новой версией 1.6.0 — идемпотентный no-op (существующий
+ *   журнал сохраняется как есть);
+ * - ядро с НЕИЗВЕСТНОЙ версией схемы ядра не изменяется вообще
+ *   (правило безопасного подъёма не доказано — состояние
+ *   диагностируется валидацией ядра version_mismatch).
+ */
+const migrate18to19: SaveMigration<any> = {
+  from: '1.8',
+  to: '1.9',
+  migrate(world: any): SaveMigrationResult<any> {
+    const core = world.coreWorldState;
+    if (core === undefined) {
+      return {
+        world: { ...world, version: '1.9' },
+        notes: [
+          'версия схемы сохранений поднята до 1.9 (журнал атомарных coupled-транзакций): ядро мира не инициализировано, поля не создаются, значения не пересоздаются'
+        ]
+      };
+    }
+    if (core === null || typeof core !== 'object' || Array.isArray(core)) {
+      return {
+        world: { ...world, version: '1.9' },
+        notes: [
+          'coreWorldState равно null или не является объектом-состоянием ядра: значение оставлено без изменений (это не отсутствие ядра) — некорректная форма будет диагностирована валидацией Storage'
+        ]
+      };
+    }
+    if (core.schemaVersion === '1.6.0') {
+      // Уже новая схема (например, частично обновлённое сохранение) —
+      // чужие данные не перезаписываются, идемпотентный no-op.
+      return { world: { ...world, version: '1.9' }, notes: [] };
+    }
+    const knownCoreVersions = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0'];
+    const previousSchemaVersion = typeof core.schemaVersion === 'string' ? core.schemaVersion : null;
+    const known = previousSchemaVersion !== null && knownCoreVersions.includes(previousSchemaVersion);
+    if (!known) {
+      return {
+        world: { ...world, version: '1.9' },
+        notes: [
+          'версия схемы состояния ядра «' + String(core.schemaVersion) + '» не распознана: безопасное правило подъёма ядра не доказано — coreWorldState оставлен без изменений; состояние будет диагностировано валидацией ядра (version_mismatch)'
+        ]
+      };
+    }
+    const nextCore: Record<string, unknown> = { ...core, schemaVersion: '1.6.0' };
+    const notes: string[] = [
+      'версия схемы состояния ядра поднята с ' + previousSchemaVersion + ' до 1.6.0 (опциональное поле geochemicalTransactionLog — журнал применённых атомарных coupled-транзакций)'
+    ];
+    if (nextCore.geochemicalTransactionLog === undefined) {
+      nextCore.geochemicalTransactionLog = { appliedTransactionIds: [] };
+      notes.push('создан ПУСТОЙ журнал транзакций: ни одна прошлая транзакция не выдумывается, provenance задним числом не синтезируется; инвентари и записи журналов не затронуты');
+    } else {
+      notes.push('поле geochemicalTransactionLog уже присутствовало в состоянии и сохранено как есть');
+    }
+    return {
+      world: { ...world, version: '1.9', coreWorldState: nextCore },
+      notes
+    };
+  }
+};
+
+const MIGRATIONS: readonly SaveMigration<any>[] = [migrate10to11, migrate11to12, migrate12to13, migrate13to14, migrate14to15, migrate15to16, migrate16to17, migrate17to18, migrate18to19];
 
 /**
  * Полная цепочка миграций. Детерминирована: одна и та же входная

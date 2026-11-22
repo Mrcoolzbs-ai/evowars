@@ -35,7 +35,7 @@ import { validateFluxLedger } from './fluxLedger';
 import type { ReactionLedger } from './reactionLedger';
 import { validateReactionLedger } from './reactionLedger';
 import type { ReservoirRecord } from './reservoir';
-import { validateReservoirRecord } from './reservoir';
+import { isPlainRecord, validateReservoirRecord } from './reservoir';
 import type { ScientificValue } from './scientificValue';
 import { validateScientificValueShape } from './scientificValue';
 import type { SimulationClockState } from './simulationClock';
@@ -72,8 +72,18 @@ import { validateBodyThermalState } from './thermalState';
  * (GeochemicalReactionContext,Stage 4.9b). Миграция 1.7 → 1.8 записи
  * реакций НЕ переписывает и инвентари НЕ затрагивает: контекст
  * появляется только в новых записях исполнителя.
+ * 1.6.0 (Stage 4.9d): опциональное поле geochemicalTransactionLog —
+ * журнал применённых атомарных coupled-транзакций (список
+ * appliedTransactionIds). Записи реакций/потоков внутри транзакции
+ * продолжают жить в существующих ReactionLedger/FluxLedger: второй
+ * системы журналов не создаётся. Журнал защищает от повторного
+ * применения того же transactionId (анти-replay) и фиксирует
+ * принадлежность нескольких записей одной атомарной транзакции.
+ * Миграция 1.8 → 1.9 создаёт ПУСТОЙ журнал (никакие прошлые
+ * транзакции не выдумываются). Некорректный журнал отклоняется
+ * валидацией (invalid_transaction_log), а не «чинится» молча.
  */
-export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.5.0';
+export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.6.0';
 
 /**
  * Поддерживаемые версии схемы CoreWorldState (Stage 4.1.1).
@@ -81,7 +91,18 @@ export const CORE_WORLD_STATE_SCHEMA_VERSION = '1.5.0';
  * списку, а не только на непустоту: неизвестная версия — это
  * version_mismatch, а не молчаливое «сойдёт любая».
  */
-export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0'];
+export const SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS: readonly string[] = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'];
+
+/**
+ * Журнал атомарных coupled-транзакций (Stage 4.9d): список id УЖЕ
+ * ПРИМЕНЁННЫХ транзакций. Только данные, без методов. Повторное
+ * применение того же transactionId отклоняется исполнителем
+ * (анти-replay: защита от двойного применения одной транзакции).
+ */
+export interface GeochemicalTransactionLog {
+  /** id применённых транзакций в порядке применения; уникальны. */
+  readonly appliedTransactionIds: readonly string[];
+}
 
 export const BODY_KINDS: readonly BodyKind[] = [
   'star',
@@ -176,6 +197,14 @@ export interface CoreWorldState {
    * никогда (передаются планировщику отдельно).
    */
   scheduling?: SchedulerBookkeeping;
+  /**
+   * Журнал атомарных coupled-транзакций (Stage 4.9d). Опционально:
+   * состояния схемы 1.5.0 и старше его не имеют, и миграция 1.8 → 1.9
+   * создаёт ПУСТОЙ журнал (никакая прошлая транзакция не выдумывается).
+   * Записи реакций/потоков продолжают жить в ReactionLedger/FluxLedger —
+   * журнал хранит только применённые transactionId в порядке применения.
+   */
+  geochemicalTransactionLog?: GeochemicalTransactionLog;
   /** Идентификация легаси-источника (НЕ копия его данных). */
   legacy: {
     generatorVersion?: string;
@@ -200,6 +229,7 @@ export interface WorldStateIssue {
     | 'invalid_flux'
     | 'invalid_flux_reference'
     | 'invalid_reaction_ledger'
+    | 'invalid_transaction_log'
     | 'invalid_scheduling'
     | 'invalid_event'
     | 'invalid_body'
@@ -211,6 +241,39 @@ export interface WorldStateIssue {
   message: string;
   /** Затронутые идентификаторы. */
   refs: string[];
+}
+
+/**
+ * Журнал атомарных coupled-транзакций (Stage 4.9d): форма записи
+ * (plain-объект, appliedTransactionIds — массив уникальных непустых
+ * строк в порядке применения). Возвращает список проблем
+ * (пустой список = журнал корректен).
+ */
+export function validateGeochemicalTransactionLog(value: unknown): string[] {
+  const issues: string[] = [];
+  if (!isPlainRecord(value)) {
+    issues.push('geochemicalTransactionLog должен быть объектом-записью (plain record), получено ' + typeof value);
+    return issues;
+  }
+  const ids = (value as Record<string, unknown>).appliedTransactionIds;
+  if (!Array.isArray(ids)) {
+    issues.push('geochemicalTransactionLog.appliedTransactionIds должен быть массивом id применённых транзакций');
+    return issues;
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < ids.length; index++) {
+    const id = ids[index];
+    if (typeof id !== 'string' || id.trim() === '') {
+      issues.push(`appliedTransactionIds[${index}] должен быть непустой строкой`);
+      continue;
+    }
+    if (seen.has(id)) {
+      issues.push(`appliedTransactionIds содержит дубликат «${id}»: одна транзакция применяется ровно один раз`);
+    } else {
+      seen.add(id);
+    }
+  }
+  return issues;
 }
 
 /**
@@ -349,6 +412,18 @@ export function validateWorldState(state: CoreWorldState): WorldStateIssue[] {
     }
   }
 
+  // --- журнал атомарных coupled-транзакций (Stage 4.9d) ---
+  // Проверяется ЯВНО заданный журнал: отсутствие поля — не ошибка
+  // (легаси-состояние схемы 1.5.0 и старше). Некорректные данные не
+  // превращаются молча в пустой журнал: каждая проблема — диагностика
+  // invalid_transaction_log, «лечения» автозаполнением нет.
+  if (state.geochemicalTransactionLog !== undefined) {
+    const logIssues = validateGeochemicalTransactionLog(state.geochemicalTransactionLog);
+    if (logIssues.length > 0) {
+      issues.push({ code: 'invalid_transaction_log', component: 'GeochemicalTransactionLog', message: logIssues.join('; '), refs: [] });
+    }
+  }
+
   // --- планировщик (Stage 4.2.1): опциональное состояние расписаний ---
   if (state.scheduling !== undefined) {
     const schedulingIssues = validateSchedulerBookkeeping(state.scheduling);
@@ -402,6 +477,7 @@ export function createCoreWorldState(worldId: string): CoreWorldState {
     reservoirs: [],
     fluxLedger: { records: [] },
     reactionLedger: { records: [] },
+    geochemicalTransactionLog: { appliedTransactionIds: [] },
     legacy: {}
   };
 }

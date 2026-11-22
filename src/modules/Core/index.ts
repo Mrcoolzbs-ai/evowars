@@ -118,3 +118,9 @@ export * from './geochemicalReactionExecution';
 // (K1/K2/Kw с provenance, solved-спекиация, карбонатная щёлочность, зарядовый
 // баланс; физическое применение переноса к инвентарям — следующий этап).
 export * from './carbonateChemistry';
+// Stage 4.9d: атомарное исполнение coupled-транзакций (единый transactionId,
+// агрегирование дельт на одном снимке, план-валидация-commit, анти-replay,
+// fail-closed rollback); физическое применение результатов карбонатной
+// специации к инвентарям океана см. carbonateSpeciationExecution (следующий
+// коммит этого этапа).
+export * from './geochemicalCoupledExecution';
