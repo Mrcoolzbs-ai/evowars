@@ -604,7 +604,12 @@ export type CO2TargetDICSearchResult =
     }
   | {
       readonly status: 'not_applied';
-      readonly reasonKind: 'invalid_input' | 'out_of_applicability' | 'no_solution';
+      readonly reasonKind:
+        | 'invalid_input'
+        | 'out_of_applicability'
+        | 'no_solution'
+        | 'unsupported_activity_model'
+        | 'unsupported_ph_scale';
       readonly reason: string;
       readonly issues: readonly string[];
     };
@@ -1034,7 +1039,12 @@ export function evaluateAtmosphereOceanEquilibrium(
   if (dFinal.status !== 'applied' || !Number.isFinite(final.carbon)) {
     return {
       status: 'not_applied',
-      reasonKind: dFinal.status === 'not_applied' ? dFinal.reasonKind : 'no_solution',
+      reasonKind:
+        dFinal.status === 'not_applied'
+          ? dFinal.reasonKind === 'unsupported_activity_model' || dFinal.reasonKind === 'unsupported_ph_scale'
+            ? 'no_solution'
+            : dFinal.reasonKind
+          : 'no_solution',
       reason: 'финальное равновесие не сошлось: ' + (dFinal.status === 'not_applied' ? dFinal.reason : 'невязка непредставима'),
       issues: dFinal.status === 'not_applied' ? [...dFinal.issues] : []
     };

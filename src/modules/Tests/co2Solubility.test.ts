@@ -617,7 +617,7 @@ describe('Stage 4.9e замкнутое равновесие атмосфера-
   });
 
   it('нехватка газового состояния атмосферы — not_verifiable со списком недостающих входов', () => {
-    const raw = equilibriumInput() as Record<string, unknown>;
+    const raw: Record<string, unknown> = { ...equilibriumInput() };
     delete raw.atmosphere;
     const result = evaluateAtmosphereOceanEquilibrium(raw as never);
     expect(result.status).toBe('not_verifiable');
@@ -634,7 +634,7 @@ describe('Stage 4.9e замкнутое равновесие атмосфера-
       ['no-atm-co2', 'atmosphereCO2ColumnMolPerM2'],
       ['no-dic', 'oceanDICColumnMolPerM2']
     ] as const) {
-      const raw = equilibriumInput() as Record<string, unknown>;
+      const raw: Record<string, unknown> = { ...equilibriumInput() };
       delete raw[key];
       const result = evaluateAtmosphereOceanEquilibrium(raw as never);
       expect(result.status, label).toBe('not_verifiable');
@@ -645,7 +645,7 @@ describe('Stage 4.9e замкнутое равновесие атмосфера-
   });
 
   it('масса столба без provenance — not_verifiable (происхождение обязательно)', () => {
-    const raw = equilibriumInput() as Record<string, unknown>;
+    const raw: Record<string, unknown> = { ...equilibriumInput() };
     raw.seawaterColumnMassKgPerM2 = { valueKgPerM2: 1000, unit: SEAWATER_COLUMN_MASS_UNIT, provenance: { note: 'без источника' } };
     const result = evaluateAtmosphereOceanEquilibrium(raw as never);
     expect(result.status).toBe('not_verifiable');
@@ -655,14 +655,14 @@ describe('Stage 4.9e замкнутое равновесие атмосфера-
   });
 
   it('неправильная единица массы столба и NaN-входы — контролируемый отказ (не ноль, не выдумка)', () => {
-    const badUnit = equilibriumInput();
-    badUnit.seawaterColumnMassKgPerM2 = { valueKgPerM2: 1000, unit: 'kg/m2', provenance: FIXTURE_PROVENANCE } as never;
-    const r1 = evaluateAtmosphereOceanEquilibrium(badUnit);
+    const badUnit: Record<string, unknown> = { ...equilibriumInput() };
+    badUnit.seawaterColumnMassKgPerM2 = { valueKgPerM2: 1000, unit: 'kg/m2', provenance: FIXTURE_PROVENANCE };
+    const r1 = evaluateAtmosphereOceanEquilibrium(badUnit as never);
     expect(r1.status).toBe('not_applied');
     if (r1.status === 'not_applied') expect(r1.issues.join(' ')).toContain('kg-SW');
-    const badNaN = equilibriumInput();
+    const badNaN: Record<string, unknown> = { ...equilibriumInput() };
     badNaN.atmosphereCO2ColumnMolPerM2 = { value: Number.NaN, provenance: FIXTURE_PROVENANCE };
-    const r2 = evaluateAtmosphereOceanEquilibrium(badNaN);
+    const r2 = evaluateAtmosphereOceanEquilibrium(badNaN as never);
     expect(r2.status).toBe('not_applied');
     if (r2.status === 'not_applied') expect(r2.reasonKind).toBe('invalid_input');
   });
