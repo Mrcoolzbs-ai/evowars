@@ -255,7 +255,7 @@ describe('Stage 4.9e Weiss K0: численная корректность', () 
       const result = evaluateCO2Solubility(build());
       expect(result.status, label).toBe('not_applied');
       if (result.status === 'not_applied') {
-        expect(result.issues.join(' ')).toContain('provenance');
+        expect(result.issues.join(' ').toLowerCase()).toContain('provenance');
       }
     }
   });
@@ -411,7 +411,7 @@ describe('Stage 4.9e фугативность: основы и единицы', 
       fugacityCoefficient: 0.9955
     });
     expect(noProv.status).toBe('not_applied');
-    if (noProv.status === 'not_applied') expect(noProv.reason).toContain('provenance');
+    if (noProv.status === 'not_applied') expect(noProv.reason.toLowerCase()).toContain('provenance');
   });
 
   it('p_CO2 выше конверта модуля (5 atm) — out_of_applicability, а не предполагаемая поправка', () => {
@@ -470,7 +470,7 @@ describe('Stage 4.9e равновесие Генри: [CO2*] = K0·f_CO2', () =>
   it('фугативность без provenance — отказ', () => {
     const result = calculateCO2AqueousEquilibrium(henryInput({ fCO2Provenance: { sourceName: '' } as unknown as DataProvenance }));
     expect(result.status).toBe('not_applied');
-    if (result.status === 'not_applied') expect(result.reason).toContain('provenance');
+    if (result.status === 'not_applied') expect(result.reason.toLowerCase()).toContain('provenance');
   });
 
   it('фугативность выше конверта модуля — out_of_applicability', () => {
