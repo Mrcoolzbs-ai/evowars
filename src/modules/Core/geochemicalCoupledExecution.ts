@@ -605,6 +605,8 @@ export function planGeochemicalCoupledTransaction(
   const transferContributions: { reservoirId: string; speciesId: string; delta: number; recordId: string }[] = [];
   /** Вклады, пересекающие внешнюю границу (элементный источник — вне системы). */
   const externalContributions: { speciesId: string; delta: number }[] = [];
+  /** recordId внешних переносов: их вклады НЕ входят во внутренний счёт аудита (двойной учёт исключён). */
+  const externalRecordIds: string[] = [];
   const boundaryJustifications: string[] = [];
   for (let index = 0; index < components.length; index++) {
     const component = components[index]!;
@@ -698,10 +700,12 @@ export function planGeochemicalCoupledTransaction(
       // обоснованной границей), а не внутренняя невязка — иначе честный
       // приток вещества не проходил бы элементный аудит вообще.
       externalContributions.push({ speciesId: component.speciesId, delta: +component.amountMolPerM2 });
+      externalRecordIds.push(recordId);
     } else {
       transferContributions.push({ reservoirId: sides.from, speciesId: component.speciesId, delta: -component.amountMolPerM2, recordId });
       // Элементы уходят НАРУЖУ через обоснованную (validated) границу.
       externalContributions.push({ speciesId: component.speciesId, delta: -component.amountMolPerM2 });
+      externalRecordIds.push(recordId);
     }
   }
 
@@ -767,6 +771,11 @@ export function planGeochemicalCoupledTransaction(
     internalCounts[contribution.speciesId] = (internalCounts[contribution.speciesId] ?? 0) + contribution.delta;
   }
   for (const contribution of transferContributions) {
+    // Вклады внешних переносов остаются в transferContributions (история
+    // записи потока), но во ВНУТРЕННИЙ счёт не входят: иначе внешний
+    // приток/отток учитывался бы дважды — во внутреннем балансе и как
+    // netExternal — и честный перенос вещества блокировал бы транзакцию.
+    if (externalRecordIds.includes(contribution.recordId)) continue;
     internalCounts[contribution.speciesId] = (internalCounts[contribution.speciesId] ?? 0) + contribution.delta;
   }
   for (const contribution of externalContributions) {

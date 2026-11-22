@@ -8,7 +8,7 @@
 // - fail-closed: несбалансированные/непроверяемые/вне применимости
 //   реакции не применяются, входные объекты не мутируются;
 // - структурная атрибуция GeochemicalReactionContext в ReactionRecord;
-// - миграция 1.7 → 1.8 и Storage round-trip.
+// - миграция 1.7 → текущей save-схемы (1.9) и Storage round-trip.
 //
 // ФИКСТУРА CO2(g) ⇌ CO2(aq): синтетический проверочный механизм для
 // ОБОБЩЁННОГО исполнителя (1:1 переход фаз, сохранение C и O). Extent
@@ -639,7 +639,7 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
     expect(ocean.material!.entries.co2_aq).toBe(20 + 7);
   });
 
-  it('35. миграция 1.7 → 1.8 сохраняет старые записи без подделанного provenance', () => {
+  it('35. миграция 1.7 → текущей save-схемы сохраняет старые записи без подделанного provenance', () => {
     const legacy = {
       id: 'legacy-reaction-1',
       reactionId: 'legacy.fix.v0',
@@ -666,17 +666,21 @@ describe('Stage 4.9b: GeochemicalReactionContext, сериализация, ми
       }
     };
     expect(isKnownSchemaVersion('1.7')).toBe(true);
-    expect(CURRENT_SAVE_SCHEMA_VERSION).toBe('1.8');
+    // Stage 4.9d: save-схема продвинута до 1.9 (журнал geochemicalTransactionLog),
+    // схема ядра — до 1.6.0; пины обновлены вместе со схемой, не ослаблены.
+    expect(CURRENT_SAVE_SCHEMA_VERSION).toBe('1.9');
     expect(SAVE_SCHEMA_VERSIONS).toContain('1.7');
     expect(SAVE_SCHEMA_VERSIONS).toContain('1.8');
     expect(SUPPORTED_CORE_WORLD_STATE_SCHEMA_VERSIONS).toContain('1.5.0');
-    expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.5.0');
+    expect(CORE_WORLD_STATE_SCHEMA_VERSION).toBe('1.6.0');
     const { world, notes, from, to } = migrateSavedWorld(save17);
     expect(from).toBe('1.7');
-    expect(to).toBe('1.8');
-    expect(world.version).toBe('1.8');
+    // миграция идёт до текущей схемы (1.9): 1.7 → 1.8 → 1.9
+    expect(to).toBe('1.9');
+    expect(world.version).toBe('1.9');
     const core = (world as Record<string, unknown>).coreWorldState as Record<string, unknown>;
-    expect(core.schemaVersion).toBe('1.5.0');
+    // 1.4.0 → 1.5.0 (в шаге 1.7→1.8), затем 1.5.0 → 1.6.0 (в шаге 1.8→1.9)
+    expect(core.schemaVersion).toBe('1.6.0');
     const ledger = core.reactionLedger as { records: ReactionRecord[] };
     expect(ledger.records.length).toBe(1);
     expect(ledger.records[0]!.geochemical).toBeUndefined(); // provenance НЕ синтезирован
