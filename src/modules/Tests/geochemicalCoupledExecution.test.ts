@@ -720,7 +720,7 @@ describe('Stage 4.9d coupled: отказы и неизменность вход�
     // Отказ последней компоненты пакета отменяет ВСЮ транзакцию: первая компонента не применилась.
     expect(snapshotOf(f)).toBe(before);
     expect(f.env.fluxLedgerInput.records).toHaveLength(0);
-    expect(f.env.reactionLedgerInput.records).toHaveLength(0);
+    expect(f.env.reactionLedgerInput?.records ?? []).toHaveLength(0);
   });
 
   it('вид c_org в реакции отклоняется правилом 4.9b (bookkeeping-вид не превращается)', () => {
@@ -776,7 +776,7 @@ describe('Stage 4.9d coupled: отказы и неизменность вход�
     expect(result.status).toBe('blocked');
     expect(snapshotOf(f)).toBe(before);
     expect(f.env.fluxLedgerInput.records).toHaveLength(0);
-    expect(f.env.reactionLedgerInput.records).toHaveLength(0);
+    expect(f.env.reactionLedgerInput?.records ?? []).toHaveLength(0);
   });
 });
 
