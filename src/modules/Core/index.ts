@@ -139,3 +139,4 @@ export * from './carbonateSpeciationExecution';
 // цель, НЕ кинетика газообмена.
 export * from './co2Solubility';
 
+export * from './co2ExchangeExecution';
