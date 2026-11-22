@@ -402,8 +402,7 @@ function environmentFromCore(
       reactionLedgerInput: core.reactionLedger,
       fluxLedgerInput: core.fluxLedger,
       appliedTransactionIds: core.geochemicalTransactionLog !== undefined ? core.geochemicalTransactionLog.appliedTransactionIds : []
-    },
-    issues: []
+    }
   };
 }
 
