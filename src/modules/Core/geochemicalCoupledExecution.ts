@@ -451,9 +451,12 @@ export function withTransactionLogApplied(core: CoreWorldState, transactionId: s
  *  5. планирование каждой реакции через planGeochemicalReaction (4.9b:
  *     форма определения → вход → c_org-правило → candidate-запись →
  *     auditReactionStoichiometry строго 'balanced' → вклады → среда);
- *  6. проверка каждого переноса: вид/резервуары/инвентари/основания/
+ *  6. проверка каждого переноса: резервуары/инвентари/основания/
  *     направления/количество/provenance/границы; заряженный внешний
- *     перенос отклоняется (проверка 9 промпта 4.9d);
+ *     перенос отклоняется (проверка 9 промпта 4.9d); вид, отсутствующий
+ *     в SpeciesCatalog, НЕ отклоняется здесь, а доходит до аудита
+ *     (шаг 9) и даёт честный not_verifiable — неизвестный состав
+ *     не заменяется нулём и не «блокируется молча»;
  *  7. агрегирование всех дельт по парам (reservoirId, speciesId) на
  *     ОДНОМ снимке (промпт 4.9d: агрегирование ДО вычисления
  *     инвентарей, никакое применение по одному с повторным чтением);
@@ -600,6 +603,8 @@ export function planGeochemicalCoupledTransaction(
   // --- 6. проверки переносов ---
   const fluxRecords: FluxRecord[] = [];
   const transferContributions: { reservoirId: string; speciesId: string; delta: number; recordId: string }[] = [];
+  /** Вклады, пересекающие внешнюю границу (элементный источник — вне системы). */
+  const externalContributions: { speciesId: string; delta: number }[] = [];
   const boundaryJustifications: string[] = [];
   for (let index = 0; index < components.length; index++) {
     const component = components[index]!;
@@ -609,9 +614,10 @@ export function planGeochemicalCoupledTransaction(
       return blocked('duplicate_transaction', processId, 'производный идентификатор записи потока конфликтует с существующей записью журнала', ['конфликт id: ' + recordId]);
     }
     const transferIssues: string[] = [];
-    if (!env.speciesCatalog.has(component.speciesId)) {
-      transferIssues.push('вид «' + component.speciesId + '» отсутствует в SpeciesCatalog: перенос неизвестного вида невозможен (фиктивные виды не вводятся)');
-    }
+    // Неизвестный вид НЕ отклоняется здесь (not_executable): он доходит до
+    // элементного/зарядового аудита (шаг 9), где elementTotals/chargeTotal
+    // помечают его исключённым и транзакция получает честный not_verifiable —
+    // неизвестный состав не заменяется нулём и не блокируется молча.
     if (!Number.isFinite(component.amountMolPerM2) || component.amountMolPerM2 <= 0) {
       transferIssues.push('amountMolPerM2 должен быть конечным положительным числом, получено ' + String(component.amountMolPerM2) + ' (скоростные переносы в coupled-транзакцию не включаются: скорость требует интеграции вне транзакции)');
     }
@@ -688,8 +694,14 @@ export function planGeochemicalCoupledTransaction(
       transferContributions.push({ reservoirId: sides.to, speciesId: component.speciesId, delta: +component.amountMolPerM2, recordId });
     } else if (sides.kind === 'external_input') {
       transferContributions.push({ reservoirId: sides.to, speciesId: component.speciesId, delta: +component.amountMolPerM2, recordId });
+      // Элементы входят СНАРУЖИ: это внешний перенос (netExternal с
+      // обоснованной границей), а не внутренняя невязка — иначе честный
+      // приток вещества не проходил бы элементный аудит вообще.
+      externalContributions.push({ speciesId: component.speciesId, delta: +component.amountMolPerM2 });
     } else {
       transferContributions.push({ reservoirId: sides.from, speciesId: component.speciesId, delta: -component.amountMolPerM2, recordId });
+      // Элементы уходят НАРУЖУ через обоснованную (validated) границу.
+      externalContributions.push({ speciesId: component.speciesId, delta: -component.amountMolPerM2 });
     }
   }
 
@@ -745,10 +757,20 @@ export function planGeochemicalCoupledTransaction(
   // --- 9. элементный и зарядовый аудит агрегата ---
   const internalCounts: Record<string, number> = {};
   const externalCounts: Record<string, number> = {};
-  for (const delta of aggregatedDeltas) {
-    const internal = delta.reservoirId !== EXTERNAL;
-    const target = internal ? internalCounts : externalCounts;
-    target[delta.speciesId] = (target[delta.speciesId] ?? 0) + delta.deltaMolM2;
+  // Реакции и внутренние переносы не пересекают границу: их совокупный
+  // элементный/зарядовый вклад обязан сходиться в нуль. Внешние переносы
+  // классифицируются по ФАКТУ пересечения границы (а не по резервуару,
+  // хранящему дельту): внешний приток записан на внутренний резервуар,
+  // но источник элементов — вне системы; это netExternal с границей,
+  // а не внутренняя невязка.
+  for (const contribution of reactionContributions) {
+    internalCounts[contribution.speciesId] = (internalCounts[contribution.speciesId] ?? 0) + contribution.delta;
+  }
+  for (const contribution of transferContributions) {
+    internalCounts[contribution.speciesId] = (internalCounts[contribution.speciesId] ?? 0) + contribution.delta;
+  }
+  for (const contribution of externalContributions) {
+    externalCounts[contribution.speciesId] = (externalCounts[contribution.speciesId] ?? 0) + contribution.delta;
   }
   const internalElements = elementTotals(env.speciesCatalog, internalCounts);
   const externalElements = elementTotals(env.speciesCatalog, externalCounts);

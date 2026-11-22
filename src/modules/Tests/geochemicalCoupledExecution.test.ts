@@ -70,7 +70,8 @@ function oceanReservoir(entriesOverride: Record<string, number> = {}): Reservoir
     hco3_aq: 0.0020,
     co3_aq: 0.0002,
     hplus_aq: 1e-8,
-    oh_aq: 5e-6,
+    // synthetic test fixture: запас oh_aq достаточен для экстентов реакций-фикстур (до 5e-4): запас 5e-6 не выдерживал бы шаг финальных инвентарей (отрицательный запас невозможен)
+    oh_aq: 0.002,
     h2o_aq: 9000,
     caco3: 0.004,
     ...entriesOverride
@@ -273,7 +274,7 @@ describe('Stage 4.9d coupled: успешные транзакции', () => {
     expect(execution.contract.fluxTransactionIds).toEqual(['tx-success-1::flux::1']);
     // Инвентарь океана: co2_aq = 0.0012 - 0.0005 + 0.0007 = 0.0014.
     expect(execution.reservoirs['ocean']?.material?.entries['co2_aq']).toBeCloseTo(0.0014, 15);
-    expect(execution.reservoirs['ocean']?.material?.entries['oh_aq']).toBeCloseTo(5e-6 - 0.0005, 15);
+    expect(execution.reservoirs['ocean']?.material?.entries['oh_aq']).toBeCloseTo(0.002 - 0.0005, 15);
     expect(execution.reservoirs['ocean']?.material?.entries['hco3_aq']).toBeCloseTo(0.002 + 0.0005, 15);
     // Журналы: ровно одна реакция и один поток; резервуары атмосферы не тронуты.
     expect(execution.reactionLedger.records).toHaveLength(1);
