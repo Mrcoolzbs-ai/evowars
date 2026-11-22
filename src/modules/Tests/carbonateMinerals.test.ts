@@ -52,6 +52,7 @@ import type {
   CarbonateMineralCycleInput
 } from '../Core/carbonateMineralExecution';
 import { solveCarbonateEquilibrium } from '../Core/carbonateChemistry';
+import type { CarbonateSpeciationDistribution } from '../Core/carbonateSpeciationExecution';
 import {
   GEOCHEMICAL_SPECIES_DEFINITIONS,
   buildGeochemicalSpeciesCatalog,
@@ -95,11 +96,6 @@ const FIXTURE_PROVENANCE: DataProvenance = {
   recordId: 'synthetic-carbonate-minerals-fixture'
 };
 
-const EXTENT_PROVENANCE: DataProvenance = {
-  ...FIXTURE_PROVENANCE,
-  note: 'synthetic test fixture: количество минеральной реакции задано ЯВНО для проверки механики транзакции, НЕ измеренное и НЕ рассчитанное значение (кинетика — Stage 4.9g)'
-};
-
 function fixtureTime(): FluxTime {
   return { segmentIndex: 1, localTimeS: 1200 };
 }
@@ -108,7 +104,7 @@ function fixtureTime(): FluxTime {
 function distributionOfSolve(
   result: Extract<ReturnType<typeof solveCarbonateEquilibrium>, { status: 'applied' }>,
   recordId: string
-) {
+): CarbonateSpeciationDistribution {
   return {
     phScale: result.phScale,
     activityModel: result.activityModel,
@@ -147,7 +143,7 @@ function solveBaseline() {
   return solved;
 }
 
-function baselineDistribution() {
+function baselineDistribution(): CarbonateSpeciationDistribution {
   return distributionOfSolve(solveBaseline(), 'fixture-baseline-distribution');
 }
 
@@ -234,7 +230,7 @@ function reactionInput(overrides: Record<string, unknown> = {}): CarbonateMinera
  */
 function chargeCompensationFor(
   direction: 'dissolve' | 'precipitate',
-  base: ReturnType<typeof baselineDistribution> = baselineDistribution(),
+  base: CarbonateSpeciationDistribution = baselineDistribution(),
   amountMolPerM2: number = EXTENT,
   massKgPerM2: number = MASS
 ) {
@@ -256,7 +252,7 @@ function chargeCompensationFor(
     activityModel: 'ideal_dilute'
   });
   if (solved.status !== 'applied') {
-    throw new Error('solveCarbonateEquilibrium отказал при вычислении компенсации фикстуры: ' + (solved.status === 'not_applied' ? solved.reason : 'статус ' + solved.status));
+    throw new Error('solveCarbonateEquilibrium отказал при вычислении компенсации фикстуры: ' + JSON.stringify(solved).slice(0, 300));
   }
   const tOh = solved.speciesMolPerKgSw.oh_aq ?? 0;
   const modeledChargePerKg =
