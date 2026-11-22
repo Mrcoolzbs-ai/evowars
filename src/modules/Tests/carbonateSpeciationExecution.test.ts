@@ -27,6 +27,7 @@ import {
   SEAWATER_COLUMN_MASS_UNIT,
   captureSpeciationTransactionSnapshot,
   executeCarbonateSpeciationExecution,
+  executeCarbonateSpeciationExecutionOnWorld,
   planCarbonateSpeciationExecution
 } from '../Core/carbonateSpeciationExecution';
 import type {
@@ -282,7 +283,7 @@ describe('Stage 4.9d speciation: единицы и provenance', () => {
   it('неидентифицированный provenance массы столба отклоняется', () => {
     const core = makeIsolatedCore();
     const before = snapshotOf(core);
-    const mass = { valueKgPerM2: COLUMN_MASS, unit: SEAWATER_COLUMN_MASS_UNIT, provenance: { note: 'источник не назван' } as never };
+    const mass: SeawaterColumnMass = { valueKgPerM2: COLUMN_MASS, unit: SEAWATER_COLUMN_MASS_UNIT, provenance: { note: 'источник не назван' } as never };
     const result = executeCarbonateSpeciationExecution(core, catalog, {
       ...makeInput('tx-mass-no-prov'),
       seawaterColumnMassKgPerM2: mass
@@ -386,8 +387,10 @@ describe('Stage 4.9d speciation: химические инварианты', () 
     expect(after.co3_aq).toBeCloseTo(0.0002, 15);
     expect(after.hplus_aq).toBeCloseTo(5e-5, 15);
     expect(after.oh_aq).toBeCloseTo(2e-4, 15);
-    // h2o_aq — закреплённый растворитель: не в дельтах и не изменён.
-    expect(result.deltas.some((d) => d.speciesId === 'h2o_aq')).toBe(false);
+    // h2o_aq — закреплённый растворитель: не в дельтах и не изменён
+    // (h2o_aq не входит в union видов дельт; проверяем через строковые id).
+    const deltaSpeciesIds: readonly string[] = result.deltas.map((d) => d.speciesId);
+    expect(deltaSpeciesIds.includes('h2o_aq')).toBe(false);
     expect(after.h2o_aq).toBe(9000);
     // состав/заряд каталога не подменялись исполнителем
     expect(catalog.has('co2_aq')).toBe(true);
