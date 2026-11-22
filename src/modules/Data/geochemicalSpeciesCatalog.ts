@@ -119,7 +119,8 @@ function iupacMassProvenance(recordId: string, applicability: string) {
 
 /** Справочные молярные массы (кг/моль) — суммы стандартных атомных весов IUPAC 2021. */
 const CO2_MOLAR_MASS_KG_MOL = 44.009; // 12.011 + 2 × 15.999
-const CACO3_MOLAR_MASS_KG_MOL = 100.086; // 40.078 + 12.011 + 3 × 15.999
+const CACO3_MOLAR_MASS_KG_MOL = 100.086; // 40.078 + 12.011 + 3 × 15.999 (одинакова для кальцита и арагонита — полиморфы)
+const CA2_MOLAR_MASS_KG_MOL = 40.078; // 1 × 40.078 (стандартный атомный вес Ca, IUPAC 2021)
 const HCO3_MOLAR_MASS_KG_MOL = 61.016; // 1.008 + 12.011 + 3 × 15.999
 const CO3_MOLAR_MASS_KG_MOL = 60.008; // 12.011 + 3 × 15.999
 const HPLUS_MOLAR_MASS_KG_MOL = 1.008; // 1 × 1.008
@@ -143,7 +144,13 @@ const H2O_MOLAR_MASS_KG_MOL = 18.015; // 2 × 1.008 + 15.999
  *   mol/kg-SW) её концентрация считается закреплённой и физически
  *   НЕ переносится геохимическими потоками — переносится
  *   стехиометрия в записях ReactionLedger, а не запас растворителя
- *   океана.
+ *   океана;
+ * - ca2_aq — растворённый ион кальция Ca2+ (Stage 4.9f): участник
+ *   минеральных реакций карбонатов (не каталог газов);
+ * - aragonite — арагонит (Stage 4.9f): полиморф CaCO3, САМОСТОЯТЕЛЬНЫЙ
+ *   вид (та же стехиометрия, что у кальцита caco3, но другой id и
+ *   другая стехиометрическая Ksp* по Mucci 1983); взаимозамена
+ *   полиморфов запрещена.
  */
 export const GEOCHEMICAL_SPECIES_DEFINITIONS: readonly GeochemicalSpeciesDefinition[] = [
   {
@@ -182,7 +189,7 @@ export const GEOCHEMICAL_SPECIES_DEFINITIONS: readonly GeochemicalSpeciesDefinit
     molarMassStatus: 'known',
     molarMassProvenance: iupacMassProvenance(
       'caco3_molar_mass',
-      'молярная масса формульной единицы CaCO3; минеральные примеси (доломит, арагонит и др.) этим видом не покрываются'
+      'молярная масса формульной единицы CaCO3; минеральные примеси (доломит и др.) этим видом не покрываются'
     ),
     dataStatus: 'known',
     provenance: {
@@ -193,7 +200,58 @@ export const GEOCHEMICAL_SPECIES_DEFINITIONS: readonly GeochemicalSpeciesDefinit
       method: 'кураторское определение минерального вида «карбонат кальция» для карбонатных процессов углеродного цикла',
       applicability: 'осаждение карбоната (Stage 4.9), субдукция/метаморфизм карбонатного материала',
       limitations: 'НЕ покрывает CaMg(CO3)2 (доломит) и другие карбонаты; стехиометрия осаждения будет задаваться ReactionLedger'
-    }
+    },
+    note: 'с Stage 4.9f запись означает именно КАЛЬЦИТ: арагонит — ОТДЕЛЬНЫЙ вид aragonite (другая запись каталога, другая растворимость по Mucci 1983); взаимозамена id caco3 и aragonite запрещена'
+  },
+  {
+    id: 'ca2_aq',
+    formula: 'Ca',
+    name: 'Ион кальция Ca2+ (водная фаза)',
+    elements: { Ca: 1 },
+    charge: 2,
+    phase: 'aqueous',
+    molarMassKgMol: CA2_MOLAR_MASS_KG_MOL,
+    molarMassStatus: 'known',
+    molarMassProvenance: iupacMassProvenance(
+      'ca2_aq_molar_mass',
+      'молярная масса иона Ca2+ принята равной стандартному атомному весу Ca (масса электронов пренебрежимо мала относительно атомной); переводы в кг допустимы'
+    ),
+    dataStatus: 'known',
+    provenance: {
+      sourceName: 'Стандартная химия Ca2+ (формула, состав и заряд — установленная химия)',
+      sourceId: 'evowars/stage-4.9f/geochemical-species-catalog',
+      recordId: 'ca2_aq_definition',
+      retrievedAt: '2026-11-23',
+      method: 'кураторское определение растворённого иона кальция для карбонатных минеральных реакций (Stage 4.9f, Core/carbonateMinerals.ts)',
+      applicability: 'стехиометрия растворения/осаждения CaCO3(s) ⇌ Ca2+ + CO3^2- и насыщение Ω = [Ca2+]·[CO3^2-]/Ksp* (Mucci 1983, DOI 10.2475/ajs.283.7.780)',
+      limitations: 'геохимический aqueous-вид, в каталог газов НЕ входит; концентрация — mol/kg-SW; фон сильных ионов морской воды (Na/Cl/S и др.) этим видом не описывается — компенсация модельного заряда только через StrongIonChargeCompensation Stage 4.9d'
+    },
+    note: 'участник минеральных реакций карбонатов (Stage 4.9f); равновесная концентрация Ca2+ морской воды решателем 4.9c НЕ вычисляется — приход/уход кальция только через минеральные реакции с ЯВНЫМ extent и provenance'
+  },
+  {
+    id: 'aragonite',
+    formula: 'CaCO3',
+    name: 'Карбонат кальция (арагонит)',
+    elements: { Ca: 1, C: 1, O: 3 },
+    charge: 0,
+    phase: 'solid',
+    molarMassKgMol: CACO3_MOLAR_MASS_KG_MOL,
+    molarMassStatus: 'known',
+    molarMassProvenance: iupacMassProvenance(
+      'aragonite_molar_mass',
+      'молярная масса формульной единицы CaCO3 одинакова для полиморфов (кальцит и арагонит различаются кристаллической решёткой, а не составом); переводы в кг допустимы'
+    ),
+    dataStatus: 'known',
+    provenance: {
+      sourceName: 'Стандартная химия CaCO3 (формула и состав — установленная химия); различение полиморфов — Mucci (1983)',
+      sourceId: 'evowars/stage-4.9f/geochemical-species-catalog',
+      recordId: 'aragonite_definition',
+      retrievedAt: '2026-11-23',
+      method: 'кураторское определение арагонита как САМОСТОЯТЕЛЬНОГО вида (полиморф кальцита): одинаковая стехиометрия {Ca:1, C:1, O:3}, разные видовые записи и разные Ksp* (Mucci 1983, Am. J. Sci. 283:780-799, DOI 10.2475/ajs.283.7.780)',
+      applicability: 'растворение/осаждение арагонита как отдельной минеральной фазы (Stage 4.9f, Core/carbonateMinerals.ts)',
+      limitations: 'НЕ взаимозаменяем с кальцитом (caco3): id, запасы и реакции полиморфов раздельны; старые запасы caco3 НЕ переквалифицируются в арагонит задним числом; давление-зависимые превращения полиморфов (кальцит ⇌ арагонит) не моделируются'
+    },
+    note: 'полиморф CaCO3: стехиометрия реакций совпадает с кальцитом (CaCO3(s) ⇌ Ca2+ + CO3^2-), но внутрь реакций подставляется именно aragonite и стехиометрическая Ksp* арагонита — смешение полиморфов в одной реакции запрещено'
   },
   {
     id: 'c_org',
@@ -393,3 +451,5 @@ export function buildGeochemicalSpeciesCatalog(): SpeciesCatalog {
 export function addGeochemicalSpeciesToCatalog(base: SpeciesCatalog): MergedSpeciesCatalog {
   return mergeGeochemicalSpeciesIntoCatalog(base, GEOCHEMICAL_SPECIES_DEFINITIONS);
 }
+
+

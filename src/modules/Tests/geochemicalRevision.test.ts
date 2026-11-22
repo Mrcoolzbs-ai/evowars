@@ -179,23 +179,25 @@ describe('Stage 4.9a.1 (A): вещества и каталоги видов', ()
     // Stage 4.9c: набор расширен водными ионами карбонатной системы
     // (hco3_aq, co3_aq, hplus_aq, oh_aq) — ожидаемый состав обновлён,
     // аддитивность и уникальность id сохранены.
-    expect(GEOCHEMICAL_SPECIES_DEFINITIONS.map((d) => d.id).sort()).toEqual(['c_org', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    // Stage 4.9f: добавлены ca2_aq (ион кальция) и aragonite (полиморф
+    // CaCO3 отдельной записью); caco3 сохранён как кальцит.
+    expect(GEOCHEMICAL_SPECIES_DEFINITIONS.map((d) => d.id).sort()).toEqual(['aragonite', 'c_org', 'caco3', 'ca2_aq', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(validateGeochemicalSpeciesDefinitions()).toEqual([]);
     const geo = buildGeochemicalSpeciesCatalog();
-    expect(geo.size()).toBe(8);
+    expect(geo.size()).toBe(10);
     // легаси-каталог по-прежнему их не содержит
     const production = productionCatalog();
     expect(production.has('caco3')).toBe(false);
-    // аддитивное слияние: легаси + геохимия, добавлены все 3 вида 4.9a.1 + 5 видов 4.9c (4 иона + растворитель h2o_aq)
+    // аддитивное слияние: легаси + геохимия, добавлены все 3 вида 4.9a.1 + 5 видов 4.9c (4 иона + растворитель h2o_aq) + 2 вида 4.9f
     const merged = addGeochemicalSpeciesToCatalog(production);
     expect(merged.issues).toEqual([]);
     expect(merged.conflicts).toEqual([]);
-    expect([...merged.added].sort()).toEqual(['c_org', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
-    expect(merged.catalog.size()).toBe(production.size() + 8);
+    expect([...merged.added].sort()).toEqual(['aragonite', 'c_org', 'caco3', 'ca2_aq', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    expect(merged.catalog.size()).toBe(production.size() + 10);
     // повторное слияние идемпотентно: ничего не добавляется заново
     const again = addGeochemicalSpeciesToCatalog(merged.catalog);
     expect(again.added).toEqual([]);
-    expect([...again.skipped].sort()).toEqual(['c_org', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    expect([...again.skipped].sort()).toEqual(['aragonite', 'c_org', 'caco3', 'ca2_aq', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(again.conflicts).toEqual([]);
   });
 
@@ -767,4 +769,6 @@ describe('Stage 4.9a.1 (F): каталог процессов после рев�
     expect(JSON.stringify(env.reservoirs)).toBe(snapshot);
   });
 });
+
+
 
