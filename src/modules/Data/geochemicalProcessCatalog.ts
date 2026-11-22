@@ -186,11 +186,11 @@ export const GEOCHEMICAL_PROCESS_CATALOG: readonly GeochemicalProcessSpec[] = [
     implementationStatus: 'not_implemented',
     reactionIntent: {
       note: 'сопряжённая операция: химическое связывание атмосферного CO2 при выветривании силиката ЗАТЕМ перенос продуктов в океан; финальная форма углерода (co2_aq/карбонатные ионы) отличается от исходной газовой co2',
-      reactantsNote: 'co2 (атмосферная газовая форма) + силикатный минерал + вода (силикатные виды и ионы карбонатной химии НЕ зарегистрированы — фиктивные species не вводятся)',
+      reactantsNote: 'co2 (атмосферная газовая форма) + силикатный минерал + вода (силикатные виды НЕ зарегистрированы — фиктивные species не вводятся; ионные формы карбонатной химии зарегистрированы Stage 4.9c/4.9f, что НЕ делает этот процесс исполняемым)',
       productsNote: 'растворённый углерод океана; целевой вид в этом каталоге — co2_aq (водная форма); карбонатные ионы (HCO3-/CO3^2-) — Stage 4.9'
     },
     couplingSequence: '1) реакция: силикат + CO2 + H2O → карбонатная щёлочность + растворённый углерод (запись ReactionLedger; стехиометрия с зарегистрированными видами — Stage 4.9); 2) перенос продуктов реакции из зоны выветривания в океан (запись FluxLedger как co2_aq). Исполнение — только согласованной парой записей, единственный FluxLedger-перенос запрещён',
-    implementationNote: 'карбонатная химия (HCO3-/CO3^2-) и кинетика выветривания не реализуются в этой ревизии (границы Stage 4.9a.1)',
+    implementationNote: 'равновесная карбонатная химия решателем Stage 4.9c реализована (диагностически), но путь исполнения выветривания (силикатные виды + coupled-последовательность) и кинетика выветривания НЕ реализованы (границы Stage 4.9a.1; кинетика — Stage 4.9g)',
     speciesId: 'co2_aq',
     direction: { kind: 'internal_transfer', fromReservoirId: 'atmosphere', toReservoirId: 'ocean' },
     rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
@@ -207,11 +207,11 @@ export const GEOCHEMICAL_PROCESS_CATALOG: readonly GeochemicalProcessSpec[] = [
     implementationStatus: 'not_implemented',
     reactionIntent: {
       note: 'сопряжённая операция: химическое растворение карбонатной породы атмосферным CO2 ЗАТЕМ перенос продуктов в океан; форма углерода меняется (карбонатный углерод породы + газовый CO2 → растворённые формы)',
-      reactantsNote: 'caco3 (порода) + co2 (атмосферный газ) + вода; ионные формы (Ca2+, HCO3-) в каталоге видов НЕ зарегистрированы (карбонатная химия — Stage 4.9)',
-      productsNote: 'растворённые продукты (Ca2+ + 2HCO3- как намеченное превращение); в текущем каталоге видов целевого ионного вида НЕТ — фиктивный species не вводится'
+      reactantsNote: 'caco3 (порода) + co2 (атмосферный газ) + вода; ионные формы теперь зарегистрированы в каталоге видов (Stage 4.9c: hco3_aq; Stage 4.9f: ca2_aq), что НЕ делает этот процесс исполняемым',
+      productsNote: 'растворённые продукты (Ca2+ + 2HCO3- как намеченное превращение → виды ca2_aq, hco3_aq, зарегистрированные Stage 4.9c/4.9f); сопряжённая последовательность «реакция + перенос» остаётся нереализованной'
     },
-    couplingSequence: '1) реакция: CaCO3 + CO2 + H2O → Ca2+ + 2HCO3- (запись ReactionLedger; требует регистрации ионных видов — Stage 4.9); 2) перенос продуктов в океан (запись FluxLedger). Исполнение — только согласованной парой записей',
-    implementationNote: 'заблокировано отсутствием ионных видов и карбонатной химии; не подменяется переносом co2_aq (пример «перенос финального вида» скрывал бы реагенты)',
+    couplingSequence: '1) реакция: CaCO3 + CO2 + H2O → Ca2+ + 2HCO3- (запись ReactionLedger; ионные виды зарегистрированы Stage 4.9c/4.9f, но связанная последовательность этого процесса НЕ реализована); 2) перенос продуктов в океан (запись FluxLedger). Исполнение — только согласованной парой записей',
+    implementationNote: 'заблокировано отсутствием реализованного пути исполнения выветривания (виды больше не блокирующая причина); не подменяется переносом co2_aq (пример «перенос финального вида» скрывал бы реагенты)',
     speciesId: 'co2_aq',
     direction: { kind: 'internal_transfer', fromReservoirId: 'atmosphere', toReservoirId: 'ocean' },
     rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
@@ -265,20 +265,80 @@ export const GEOCHEMICAL_PROCESS_CATALOG: readonly GeochemicalProcessSpec[] = [
     processType: 'precipitation',
     description: 'Осаждение карбоната кальция из океана в осадочный слой коры (ионы Ca2+/CO3^2- → минерал caco3)',
     mechanism: 'reaction',
-    implementationStatus: 'not_implemented',
+    implementationStatus: 'reaction_required',
     reactionIntent: {
-      note: 'химическое превращение: ионы океана связываются в твёрдый минерал; исходные ионы и минерал — разные виды, переносом не изображается',
-      reactantsNote: 'Ca2+ и CO3^2- (ионы в каталоге видов НЕ зарегистрированы — карбонатная химия Stage 4.9; фиктивные species не вводятся)',
-      productsNote: 'caco3 — твёрдая форма (геохимический каталог видов Stage 4.9a.1)'
+      note: 'химическое превращение: ионы океана связываются в твёрдый минерал; исходные ионы и минерал — разные виды, переносом не изображается; полиморф НЕ смешивается с арагонитом (aragonite — отдельный вид и отдельный процесс)',
+      reactantsNote: 'ca2_aq (заряд +2) и co3_aq (заряд −2) — водные ионы каталога видов (зарегистрированы Stage 4.9c/4.9f)',
+      productsNote: 'caco3 — твёрдая форма, КАЛЬЦИТ (геохимический каталог видов; арагонит осаждается отдельным процессом и отдельным видом aragonite)'
     },
-    implementationNote: 'заблокировано отсутствием ионных видов; равновесие HCO3-/CO3^2- и насыщение не реализуются в этой ревизии',
+    implementationNote: 'исполняется адаптером Stage 4.9f (Core/carbonateMinerals.ts + Core/carbonateMineralExecution.ts) через coupled-транзакцию Stage 4.9d с ЯВНЫМ extent (mol/m²) и provenance; Ω = [Ca2+]·[CO3^2-]/K*sp по Mucci 1983 (DOI 10.2475/ajs.283.7.780, 1 atm) — термодинамический вердикт, НЕ количество и НЕ скорость; кинетика/нуклеация не реализуются (Stage 4.9g)',
     speciesId: 'caco3',
     direction: { kind: 'internal_transfer', fromReservoirId: 'ocean', toReservoirId: 'crust' },
     rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
     basis: GEOCHEMICAL_INVENTORY_BASIS,
-    applicability: 'океан с растворённым Ca2+ и CO3^2-; насыщение/глубина компенсации — вне Stage 4.9a.1',
-    conditions: 'наличие резервуаров ocean и crust (столбовые запасы); вид caco3 должен быть зарегистрирован в каталоге видов',
-    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; минеральное превращение (Ca2+ + CO3^2- → CaCO3) при введении будет задано через ReactionLedger'
+    applicability: 'океан с растворённым Ca2+ и CO3^2- (единая основа mol/kg-SW); пересыщение Ω > 1 — термодинамическое направление осаждения, НЕ гарантированное осаждение; параметризация применима при T = 5–40 °C, S = 5–44, 1 atm',
+    conditions: 'наличие резервуаров ocean и crust (столбовые запасы); виды ca2_aq, co3_aq и caco3 должны быть зарегистрированы в каталоге видов',
+    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; минеральное превращение (Ca2+ + CO3^2- → CaCO3) исполняется через ReactionLedger адаптером Stage 4.9f (executeCarbonateMineralCycle: реакция → DIC/TA_C → переспециация Stage 4.9c → инвентарь, атомарно); rate: unknown сохранён'
+  },
+  {
+    processId: 'geo.dissolution.caco3.crust->ocn',
+    processType: 'dissolution',
+    description: 'Растворение кальцита из осадочного слоя коры в океан: caco3 (твёрдая фаза) → Ca2+ + CO3^2- (водные ионы)',
+    mechanism: 'reaction',
+    implementationStatus: 'reaction_required',
+    reactionIntent: {
+      note: 'химическое превращение: твёрдый минерал коры переходит в водные ионы океана; минерал и ионы — разные виды, переносом не изображается; недонасыщение Ω < 1 — термодинамическое направление растворения, НЕ скорость',
+      reactantsNote: 'caco3 — кальцит, твёрдая фаза (геохимический каталог видов)',
+      productsNote: 'ca2_aq (+2) и co3_aq (−2) — водные ионы каталога видов (Stage 4.9c/4.9f)'
+    },
+    implementationNote: 'исполняется адаптером Stage 4.9f (Core/carbonateMinerals.ts + Core/carbonateMineralExecution.ts) через coupled-транзакцию Stage 4.9d с ЯВНЫМ extent и provenance; K*sp кальцита по Mucci 1983 (DOI 10.2475/ajs.283.7.780); DIC/TA_C и переспециация через существующий решатель Stage 4.9c; кинетика растворения НЕ реализуется',
+    speciesId: 'ca2_aq',
+    direction: { kind: 'internal_transfer', fromReservoirId: 'crust', toReservoirId: 'ocean' },
+    rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
+    basis: GEOCHEMICAL_INVENTORY_BASIS,
+    applicability: 'запас кальцита в коре (столбовые запасы mol/m²); параметризация Mucci применима при T = 5–40 °C, S = 5–44, 1 atm; недонасыщение Ω < 1 — направление, не скорость',
+    conditions: 'наличие резервуаров crust и ocean (столбовые запасы); виды ca2_aq, co3_aq и caco3 должны быть зарегистрированы в каталоге видов',
+    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; минеральное превращение (CaCO3 → Ca2+ + CO3^2-) исполняется через ReactionLedger адаптером Stage 4.9f (executeCarbonateMineralCycle: атомарно, при отказе — исходное состояние); за моль растворённого CaCO3 DIC растёт на +1, карбонатная щёлочность на +2 экв'
+  },
+  {
+    processId: 'geo.precipitation.aragonite.ocn->crust',
+    processType: 'precipitation',
+    description: 'Осаждение арагонита из океана в осадочный слой коры: Ca2+ + CO3^2- (водные ионы) → aragonite (твёрдая фаза)',
+    mechanism: 'reaction',
+    implementationStatus: 'reaction_required',
+    reactionIntent: {
+      note: 'химическое превращение для полиморфа-АРАГОНИТА: ионы океана связываются в твёрдый минерал aragonite; НЕ смешивается с кальцитом (caco3 — другой вид и другой процесс)',
+      reactantsNote: 'ca2_aq (+2) и co3_aq (−2) — водные ионы каталога видов (зарегистрированы Stage 4.9c/4.9f)',
+      productsNote: 'aragonite — твёрдая фаза, ОТДЕЛЬНЫЙ вид каталога (Stage 4.9f), НЕ взаимозаменяемый с caco3'
+    },
+    implementationNote: 'исполняется адаптером Stage 4.9f (Core/carbonateMinerals.ts + Core/carbonateMineralExecution.ts) через coupled-транзакцию Stage 4.9d с ЯВНЫМ extent и provenance; K*sp арагонита по Mucci 1983 (DOI 10.2475/ajs.283.7.780); ПАРАМЕТРИЗАЦИЯ применима при T = 5–40 °C, S = 5–44, 1 atm; кинетика/нуклеация не реализуются',
+    speciesId: 'aragonite',
+    direction: { kind: 'internal_transfer', fromReservoirId: 'ocean', toReservoirId: 'crust' },
+    rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
+    basis: GEOCHEMICAL_INVENTORY_BASIS,
+    applicability: 'океан с растворённым Ca2+ и CO3^2- (единая основа mol/kg-SW); пересыщение Ω > 1 — термодинамическое направление осаждения, НЕ гарантированное осаждение (нуклеация не моделируется)',
+    conditions: 'наличие резервуаров ocean и crust (столбовые запасы); виды ca2_aq, co3_aq и aragonite должны быть зарегистрированы в каталоге видов',
+    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; минеральное превращение исполняется через ReactionLedger адаптером Stage 4.9f (executeCarbonateMineralCycle: атомарно); за моль осаждённого арагонита DIC падает на −1, карбонатная щёлочность на −2 экв'
+  },
+  {
+    processId: 'geo.dissolution.aragonite.crust->ocn',
+    processType: 'dissolution',
+    description: 'Растворение арагонита из осадочного слоя коры в океан: aragonite (твёрдая фаза) → Ca2+ + CO3^2- (водные ионы)',
+    mechanism: 'reaction',
+    implementationStatus: 'reaction_required',
+    reactionIntent: {
+      note: 'химическое превращение для полиморфа-АРАГОНИТА: твёрдый минерал коры переходит в водные ионы океана; НЕ смешивается с кальцитом (caco3); арагонит растворимее кальцита (K*sp выше при тех же T/S)',
+      reactantsNote: 'aragonite — твёрдая фаза, ОТДЕЛЬНЫЙ вид каталога (Stage 4.9f)',
+      productsNote: 'ca2_aq (+2) и co3_aq (−2) — водные ионы каталога видов (Stage 4.9c/4.9f)'
+    },
+    implementationNote: 'исполняется адаптером Stage 4.9f (Core/carbonateMinerals.ts + Core/carbonateMineralExecution.ts) через coupled-транзакцию Stage 4.9d с ЯВНЫМ extent и provenance; K*sp арагонита по Mucci 1983 (DOI 10.2475/ajs.283.7.780); DIC/TA_C и переспециация через существующий решатель Stage 4.9c; кинетика растворения НЕ реализуется',
+    speciesId: 'ca2_aq',
+    direction: { kind: 'internal_transfer', fromReservoirId: 'crust', toReservoirId: 'ocean' },
+    rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
+    basis: GEOCHEMICAL_INVENTORY_BASIS,
+    applicability: 'запас арагонита в коре (столбовые запасы mol/m²); параметризация Mucci применима при T = 5–40 °C, S = 5–44, 1 atm; недонасыщение Ω < 1 — направление, не скорость',
+    conditions: 'наличие резервуаров crust и ocean (столбовые запасы); виды ca2_aq, co3_aq и aragonite должны быть зарегистрированы в каталоге видов',
+    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; минеральное превращение исполняется через ReactionLedger адаптером Stage 4.9f (executeCarbonateMineralCycle: атомарно); за моль растворённого арагонита DIC растёт на +1, карбонатная щёлочность на +2 экв'
   },
   {
     processId: 'geo.organic_carbon_burial.c_org.ocn->crust',
@@ -342,3 +402,5 @@ export const GEOCHEMICAL_PROCESS_CATALOG: readonly GeochemicalProcessSpec[] = [
 export function validateInitialGeochemicalProcessCatalog(): string[] {
   return validateGeochemicalProcessCatalogOf(GEOCHEMICAL_PROCESS_CATALOG);
 }
+
+

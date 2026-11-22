@@ -140,3 +140,14 @@ export * from './carbonateSpeciationExecution';
 export * from './co2Solubility';
 
 export * from './co2ExchangeExecution';
+
+// Stage 4.9f: растворимость кальцита/арагонита (K*sp по Mucci 1983,
+// DOI 10.2475/ajs.283.7.780), насыщение W = [Ca2+].[CO3^2-]/K*sp и
+// атомарные минеральные реакции (растворение/осаждение) поверх
+// coupled-исполнителя Stage 4.9d. Термодинамика и стехиометрия; НЕ
+// кинетика (нуклеация/скорости — Stage 4.9g), НЕ давление-зависимая
+// параметризация (только 1 atm), полиморфы (caco3 / aragonite)
+// не смешиваются.
+export * from './carbonateMinerals';
+
+export * from './carbonateMineralExecution';
