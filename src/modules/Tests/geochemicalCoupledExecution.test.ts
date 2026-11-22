@@ -167,6 +167,8 @@ function rxBicarbonateDissociation(): GeochemicalReactionDefinition {
   };
 }
 
+/** co2_aq + h2o_aq → hco3_aq + hplus_aq (водный канал гидратации CO2). */
+function rxCo2Hydration(): GeochemicalReactionDefinition {
   return {
     reactionId: 'test.synthetic.co2+h2o->hco3+hplus',
     processId: 'test.synthetic.coupled.fixture',
@@ -1032,3 +1034,4 @@ describe('Stage 4.9d coupled: исполнение к ядру мира', () => 
     expect(replan.status).toBe('blocked');
   });
 });
+
