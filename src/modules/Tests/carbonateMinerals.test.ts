@@ -127,6 +127,41 @@ function distributionOfSolve(
   };
 }
 
+/**
+ * Фикстурный provenance величин вызова решателя Stage 4.9c: Stage 4.9c
+ * требует provenance на КАЖДУЮ физическую величину входа (fail-closed),
+ * без него фикстура честно отклоняется.
+ */
+function fixtureSolverProvenances(): Record<string, DataProvenance> {
+  return {
+    temperatureProvenance: {
+      ...FIXTURE_PROVENANCE,
+      recordId: 'fixture-temperature-stage2',
+      note: 'synthetic test fixture: температура стадии переспециации, НЕ измерение'
+    },
+    salinityProvenance: {
+      ...FIXTURE_PROVENANCE,
+      recordId: 'fixture-salinity-stage2',
+      note: 'synthetic test fixture: солёность стадии переспециации, НЕ измерение'
+    },
+    pressureProvenance: {
+      ...FIXTURE_PROVENANCE,
+      recordId: 'fixture-pressure-stage2',
+      note: 'synthetic test fixture: давление стадии переспециации (1 atm), НЕ измерение'
+    },
+    dicProvenance: {
+      ...FIXTURE_PROVENANCE,
+      recordId: 'fixture-dic-stage2',
+      note: 'synthetic test fixture: DIC стадии переспециации, НЕ измерение'
+    },
+    carbonateAlkalinityProvenance: {
+      ...FIXTURE_PROVENANCE,
+      recordId: 'fixture-ta-c-stage2',
+      note: 'synthetic test fixture: карбонатная щёлочность стадии переспециации, НЕ измерение'
+    }
+  };
+}
+
 /** Baseline-равновесие фикстуры (Stage 4.9c, DIC/TA_C фикстуры). */
 function solveBaseline() {
   const solved = solveCarbonateEquilibrium({
@@ -136,7 +171,8 @@ function solveBaseline() {
     dicMolPerKgSw: 0.002,
     carbonateAlkalinityMolPerKgSw: 0.0023,
     phScale: 'seawater',
-    activityModel: 'ideal_dilute'
+    activityModel: 'ideal_dilute',
+    ...fixtureSolverProvenances()
   });
   expect(solved.status).toBe('applied');
   if (solved.status !== 'applied') throw new Error('solveCarbonateEquilibrium отказал на фикстуре (проверь Stage 4.9c)');
@@ -249,7 +285,8 @@ function chargeCompensationFor(
     dicMolPerKgSw: dic,
     carbonateAlkalinityMolPerKgSw: alk,
     phScale: 'seawater',
-    activityModel: 'ideal_dilute'
+    activityModel: 'ideal_dilute',
+    ...fixtureSolverProvenances()
   });
   if (solved.status !== 'applied') {
     throw new Error('solveCarbonateEquilibrium отказал при вычислении компенсации фикстуры: ' + JSON.stringify(solved).slice(0, 300));
@@ -1144,4 +1181,3 @@ describe('Stage 4.9f производственные каталоги: виды
     expect(byId.get('geo.silicate_weathering.co2_aq.atm->ocn')?.rate.status).toBe('unknown');
   });
 });
-

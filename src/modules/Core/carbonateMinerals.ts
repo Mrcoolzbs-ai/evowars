@@ -255,8 +255,9 @@ export function evaluateCarbonateMineralSolubility(input: CarbonateMineralSolubi
     input.mineral !== 'calcite' &&
     input.mineral !== 'aragonite'
   ) {
+    const requested = String((input as { mineral?: unknown }).mineral);
     return notApplied('invalid_input', 'mineral должен быть «calcite» или «aragonite» (разные виды каталога: caco3 / aragonite)', [
-      'полиморф не распознан: смешение полиморфов или неизвестный вид'
+      `полиморф не распознан: «${requested}» не является ни кальцитом («calcite»), ни арагонитом («aragonite»); смешение полиморфов или неизвестный вид`
     ]);
   }
   const issues: string[] = [];
@@ -428,8 +429,9 @@ export function evaluateCarbonateMineralSaturation(input: CarbonateMineralSatura
     input.mineral !== 'calcite' &&
     input.mineral !== 'aragonite'
   ) {
+    const requested = String((input as { mineral?: unknown }).mineral);
     return notApplied('invalid_input', 'mineral должен быть «calcite» или «aragonite» (разные виды каталога: caco3 / aragonite)', [
-      'полиморф не распознан: смешение полиморфов или неизвестный вид'
+      `полиморф не распознан: «${requested}» не является ни кальцитом («calcite»), ни арагонитом («aragonite»); смешение полиморфов или неизвестный вид`
     ]);
   }
   const issues: string[] = [];
@@ -515,4 +517,3 @@ export function evaluateCarbonateMineralSaturation(input: CarbonateMineralSatura
     warnings: []
   };
 }
-

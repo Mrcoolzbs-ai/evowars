@@ -495,13 +495,35 @@ export function carbonateMineralPostReactionTarget(input: CarbonateMineralPostRe
     );
   }
 
+  // Provenance обязателен на КАЖДУЮ величину вызова решателя Stage 4.9c
+  // (validateCarbonateChemistryInputs, fail-closed): условия среды
+  // наследуются из baseline-дистрибуции Stage 4.9d, DIC/TA_C — вычислены
+  // из baseline плюс ЯВНАЯ стехиометрия минеральной реакции.
+  const environmentProvenance: DataProvenance = {
+    sourceName: 'Stage 4.9f: условия среды (T/S/P) стадии переспециации унаследованы из baseline-дистрибуции Stage 4.9d',
+    sourceId: 'evowars/stage-4.9f/carbonate-mineral-execution',
+    recordId: 'carbonate_mineral_stage2_environment',
+    retrievedAt: '2026-11-23',
+    method: 'температура/солёность/давление переносятся из baseline-дистрибуции без преобразований; новые измерения не добавляются'
+  };
+  const dicTaProvenance: DataProvenance = {
+    sourceName: 'Stage 4.9f: DIC/TA_C = baseline (Stage 4.9c/4.9d) + стехиометрия CaCO3(s) ⇌ Ca2+ + CO3^2- (Mucci 1983)',
+    sourceId: 'doi:10.2475/ajs.283.7.780',
+    recordId: 'carbonate_mineral_stage2_dic_ta',
+    retrievedAt: '2026-11-23',
+    method: 'вычислено из baseline-дистрибуции и ЯВНОГО extent минеральной реакции (±e/m по DIC, ±2e/m по TA_C)'
+  };
   const modelInput: CarbonateModelInput = {
     temperatureK: b.temperatureK,
-    temperatureProvenance: undefined,
+    temperatureProvenance: environmentProvenance,
     salinityPSU: b.salinityPSU,
+    salinityProvenance: environmentProvenance,
     pressurePa: b.pressurePa,
+    pressureProvenance: environmentProvenance,
     dicMolPerKgSw: dic,
+    dicProvenance: dicTaProvenance,
     carbonateAlkalinityMolPerKgSw: alk,
+    carbonateAlkalinityProvenance: dicTaProvenance,
     phScale: b.phScale,
     activityModel: b.activityModel
   };
@@ -969,4 +991,3 @@ export function executeCarbonateMineralCycle(
     warnings: target.warnings
   };
 }
-
