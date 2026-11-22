@@ -231,14 +231,14 @@ export const GEOCHEMICAL_PROCESS_CATALOG: readonly GeochemicalProcessSpec[] = [
       reactantsNote: 'co2 — газовая форма (легаси-каталог, атм. столб)',
       productsNote: 'co2_aq — водная форма (геохимический каталог видов Stage 4.9a.1, океан)'
     },
-    implementationNote: 'запись ReactionLedger для фазового перехода потребует контракта фазовых операций ядра; числовая скорость (растворимость по Генри) НЕ реализуется в этой ревизии — граница промпта 4.9a.1',
+    implementationNote: 'фазовый переход исполняется адаптером Stage 4.9e (Core/co2ExchangeExecution.ts) как coupled-транзакция Stage 4.9d с extent из ЯВНОГО входа (типово — замкнутое равновесие Генри Stage 4.9e, co2PhaseExchangeFromEquilibrium); термодинамическая цель из Weiss 1974 (K0, фугативность) реализована, а числовая СКОРОСТЬ газообмена (кинетика) не реализуется — следующий этап Stage 4.9g',
     speciesId: 'co2_aq',
     direction: { kind: 'internal_transfer', fromReservoirId: 'atmosphere', toReservoirId: 'ocean' },
     rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
     basis: GEOCHEMICAL_INVENTORY_BASIS,
     applicability: 'наличие океана и атмосферы; растворимость CO2 (закон Генри, температура) — вне Stage 4.9a.1',
     conditions: 'совместное существование атмосферы и океана (столбовые запасы)',
-    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; фазовый переход (механизм reaction) через FluxLedger не исполняется; полная карбонатная химия океана (HCO3-/CO3^2-) НЕ подключается'
+    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; прямое исполнение через executeGeochemicalProcess не реализовано (mechanism reaction, rate: unknown); фазовый переход co2 -> co2_aq исполняется адаптером co2ExchangeExecution.ts (Stage 4.9e) через coupled-транзакцию с записью ReactionLedger; растворимость Генри (Weiss 1974) и карбонатная химия океана доступны Через отдельные модули (Stage 4.9e/4.9c), но через этот процесс каталога не исполняются'
   },
   {
     processId: 'geo.ocean_atm_exchange.co2.ocn->atm',
@@ -251,14 +251,14 @@ export const GEOCHEMICAL_PROCESS_CATALOG: readonly GeochemicalProcessSpec[] = [
       reactantsNote: 'co2_aq — водная форма (геохимический каталог видов Stage 4.9a.1)',
       productsNote: 'co2 — газовая форма (легаси-каталог, атм. столб)'
     },
-    implementationNote: 'запись ReactionLedger для фазового перехода потребует контракта фазовых операций ядра; реальные скорости обмена НЕ реализуются в этой ревизии',
+    implementationNote: 'фазовый переход исполняется адаптером Stage 4.9e (Core/co2ExchangeExecution.ts) как coupled-транзакция Stage 4.9d (реакционная компонента с extent из ЯВНОГО входа); реальные скорости обмена (кинетика газообмена, ветер, пограничный слой) НЕ реализуются — следующий этап Stage 4.9g',
     speciesId: 'co2',
     direction: { kind: 'internal_transfer', fromReservoirId: 'ocean', toReservoirId: 'atmosphere' },
     rate: { status: 'unknown', reason: UNKNOWN_RATE_REASON },
     basis: GEOCHEMICAL_INVENTORY_BASIS,
     applicability: 'наличие океана и атмосферы; неравновесие pCO2 — вне Stage 4.9a.1',
     conditions: 'совместное существование океана и атмосферы (столбовые запасы); обратное направление отдельным процессом (положительные скорости и явные from/to), а НЕ отрицательной скоростью dissolution',
-    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; фазовый переход (механизм reaction) через FluxLedger не исполняется; обязательная пара к geo.dissolution.co2_aq.atm->ocn'
+    diagnosticsNote: CATALOG_DIAGNOSTIC_NOTE + '; прямое исполнение через executeGeochemicalProcess не реализовано (mechanism reaction, rate: unknown); фазовый переход co2_aq -> co2 исполняется адаптером co2ExchangeExecution.ts (Stage 4.9e) через coupled-транзакцию с записью ReactionLedger; обязательная пара к geo.dissolution.co2_aq.atm->ocn'
   },
   {
     processId: 'geo.precipitation.caco3.ocn->crust',
