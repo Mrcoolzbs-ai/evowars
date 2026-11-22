@@ -176,23 +176,26 @@ describe('Stage 4.9a.1 (A): вещества и каталоги видов', ()
 
   it('(2) геохимические виды — отдельный каталог данных, Data/gases.ts не расширяется', () => {
     // данные живут в geochemicalSpeciesCatalog, НЕ в каталоге газов
-    expect(GEOCHEMICAL_SPECIES_DEFINITIONS.map((d) => d.id).sort()).toEqual(['c_org', 'caco3', 'co2_aq']);
+    // Stage 4.9c: набор расширен водными ионами карбонатной системы
+    // (hco3_aq, co3_aq, hplus_aq, oh_aq) — ожидаемый состав обновлён,
+    // аддитивность и уникальность id сохранены.
+    expect(GEOCHEMICAL_SPECIES_DEFINITIONS.map((d) => d.id).sort()).toEqual(['c_org', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(validateGeochemicalSpeciesDefinitions()).toEqual([]);
     const geo = buildGeochemicalSpeciesCatalog();
-    expect(geo.size()).toBe(3);
+    expect(geo.size()).toBe(8);
     // легаси-каталог по-прежнему их не содержит
     const production = productionCatalog();
     expect(production.has('caco3')).toBe(false);
-    // аддитивное слияние: легаси + геохимия, добавлены все три
+    // аддитивное слияние: легаси + геохимия, добавлены все 3 вида 4.9a.1 + 5 видов 4.9c (4 иона + растворитель h2o_aq)
     const merged = addGeochemicalSpeciesToCatalog(production);
     expect(merged.issues).toEqual([]);
     expect(merged.conflicts).toEqual([]);
-    expect([...merged.added].sort()).toEqual(['c_org', 'caco3', 'co2_aq']);
-    expect(merged.catalog.size()).toBe(production.size() + 3);
+    expect([...merged.added].sort()).toEqual(['c_org', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    expect(merged.catalog.size()).toBe(production.size() + 8);
     // повторное слияние идемпотентно: ничего не добавляется заново
     const again = addGeochemicalSpeciesToCatalog(merged.catalog);
     expect(again.added).toEqual([]);
-    expect([...again.skipped].sort()).toEqual(['c_org', 'caco3', 'co2_aq']);
+    expect([...again.skipped].sort()).toEqual(['c_org', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(again.conflicts).toEqual([]);
   });
 
@@ -686,7 +689,7 @@ describe('Stage 4.9a.1 (E): конверсии, provenance, атомарност
     const audit = auditGeochemicalElements(catalog, result.ledger, before, result.reservoirs);
     expect(audit.status).toBe('balanced');
     expect(audit.balanced).toBe(true);
-    // повэлементная диагностика: C сохраняется точно
+    // поэлементная диагностика: C сохраняется точно
     const carbon = audit.elementDiagnostics.find((d) => d.element === 'C');
     expect(carbon).toBeDefined();
     expect(carbon!.residual).toBeCloseTo(0, 9);
@@ -736,7 +739,7 @@ describe('Stage 4.9a.1 (F): каталог процессов после рев�
         // перенос: вид должен быть реально зарегистрирован в объединённом каталоге
         expect(mergedCatalog().has(entry.speciesId)).toBe(true);
       }
-      // у всех процессов каталога速度 неизвестна: численных скоростей в этом промпте нет
+      // у всех процессов каталога скорость неизвестна: численных скоростей в этом промпте нет
       expect(entry.rate.status).toBe('unknown');
       expect(entry.rate.status === 'unknown' ? entry.rate.reason.length : 0).toBeGreaterThan(0);
       // каждая спецификация проходит валидатор формы
@@ -764,3 +767,4 @@ describe('Stage 4.9a.1 (F): каталог процессов после рев�
     expect(JSON.stringify(env.reservoirs)).toBe(snapshot);
   });
 });
+
