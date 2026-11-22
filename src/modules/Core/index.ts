@@ -114,3 +114,7 @@ export * from './geochemicalReservoirs';
 export * from './geochemicalReactionContext';
 // Stage 4.9b: атомарный исполнитель геохимических реакций (реальное применение к инвентарям)
 export * from './geochemicalReactionExecution';
+// Stage 4.9c: карбонатная система океана — равновесное распределение DIC
+// (K1/K2/Kw с provenance, solved-спекиация, карбонатная щёлочность, зарядовый
+// баланс; физическое применение переноса к инвентарям — следующий этап).
+export * from './carbonateChemistry';
