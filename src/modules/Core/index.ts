@@ -121,6 +121,13 @@ export * from './carbonateChemistry';
 // Stage 4.9d: атомарное исполнение coupled-транзакций (единый transactionId,
 // агрегирование дельт на одном снимке, план-валидация-commit, анти-replay,
 // fail-closed rollback); физическое применение результатов карбонатной
-// специации к инвентарям океана см. carbonateSpeciationExecution (следующий
-// коммит этого этапа).
+// специации к инвентарям океана см. carbonateSpeciationExecution ниже.
+// (модуль экспортирован ниже).
 export * from './geochemicalCoupledExecution';
+// Stage 4.9d: атомарное применение результатов карбонатной специации
+// Stage 4.9c к столбовому инвентарю океана (co2_aq/hco3_aq/co3_aq и,
+// при ненулевом сдвиге, протонные h+ / oh-). mol/kg-SW → mol/m² только
+// через ЯВНУЮ массу водного столба с provenance; h2o_aq — растворитель,
+// его инвентарь не меняется; фиктивные Flux/Reaction-записи не создаются;
+// план → валидация → commit, fail-closed при любой проблеме.
+export * from './carbonateSpeciationExecution';
