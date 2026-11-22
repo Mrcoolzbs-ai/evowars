@@ -236,8 +236,9 @@ function simpleInput(
   };
 }
 
-function snapshotOf(core: CoreWorldState): string {
-  return JSON.stringify(core);
+/** Строковый снимок произвольного объекта для побитовой проверки неизменности. */
+function snapshotOf(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 // ============================================

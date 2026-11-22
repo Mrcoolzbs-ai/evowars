@@ -641,7 +641,7 @@ export function planGeochemicalCoupledTransaction(
       // без фоновых ионов не может гарантировать электронейтральность —
       // перенос отклоняется, а не объявляется нейтральным.
       const species = env.speciesCatalog.get(component.speciesId);
-      if (species !== undefined && species.charge !== 0) {
+      if (species !== undefined && species !== null && species.charge !== 0) {
         transferIssues.push('внешний перенос заряженного вида «' + component.speciesId + '» (charge = ' + species.charge + ') не исполняется: изменение модельного заряда без фоновых ионов не может быть подтверждено (fail-closed)');
       }
     }
@@ -1049,3 +1049,4 @@ export function executeGeochemicalCoupledTransactionOnWorld(
     diagnostics: execution.diagnostics
   };
 }
+
