@@ -321,11 +321,18 @@ describe('Stage 4.9d coupled: успешные транзакции', () => {
     expect(execution.fluxLedger.records).toHaveLength(2);
     expect(execution.reservoirs['ocean']?.material?.entries['co2_aq']).toBeCloseTo(0.0012 - 0.0005 + 0.0002, 15);
     expect(execution.reservoirs['atmosphere']?.material?.entries['co2_aq']).toBeCloseTo(0.0008 - 0.0003, 15);
-    // DIC внутри океана сохранён (все углеродные виды в одном резервуаре).
-    const dicBefore = 0.0012 + 0.002 + 0.0002;
+    // Углерод: обе реакции DIC не меняют; внутренний перенос atm -> ocean
+    // импортирует в океан ровно 0.0002 в единственном углеродном виде co2_aq,
+    // поэтому ожидание = исходный DIC океана + 0.0002 (synthetic test fixture).
+    const dicBeforeOcean = 0.0012 + 0.002 + 0.0002;
     const after = execution.reservoirs['ocean']?.material?.entries;
-    const dicAfter = (after?.['co2_aq'] ?? 0) + (after?.['hco3_aq'] ?? 0) + (after?.['co3_aq'] ?? 0);
-    expect(dicAfter).toBeCloseTo(dicBefore, 15);
+    const dicAfterOcean = (after?.['co2_aq'] ?? 0) + (after?.['hco3_aq'] ?? 0) + (after?.['co3_aq'] ?? 0);
+    expect(dicAfterOcean).toBeCloseTo(dicBeforeOcean + 0.0002, 15);
+    // Полный углерод системы (ocean + atmosphere) изменяется ТОЛЬКО внешним
+    // оттоком: systemCarbonAfter = systemCarbonBefore - 0.0001.
+    const carbonBeforeSystem = dicBeforeOcean + 0.0008;
+    const atmosphereAfter = execution.reservoirs['atmosphere']?.material?.entries?.['co2_aq'] ?? 0;
+    expect(dicAfterOcean + atmosphereAfter).toBeCloseTo(carbonBeforeSystem - 0.0001, 15);
   });
 
   it('внутренний перенос заряженного вида допустим (заряд остаётся внутри системы), внешний — нет', () => {
