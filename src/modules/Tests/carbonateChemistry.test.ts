@@ -163,7 +163,9 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
   });
 
   it('(6) низкий DIC корректно распределяется; доли зависят только от pH и констант', () => {
-    const result = solveCarbonateEquilibrium(fixtureInputByTA(0.001117) as unknown as CarbonateModelInput);
+    // низкий DIC: 1e-3 mol/kg-SW с карбонатной щёлочностью 1.117·DIC (та же
+    // пропорция, что в сценарии (12); обе величины — synthetic test fixture)
+    const result = solveCarbonateEquilibrium(fixtureInputByTA(0.001117, { dicMolPerKgSw: 0.001 }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     const sum = result.speciesMolPerKgSw.co2_aq + result.speciesMolPerKgSw.hco3_aq + result.speciesMolPerKgSw.co3_aq;
