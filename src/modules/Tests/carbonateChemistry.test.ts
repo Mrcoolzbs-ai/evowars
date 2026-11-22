@@ -31,7 +31,8 @@ import {
   solveCarbonateEquilibrium,
   validateCarbonateChemistryInputs,
   validateCarbonateDissociationReactionDefinitions,
-  CarbonateChemistryError
+  CarbonateChemistryError,
+  type CarbonateModelInput
 } from '../Core/carbonateChemistry';
 import {
   GEOCHEMICAL_SPECIES_DEFINITIONS,
@@ -88,26 +89,6 @@ function fixtureInputByTA(taC: number, overrides: Record<string, unknown> = {}):
   } as Record<string, unknown>;
 }
 
-/** Задача solve с входом прохождения валидации (приведение формы). */
-interface SolveInputShape {
-  temperatureK: number;
-  temperatureProvenance?: { sourceName?: string; sourceId?: string };
-  salinityPSU: number;
-  salinityProvenance?: { sourceName?: string; sourceId?: string };
-  pressurePa: number;
-  pressureProvenance?: { sourceName?: string; sourceId?: string };
-  dicMolPerKgSw: number;
-  dicProvenance?: { sourceName?: string; sourceId?: string };
-  carbonateAlkalinityMolPerKgSw?: number;
-  carbonateAlkalinityProvenance?: { sourceName?: string; sourceId?: string };
-  ph?: number;
-  phProvenance?: { sourceName?: string; sourceId?: string };
-  phScale: string;
-  activityModel: string;
-  backgroundStrongIonChargeMolPerKgSw?: number;
-  backgroundChargeProvenance?: { sourceName?: string; sourceId?: string };
-  [key: string]: unknown;
-}
 
 // Справочные значения (рассчитаны НЕЗАВИСИМО от модуля по формулам
 // первоисточников; сравнение в допуске 0.05, что сильно меньше
@@ -182,7 +163,7 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
   });
 
   it('(6) низкий DIC корректно распределяется; доли зависят только от pH и констант', () => {
-    const result = solveCarbonateEquilibrium(fixtureInputByTA(0.001117) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInputByTA(0.001117) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     const sum = result.speciesMolPerKgSw.co2_aq + result.speciesMolPerKgSw.hco3_aq + result.speciesMolPerKgSw.co3_aq;
@@ -192,7 +173,7 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
   });
 
   it('(7) при низком pH преобладает CO2* (в CO2-ограничении)', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ ph: 4.5 }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ ph: 4.5 }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     const { co2_aq: co2, hco3_aq: hco3, co3_aq: co3 } = result.speciesMolPerKgSw;
@@ -203,7 +184,7 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
 
   it('(8) в характерном промежуточном диапазоне pH преобладает HCO3-', () => {
     for (const ph of [7.4, 8.1, 8.8]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ ph }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ ph }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('applied');
       if (result.status !== 'applied') continue;
       const { co2_aq: co2, hco3_aq: hco3, co3_aq: co3 } = result.speciesMolPerKgSw;
@@ -213,7 +194,7 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
   });
 
   it('(9) при высоком pH преобладает CO3^2-', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ ph: 10.2 }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ ph: 10.2 }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     const { co2_aq: co2, hco3_aq: hco3, co3_aq: co3 } = result.speciesMolPerKgSw;
@@ -223,7 +204,7 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
 
   it('(10) DIC сохраняется: слагаемые видов в точности дают DIC (и при малом, и при большом)', () => {
     for (const dic of [1e-12, 0.002, 0.1]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw: dic }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw: dic }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('applied');
       if (result.status !== 'applied') continue;
       expect(result.dicConservationResidualMolPerKgSw).toBeLessThan(1e-12);
@@ -238,7 +219,7 @@ describe('Stage 4.9c (2): спекиация и пределы DIC', () => {
 
 describe('Stage 4.9c (3): карбонатная щёлочность', () => {
   it('(11) TA_C повторяет вычисление карбонатной щёлочности и маркируется как «только карбонатная»', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({}) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({}) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     const direct = calculateCarbonateAlkalinity({
@@ -254,7 +235,7 @@ describe('Stage 4.9c (3): карбонатная щёлочность', () => {
 
   it('(12) режим щёлочности: решение по TA_C даёт малую невязку TA', () => {
     const taC = 0.002234; // синтетическая карбонатная щёлочность fixture (mol/kg-SW)
-    const result = solveCarbonateEquilibrium(fixtureInputByTA(taC) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInputByTA(taC) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     expect(result.mode).toBe('alkalinity');
@@ -266,10 +247,10 @@ describe('Stage 4.9c (3): карбонатная щёлочность', () => {
 
   it('(13) согласованность прямых и обратных задач: pH-режим → TA_C → тот же pH', () => {
     const ph0 = 8.1;
-    const first = solveCarbonateEquilibrium(fixtureInput({ ph: ph0 }) as SolveInputShape);
+    const first = solveCarbonateEquilibrium(fixtureInput({ ph: ph0 }) as unknown as CarbonateModelInput);
     expect(first.status).toBe('applied');
     if (first.status !== 'applied') return;
-    const second = solveCarbonateEquilibrium(fixtureInputByTA(first.carbonateAlkalinityMolPerKgSw) as SolveInputShape);
+    const second = solveCarbonateEquilibrium(fixtureInputByTA(first.carbonateAlkalinityMolPerKgSw) as unknown as CarbonateModelInput);
     expect(second.status).toBe('applied');
     if (second.status !== 'applied') return;
     expect(Math.abs(second.ph - ph0)).toBeLessThan(1e-6);
@@ -305,14 +286,14 @@ describe('Stage 4.9c (4): температура/солёность/давлен
     expect((deep.K1.value as number) / (surface.K1.value as number)).toBeCloseTo(1.094, 2);
     expect(deep.pressureBarOverAtmosphere).toBeCloseTo(100, 6);
     // давление за конвертом поправок: значение НЕ подставляется
-    const beyond = solveCarbonateEquilibrium(fixtureInput({ pressurePa: 101325 + 1.01e8 }) as SolveInputShape);
+    const beyond = solveCarbonateEquilibrium(fixtureInput({ pressurePa: 101325 + 1.01e8 }) as unknown as CarbonateModelInput);
     expect(beyond.status).toBe('not_applied');
     if (beyond.status !== 'not_applied') return;
     expect(beyond.reasonKind).toBe('out_of_applicability');
   });
 
   it('(17) температура вне заявленного диапазона T = 2..35 °C даёт отказ, а не экстраполяцию', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ temperatureK: 270 }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ temperatureK: 270 }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('not_applied');
     if (result.status !== 'not_applied') return;
     expect(result.reasonKind).toBe('out_of_applicability');
@@ -325,7 +306,7 @@ describe('Stage 4.9c (4): температура/солёность/давлен
 
   it('(18) солёность вне заявленного диапазона S = 20..40 даёт отказ', () => {
     for (const salinity of [5, 45]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ salinityPSU: salinity }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ salinityPSU: salinity }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('not_applied');
       if (result.status !== 'not_applied') continue;
       expect(result.reasonKind).toBe('out_of_applicability');
@@ -339,7 +320,7 @@ describe('Stage 4.9c (4): температура/солёность/давлен
 
 describe('Stage 4.9c (5): валидация входа и отказы', () => {
   it('(19) неподдерживаемая шкала pH даёт ЯВНЫЙ отказ (free/NBS не реализованы)', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ phScale: 'free' }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ phScale: 'free' }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('not_applied');
     if (result.status !== 'not_applied') return;
     expect(result.reasonKind).toBe('unsupported_ph_scale');
@@ -355,7 +336,7 @@ describe('Stage 4.9c (5): валидация входа и отказы', () => 
     const note = validateCarbonateChemistryInputs(fixtureInput({ temperatureProvenance: { note: 'без источника' } }));
     expect(note.some((e) => e.includes('температура'))).toBe(true);
     // solve: invalid_input + никакой «приблизительной» подстановки констант
-    const result = solveCarbonateEquilibrium(fixtureInput({ salinityProvenance: undefined }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ salinityProvenance: undefined }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('not_applied');
     if (result.status !== 'not_applied') return;
     expect(result.reasonKind).toBe('invalid_input');
@@ -363,7 +344,7 @@ describe('Stage 4.9c (5): валидация входа и отказы', () => 
 
   it('(21) неположительный DIC блокируется (0 и отрицательное значение)', () => {
     for (const dicMolPerKgSw of [0, -0.002]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('not_applied');
       if (result.status !== 'not_applied') continue;
       expect(result.reasonKind).toBe('invalid_input');
@@ -372,19 +353,19 @@ describe('Stage 4.9c (5): валидация входа и отказы', () => 
   });
 
   it('(22) несогласованность DIC и TA: TA_C > 2·DIC и TA_C = 2·DIC — решения нет', () => {
-    const tooBig = solveCarbonateEquilibrium(fixtureInputByTA(0.005) as SolveInputShape);
+    const tooBig = solveCarbonateEquilibrium(fixtureInputByTA(0.005) as unknown as CarbonateModelInput);
     expect(tooBig.status).toBe('not_applied');
     if (tooBig.status !== 'not_applied') return;
     expect(tooBig.reasonKind).toBe('no_solution');
     expect(tooBig.reason).toContain('2·DIC');
-    const exact = solveCarbonateEquilibrium(fixtureInputByTA(0.004) as SolveInputShape);
+    const exact = solveCarbonateEquilibrium(fixtureInputByTA(0.004) as unknown as CarbonateModelInput);
     expect(exact.status).toBe('not_applied');
     if (exact.status !== 'not_applied') return;
     expect(exact.reasonKind).toBe('no_solution');
   });
 
   it('(23) неподдерживаемая модель активности даёт ЯВНЫЙ отказ (Pitzer не реализован)', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ activityModel: 'pitzer' }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ activityModel: 'pitzer' }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('not_applied');
     if (result.status !== 'not_applied') return;
     expect(result.reasonKind).toBe('unsupported_activity_model');
@@ -396,7 +377,7 @@ describe('Stage 4.9c (5): валидация входа и отказы', () => 
 
   it('(24) NaN/Infinity входы отклоняются (никак не «аварийное решение»)', () => {
     for (const weird of [Number.NaN, Number.POSITIVE_INFINITY]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ temperatureK: weird, temperatureProvenance: { sourceName: 'synthetic' } }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ temperatureK: weird, temperatureProvenance: { sourceName: 'synthetic' } }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('not_applied');
       if (result.status !== 'not_applied') continue;
       expect(result.reasonKind).toBe('invalid_input');
@@ -407,7 +388,7 @@ describe('Stage 4.9c (5): валидация входа и отказы', () => 
   it('(25) откат при невозможном решении: вход остаётся неизменным, результата нет', () => {
     const broken = fixtureInputByTA(0.005); // TA_C > 2·DIC → решения нет
     const snapshot = JSON.stringify(broken);
-    const result = solveCarbonateEquilibrium(broken as SolveInputShape);
+    const result = solveCarbonateEquilibrium(broken as unknown as CarbonateModelInput);
     expect(result.status).toBe('not_applied');
     expect(JSON.stringify(broken)).toBe(snapshot); // вход не мутирован
   });
@@ -420,7 +401,7 @@ describe('Stage 4.9c (5): валидация входа и отказы', () => 
 describe('Stage 4.9c (6): положительность, зарядовый баланс', () => {
   it('(26) при корректных задачах все концентрации конечны и положительны', () => {
     for (const ph of [3.0, 6.0, 8.1, 11.5, 13.9]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ ph }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ ph }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('applied');
       if (result.status !== 'applied') continue;
       for (const v of [result.speciesMolPerKgSw.co2_aq, result.speciesMolPerKgSw.hco3_aq, result.speciesMolPerKgSw.co3_aq]) {
@@ -431,7 +412,7 @@ describe('Stage 4.9c (6): положительность, зарядовый б�
   });
 
   it('(27) зарядовый баланс РАСТВОРА проверяется независимо; без фона — «unknown», с фоном — «yes/no»', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({}) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({}) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     // без явного фона модуль НЕ утверждает нейтральность полного раствора
@@ -513,8 +494,8 @@ describe('Stage 4.9c (7): фазовая идентичность и катал�
 
 describe('Stage 4.9c (8): сохранение углерода, детерминизм, сериализация', () => {
   it('(31) transfer-план: сумма дельт по углеродным видам сохраняет DIC', () => {
-    const before = solveCarbonateEquilibrium(fixtureInput({ ph: 8.1 }) as SolveInputShape);
-    const after = solveCarbonateEquilibrium(fixtureInput({ ph: 7.6 }) as SolveInputShape);
+    const before = solveCarbonateEquilibrium(fixtureInput({ ph: 8.1 }) as unknown as CarbonateModelInput);
+    const after = solveCarbonateEquilibrium(fixtureInput({ ph: 7.6 }) as unknown as CarbonateModelInput);
     expect(before.status).toBe('applied');
     expect(after.status).toBe('applied');
     if (before.status !== 'applied' || after.status !== 'applied') return;
@@ -550,8 +531,8 @@ describe('Stage 4.9c (8): сохранение углерода, детерми�
   });
 
   it('(33) детерминизм: два запуска решателя дали побитово одинаковый результат', () => {
-    const a = solveCarbonateEquilibrium(fixtureInputByTA(0.002234) as SolveInputShape);
-    const b = solveCarbonateEquilibrium(fixtureInputByTA(0.002234) as SolveInputShape);
+    const a = solveCarbonateEquilibrium(fixtureInputByTA(0.002234) as unknown as CarbonateModelInput);
+    const b = solveCarbonateEquilibrium(fixtureInputByTA(0.002234) as unknown as CarbonateModelInput);
     expect(JSON.stringify(a) === JSON.stringify(b)).toBe(true);
   });
 
@@ -565,7 +546,7 @@ describe('Stage 4.9c (8): сохранение углерода, детерми�
   });
 
   it('(35) JSON round-trip: результат решателя — plain-JSON, сериализуется по кругу без потерь', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ backgroundStrongIonChargeMolPerKgSw: 0.00233, backgroundChargeProvenance: { sourceName: 'synthetic', recordId: 'bg' } }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ backgroundStrongIonChargeMolPerKgSw: 0.00233, backgroundChargeProvenance: { sourceName: 'synthetic', recordId: 'bg' } }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     const restored: unknown = JSON.parse(JSON.stringify(result));
@@ -581,7 +562,7 @@ describe('Stage 4.9c (8): сохранение углерода, детерми�
 
 describe('Stage 4.9c (9): режим приближения и численные границы', () => {
   it('(36) идеальный разбавленный режим явно маркируется как приближение', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({}) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({}) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     expect(result.activityModel).toBe('ideal_dilute');
@@ -610,7 +591,7 @@ describe('Stage 4.9c (9): режим приближения и численны�
       expect(validateCarbonateChemistryInputs(fixtureInput({ ph })).length).toBeGreaterThan(0);
     }
     for (const ph of [0.001, 13.999]) {
-      const result = solveCarbonateEquilibrium(fixtureInput({ ph }) as SolveInputShape);
+      const result = solveCarbonateEquilibrium(fixtureInput({ ph }) as unknown as CarbonateModelInput);
       expect(result.status).toBe('applied');
       if (result.status !== 'applied') continue;
       expect(result.hydrogenMolPerKgSw).toBeGreaterThan(0);
@@ -618,7 +599,7 @@ describe('Stage 4.9c (9): режим приближения и численны�
   });
 
   it('(39) очень малый DIC без underflow: концентрации остаются положительными', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw: 1e-15 }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw: 1e-15 }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     expect(result.speciesMolPerKgSw.hco3_aq).toBeGreaterThan(0);
@@ -626,7 +607,7 @@ describe('Stage 4.9c (9): режим приближения и численны�
   });
 
   it('(40) численная устойчивость при высоком DIC (синтетическая повышенная концентрация)', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw: 1.0, ph: 7.0 }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ dicMolPerKgSw: 1.0, ph: 7.0 }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     expect(Number.isFinite(result.speciesMolPerKgSw.co2_aq)).toBe(true);
@@ -635,7 +616,7 @@ describe('Stage 4.9c (9): режим приближения и численны�
   });
 
   it('(41) Kw-only-seawater: в базе режима pH на total-шкале OH- НЕ синтезируется', () => {
-    const result = solveCarbonateEquilibrium(fixtureInput({ phScale: 'total' }) as SolveInputShape);
+    const result = solveCarbonateEquilibrium(fixtureInput({ phScale: 'total' }) as unknown as CarbonateModelInput);
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
     expect(result.speciesMolPerKgSw.oh_aq).toBeNull();

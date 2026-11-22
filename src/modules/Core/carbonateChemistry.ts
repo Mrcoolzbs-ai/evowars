@@ -670,7 +670,7 @@ export function calculateCarbonateChargeBalance(options: {
   backgroundStrongIonChargeMolPerKgSw?: number;
   toleranceMolPerKgSw?: number;
 }): CarbonateChargeBalanceResult {
-  const contributions: CarbonateChargeBalanceResult['contributions'] = [
+  const contributions: Array<{ speciesId: string; charge: number; concentrationMolPerKgSw: number; chargeContributionMolPerKgSw: number }> = [
     { speciesId: 'hplus_aq', charge: 1, concentrationMolPerKgSw: options.hydrogenMolPerKgSw, chargeContributionMolPerKgSw: options.hydrogenMolPerKgSw * 1 },
     { speciesId: 'hco3_aq', charge: -1, concentrationMolPerKgSw: options.hco3MolPerKgSw, chargeContributionMolPerKgSw: -options.hco3MolPerKgSw },
     { speciesId: 'co3_aq', charge: -2, concentrationMolPerKgSw: options.co3MolPerKgSw, chargeContributionMolPerKgSw: -2 * options.co3MolPerKgSw }
