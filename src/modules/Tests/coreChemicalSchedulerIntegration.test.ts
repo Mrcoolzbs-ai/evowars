@@ -527,11 +527,21 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
       {
         ...originalLayer,
         layerId: 'lower-kinetic-layer',
+        altitudeRangeM: { min: 0, max: 100 },
+        altitudeProvenance: {
+          ...originalLayer.thicknessProvenance,
+          sourceId: 'fixture:lower-layer-altitude'
+        },
         columnInventoriesMolM2: firstInventory
       },
       {
         ...originalLayer,
         layerId: 'upper-kinetic-layer',
+        altitudeRangeM: { min: 100, max: 200 },
+        altitudeProvenance: {
+          ...originalLayer.thicknessProvenance,
+          sourceId: 'fixture:upper-layer-altitude'
+        },
         columnInventoriesMolM2: secondInventory,
         temperatureK: 360,
         temperatureProvenance: {
@@ -555,6 +565,11 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
       'lower-kinetic-layer',
       'upper-kinetic-layer'
     ]);
+    expect(audits.map((audit) => audit.altitudeRangeM)).toEqual([
+      { min: 0, max: 100 },
+      { min: 100, max: 200 }
+    ]);
+    expect(audits[0]!.altitudeProvenance!.sourceId).toBe('fixture:lower-layer-altitude');
     expect(updated.physicalKinetics!.layers).toHaveLength(2);
 
     for (const speciesId of splitSpecies) {
@@ -772,6 +787,40 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(updatedAtmosphere?.material?.entries).toEqual(result.world.chemicalState!.inventory);
     expect(seededCore.scheduling).toEqual(priorBookkeeping);
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
+  });
+
+  it('rejects overlapping altitude intervals even when column inventories are disjoint', () => {
+    const world = makePhysicalKineticWorld();
+    const config = world.chemicalState!.physicalKinetics!;
+    const originalLayer = config.layers[0]!;
+    config.layers = [
+      {
+        ...originalLayer,
+        layerId: 'altitude-layer-a',
+        altitudeRangeM: { min: 0, max: 100 },
+        altitudeProvenance: { ...originalLayer.thicknessProvenance, sourceId: 'fixture:altitude-a' }
+      },
+      {
+        ...originalLayer,
+        layerId: 'altitude-layer-b',
+        altitudeRangeM: { min: 50, max: 150 },
+        altitudeProvenance: { ...originalLayer.thicknessProvenance, sourceId: 'fixture:altitude-b' },
+        temperatureK: 360,
+        temperatureProvenance: { ...originalLayer.temperatureProvenance, sourceId: 'fixture:temperature-b' },
+        columnInventoriesMolM2: {
+          h: 4e-6,
+          o2: 2e-5,
+          ho2: 5e-9,
+          n2: 2.1e3
+        }
+      }
+    ];
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.reason).toContain('перекрываются по высоте');
+    expect(world.coreWorldState).toBeUndefined();
+    expect(vi.mocked(runMacroStep)).not.toHaveBeenCalled();
   });
 
   it('rejects overlapping layer column inventories whose sum double-counts the same atmospheric material', () => {
