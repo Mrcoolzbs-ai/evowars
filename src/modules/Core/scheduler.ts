@@ -1540,6 +1540,25 @@ export function runMacroStep(
     };
   }
 
+  // SchedulerBookkeeping is scheduler-owned state. Operators may change
+  // physical reservoirs/ledgers, but they must never create, mutate or
+  // consume event/process scheduling records directly.
+  let originalSchedulingCanonical: string;
+  try {
+    originalSchedulingCanonical = schedulerCanonicalJson(world.scheduling ?? null);
+  } catch (error) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: [],
+      diagnostics: [
+        'исходное SchedulerBookkeeping нельзя канонически проверить до macro-step: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+
   const proposals: Array<ProcessStepProposal & { processId: string }> = [];
   const proposalDiagnostics: string[] = [];
   const currentPoint: FluxTime = {
@@ -2086,6 +2105,31 @@ export function runMacroStep(
       };
     }
     current = next;
+  }
+
+  try {
+    if (schedulerCanonicalJson(current.scheduling ?? null) !== originalSchedulingCanonical) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(plan),
+        diagnostics: [
+          'оператор изменил SchedulerBookkeeping напрямую (включая in-place мутацию); очередь событий, sequence, stepLog и process deadlines принадлежат Scheduler — шаг отклонён'
+        ]
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: rejectedLog(plan),
+      diagnostics: [
+        'SchedulerBookkeeping после операторов нельзя канонически проверить: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
   }
 
   // --- Stage 4.2.3.3.1: append-only контракт журнала реакций ---
