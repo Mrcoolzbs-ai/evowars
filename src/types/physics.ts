@@ -527,6 +527,41 @@ export interface ChemicalPhysicalMolecularDiffusionAudit {
   backgroundSpecies: Record<string, ChemicalPhysicalLennardJonesTransportSpecies>;
 }
 
+/** Explicit dry-convective mixing-length closure for trace-species transport. */
+export interface ChemicalPhysicalDryConvectiveMixingConfiguration {
+  /** Trace species whose mole mixing ratios are carried by convective overturning. */
+  speciesIds: string[];
+  /** Mixing length = min(alpha * local pressure scale height, layer-centre separation), 0 < alpha <= 1. */
+  mixingLengthScaleHeightFraction: number;
+  /** Dimensionless closure efficiency multiplying l² sqrt(-N²), 0 < value <= 1. */
+  efficiencyCoefficient: number;
+  /** Provenance of the selected mixing-length closure parameters; they are not calibrated automatically. */
+  provenance: DataProvenance;
+}
+
+/** Per-interface dry convective mixing-length diagnosis and tracer diffusivity. */
+export interface ChemicalPhysicalDryConvectiveMixingAudit {
+  method: 'dry_mixing_length_virtual_potential_temperature';
+  referencePressurePa: number;
+  mixingLengthScaleHeightFraction: number;
+  efficiencyCoefficient: number;
+  provenance: DataProvenance;
+  heatTransport: 'not_modelled';
+  interfaces: Array<{
+    lowerLayerId: string;
+    upperLayerId: string;
+    centerDistanceM: number;
+    virtualPotentialTemperatureLowerK: number;
+    virtualPotentialTemperatureUpperK: number;
+    bruntVaisalaFrequencySquaredS2: number;
+    isDryConvectivelyUnstable: boolean;
+    mixingLengthM: number;
+    convectiveVelocityScaleMs: number;
+    convectiveDiffusivityM2S: number;
+    effectiveEddyDiffusivityM2S: number;
+  }>;
+}
+
 /** Явная конфигурация вертикального турбулентного переноса для Scheduler. */
 export interface ChemicalPhysicalVerticalTransportConfiguration {
   /** Следовые species ID, явно присутствующие в каждом переносимом слое; n2/o2 запрещены. */
@@ -537,6 +572,8 @@ export interface ChemicalPhysicalVerticalTransportConfiguration {
   diffusivityProvenance: DataProvenance;
   /** Optional molecular diffusion; every LJ pair and thermal factor must be explicit and sourced. */
   molecularDiffusion?: ChemicalPhysicalMolecularDiffusionConfiguration;
+  /** Optional dry-convective tracer-mixing closure; no thermal adjustment is implied. */
+  dryConvectiveMixing?: ChemicalPhysicalDryConvectiveMixingConfiguration;
 }
 
 /** Аудит вертикального обмена вещества за тот же Scheduler dt, что и химия. */
@@ -548,6 +585,7 @@ export interface ChemicalPhysicalVerticalTransportAudit {
   /** Provenance of the explicitly supplied Kzz profile, when captured by a caller. */
   diffusivityProvenance?: DataProvenance;
   molecularDiffusion?: ChemicalPhysicalMolecularDiffusionAudit;
+  dryConvectiveMixing?: ChemicalPhysicalDryConvectiveMixingAudit;
   layers: Array<{
     layerId: string;
     altitudeRangeM: { min: number; max: number };
