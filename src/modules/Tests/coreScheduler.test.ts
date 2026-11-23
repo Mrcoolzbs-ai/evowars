@@ -2454,6 +2454,42 @@ describe('Stage 4.2 Scheduler: state-dependent macro-step selection', () => {
     expect(result.bookkeeping.eventQueue[1]!.data).toEqual({ transition: { from: 'liquid', to: 'gas' } });
   });
 
+  it('places a solver root in the next segment when its absolute local point is not representable', () => {
+    const registry = makeRegistry([stateDependent('root_solver')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const world = { ...testWorld(), clock: largeClock };
+    const operator: ProcessOperator = {
+      processId: 'root_solver',
+      proposeStep: () => ({
+        durationS: 3,
+        method: 'root-finding at sub-ULP absolute time',
+        events: [
+          { id: 'sub-ulp-root', offsetS: 3, type: 'solver_detected', data: { root: 'exact local offset' } }
+        ]
+      }),
+      apply: (state) => state
+    };
+
+    const result = runMacroStep(world, registry, [operator], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('committed');
+    expect(result.stepSize?.effectiveDurationS).toBe(3);
+    expect(result.stepSize?.eventBoundary).toEqual({
+      eventId: 'sub-ulp-root',
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 3 }
+    });
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(result.world.clock.localTimeS).toBe(3);
+    expect(result.bookkeeping.eventQueue[0]!.time).toEqual({
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 3
+    });
+    expect(dueEvents(result.bookkeeping, {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 3
+    }).map((event) => event.id)).toEqual(['sub-ulp-root']);
+    expect(world.clock).toEqual(largeClock);
+  });
+
   it('a pre-existing earlier event wins over a later solver root; the later root is not queued prematurely', () => {
     const registry = makeRegistry([stateDependent('root_solver')]);
     const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
