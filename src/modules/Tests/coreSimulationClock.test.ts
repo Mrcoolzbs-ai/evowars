@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createSimulationClock,
   advance,
+  advanceTo,
   representableStep,
   now,
   totalElapsedSeconds,
@@ -81,6 +82,27 @@ describe('Stage 4.1 SimulationClock: численная устойчивость
     expect(small.priorSegmentsS).toBeCloseTo(1e16, 0);
     expect(totalElapsedSeconds(small)).toBeCloseTo(1e16, 0);
     expect(small.stepCount).toBe(clock.stepCount + 1);
+  });
+
+  it('advanceTo lands on an exact event point even when its delta is below the conservative representable-step estimate', () => {
+    const clock = advance(createSimulationClock(), 1e16);
+    const eventPoint = { segmentIndex: clock.segmentIndex, localTimeS: clock.localTimeS + 2 };
+
+    expect(2).toBeLessThan(representableStep(clock)!);
+    const relativeAdvance = advance(clock, 2);
+    expect(relativeAdvance.segmentIndex).toBe(clock.segmentIndex + 1);
+
+    const exactAdvance = advanceTo(clock, eventPoint);
+    expect(exactAdvance.segmentIndex).toBe(clock.segmentIndex);
+    expect(exactAdvance.localTimeS).toBe(eventPoint.localTimeS);
+    expect(exactAdvance.stepCount).toBe(clock.stepCount + 1);
+  });
+
+  it('advanceTo rejects past, equal and cross-segment targets', () => {
+    const clock = advance(createSimulationClock(), 10);
+    expect(() => advanceTo(clock, { segmentIndex: 0, localTimeS: 10 })).toThrow(SimulationClockError);
+    expect(() => advanceTo(clock, { segmentIndex: 0, localTimeS: 9 })).toThrow(SimulationClockError);
+    expect(() => advanceTo(clock, { segmentIndex: 1, localTimeS: 1 })).toThrow(SimulationClockError);
   });
 
   it('обычный шаг при обычном времени сегментации не вызывает', () => {
