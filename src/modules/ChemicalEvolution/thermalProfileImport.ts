@@ -277,10 +277,6 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
   }
 
   let effectiveSeeds: ThermalProfileKineticLayerSeed[] = [...imported.layers];
-  const hydrostaticStateById = new Map<
-    string,
-    NonNullable<ChemicalPhysicalKineticsState['layers'][number]['hydrostaticState']>
-  >();
   const pendingHydrostaticById = new Map<string, {
     boundary: HydrostaticColumnCompleted['layerBoundaries'][number];
     representative: HydrostaticProfilePoint;
@@ -396,17 +392,6 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
           continue;
         }
 
-        const snapshot = (point: HydrostaticProfilePoint) => ({
-          heightM: point.heightM,
-          pressurePa: point.pressurePa,
-          temperatureK: point.temperatureK,
-          densityKgPerM3: point.densityKgPerM3,
-          meanMolarMassKgPerMol: point.meanMolarMassKgPerMol,
-          gravityMs2: point.gravityMs2,
-          scaleHeightM: point.scaleHeightM,
-          columnMassKgPerM2: point.columnMassKgPerM2,
-          columnMolesPerM2: point.columnMolesPerM2
-        });
         pendingHydrostaticById.set(boundary.layerId, {
           boundary,
           representative,
@@ -623,19 +608,16 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
             inventoryRelativeDeviation
           },
           provenance: {
-            pressure: { ...input.hydrostaticColumn.provenance.surfacePressure },
+            pressure: { ...input.hydrostaticColumn!.provenance.surfacePressure },
             composition: { ...sourceProvenance },
             model: {
               sourceName: 'Core hydrostatic atmosphere solver (Stage 4.8.1)',
               method: 'spherical-gravity ideal-gas hydrostatic integration with Radau IIA',
-              limitations: input.hydrostaticColumn.assumptions.join('; ')
+              limitations: input.hydrostaticColumn!.assumptions.join('; ')
             }
           }
         };
       }
-    }
-    if (hydrostaticState !== undefined) {
-      hydrostaticStateById.set(seed.sourceLayerId, hydrostaticState);
     }
 
     configurationLayers.push({
