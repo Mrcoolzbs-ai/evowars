@@ -832,3 +832,384 @@ export function computeHydrostaticColumn(input: HydrostaticColumnInput): Hydrost
     }
   };
 }
+
+
+// ============================================
+// ADAPTIVE VERTICAL REFINEMENT (pressure / T / number density gradients)
+// ============================================
+
+export interface HydrostaticRefinementPolicy {
+  /** Maximum |ln(Ptop/Pbottom)| per child layer. */
+  maximumLogPressureChange: number;
+  /** Maximum adjacent relative temperature change per child layer. */
+  maximumRelativeTemperatureChange: number;
+  /** Maximum |ln((P/T)top/(P/T)bottom)| per child layer; composition is piecewise constant. */
+  maximumLogNumberDensityChange: number;
+  /** Hard upper bound on children created from one source layer. */
+  maximumSubdivisionsPerLayer: number;
+}
+
+export const HYDROSTATIC_REFINEMENT_DEFAULTS: Readonly<HydrostaticRefinementPolicy> = {
+  maximumLogPressureChange: 0.2,
+  maximumRelativeTemperatureChange: 0.02,
+  maximumLogNumberDensityChange: 0.2,
+  maximumSubdivisionsPerLayer: 64
+};
+
+export interface HydrostaticLayerRefinementSummary {
+  parentLayerId: string;
+  childLayerIds: readonly string[];
+  subdivisions: number;
+  sourceLogPressureChange: number;
+  maximumChildLogPressureChange: number;
+  sourceRelativeTemperatureChange: number;
+  maximumChildRelativeTemperatureChange: number;
+  sourceLogNumberDensityChange: number;
+  maximumChildLogNumberDensityChange: number;
+}
+
+export type AdaptiveHydrostaticColumnResult =
+  | {
+      status: 'completed';
+      input: HydrostaticColumnInput;
+      column: HydrostaticColumnCompleted;
+      refinements: readonly HydrostaticLayerRefinementSummary[];
+      policy: HydrostaticRefinementPolicy;
+      diagnostics: readonly string[];
+    }
+  | {
+      status: 'rejected';
+      reason: string;
+      sourceStatus?: HydrostaticColumnResult['status'];
+      diagnostics: readonly string[];
+    };
+
+function temperatureModelForSubrange(
+  model: AtmosphereTemperatureModel,
+  originalBottomM: number,
+  bottomM: number,
+  topM: number
+): AtmosphereTemperatureModel {
+  const temperatureAt = (heightM: number) =>
+    temperatureAtGeometricHeight(model, originalBottomM, heightM);
+  switch (model.kind) {
+    case 'isothermal':
+      return { ...model };
+    case 'lapseRate':
+      return {
+        kind: 'lapseRate',
+        bottomTemperatureK: temperatureAt(bottomM),
+        lapseRateKPerM: model.lapseRateKPerM
+      };
+    case 'geopotentialLapseRate': {
+      const bottomGeopotentialHeightM =
+        (model.referenceRadiusM * bottomM) / (model.referenceRadiusM + bottomM);
+      return {
+        ...model,
+        bottomGeopotentialHeightM,
+        bottomTemperatureK: temperatureAt(bottomM)
+      };
+    }
+    case 'measuredNodes': {
+      const interiorNodes = model.nodes
+        .filter((node) => node.heightM > bottomM && node.heightM < topM)
+        .map((node) => ({ heightM: node.heightM, temperatureK: node.temperatureK }));
+      return {
+        kind: 'measuredNodes',
+        interpolation: 'linear',
+        nodes: [
+          { heightM: bottomM, temperatureK: temperatureAt(bottomM) },
+          ...interiorNodes,
+          { heightM: topM, temperatureK: temperatureAt(topM) }
+        ]
+      };
+    }
+  }
+}
+
+function maximumRelativeTemperatureChange(
+  model: AtmosphereTemperatureModel,
+  originalBottomM: number,
+  bottomM: number,
+  topM: number
+): number {
+  const sampleHeights = [bottomM, topM];
+  if (model.kind === 'measuredNodes') {
+    for (const node of model.nodes) {
+      if (node.heightM > bottomM && node.heightM < topM) sampleHeights.push(node.heightM);
+    }
+  }
+  sampleHeights.sort((a, b) => a - b);
+  let maximum = 0;
+  for (let index = 1; index < sampleHeights.length; index++) {
+    const previous = temperatureAtGeometricHeight(model, originalBottomM, sampleHeights[index - 1]!);
+    const current = temperatureAtGeometricHeight(model, originalBottomM, sampleHeights[index]!);
+    maximum = Math.max(maximum, Math.abs(current - previous) / Math.min(previous, current));
+  }
+  return maximum;
+}
+
+/**
+ * First solves the source column, then splits only layers whose integrated
+ * pressure, temperature or ideal-gas number-density gradients exceed the
+ * policy. The exact source temperature function and constant layer
+ * composition are preserved in each child. A second Radau IIA solve returns
+ * the refined P/T/rho and molar-column increments; no pressure interpolation
+ * or inventory scaling is used as a substitute for the solver.
+ */
+export function computeAdaptivelyRefinedHydrostaticColumn(
+  input: HydrostaticColumnInput,
+  policy: HydrostaticRefinementPolicy = HYDROSTATIC_REFINEMENT_DEFAULTS
+): AdaptiveHydrostaticColumnResult {
+  const policyErrors: string[] = [];
+  for (const [field, value] of [
+    ['maximumLogPressureChange', policy.maximumLogPressureChange],
+    ['maximumRelativeTemperatureChange', policy.maximumRelativeTemperatureChange],
+    ['maximumLogNumberDensityChange', policy.maximumLogNumberDensityChange]
+  ] as const) {
+    if (!Number.isFinite(value) || value <= 0) {
+      policyErrors.push(field + ' должен быть конечным положительным числом');
+    }
+  }
+  if (
+    !Number.isInteger(policy.maximumSubdivisionsPerLayer) ||
+    policy.maximumSubdivisionsPerLayer < 1 ||
+    policy.maximumSubdivisionsPerLayer > 4096
+  ) {
+    policyErrors.push('maximumSubdivisionsPerLayer должен быть целым числом от 1 до 4096');
+  }
+  if (policyErrors.length > 0) {
+    return { status: 'rejected', reason: 'некорректная политика разбиения', diagnostics: policyErrors };
+  }
+
+  const sourceResult = computeHydrostaticColumn(input);
+  if (sourceResult.status !== 'completed') {
+    const detail = sourceResult.status === 'invalid_input'
+      ? sourceResult.errors.join('; ')
+      : sourceResult.status === 'out_of_applicability'
+        ? sourceResult.reason
+        : sourceResult.reason;
+    return {
+      status: 'rejected',
+      reason: 'исходная гидростатическая колонка не рассчитана',
+      sourceStatus: sourceResult.status,
+      diagnostics: [detail]
+    };
+  }
+
+  const sourceBoundaryById = new Map(
+    sourceResult.layerBoundaries.map((boundary) => [boundary.layerId, boundary])
+  );
+  const refinedLayers: AtmosphereLayerSpec[] = [];
+  const refinements: HydrostaticLayerRefinementSummary[] = [];
+  const midpointHeights: number[] = [];
+
+  for (const sourceLayer of input.layers) {
+    const boundary = sourceBoundaryById.get(sourceLayer.layerId);
+    if (boundary === undefined) {
+      return {
+        status: 'rejected',
+        reason: 'невозможно сопоставить исходный слой с результатом гидростатики',
+        diagnostics: ['отсутствует гидростатическая граница слоя «' + sourceLayer.layerId + '»']
+      };
+    }
+    const bottomTemperatureK = boundary.bottom.temperatureK;
+    const topTemperatureK = boundary.top.temperatureK;
+    const sourceLogPressureChange =
+      Math.abs(Math.log(boundary.top.pressurePa / boundary.bottom.pressurePa));
+    const sourceRelativeTemperatureChange = maximumRelativeTemperatureChange(
+      sourceLayer.temperature,
+      sourceLayer.bottomHeightM,
+      sourceLayer.bottomHeightM,
+      sourceLayer.topHeightM
+    );
+    const sourceLogNumberDensityChange = Math.abs(
+      Math.log(
+        (boundary.top.pressurePa / topTemperatureK) /
+        (boundary.bottom.pressurePa / bottomTemperatureK)
+      )
+    );
+
+    const subdivisions = Math.max(
+      1,
+      Math.ceil(sourceLogPressureChange / policy.maximumLogPressureChange),
+      Math.ceil(sourceRelativeTemperatureChange / policy.maximumRelativeTemperatureChange),
+      Math.ceil(sourceLogNumberDensityChange / policy.maximumLogNumberDensityChange)
+    );
+    if (subdivisions > policy.maximumSubdivisionsPerLayer) {
+      return {
+        status: 'rejected',
+        reason: 'требуемое число дочерних слоёв превышает ограничение политики',
+        diagnostics: [
+          'слой «' + sourceLayer.layerId + '» требует ' + subdivisions +
+          ' подслоёв, максимум ' + policy.maximumSubdivisionsPerLayer
+        ]
+      };
+    }
+
+    const childLayerIds: string[] = [];
+    let maximumChildLogPressureChange = 0;
+    let maximumChildRelativeTemperatureChange = 0;
+    let maximumChildLogNumberDensityChange = 0;
+
+    for (let childIndex = 0; childIndex < subdivisions; childIndex++) {
+      const bottomM = sourceLayer.bottomHeightM +
+        (sourceLayer.topHeightM - sourceLayer.bottomHeightM) * childIndex / subdivisions;
+      const topM = sourceLayer.bottomHeightM +
+        (sourceLayer.topHeightM - sourceLayer.bottomHeightM) * (childIndex + 1) / subdivisions;
+      const layerId = subdivisions === 1
+        ? sourceLayer.layerId
+        : sourceLayer.layerId + '::sub' + String(childIndex + 1).padStart(2, '0');
+      const parentLayerId = sourceLayer.parentLayerId ?? sourceLayer.layerId;
+      const temperature = temperatureModelForSubrange(
+        sourceLayer.temperature,
+        sourceLayer.bottomHeightM,
+        bottomM,
+        topM
+      );
+      const temperatureBottomK = temperatureAtGeometricHeight(
+        sourceLayer.temperature,
+        sourceLayer.bottomHeightM,
+        bottomM
+      );
+      const temperatureTopK = temperatureAtGeometricHeight(
+        sourceLayer.temperature,
+        sourceLayer.bottomHeightM,
+        topM
+      );
+      const provenance: DataProvenance = {
+        ...sourceLayer.provenance,
+        method: 'adaptive vertical subdivision preserving source temperature law',
+        rawInput: {
+          ...(sourceLayer.provenance.rawInput ?? {}),
+          parentLayerId,
+          childLayerIndex: childIndex,
+          childLayerCount: subdivisions,
+          childBottomHeightM: bottomM,
+          childTopHeightM: topM
+        },
+        note: [
+          sourceLayer.provenance.note,
+          'дочерний слой адаптивного гидростатического разбиения; состав и температурный закон исходного слоя сохранены'
+        ].filter(Boolean).join('; ')
+      };
+      refinedLayers.push({
+        ...sourceLayer,
+        layerId,
+        parentLayerId,
+        bottomHeightM: bottomM,
+        topHeightM: topM,
+        temperature,
+        provenance
+      });
+      childLayerIds.push(layerId);
+      midpointHeights.push((bottomM + topM) / 2);
+      // These are conservative source-law estimates. The second solver
+      // run below is authoritative and re-evaluates the actual P/T profile.
+      maximumChildRelativeTemperatureChange = Math.max(
+        maximumChildRelativeTemperatureChange,
+        maximumRelativeTemperatureChange(
+          sourceLayer.temperature,
+          sourceLayer.bottomHeightM,
+          bottomM,
+          topM
+        )
+      );
+      void temperatureBottomK;
+      void temperatureTopK;
+    }
+
+    refinements.push({
+      parentLayerId: sourceLayer.layerId,
+      childLayerIds,
+      subdivisions,
+      sourceLogPressureChange,
+      maximumChildLogPressureChange,
+      sourceRelativeTemperatureChange,
+      maximumChildRelativeTemperatureChange,
+      sourceLogNumberDensityChange,
+      maximumChildLogNumberDensityChange
+    });
+  }
+
+  const refinedInput: HydrostaticColumnInput = {
+    ...input,
+    layers: refinedLayers,
+    requestedHeightsM: midpointHeights
+  };
+  const refinedResult = computeHydrostaticColumn(refinedInput);
+  if (refinedResult.status !== 'completed') {
+    const detail = refinedResult.status === 'invalid_input'
+      ? refinedResult.errors.join('; ')
+      : refinedResult.status === 'out_of_applicability'
+        ? refinedResult.reason
+        : refinedResult.reason;
+    return {
+      status: 'rejected',
+      reason: 'повторное гидростатическое интегрирование адаптивных слоёв не прошло проверку',
+      sourceStatus: refinedResult.status,
+      diagnostics: [detail]
+    };
+  }
+
+  const refinedBoundaryById = new Map(
+    refinedResult.layerBoundaries.map((boundary) => [boundary.layerId, boundary])
+  );
+  const finalSummaries = refinements.map((summary) => {
+    let maximumChildLogPressureChange = 0;
+    let maximumChildLogNumberDensityChange = 0;
+    for (const childId of summary.childLayerIds) {
+      const boundary = refinedBoundaryById.get(childId);
+      if (boundary === undefined) continue;
+      maximumChildLogPressureChange = Math.max(
+        maximumChildLogPressureChange,
+        Math.abs(Math.log(boundary.top.pressurePa / boundary.bottom.pressurePa))
+      );
+      maximumChildLogNumberDensityChange = Math.max(
+        maximumChildLogNumberDensityChange,
+        Math.abs(Math.log(
+          (boundary.top.pressurePa / boundary.top.temperatureK) /
+          (boundary.bottom.pressurePa / boundary.bottom.temperatureK)
+        ))
+      );
+    }
+    return {
+      ...summary,
+      maximumChildLogPressureChange,
+      maximumChildLogNumberDensityChange
+    };
+  });
+
+  const violations = finalSummaries.flatMap((summary) => {
+    const issues: string[] = [];
+    if (summary.maximumChildLogPressureChange > policy.maximumLogPressureChange * (1 + 1e-8)) {
+      issues.push(summary.parentLayerId + ': max log-pressure gradient still exceeds policy');
+    }
+    if (summary.maximumChildRelativeTemperatureChange > policy.maximumRelativeTemperatureChange * (1 + 1e-8)) {
+      issues.push(summary.parentLayerId + ': max relative temperature gradient still exceeds policy');
+    }
+    if (summary.maximumChildLogNumberDensityChange > policy.maximumLogNumberDensityChange * (1 + 1e-8)) {
+      issues.push(summary.parentLayerId + ': max log-number-density gradient still exceeds policy');
+    }
+    return issues;
+  });
+  if (violations.length > 0) {
+    return {
+      status: 'rejected',
+      reason: 'после повторного интегрирования политика градиентов не соблюдена',
+      diagnostics: violations
+    };
+  }
+
+  return {
+    status: 'completed',
+    input: refinedInput,
+    column: refinedResult,
+    refinements: finalSummaries,
+    policy: { ...policy },
+    diagnostics: [
+      'Адаптивное разбиение рассчитано по P(z), T(z) и идеальногазовой численной плотности P/T; для каждого дочернего слоя выполнено повторное Radau IIA интегрирование.',
+      'Температурный закон и состав исходного слоя сохранены; подстолбовые количества следует брать из разности новых интегрированных границ, не масштабировать старые столбы линейно.'
+    ]
+  };
+}
