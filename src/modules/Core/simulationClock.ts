@@ -117,14 +117,14 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
 
   // A binary64 sum is allowed its normal rounding error. Rollover is
   // required only when the rounded increment is materially different from
-  // the requested dt (relative error > 1e-12), or disappears completely.
-  // This preserves ordinary small steps such as 1e-6 after 1e-3, while
-  // preventing 1e16 + 3 from silently becoming a 4-second clock advance.
+  // the requested dt (relative error > 1e-9), or disappears completely.
+  // This preserves ordinary steps such as 1e-6 after 1e-3, while preventing
+  // 1e16 + 3 from silently becoming a 4-second clock advance.
   const representedIncrement = localTimeS - clock.localTimeS;
   const incrementRelativeError = Math.abs(representedIncrement - dtS) / dtS;
   if (
     clock.localTimeS > 0 &&
-    (representedIncrement === 0 || incrementRelativeError > 1e-12)
+    (representedIncrement === 0 || incrementRelativeError > 1e-9)
   ) {
     const nextSegment = startNewSegment(clock);
     return {
