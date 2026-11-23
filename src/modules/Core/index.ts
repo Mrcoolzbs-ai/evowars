@@ -151,3 +151,15 @@ export * from './co2ExchangeExecution';
 export * from './carbonateMinerals';
 
 export * from './carbonateMineralExecution';
+
+// Stage 4.9g: контракты кинетических записей геохимических процессов и
+// планировщик extent (rate × Δt) — БЕЗ численных физических скоростей:
+// production-скорости остаются unknown (geochemicalProcessCatalog);
+// extent применяется только через production-исполнители (4.9a/4.9d/4.9e/4.9f).
+export * from './geochemicalKinetics';
+
+// Stage 4.9g: macro-шаг геохимического цикла — детерминированная склейка
+// фаз transport / CO2-обмен / минеральный цикл поверх production-
+// исполнителей 4.9a/4.9d/4.9e/4.9f, независимый элементно-зарядовый
+// аудит инвентарей (elementTotals/chargeTotal) и макро-атомарность.
+export * from './geochemicalCycleMacroStep';
