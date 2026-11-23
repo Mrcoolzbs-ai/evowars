@@ -471,7 +471,18 @@ describe('Stage 4.2: reference profile integration', () => {
           method: 'explicit test fixture',
           limitations: 'Not calibrated and not intended as an Earth-atmosphere Kzz estimate'
         },
-        molecularDiffusion: syntheticMolecularDiffusionForSchedulerTest()
+        molecularDiffusion: syntheticMolecularDiffusionForSchedulerTest(),
+        dryConvectiveMixing: {
+          speciesIds: ['no'],
+          // Synthetic uncalibrated values verify the Scheduler contract only.
+          mixingLengthScaleHeightFraction: 0.2,
+          efficiencyCoefficient: 0.1,
+          provenance: {
+            sourceName: 'synthetic dry-convective mixing-length closure (test only)',
+            sourceId: 'test:synthetic:dry-convection',
+            limitations: 'Not calibrated against observed planetary convection or tracer profiles'
+          }
+        }
       }
     };
     const configured = configurePrimaryPhysicalChemicalKinetics(
@@ -507,6 +518,16 @@ describe('Stage 4.2: reference profile integration', () => {
     expect(audit.verticalTransport!.diffusivityProvenance?.sourceId).toBe('test:synthetic:Kzz');
     expect(audit.verticalTransport!.molecularDiffusion?.method)
       .toBe('chapman_enskog_neufeld_effective_binary_trace_species');
+    expect(audit.verticalTransport!.dryConvectiveMixing?.method)
+      .toBe('dry_mixing_length_virtual_potential_temperature');
+    expect(audit.verticalTransport!.dryConvectiveMixing?.provenance.sourceId)
+      .toBe('test:synthetic:dry-convection');
+    expect(audit.verticalTransport!.dryConvectiveMixing!.interfaces)
+      .toHaveLength(audit.verticalTransport!.interfaces.length);
+    expect(audit.verticalTransport!.interfaces.every((entry) =>
+      Number.isFinite(entry.convectiveDiffusivityM2S) &&
+      entry.effectiveEddyDiffusivityM2S >= entry.eddyDiffusivityM2S
+    )).toBe(true);
     expect(audit.verticalTransport!.molecularDiffusion?.species.no?.thermalDiffusionProvenance.sourceId)
       .toBe('test:synthetic:molecular:thermal:no');
     expect(audit.verticalTransport!.interfaces[0]!.species.no!.molecularDiffusivityM2S)
