@@ -603,6 +603,8 @@ export interface ChemicalPhysicalVerticalTransportAudit {
     interfaceHeightM: number;
     centerDistanceM: number;
     eddyDiffusivityM2S: number;
+    convectiveDiffusivityM2S: number;
+    effectiveEddyDiffusivityM2S: number;
     interfacePressurePa: number;
     interfaceTemperatureK: number;
     airMolarDensityMolM3: number;
@@ -620,6 +622,7 @@ export interface ChemicalPhysicalVerticalTransportAudit {
       barodiffusionVelocityMs?: number;
       thermalDiffusionVelocityMs?: number;
       molecularDriftVelocityMs?: number;
+      convectiveGradientFluxMolM2S?: number;
     }>;
   }>;
   columnTotalsMolM2: Record<string, {
