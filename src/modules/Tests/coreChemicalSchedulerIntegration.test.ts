@@ -596,6 +596,43 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(world.chemicalState!.inventory).toEqual(globalBefore);
   });
 
+  it('records vertical gaps as explicitly unmodeled instead of interpolating chemistry across them', () => {
+    const world = makePhysicalKineticWorld(350);
+    const config = world.chemicalState!.physicalKinetics!;
+    const originalLayer = config.layers[0]!;
+    const splitSpecies = ['h', 'o2', 'ho2', 'n2'] as const;
+    const firstInventory = Object.fromEntries(
+      splitSpecies.map((speciesId) => [speciesId, originalLayer.columnInventoriesMolM2[speciesId]! * 0.4])
+    );
+    const secondInventory = Object.fromEntries(
+      splitSpecies.map((speciesId) => [speciesId, originalLayer.columnInventoriesMolM2[speciesId]! * 0.6])
+    );
+    config.layers = [
+      {
+        ...originalLayer,
+        layerId: 'lower-kinetic-layer',
+        altitudeRangeM: { min: 0, max: 100 },
+        altitudeProvenance: { ...originalLayer.thicknessProvenance, sourceId: 'fixture:lower-altitude' },
+        columnInventoriesMolM2: firstInventory
+      },
+      {
+        ...originalLayer,
+        layerId: 'upper-kinetic-layer',
+        altitudeRangeM: { min: 200, max: 300 },
+        altitudeProvenance: { ...originalLayer.thicknessProvenance, sourceId: 'fixture:upper-altitude' },
+        columnInventoriesMolM2: secondInventory
+      }
+    ];
+
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('committed');
+    const assumptions = result.world.chemicalState!.physicalKineticsHistory![0]!.assumptions;
+    expect(assumptions.some((item) =>
+      item.includes('вертикальный промежуток 100–200 м') &&
+      item.includes('химия и перенос в этом интервале не моделируются')
+    )).toBe(true);
+  });
+
   it('executes the #89 NOx reaction in the primary ChemicalEvolutionState at its valid temperature', () => {
     const world = makePhysicalKineticWorld(250);
     const state = world.chemicalState!;
