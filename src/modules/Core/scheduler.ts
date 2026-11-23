@@ -604,6 +604,8 @@ export interface MacroStepSizeReport {
   effectiveDurationS: number;
   /** Процессы, задавшие минимальное ограничение, только когда шаг сокращён. */
   limitingProcessIds: readonly string[];
+  /** Ближайшее событие текущего временного сегмента, на котором остановлен шаг. */
+  eventBoundary?: { eventId: string; time: FluxTime };
   proposals: readonly (ProcessStepProposal & { processId: string })[];
   diagnostics: readonly string[];
 }
@@ -1047,16 +1049,63 @@ export function runMacroStep(
     }
     effectiveDurationS = Math.min(effectiveDurationS, normalized.durationS);
   }
+  // A macro-step must not pass a pending event in the current clock
+  // segment. Segment indices are ordered exactly, but priorSegmentsS is
+  // only an elapsed-time estimate; therefore we never translate a future
+  // segment's event into a delta using that approximate sum.
+  const currentPoint = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const pendingEventTime = nextEventTime(originalBk);
+  let eventBoundary: MacroStepSizeReport['eventBoundary'];
+  if (pendingEventTime !== null) {
+    const comparison = comparePoints(pendingEventTime, currentPoint);
+    if (comparison <= 0) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'событие «' + (pendingEvents(originalBk)[0]?.id ?? 'unknown') +
+            '» уже наступило и остаётся pending: обработайте событие до следующего macro-шага; время и состояние не изменены'
+        ]
+      };
+    }
+    if (pendingEventTime.segmentIndex === world.clock.segmentIndex) {
+      const secondsUntilEvent = pendingEventTime.localTimeS - world.clock.localTimeS;
+      if (secondsUntilEvent <= effectiveDurationS) {
+        effectiveDurationS = secondsUntilEvent;
+        const event = pendingEvents(originalBk)[0];
+        if (event !== undefined) {
+          eventBoundary = {
+            eventId: event.id,
+            time: { ...pendingEventTime }
+          };
+        }
+      }
+    }
+  }
+
   const limitingProcessIds =
     effectiveDurationS < opts.durationS
       ? proposals.filter((proposal) => proposal.durationS === effectiveDurationS).map((proposal) => proposal.processId).sort()
       : [];
+  const stepSizeDiagnostics = [...proposalDiagnostics];
+  if (eventBoundary !== undefined) {
+    stepSizeDiagnostics.push(
+      'macro-шаг остановлен на событии «' + eventBoundary.eventId +
+        '»; событие остаётся pending и должно быть обработано до следующего шага'
+    );
+  }
   const stepSize: MacroStepSizeReport = {
     requestedDurationS: opts.durationS,
     effectiveDurationS,
     limitingProcessIds,
+    ...(eventBoundary === undefined ? {} : { eventBoundary }),
     proposals: proposals.map((proposal) => ({ ...proposal })),
-    diagnostics: [...proposalDiagnostics]
+    diagnostics: stepSizeDiagnostics
   };
 
   // --- детерминированный план вызовов операторов ---
