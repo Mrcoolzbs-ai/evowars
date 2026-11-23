@@ -148,6 +148,7 @@ interface InterfaceGeometry {
   centerDistanceM: number;
   eddyDiffusivityM2S: number;
   convectiveDiffusivityM2S: number;
+  effectiveEddyDiffusivityM2S: number;
   pressurePa: number;
   temperatureK: number;
   airMolarDensityMolM3: number;
@@ -623,6 +624,7 @@ export function runVerticalEddyDiffusionStep(
       centerDistanceM,
       eddyDiffusivityM2S,
       convectiveDiffusivityM2S,
+      effectiveEddyDiffusivityM2S,
       pressurePa: interfacePressurePa,
       temperatureK: interfaceTemperatureK,
       airMolarDensityMolM3,
@@ -753,7 +755,7 @@ export function runVerticalEddyDiffusionStep(
           const driftVelocityMs = barodiffusionVelocityMs + thermalDiffusionVelocityMs;
           const totalGradientConductance =
             interfaceGeometry.airMolarDensityMolM3 *
-            (interfaceGeometry.eddyDiffusivityM2S + molecularDiffusivityM2S) /
+            (effectiveEddyDiffusivities[interfaceIndex]! + molecularDiffusivityM2S) /
             interfaceGeometry.centerDistanceM;
           const driftFluxCoefficientMolM2S =
             interfaceGeometry.airMolarDensityMolM3 * driftVelocityMs;
@@ -934,16 +936,18 @@ export function runVerticalEddyDiffusionStep(
       const mixingRatioGradientNumerator = lowerMixingRatio - upperMixingRatio;
       const eddyGradientFluxMolM2S =
         interfaceGeometry.airMolarDensityMolM3 *
-        effectiveEddyDiffusivities[index]! *
+        interfaceGeometry.eddyDiffusivityM2S *
         mixingRatioGradientNumerator / interfaceGeometry.centerDistanceM;
       const convectiveGradientFluxMolM2S = convectiveMixingEnabledForSpecies
         ? interfaceGeometry.airMolarDensityMolM3 *
           interfaceGeometry.convectiveDiffusivityM2S *
           mixingRatioGradientNumerator / interfaceGeometry.centerDistanceM
         : 0;
+      const totalEddyGradientFluxMolM2S =
+        eddyGradientFluxMolM2S + convectiveGradientFluxMolM2S;
       if (molecularStates === undefined) {
         return {
-          constitutiveFluxMolM2S: eddyGradientFluxMolM2S,
+          constitutiveFluxMolM2S: totalEddyGradientFluxMolM2S,
           eddyGradientFluxMolM2S,
           convectiveGradientFluxMolM2S
         };
@@ -960,7 +964,7 @@ export function runVerticalEddyDiffusionStep(
         molecularState.driftVelocityMs * upwindMixingRatio;
       return {
         constitutiveFluxMolM2S:
-          eddyGradientFluxMolM2S +
+          totalEddyGradientFluxMolM2S +
           molecularGradientFluxMolM2S +
           molecularDriftFluxMolM2S,
         eddyGradientFluxMolM2S,
