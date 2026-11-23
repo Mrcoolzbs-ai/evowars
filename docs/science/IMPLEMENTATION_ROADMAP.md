@@ -680,21 +680,41 @@
 > покомпонентный допуск линейных инвариантов
 > (absTolerance/relTolerance), честная статистика шагов
 
-> **Закрытие Stage 4.2 (2026-11-23, CI run #500): выполнены и сквозно
-> проверены все критерии раздела 4.2.** WorldClock поверх сегментированных
-> SimulationClock; Core ProcessRegistry и Scheduler; InvariantAuditor;
-> температурная иерархия 4.2.2; snapshot-изоляция macro-шага; ReactionLedger
-> в CoreWorldState/Storage и аудит реакции относительно материальных
-> инвентарей (4.2.3.2–4.2.3.4.1). Пользовательский шаг химической эволюции
-> в production UI использует runChemicalEvolutionSchedulerStep →
-> runMacroStep. Контрольная 100-шаговая траектория через Scheduler
-> совпала с прежним legacy golden SHA-256
-> 877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20;
-> модельное время — 100000000 лет, часы и bookkeeping Scheduler продвинулись
-> ровно 100 раз. Мост всех 11 процессов легаси-каталога включён в Core
-> ProcessRegistry, но они остаются disabled с tau=unknown и
-> solverAvailability=not_implemented; пользовательский стехиометрический
-> шаг — explicit_only. **Физическая кинетика и автоматические скорости не
-> заявляются и остаются вне закрытия 4.2.** CI: TypeScript, тесты, lint и
-> production build — success; 86 файлов / 3126 passed / 53 skipped,
-> 62 lint-предупреждения, 0 lint-ошибок.
+> **Корректировка статуса Stage 4.2 (2026-11-23, после уточнения
+> критерия владельцем проекта): инфраструктура Scheduler завершена,
+> полное закрытие Stage 4.2 ОТКРЫТО.** Предыдущая запись о закрытии
+> подтверждала исходный технический критерий SIMULATION_ENGINE §9
+> (WorldClock/Scheduler/InvariantAuditor, перевод пользовательского шага
+> Chemistry на Scheduler с сохранением режима A и golden), но не
+> подтверждала физическую автоматизацию химии. Это различие теперь
+> зафиксировано явно: основной runChemicalEvolutionSchedulerStep
+> использует стехиометрический режим A с игровым extentFraction и
+> executionMode=explicit_only; все 11 legacy-процессов зарегистрированы,
+> но disabled, tau=unknown, solverAvailability=not_implemented.
+> Kinetic mechanism №89/№106 и kineticWorldAdapter остаются отдельным
+> экспериментом с явными концентрациями/запасами/толщиной слоя, не
+> применяются к основному ChemicalEvolutionState.
+>
+> Дополнительный критерий полного закрытия 4.2: физическая механистическая
+> сеть должна быть подключена к production ChemicalEvolutionState и
+> автоматически выполняться через Scheduler без игровых extentFraction/
+> gameSpeedCoefficient. Требуются source-backed rate laws и per-record
+> provenance/единицы/диапазоны; физическая концентрационная модель
+> атмосферы/радикалов/третьих тел; RHS + якобиан и адаптивная жёсткая
+> интеграция; динамический выбор шага Scheduler; атомарность, элементный
+> и зарядовый баланс, positivity, timestep convergence и независимые
+> регрессии. Четыре текущие записи chemicalReactions.ts — суммарные реакции,
+> а не elementary kinetic mechanism. Данные с неизвестной скоростью
+> остаются disabled до получения источника; числовые τ или скорости
+> не выдумываются.
+>
+> Текущее основание для следующего этапа работ: контракты 4.5.1/4.5.2,
+> вычислитель k(T) и плотный Radau IIA 4.5.3 уже существуют; каталог
+> JPL/KIDA 4.5.4 остаётся частичным (в production-каталоге известны
+> только отдельные записи №89/№106; JPL Table 2.1 и часть KIDA параметров
+> имеют открытые вопросы доступа/лицензирования/единиц); 4.5.5 содержит
+> ограниченный отдельный механизм, но не полную production-интеграцию.
+> Следовательно Stage 4.2 остаётся открытым под расширенным критерием.
+> CI #501 на HEAD ca3a786ca22b6405e2dd7b616d0233dc79612c2d — success:
+> TypeScript, 86 файлов passed / 2 skipped, 3126 тестов passed /
+> 53 skipped, lint (62 предупреждения, 0 ошибок), production build.
