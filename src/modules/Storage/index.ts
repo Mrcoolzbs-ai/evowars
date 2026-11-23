@@ -1150,11 +1150,14 @@ export function importWorldFromJSONDetailed(json: string): WorldImportResult {
     // Stage 4.2.3.3.1: некорректный журнал реакций не возвращается
     // как валидно загруженный мир — причина отказа возвращается
     // диагностикой, оригинальный JSON остаётся у вызывающей стороны.
+    // Stage 4.2: явно заданный SchedulerBookkeeping проходит тот же
+    // fail-closed валидатор, что и при загрузке из localStorage.
     // Stage 4.5.5: то же для явно заданного кинетического эксперимента
     // (версия схемы состояния, толщина слоя, инвентари, N₂, накопленное
     // время, история запусков); отсутствующее поле проходит насквозь.
     const problems = [
       ...reactionLedgerProblemsOfWorld(migrated),
+      ...schedulerProblemsOfWorld(migrated),
       ...kineticExperimentProblemsOfWorld(migrated),
       ...geochemicalFluxContextProblemsOfWorld(migrated)
     ];
