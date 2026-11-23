@@ -178,7 +178,15 @@ function GeneratorPanel(props: {
           <select
             value={localSettings.atmospherePreset || ''}
             onChange={(e) => {
-              const newSettings = { ...localSettings, atmospherePreset: e.target.value || undefined };
+              const atmospherePreset = e.target.value || undefined;
+              const newSettings = {
+                ...localSettings,
+                atmospherePreset,
+                atmosphericReferenceProfile:
+                  atmospherePreset === 'earth'
+                    ? localSettings.atmosphericReferenceProfile
+                    : undefined
+              };
               setLocalSettings(newSettings);
               props.onSettingsChange(newSettings);
             }}
@@ -208,6 +216,30 @@ function GeneratorPanel(props: {
                 return 'Пресет сгенерирует атмосферу с допустимыми вариациями состава.';
               })()}
             </p>
+          )}
+          {localSettings.atmospherePreset === 'earth' && (
+            <div className="category-selector">
+              <label>Вертикальный reference-профиль:</label>
+              <select
+                value={localSettings.atmosphericReferenceProfile || ''}
+                onChange={(e) => {
+                  const newSettings = {
+                    ...localSettings,
+                    atmosphericReferenceProfile:
+                      e.target.value === 'ussa_1976_earth' ? 'ussa_1976_earth' as const : undefined
+                  };
+                  setLocalSettings(newSettings);
+                  props.onSettingsChange(newSettings);
+                }}
+              >
+                <option value="">Не подключать</option>
+                <option value="ussa_1976_earth">US Standard Atmosphere 1976 — 7 слоёв до 86 км</option>
+              </select>
+              <p className="preset-note">
+                Профиль подключается как внешний reference, не заменяет параметры сгенерированной планеты.
+                Температура каждого слоя — изотермическое приближение в середине слоя; химические запасы и радикалы не задаются.
+              </p>
+            </div>
           )}
         </div>
       </div>
