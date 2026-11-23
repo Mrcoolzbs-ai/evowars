@@ -193,6 +193,10 @@ export interface SchedulerStepLogEntry {
   durationS: number;
   /** Начало физического подынтервала [intervalStartS, intervalStartS + durationS) внутри macro-шага [0, dt], с. */
   intervalStartS: number;
+  /** Абсолютное начало macro-step в сегментированных часах; отсутствует в старых сохранениях. */
+  worldStartTime?: FluxTime;
+  /** Абсолютный конец macro-step в сегментированных часах; отсутствует в старых сохранениях. */
+  worldEndTime?: FluxTime;
   status: 'committed' | 'rejected';
 }
 
@@ -391,6 +395,28 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
       }
       if (typeof entry.intervalStartS !== 'number' || !Number.isFinite(entry.intervalStartS) || entry.intervalStartS < 0) {
         issues.push(label + ': intervalStartS должен быть неотрицательным конечным числом');
+      }
+      if ((entry.worldStartTime === undefined) !== (entry.worldEndTime === undefined)) {
+        issues.push(label + ': worldStartTime и worldEndTime должны задаваться вместе');
+      }
+      if (entry.worldStartTime !== undefined) {
+        for (const issue of validateFluxTimeShape(entry.worldStartTime)) {
+          issues.push(label + ': worldStartTime: ' + issue);
+        }
+        for (const issue of validateFluxTimeShape(entry.worldEndTime)) {
+          issues.push(label + ': worldEndTime: ' + issue);
+        }
+        if (
+          isPlainRecord(entry.worldStartTime) &&
+          isPlainRecord(entry.worldEndTime) &&
+          typeof entry.worldStartTime.segmentIndex === 'number' &&
+          typeof entry.worldStartTime.localTimeS === 'number' &&
+          typeof entry.worldEndTime.segmentIndex === 'number' &&
+          typeof entry.worldEndTime.localTimeS === 'number' &&
+          comparePoints(entry.worldEndTime as unknown as FluxTime, entry.worldStartTime as unknown as FluxTime) <= 0
+        ) {
+          issues.push(label + ': worldEndTime должен быть строго позже worldStartTime');
+        }
       }
       if (entry.status !== 'committed' && entry.status !== 'rejected') {
         issues.push(label + ': status должен быть committed или rejected');
@@ -2252,12 +2278,22 @@ export function runMacroStep(
       operatorCallsCompleted: dynamics.operatorCallsCompleted + calls
     };
   }
+  const macroStepStartTime: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const macroStepEndTime: FluxTime = {
+    segmentIndex: newClock.segmentIndex,
+    localTimeS: newClock.localTimeS
+  };
   const committedLog: SchedulerStepLogEntry[] = plan.map((c) => ({
     stepIndex,
     processId: c.processId,
     phase: c.phase,
     durationS: c.durationS,
     intervalStartS: c.intervalStartS,
+    worldStartTime: { ...macroStepStartTime },
+    worldEndTime: { ...macroStepEndTime },
     status: 'committed' as const
   }));
   const newBk: SchedulerBookkeeping = {
