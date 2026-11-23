@@ -324,6 +324,79 @@ describe('Stage 4.2: reference profile integration', () => {
     )).toHaveLength(7);
   });
 
+  it('retains hydrostatic P(z) and bulk composition through a physical Scheduler commit with explicit synthetic radicals', () => {
+    const column = computeUssa1976ReferenceHydrostaticColumn();
+    expect(column.status).toBe('completed');
+    if (column.status !== 'completed') return;
+
+    const derived = deriveDryAirKineticInventoriesFromHydrostaticColumn(column, [R89]);
+    expect(derived.status).toBe('derived');
+    if (derived.status !== 'derived') return;
+
+    // Radicals are intentionally synthetic test fixtures, not USSA inputs.
+    const totals = {
+      ...derived.totalColumnInventoriesMolM2,
+      o: 1e-5,
+      no: 5e-6,
+      no2: 2e-7
+    };
+    const syntheticProvenance = {
+      sourceName: 'synthetic-only test radicals (not Earth observations)',
+      sourceId: 'test:synthetic:radicals'
+    };
+    const layerInputs = derived.layers.map((layer, index) => ({
+      ...layer,
+      columnInventoriesMolM2: {
+        ...layer.columnInventoriesMolM2,
+        o: totals.o / derived.layers.length,
+        no: totals.no / derived.layers.length,
+        no2: totals.no2 / derived.layers.length
+      },
+      inventoryProvenance: provenance('test:hydrostatic+synthetic-radicals:' + index)
+    }));
+    const totalProvenance = {
+      ...derived.totalInventoryProvenance,
+      o: syntheticProvenance,
+      no: syntheticProvenance,
+      no2: syntheticProvenance
+    };
+    const built = buildPhysicalKineticsConfigurationFromSourcedProfile(
+      createUssa1976AtmosphericTemperatureProfile(),
+      {
+        maximumMacroStepS: 0.1,
+        totalInventoryProvenance: totalProvenance,
+        layers: layerInputs,
+        hydrostaticColumn: column
+      }
+    );
+    expect(built.status).toBe('configured');
+    if (built.status !== 'configured') return;
+
+    const world = generateReferenceWorld();
+    const syntheticWorld = withSyntheticColumnState(world, totals);
+    const configured = configurePrimaryPhysicalChemicalKinetics(
+      syntheticWorld.chemicalState!,
+      built.configuration,
+      totals
+    );
+    expect(configured.status).toBe('configured');
+    if (configured.status !== 'configured') return;
+    syntheticWorld.chemicalState = configured.state;
+
+    const result = runChemicalEvolutionSchedulerStep(syntheticWorld);
+    expect(result.status).toBe('committed');
+    if (result.status !== 'committed') return;
+    const audit = result.world.chemicalState!.physicalKineticsHistory![0]!;
+    expect(audit.layers).toHaveLength(7);
+    expect(audit.layers.every((layer) => layer.hydrostaticState !== undefined)).toBe(true);
+    const firstLayer = audit.layers[0]!.hydrostaticState!;
+    expect(firstLayer.bottom.pressurePa).toBeGreaterThan(firstLayer.representative.pressurePa);
+    expect(firstLayer.representative.pressurePa).toBeGreaterThan(firstLayer.top.pressurePa);
+    expect(firstLayer.molarFractions.n2).toBeCloseTo(0.7808, 8);
+    expect(firstLayer.molarFractions.o2).toBeCloseTo(0.2095, 8);
+    expect(audit.layers[0]!.initialColumnInventoriesMolM2.n2).toBeGreaterThan(0);
+  });
+
   it('does not infer missing radicals from the sourced dry-air profile', () => {
     const world = generateReferenceWorld();
     const profile = world.atmosphericReferenceProfile!;
