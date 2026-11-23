@@ -1005,10 +1005,18 @@ function PrimaryPhysicalKineticsConfigurator(props: {
       totalColumnInventoriesMolM2[item.id] = globalValue;
     }
 
+    const globalSpeciesIds = [...new Set([
+      ...Object.keys(state.inventory),
+      ...species.map((item) => item.id)
+    ])].sort();
     const totalInventoryProvenance = Object.fromEntries(
-      species.map((item) => [
-        item.id,
-        makeSource(totalInventorySourceName, totalInventorySourceReference, 'полного атмосферного запаса ' + item.id)
+      globalSpeciesIds.map((speciesId) => [
+        speciesId,
+        makeSource(
+          totalInventorySourceName,
+          totalInventorySourceReference,
+          'полного атмосферного запаса ' + speciesId
+        )
       ])
     );
 
@@ -1145,7 +1153,7 @@ function PrimaryPhysicalKineticsConfigurator(props: {
           {species.length > 0 && (
             <fieldset>
               <legend>Полные атмосферные запасы, моль/м²</legend>
-              <p className="model-note">Это общий столб для всех слоёв. Уже известные значения показываются из ChemicalEvolutionState; отсутствующие радикальные запасы остаются пустыми.</p>
+              <p className="model-note">Это общий столб для всех слоёв. Уже известные значения показываются из ChemicalEvolutionState; отсутствующие радикальные запасы остаются пустыми. Источник, указанный ниже, относится также к остальным видам полного атмосферного инвентаря, которые не включены в реакционные слои и будут отражены как немоделируемый остаток.</p>
               {species.map((item) => (
                 <div key={item.id}>
                   <strong>{item.label}</strong>
