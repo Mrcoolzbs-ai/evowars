@@ -421,8 +421,9 @@ describe('Stage 4.2: reference profile integration', () => {
     syntheticWorld.chemicalState = configured.state;
 
     const result = runChemicalEvolutionSchedulerStep(syntheticWorld);
-    expect(result.status).toBe('committed');
-    if (result.status !== 'committed') return;
+    if (result.status !== 'committed') {
+      throw new Error('refined Scheduler transaction rejected: ' + JSON.stringify(result));
+    }
     const audit = result.world.chemicalState!.physicalKineticsHistory![0]!;
     expect(audit.layers).toHaveLength(column.layerBoundaries.length);
     expect(audit.layers.every((layer) => layer.hydrostaticState !== undefined)).toBe(true);
