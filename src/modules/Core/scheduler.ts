@@ -1193,6 +1193,12 @@ export interface MacroStepOptions {
   /** Аудит инвариантов до фиксации нового состояния. */
   audit?: MacroStepAuditOptions;
   /**
+   * Позволяет непрерывным операторам участвовать в выборе границ их
+   * собственных future nextDueTime. Обычный ручной runMacroStep по
+   * умолчанию может запускать процесс раньше его deadline.
+   */
+  respectSelectedProcessDeadlines?: boolean;
+  /**
    * Stage 4.2.3.3: явный пользовательский запуск дискретного процесса
    * (executionMode = 'explicit_only'). Требования к такому шагу:
    * - processId обязан ссылаться на explicit_only-процесс реестра
@@ -1795,7 +1801,7 @@ export function runMacroStep(
 
   let processBoundary: MacroStepSizeReport['processBoundary'];
   const nextUnselectedProcessDeadline = exactProcessDeadlines.find(([processId, dynamics]) =>
-    !selectedProcessIds.has(processId) &&
+    (!selectedProcessIds.has(processId) || opts.respectSelectedProcessDeadlines === true) &&
     dynamics.nextDueTime.segmentIndex === currentPoint.segmentIndex &&
     comparePoints(dynamics.nextDueTime, currentPoint) > 0
   );
@@ -1810,7 +1816,7 @@ export function runMacroStep(
       effectiveDurationS = secondsUntilDeadline;
       const sameTimeProcessIds = exactProcessDeadlines
         .filter(([processId, dynamics]) =>
-          !selectedProcessIds.has(processId) &&
+          (!selectedProcessIds.has(processId) || opts.respectSelectedProcessDeadlines === true) &&
           comparePoints(dynamics.nextDueTime, deadlinePoint) === 0
         )
         .map(([processId]) => processId)
@@ -1854,7 +1860,7 @@ export function runMacroStep(
         a.id.localeCompare(b.id)
       )[0];
     const nextSegmentProcesses = exactProcessDeadlines.filter(([processId, dynamics]) =>
-      !selectedProcessIds.has(processId) &&
+      (!selectedProcessIds.has(processId) || opts.respectSelectedProcessDeadlines === true) &&
       dynamics.nextDueTime.segmentIndex === nextSegmentIndex
     );
     const originEvent = nextSegmentEvent?.time.localTimeS === 0 ? nextSegmentEvent : undefined;
@@ -2290,7 +2296,12 @@ export interface ScheduledProcessRunResult {
   status: 'idle' | 'committed' | 'rejected';
   world: CoreWorldState;
   bookkeeping: SchedulerBookkeeping;
+  /** One-shot processes whose exact deadlines are due at the start of the run. */
   readyProcessIds: readonly string[];
+  /** Continuous operators integrated in this run, even without a one-shot deadline. */
+  continuousProcessIds?: readonly string[];
+  /** Complete set of operators invoked by the committed/rejected macro-step. */
+  invokedProcessIds?: readonly string[];
   macroStep?: MacroStepResult;
   diagnostics: readonly string[];
 }
@@ -2408,8 +2419,15 @@ export function runReadyProcessesAt(
 export interface ScheduledWorldTurnOptions {
   /** Mandatory audit for every world event dispatched before process execution. */
   eventAudit: ProcessWorldEventOptions;
-  /** Maximum duration and optional invariant audit for due process execution. */
+  /** Maximum duration and optional invariant audit for process execution. */
   process: ScheduledProcessRunOptions;
+  /**
+   * Continuously integrated processes. They run on every world turn; their
+   * exact future nextDueTime still clips the macro-step so the next turn
+   * can re-evaluate the state at that boundary. One-shot scheduled processes
+   * are added automatically when their deadline is due.
+   */
+  continuousProcessIds?: readonly string[];
 }
 
 export interface ScheduledWorldTurnResult {
