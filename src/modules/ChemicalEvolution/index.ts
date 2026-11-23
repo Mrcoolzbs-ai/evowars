@@ -1125,7 +1125,8 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
           problems.push(prefix + '.hydrostaticState.molarFractions must be a plain composition record');
         } else {
           const values = Object.values(fractions);
-          const sum = values.reduce((total, value) => total + (typeof value === 'number' ? value : NaN), 0);
+          const numericValues = values.filter((value): value is number => typeof value === 'number');
+          const sum = numericValues.reduce<number>((total, value) => total + value, 0);
           if (
             values.length === 0 ||
             values.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value <= 0) ||
