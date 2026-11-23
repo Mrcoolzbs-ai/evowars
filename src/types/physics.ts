@@ -609,6 +609,9 @@ export interface ChemicalPhysicalVerticalTransportAudit {
     interfaceTemperatureK: number;
     airMolarDensityMolM3: number;
     conductanceMolM2S: number;
+    eddyConductanceMolM2S: number;
+    convectiveConductanceMolM2S: number;
+    effectiveEddyConductanceMolM2S: number;
     species: Record<string, {
       fluxMolM2S: number;
       constitutiveFluxMolM2S: number;
