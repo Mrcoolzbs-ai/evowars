@@ -726,6 +726,8 @@ function KineticExperimentSection(props: {
  */
 interface PrimaryPhysicalKineticLayerDraft {
   key: number;
+  reaction89: boolean;
+  reaction106: boolean;
   temperatureK: string;
   bottomAltitudeM: string;
   topAltitudeM: string;
@@ -741,6 +743,8 @@ interface PrimaryPhysicalKineticLayerDraft {
 function createPrimaryPhysicalKineticLayerDraft(key: number): PrimaryPhysicalKineticLayerDraft {
   return {
     key,
+    reaction89: false,
+    reaction106: false,
     temperatureK: '',
     bottomAltitudeM: '',
     topAltitudeM: '',
@@ -765,8 +769,6 @@ function PrimaryPhysicalKineticsConfigurator(props: {
   onWorldReplace: (world: GeneratedWorld) => void;
 }) {
   const state = props.world.chemicalState;
-  const [reaction89, setReaction89] = useState(false);
-  const [reaction106, setReaction106] = useState(false);
   const [maximumMacroStepS, setMaximumMacroStepS] = useState('');
   const [totalInventorySourceName, setTotalInventorySourceName] = useState('');
   const [totalInventorySourceReference, setTotalInventorySourceReference] = useState('');
@@ -779,23 +781,28 @@ function PrimaryPhysicalKineticsConfigurator(props: {
 
   if (!state) return null;
 
-  const species = [
-    ...(reaction89 ? [
+  const reactionIdsForLayer = (layer: PrimaryPhysicalKineticLayerDraft): string[] => [
+    ...(layer.reaction89 ? ['kida-tb-2015-03-19-89'] : []),
+    ...(layer.reaction106 ? ['kida-tb-2015-03-19-106'] : [])
+  ];
+  const speciesForLayer = (layer: PrimaryPhysicalKineticLayerDraft) => [
+    ...(layer.reaction89 ? [
       { id: 'o', label: 'O — атомарный кислород' },
       { id: 'no', label: 'NO — оксид азота' },
       { id: 'no2', label: 'NO₂ — диоксид азота' }
     ] : []),
-    ...(reaction106 ? [
+    ...(layer.reaction106 ? [
       { id: 'h', label: 'H — атомарный водород' },
       { id: 'o2', label: 'O₂ — молекулярный кислород' },
       { id: 'ho2', label: 'HO₂ — гидропероксильный радикал' }
     ] : []),
-    ...(reaction89 || reaction106 ? [{ id: 'n2', label: 'N₂ — третье тело' }] : [])
+    ...(layer.reaction89 || layer.reaction106 ? [{ id: 'n2', label: 'N₂ — третье тело' }] : [])
   ];
-  const selectedReactionIds = [
-    ...(reaction89 ? ['kida-tb-2015-03-19-89'] : []),
-    ...(reaction106 ? ['kida-tb-2015-03-19-106'] : [])
-  ];
+  const speciesById = new Map(
+    layerDrafts.flatMap((layer) => speciesForLayer(layer)).map((item) => [item.id, item])
+  );
+  const species = [...speciesById.values()];
+  const selectedReactionIds = [...new Set(layerDrafts.flatMap(reactionIdsForLayer))];
 
   const makeSource = (sourceName: string, reference: string, field: string) => ({
     sourceName: sourceName.trim(),
@@ -840,7 +847,7 @@ function PrimaryPhysicalKineticsConfigurator(props: {
       return;
     }
     if (selectedReactionIds.length === 0) {
-      setMessage('Выберите хотя бы одну параметризованную реакцию.');
+      setMessage('Выберите хотя бы одну параметризованную реакцию хотя бы в одном слое.');
       return;
     }
     if (layerDrafts.length === 0) {
@@ -922,8 +929,14 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         }
       }
 
+      const draftReactionIds = reactionIdsForLayer(draft);
+      if (draftReactionIds.length === 0) {
+        setMessage(prefix + ': выберите хотя бы одну параметризованную реакцию для этого слоя.');
+        return;
+      }
+      const layerSpecies = speciesForLayer(draft);
       const columnInventoriesMolM2: Record<string, number> = {};
-      for (const item of species) {
+      for (const item of layerSpecies) {
         const layerValue = numeric(
           draft.inventories[item.id] ?? '',
           prefix + ': подстолбовой запас ' + item.id + ', моль/м²'
@@ -947,7 +960,7 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         temperatureProvenance: makeSource(draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': локальная температура'),
         columnInventoriesMolM2,
         inventoryProvenance: makeSource(draft.inventorySourceName, draft.inventorySourceReference, prefix + ': подстолбовой запас'),
-        reactionIds: [...selectedReactionIds]
+        reactionIds: draftReactionIds
       });
     }
 
@@ -1012,19 +1025,6 @@ function PrimaryPhysicalKineticsConfigurator(props: {
       ) : (
         <>
           <fieldset>
-            <legend>Параметризованные реакции</legend>
-            <label>
-              <input type="checkbox" checked={reaction89} onChange={(event) => setReaction89(event.target.checked)} />
-              {' '}#89: O + NO + N₂ → NO₂ + N₂ (200–300 K)
-            </label>
-            <label>
-              <input type="checkbox" checked={reaction106} onChange={(event) => setReaction106(event.target.checked)} />
-              {' '}#106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)
-            </label>
-            <p className="model-note">Общая область применимости двух реакций — ровно 300 K. Вне диапазона выбранной записи Scheduler отклонит шаг.</p>
-          </fieldset>
-
-          <fieldset>
             <legend>Максимальный физический шаг</legend>
             <label>Maximum macro dt, с (численное ограничение, не τ реакции)
               <input type="number" min="0" step="any" value={maximumMacroStepS} onChange={(event) => setMaximumMacroStepS(event.target.value)} />
@@ -1062,6 +1062,22 @@ function PrimaryPhysicalKineticsConfigurator(props: {
             {layerDrafts.map((layer, index) => (
               <fieldset key={layer.key}>
                 <legend>Реакционный слой {index + 1}</legend>
+                <fieldset>
+                  <legend>Реакции этого слоя</legend>
+                  <label>
+                    <input type="checkbox" checked={layer.reaction89}
+                      onChange={(event) => updateLayerDraft(layer.key, { reaction89: event.target.checked })} />
+                    {' '}#89: O + NO + N₂ → NO₂ + N₂ (200–300 K)
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={layer.reaction106}
+                      onChange={(event) => updateLayerDraft(layer.key, { reaction106: event.target.checked })} />
+                    {' '}#106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)
+                  </label>
+                  <p className="model-note">
+                    Выбранные реакции применяются только к этому слою. Температура слоя обязана находиться в диапазоне каждой выбранной записи.
+                  </p>
+                </fieldset>
                 {layerDrafts.length > 1 && (
                   <button type="button" className="secondary" onClick={() => {
                     setLayerDrafts((current) => current.filter((candidate) => candidate.key !== layer.key));
@@ -1085,10 +1101,10 @@ function PrimaryPhysicalKineticsConfigurator(props: {
                   Толщина вычисляется строго как верхняя минус нижняя высота; диапазоны соседних слоёв должны не перекрываться.
                 </p>
 
-                {species.length > 0 && (
+                {speciesForLayer(layer).length > 0 && (
                   <div>
                     <strong>Подстолбовые запасы этого слоя, моль/м²</strong>
-                    {species.map((item) => (
+                    {speciesForLayer(layer).map((item) => (
                       <label key={item.id}>{item.label}
                         <input
                           type="number"
