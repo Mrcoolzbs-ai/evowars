@@ -153,6 +153,8 @@ interface InterfaceGeometry {
   temperatureK: number;
   airMolarDensityMolM3: number;
   conductanceMolM2S: number;
+  convectiveConductanceMolM2S: number;
+  effectiveEddyConductanceMolM2S: number;
   meanMolarMassKgMol: number;
   gravityMs2: number;
   temperatureGradientKPerM: number;
@@ -615,7 +617,9 @@ export function runVerticalEddyDiffusionStep(
     const convectiveDiffusivityM2S =
       dryConvectiveInterfaces[index]?.convectiveDiffusivityM2S ?? 0;
     const effectiveEddyDiffusivityM2S = eddyDiffusivityM2S + convectiveDiffusivityM2S;
-    const conductanceMolM2S = eddyDiffusivityM2S * airMolarDensityMolM3 / centerDistanceM;
+    const eddyConductanceMolM2S = eddyDiffusivityM2S * airMolarDensityMolM3 / centerDistanceM;
+    const convectiveConductanceMolM2S = convectiveDiffusivityM2S * airMolarDensityMolM3 / centerDistanceM;
+    const conductanceMolM2S = eddyConductanceMolM2S + convectiveConductanceMolM2S;
     if (
       !isFinitePositive(interfacePressurePa) ||
       !isFinitePositive(interfaceTemperatureK) ||
@@ -636,6 +640,8 @@ export function runVerticalEddyDiffusionStep(
       temperatureK: interfaceTemperatureK,
       airMolarDensityMolM3,
       conductanceMolM2S,
+      convectiveConductanceMolM2S,
+      effectiveEddyConductanceMolM2S: conductanceMolM2S,
       meanMolarMassKgMol: molecularConfiguration === undefined
         ? (lowerEdge.meanMolarMassKgPerMol + upperEdge.meanMolarMassKgPerMol) / 2
         : (() => {
@@ -1043,20 +1049,29 @@ export function runVerticalEddyDiffusionStep(
       columnInventoriesMolM2: updatedInventories,
       inventoryProvenance: {
         ...cloned.inventoryProvenance,
-        method: molecularConfiguration === undefined
-          ? 'консервативная конечно-объёмная вертикальная турбулентная диффузия; неявный backward Euler'
-          : 'консервативная конечно-объёмная вертикальная турбулентная + молекулярная диффузия; backward Euler; Chapman-Enskog/Neufeld',
+        method: [
+          'консервативная конечно-объёмная вертикальная диффузия; неявный backward Euler',
+          molecularConfiguration === undefined ? null : 'молекулярная Chapman-Enskog/Neufeld',
+          convectiveConfiguration === undefined ? null : 'сухое convective mixing-length замыкание'
+        ].filter((entry): entry is string => entry !== null).join('; '),
         modelVersion: VERTICAL_DIFFUSION_MODEL_VERSION,
         applicability: 'Только явно выбранные следовые виды в заданной непрерывной гидростатической колонке',
-        limitations: molecularConfiguration === undefined
-          ? 'Kzz задан вызывающей стороной; нулевой внешний поток сверху и снизу; гидростатический фон фиксирован; молекулярная диффузия, конвекция, химия и фотохимия не включены; N2 и O2 этим оператором не переносятся.'
-          : 'Kzz и Lennard-Jones/thermal-diffusion параметры заданы вызывающей стороной с provenance; Chapman-Enskog effective-binary trace approximation действует только при mixing ratio ≤ 1%; закрытые границы; гидростатический фон фиксирован; нет многокомпонентной Stefan-Maxwell системы, конвекции, химии и фотохимии; N2 и O2 остаются неподвижным bulk-фоном.',
+        limitations: [
+          'caller-supplied Kzz, если задан; сухое mixing-length замыкание требует явных alpha/efficiency, provenance и NASA CEA Cp для всех bulk species; коэффициенты не калиброваны',
+          molecularConfiguration === undefined ? null : 'молекулярная Chapman-Enskog effective-binary trace approximation ограничена mixing ratio ≤ 1%; полная Stefan-Maxwell система отсутствует',
+          convectiveConfiguration === undefined ? null : 'конвекция переносит только выбранные trace species; конвективный тепловой поток, температура и переинтегрирование гидростатики не моделируются',
+          'закрытые верхняя и нижняя границы; гидростатический фон и bulk состав фиксированы; N2/O2 не перемещаются; химия/фотохимия не являются частью этого оператора'
+        ].filter((entry): entry is string => entry !== null).join('; '),
         rawInput: {
           ...(cloned.inventoryProvenance.rawInput ?? {}),
           vertical_transport_layer_id: source.layerId,
           vertical_transport_duration_s: input.durationS,
           vertical_transport_species_ids: speciesIds.join(','),
           vertical_transport_eddy_diffusivity_profile_m2_s: diffusivityValues.join(','),
+          vertical_transport_convective_diffusivity_profile_m2_s: dryConvectiveInterfaces.length === 0
+            ? 'not_configured'
+            : dryConvectiveInterfaces.map((entry) => entry.convectiveDiffusivityM2S).join(','),
+          vertical_transport_effective_eddy_diffusivity_profile_m2_s: interfaces.map((entry) => entry.effectiveEddyDiffusivityM2S).join(','),
           vertical_transport_molecular_diffusivity_profile_m2_s: molecularConfiguration === undefined
             ? 'not_configured'
             : speciesIds.map((speciesId) =>
@@ -1107,6 +1122,9 @@ export function runVerticalEddyDiffusionStep(
     interfaceTemperatureK: entry.temperatureK,
     airMolarDensityMolM3: entry.airMolarDensityMolM3,
     conductanceMolM2S: entry.conductanceMolM2S,
+    eddyConductanceMolM2S: entry.conductanceMolM2S - entry.convectiveConductanceMolM2S,
+    convectiveConductanceMolM2S: entry.convectiveConductanceMolM2S,
+    effectiveEddyConductanceMolM2S: entry.effectiveEddyConductanceMolM2S,
     species: Object.fromEntries(speciesIds.map((speciesId) => [
       speciesId,
       {
