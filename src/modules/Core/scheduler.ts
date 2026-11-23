@@ -2133,3 +2133,99 @@ export function runMacroStep(
     diagnostics
   };
 }
+
+export interface ScheduledProcessRunOptions {
+  /** Maximum allowed duration for this automatically scheduled Lie macro-step. */
+  durationS: number;
+  /** Number of equal Lie sub-cycles; defaults to one. */
+  subCycles?: number;
+  /** Mandatory when a process appends reaction transactions. */
+  audit?: MacroStepAuditOptions;
+}
+
+export interface ScheduledProcessRunResult {
+  status: 'idle' | 'committed' | 'rejected';
+  world: CoreWorldState;
+  bookkeeping: SchedulerBookkeeping;
+  readyProcessIds: readonly string[];
+  macroStep?: MacroStepResult;
+  diagnostics: readonly string[];
+}
+
+/**
+ * Run the exact-time process deadlines that are due at the world's current
+ * segmented TimePoint. Readiness and execution are one operation, so
+ * callers cannot accidentally use an elapsed-time estimate for an exact
+ * deadline or run a process whose exact deadline is still in the future.
+ *
+ * Automatically scheduled runs use deterministic Lie ordering. Strang
+ * splitting remains an explicit caller decision because it requires
+ * exactly two compatible operators and a declared symmetric order.
+ */
+export function runReadyProcessesAt(
+  world: CoreWorldState,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  options: ScheduledProcessRunOptions
+): ScheduledProcessRunResult {
+  const bookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const point: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  let ready: readonly string[];
+  try {
+    ready = readyProcessIdsAt(bookkeeping, registry, operators, point);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping,
+      readyProcessIds: [],
+      diagnostics: ['невозможно определить готовые процессы Scheduler: ' + reason]
+    };
+  }
+
+  if (ready.length === 0) {
+    const dueEventsNow = dueEvents(bookkeeping, point);
+    return {
+      status: 'idle',
+      world,
+      bookkeeping,
+      readyProcessIds: [],
+      diagnostics: dueEventsNow.length > 0
+        ? ['нет готовых процессов; перед следующим шагом необходимо обработать ' + String(dueEventsNow.length) + ' наступивших событий']
+        : ['нет процессов с наступившим точным deadline; время и состояние не изменены']
+    };
+  }
+
+  const selected = operators.filter((operator) => ready.includes(operator.processId));
+  try {
+    const macroStep = runMacroStep(world, registry, selected, {
+      durationS: options.durationS,
+      splitting: 'lie',
+      ...(options.subCycles === undefined ? {} : { subCycles: options.subCycles }),
+      processIds: ready,
+      ...(options.audit === undefined ? {} : { audit: options.audit })
+    });
+    return {
+      status: macroStep.status,
+      world: macroStep.world,
+      bookkeeping: macroStep.bookkeeping,
+      readyProcessIds: ready,
+      macroStep,
+      diagnostics: macroStep.diagnostics
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping,
+      readyProcessIds: ready,
+      diagnostics: ['запуск готовых процессов Scheduler отклонён до commit: ' + reason]
+    };
+  }
+}
+
