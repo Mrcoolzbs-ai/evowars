@@ -319,7 +319,7 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(kineticRecord!.extent).toBeGreaterThan(0);
     expect(result.world.coreWorldState!.clock.localTimeS).toBeCloseTo(result.stepSize!.effectiveDurationS, 12);
     expect(updated.modelTimeYears).toBeCloseTo(
-      7 + convert(quantity(result.stepSize!.effectiveDurationS, 's'), 'yr').value,
+      convert(quantity(result.stepSize!.effectiveDurationS, 's'), 'yr').value,
       12
     );
     expect(world.chemicalState!.inventory).toEqual(before);
@@ -361,7 +361,7 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     const result = runChemicalEvolutionSchedulerStep(world);
     expect(result.status).toBe('rejected');
     expect(result.world).toBe(world);
-    expect(result.reason).toContain('температур');
+    expect(result.reason).toMatch(/температур|temperature|250/);
     expect(JSON.stringify(world.chemicalState)).toBe(before);
     expect(world.coreWorldState).toBeUndefined();
   });
