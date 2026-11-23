@@ -512,6 +512,8 @@ export interface ChemicalPhysicalVerticalTransportAudit {
   boundaryCondition: 'closed_zero_flux';
   durationS: number;
   speciesIds: string[];
+  /** Provenance of the explicitly supplied Kzz profile, when captured by a caller. */
+  diffusivityProvenance?: DataProvenance;
   layers: Array<{
     layerId: string;
     altitudeRangeM: { min: number; max: number };
