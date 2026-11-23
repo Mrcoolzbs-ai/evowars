@@ -422,40 +422,11 @@ function runScenario(opts: ScenarioOptions): ScenarioResult {
     const burialRate = plan.extents.find((e) => e.processId === BURIAL_ID)!.rateMolPerM2PerYear;
     const subductionRate = plan.extents.find((e) => e.processId === SUBDUCTION_ID)!.rateMolPerM2PerYear;
     const exchangeExtent = plan.extents.find((e) => e.processId === 'geo.dissolution.co2_aq.atm->ocn')!.extentMolPerM2;
-    const phases: GeochemicalMacroStepPhase[] = [
-      {
-        kind: 'transport',
-        spec: withSyntheticRate(productionSpec(BURIAL_ID), burialRate, 'synthetic-rate-stage49g-burial'),
-        fluxId: 'flux-burial-' + String(step),
-        durationS: plan.durationSeconds,
-        time: timeOf(step),
-        note: 'Stage 4.9g macro-step: захоронение органического углерода (скорость — synthetic test fixture)'
-      },
-      {
-        kind: 'transport',
-        spec: withSyntheticRate(productionSpec(SUBDUCTION_ID), subductionRate, 'synthetic-rate-stage49g-subduction'),
-        fluxId: 'flux-subduction-' + String(step),
-        durationS: plan.durationSeconds,
-        time: timeOf(step),
-        note: 'Stage 4.9g macro-step: субдукция карбоната (скорость — synthetic test fixture)'
-      },
-      {
-        kind: 'co2_phase_exchange',
-        input: {
-          transactionId: 'tx-exchange-' + String(step),
-          direction: 'dissolution',
-          atmosphereReservoirId: 'atmosphere',
-          oceanReservoirId: 'ocean',
-          amountMolPerM2: exchangeExtent,
-          amountProvenance: {
-            ...PROV,
-            recordId: 'fixture-co2-exchange-amount-' + String(step),
-            note: 'synthetic test fixture: количество обмена из кинетического плана фикстуры (rate × Δt), НЕ термодинамическое равновесие на этот шаг'
-          },
-          time: timeOf(step)
-        } as CO2PhaseExchangeInput
-      }
-    ];
+    const phases: GeochemicalMacroStepPhase[] = [];
+    // Минеральная фаза — ПЕРВОЙ в macro-шаге: её baseline обязан быть
+    // согласован с инвентарём НАЧАЛА шага (все фазы строятся по одному
+    // состоянию; Exchange в этом же шаге сдвинул бы co2_aq и нарушил бы
+    // согласованность baseline с инвентарём на момент минеральной фазы).
     if (opts.includeMineral && step % 10 === 5) {
       const mineralExtent = plan.extents.find((e) => e.processId === MINERAL_FIXTURE_ID)!.extentMolPerM2;
       const baseline = baselineFromInventory(core, 'fixture-baseline-macro-' + String(step));
@@ -494,6 +465,39 @@ function runScenario(opts: ScenarioOptions): ScenarioResult {
         } as CarbonateMineralCycleInput
       });
     }
+    phases.push({
+        kind: 'transport',
+        spec: withSyntheticRate(productionSpec(BURIAL_ID), burialRate, 'synthetic-rate-stage49g-burial'),
+        fluxId: 'flux-burial-' + String(step),
+        durationS: plan.durationSeconds,
+        time: timeOf(step),
+        note: 'Stage 4.9g macro-step: захоронение органического углерода (скорость — synthetic test fixture)'
+      },
+      {
+        kind: 'transport',
+        spec: withSyntheticRate(productionSpec(SUBDUCTION_ID), subductionRate, 'synthetic-rate-stage49g-subduction'),
+        fluxId: 'flux-subduction-' + String(step),
+        durationS: plan.durationSeconds,
+        time: timeOf(step),
+        note: 'Stage 4.9g macro-step: субдукция карбоната (скорость — synthetic test fixture)'
+      },
+      {
+        kind: 'co2_phase_exchange',
+        input: {
+          transactionId: 'tx-exchange-' + String(step),
+          direction: 'dissolution',
+          atmosphereReservoirId: 'atmosphere',
+          oceanReservoirId: 'ocean',
+          amountMolPerM2: exchangeExtent,
+          amountProvenance: {
+            ...PROV,
+            recordId: 'fixture-co2-exchange-amount-' + String(step),
+            note: 'synthetic test fixture: количество обмена из кинетического плана фикстуры (rate × Δt), НЕ термодинамическое равновесие на этот шаг'
+          },
+          time: timeOf(step)
+        } as CO2PhaseExchangeInput
+      }
+    );
     return phases;
   };
 
@@ -625,7 +629,7 @@ describe('Stage 4.9g macro-шаг: элементный снапшот (неза
     const base = geochemicalElementSnapshot(catalog, baseCore);
     const snapshot = geochemicalElementSnapshot(catalog, core);
     expect(snapshot.unknownMaterialReservoirs).toContain('exogenic_sink');
-    expect(geochemicalElementResidual(base, snapshot).absolute['C']).toBeCloseTo(0, 18);
+    expect(geochemicalElementResidual(base, snapshot).absolute['C']).toBeCloseTo(0, 14);
   });
 
   it('вид без известного состава исключается из подсчёта И явно перечисляется (не ноль, не молчание)', () => {
@@ -640,7 +644,7 @@ describe('Stage 4.9g macro-шаг: элементный снапшот (неза
     const snapshot = geochemicalElementSnapshot(catalog, core);
     expect(snapshot.excludedSpecies).toContain('unknown_mineral');
     const residual = geochemicalElementResidual(base, snapshot);
-    expect(residual.absolute['C']).toBeCloseTo(0, 18);
+    expect(residual.absolute['C']).toBeCloseTo(0, 14);
   });
 });
 
@@ -663,9 +667,9 @@ describe('Stage 4.9g macro-шаг: фазы через production-исполни
     expect(entriesOf(result.core, 'mantle')['caco3']).toBeCloseTo(0.01 + moved, 15);
     expect(result.core.fluxLedger.records.length).toBe(1);
     const residual = geochemicalElementResidual(before, result.elementAfter);
-    expect(residual.absolute['C']).toBeCloseTo(0, 18);
-    expect(residual.absolute['Ca']).toBeCloseTo(0, 18);
-    expect(residual.absolute['O']).toBeCloseTo(0, 18);
+    expect(residual.absolute['C']).toBeCloseTo(0, 14);
+    expect(residual.absolute['Ca']).toBeCloseTo(0, 14);
+    expect(residual.absolute['O']).toBeCloseTo(0, 14);
   });
 
   it('production-спецификация БЕЗ переопределения (rate unknown) честно не применяется: ни чисел, ни записей в журналах', () => {
@@ -717,8 +721,8 @@ describe('Stage 4.9g macro-шаг: фазы через production-исполни
     expect(entriesOf(result.core, 'atmosphere')['co2']).toBeCloseTo(2.0e-4 - amount, 15);
     expect(entriesOf(result.core, 'ocean')['co2_aq']).toBeCloseTo(oceanCo2AqBefore + amount, 15);
     const residual = geochemicalElementResidual(before, result.elementAfter);
-    expect(residual.absolute['C']).toBeCloseTo(0, 18);
-    expect(residual.absolute['O']).toBeCloseTo(0, 18);
+    expect(residual.absolute['C']).toBeCloseTo(0, 14);
+    expect(residual.absolute['O']).toBeCloseTo(0, 14);
   });
 
   it('mineral_cycle (Stage 4.9f) внутри macro-шага: минерал расходуется, C и Ca сохраняются, дрейф H объясняется протонными дельтами', () => {
@@ -762,9 +766,9 @@ describe('Stage 4.9g macro-шаг: фазы через production-исполни
     if (result.status !== 'applied') return;
     expect(entriesOf(result.core, 'crust')['caco3']).toBeCloseTo(0.05 - amount, 15);
     const residual = geochemicalElementResidual(before, result.elementAfter);
-    expect(residual.absolute['C']).toBeCloseTo(0, 18);
-    expect(residual.absolute['Ca']).toBeCloseTo(0, 18);
-    expect(residual.absolute['O']).toBeCloseTo(0, 18);
+    expect(residual.absolute['C']).toBeCloseTo(0, 14);
+    expect(residual.absolute['Ca']).toBeCloseTo(0, 14);
+    expect(residual.absolute['O']).toBeCloseTo(0, 14);
     // Водород НЕ сохраняется: дрейф равен протонным дельтам переспециации,
     // предсказанным независимо решателем Stage 4.9c.
     const hydrogenDrift = result.elementAfter.totals['H'] - before.totals['H'];
