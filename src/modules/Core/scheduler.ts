@@ -712,6 +712,16 @@ export function processWorldEvent(
     };
   };
 
+  let originalSchedulingSnapshot: string;
+  try {
+    originalSchedulingSnapshot = schedulerCanonicalJson(world.scheduling ?? null);
+  } catch (error) {
+    return markFailed(
+      'исходное SchedulerBookkeeping не сериализуемо до события: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
   let working: CoreWorldState;
   try {
     working = snapshotWorldState(world);
@@ -739,7 +749,7 @@ export function processWorldEvent(
     return markFailed('обработчик события «' + eventId + '» изменил WorldClock: время двигает только Scheduler');
   }
   try {
-    if (schedulerCanonicalJson(handled.scheduling ?? null) !== schedulerCanonicalJson(working.scheduling ?? null)) {
+    if (schedulerCanonicalJson(handled.scheduling ?? null) !== originalSchedulingSnapshot) {
       return markFailed('обработчик события «' + eventId + '» изменил SchedulerBookkeeping напрямую; очередь и расписания принадлежат Scheduler');
     }
   } catch (error) {
