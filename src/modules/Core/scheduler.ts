@@ -160,8 +160,12 @@ export interface ProcessDynamics {
   processId: string;
   /** Последний запуск: оценка elapsed-времени, с; null — не запускался. */
   lastRunElapsedS: number | null;
-  /** Следующий момент готовности: оценка elapsed-времени, с; null — не назначен. */
+  /** Следующий момент готовности в legacy elapsed-координате; для старых сохранений. */
   nextDueElapsedS: number | null;
+  /** Точный момент последнего запуска в сегментированных часах (необязателен в старых сохранениях). */
+  lastRunTime?: FluxTime | null;
+  /** Точный момент следующей готовности; взаимоисключает nextDueElapsedS > null. */
+  nextDueTime?: FluxTime | null;
   macroStepsCompleted: number;
   operatorCallsCompleted: number;
 }
@@ -225,8 +229,8 @@ function validateFluxTimeShape(t: unknown): string[] {
     return ['time должен быть объектом-словарём {segmentIndex, localTimeS}'];
   }
   const issues: string[] = [];
-  if (typeof t.segmentIndex !== 'number' || !Number.isInteger(t.segmentIndex) || t.segmentIndex < 0) {
-    issues.push('time.segmentIndex должен быть неотрицательным целым');
+  if (typeof t.segmentIndex !== 'number' || !Number.isSafeInteger(t.segmentIndex) || t.segmentIndex < 0) {
+    issues.push('time.segmentIndex должен быть неотрицательным безопасным целым');
   }
   if (typeof t.localTimeS !== 'number' || !Number.isFinite(t.localTimeS) || t.localTimeS < 0) {
     issues.push('time.localTimeS должен быть неотрицательным конечным числом');
@@ -283,6 +287,17 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
         } else if (typeof v === 'number' && v < 0) {
           issues.push('processDynamics[' + processId + '].' + key + ' не может быть отрицательным elapsed-временем');
         }
+      }
+      for (const key of ['lastRunTime', 'nextDueTime'] as const) {
+        const point = dynamics[key];
+        if (point !== undefined && point !== null) {
+          for (const issue of validateFluxTimeShape(point)) {
+            issues.push('processDynamics[' + processId + '].' + key + ': ' + issue);
+          }
+        }
+      }
+      if (dynamics.nextDueTime !== undefined && dynamics.nextDueTime !== null && dynamics.nextDueElapsedS !== null) {
+        issues.push('processDynamics[' + processId + '] не может одновременно задавать nextDueTime и nextDueElapsedS');
       }
       for (const key of ['macroStepsCompleted', 'operatorCallsCompleted'] as const) {
         const v = dynamics[key];
@@ -855,16 +870,78 @@ export function scheduleProcess(
       processId
     );
   }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя изменить расписание в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      processId
+    );
+  }
   const dynamics: ProcessDynamics = bk.processDynamics[processId] ?? {
     processId,
     lastRunElapsedS: null,
     nextDueElapsedS: null,
+    lastRunTime: null,
+    nextDueTime: null,
     macroStepsCompleted: 0,
     operatorCallsCompleted: 0
   };
   return {
     ...bk,
-    processDynamics: { ...bk.processDynamics, [processId]: { ...dynamics, nextDueElapsedS } }
+    processDynamics: {
+      ...bk.processDynamics,
+      [processId]: { ...dynamics, nextDueElapsedS, nextDueTime: null }
+    }
+  };
+}
+
+/**
+ * Назначить следующий момент готовности по точной сегментированной
+ * временной координате. В отличие от scheduleProcess(), не использует
+ * priorSegmentsS и не сравнивает приближённые elapsed-суммы.
+ */
+export function scheduleProcessAt(
+  bk: SchedulerBookkeeping,
+  processId: string,
+  nextDueTime: FluxTime | null
+): SchedulerBookkeeping {
+  if (typeof processId !== 'string' || processId.trim() === '') {
+    throw new SchedulerError('invalid_bookkeeping', 'processId должен быть непустой строкой', processId ?? null);
+  }
+  if (nextDueTime !== null) {
+    const issues = validateFluxTimeShape(nextDueTime);
+    if (issues.length > 0) {
+      throw new SchedulerError('invalid_bookkeeping', 'nextDueTime некорректен: ' + issues.join('; '), processId);
+    }
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя изменить расписание в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      processId
+    );
+  }
+  const dynamics: ProcessDynamics = bk.processDynamics[processId] ?? {
+    processId,
+    lastRunElapsedS: null,
+    nextDueElapsedS: null,
+    lastRunTime: null,
+    nextDueTime: null,
+    macroStepsCompleted: 0,
+    operatorCallsCompleted: 0
+  };
+  return {
+    ...bk,
+    processDynamics: {
+      ...bk.processDynamics,
+      [processId]: {
+        ...dynamics,
+        nextDueElapsedS: null,
+        nextDueTime: nextDueTime === null ? null : { ...nextDueTime }
+      }
+    }
   };
 }
 
@@ -894,6 +971,37 @@ export function readyProcessIds(
     if (operator === undefined) continue;
     // State-dependent процесс доступен, только если runtime solver
     // умеет предложить ограничение шага для актуального состояния.
+    if (descriptor.executionMode === 'state_dependent' && typeof operator.proposeStep !== 'function') continue;
+    ready.push(processId);
+  }
+  return ready.sort();
+}
+
+/** Точная версия readyProcessIds для сегментированных временных координат. */
+export function readyProcessIdsAt(
+  bk: SchedulerBookkeeping,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  nowPoint: FluxTime
+): readonly string[] {
+  const pointIssues = validateFluxTimeShape(nowPoint);
+  if (pointIssues.length > 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'nowPoint некорректен: ' + pointIssues.join('; '), null);
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'состояние Scheduler некорректно: ' + bookkeepingIssues.join('; '), null);
+  }
+  const operatorById = new Map(operators.map((operator) => [operator.processId, operator]));
+  const ready: string[] = [];
+  for (const [processId, dynamics] of Object.entries(bk.processDynamics)) {
+    if (dynamics.nextDueTime === undefined || dynamics.nextDueTime === null) continue;
+    if (comparePoints(dynamics.nextDueTime, nowPoint) > 0) continue;
+    const descriptor = registry.get(processId);
+    if (descriptor === null || !isProcessAutoRunnable(descriptor)) continue;
+    if (descriptor.executionMode === 'explicit_only') continue;
+    const operator = operatorById.get(processId);
+    if (operator === undefined) continue;
     if (descriptor.executionMode === 'state_dependent' && typeof operator.proposeStep !== 'function') continue;
     ready.push(processId);
   }
