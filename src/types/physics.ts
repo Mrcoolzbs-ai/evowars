@@ -413,6 +413,42 @@ export interface ChemicalStepRecord {
 }
 
 /**
+ * Один диагностический снимок точки гидростатического слоя. Давление,
+ * плотность и столбы получены Core/hydrostaticAtmosphere, а не из
+ * кинетического механизма.
+ */
+export interface ChemicalKineticHydrostaticPoint {
+  heightM: number;
+  pressurePa: number;
+  temperatureK: number;
+  densityKgPerM3: number;
+  meanMolarMassKgPerMol: number;
+  gravityMs2: number;
+  scaleHeightM: number;
+  columnMassKgPerM2: number;
+  columnMolesPerM2: number;
+}
+
+/**
+ * Гидростатические условия слоя, переданные Scheduler как исходные
+ * данные/аудит. Три точки сохраняют границы и representative-height;
+ * molarFractions задаёт полный bulk composition, не только реакционные
+ * species. Текущий rate law по-прежнему использует явную концентрацию N2.
+ */
+export interface ChemicalKineticHydrostaticLayerState {
+  representativeHeightM: number;
+  bottom: ChemicalKineticHydrostaticPoint;
+  representative: ChemicalKineticHydrostaticPoint;
+  top: ChemicalKineticHydrostaticPoint;
+  molarFractions: Record<string, number>;
+  provenance: {
+    pressure: DataProvenance;
+    composition: DataProvenance;
+    model: DataProvenance;
+  };
+}
+
+/**
  * Явно заданный реакционный слой основного ChemicalEvolutionState.
  * Это НЕ экспериментальный GeneratedWorld.kineticExperiment:
  * столбовые запасы являются частью основного атмосферного инвентаря,
@@ -441,6 +477,8 @@ export interface ChemicalPhysicalKineticLayer {
   /** Подстолбовые запасы слоя, моль/м², часть общего атмосферного инвентаря. */
   columnInventoriesMolM2: Record<string, number>;
   inventoryProvenance: DataProvenance;
+  /** Опциональный гидростатический профиль: давления, состав и столбы границ/представительной высоты. */
+  hydrostaticState?: ChemicalKineticHydrostaticLayerState;
   /** Только реакции с параметризацией и диапазоном применимости в механизме. */
   reactionIds: string[];
 }
@@ -500,6 +538,8 @@ export interface ChemicalKineticLayerStepAudit {
   thicknessProvenance: DataProvenance;
   altitudeRangeM: { min: number; max: number } | null;
   altitudeProvenance: DataProvenance | null;
+  /** Гидростатическое давление и полный состав, если они были переданы в Scheduler. */
+  hydrostaticState?: ChemicalKineticHydrostaticLayerState;
   inventoryProvenance: DataProvenance;
   /** Источники полных атмосферных запасов видов, относящихся к слою. */
   totalInventoryProvenance: Record<string, DataProvenance>;
