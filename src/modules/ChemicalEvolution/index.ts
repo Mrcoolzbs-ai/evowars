@@ -313,6 +313,9 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
                       ? [...input.physicalKinetics.verticalTransport.eddyDiffusivityM2S]
                       : input.physicalKinetics.verticalTransport.eddyDiffusivityM2S,
                     diffusivityProvenance: { ...input.physicalKinetics.verticalTransport.diffusivityProvenance },
+                    ...(input.physicalKinetics.verticalTransport.dryConvectiveMixing === undefined
+                      ? {}
+                      : { dryConvectiveMixing: clonePrimaryDryConvectiveMixingConfiguration(input.physicalKinetics.verticalTransport.dryConvectiveMixing) }),
                     ...(input.physicalKinetics.verticalTransport.molecularDiffusion === undefined
                       ? {}
                       : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(input.physicalKinetics.verticalTransport.molecularDiffusion) })
@@ -986,6 +989,20 @@ function cloneKineticHydrostaticState(
  * дополняется нулём; общий атмосферный инвентарь обязан покрывать сумму
  * явно указанных подстолбовых запасов всех реакционных слоёв.
  */
+type PrimaryDryConvectiveMixingConfiguration = NonNullable<
+  NonNullable<ChemicalPhysicalKineticsState['verticalTransport']>['dryConvectiveMixing']
+>;
+
+function clonePrimaryDryConvectiveMixingConfiguration(
+  configuration: PrimaryDryConvectiveMixingConfiguration
+): PrimaryDryConvectiveMixingConfiguration {
+  return {
+    ...configuration,
+    speciesIds: [...configuration.speciesIds],
+    provenance: { ...configuration.provenance }
+  };
+}
+
 type PrimaryMolecularDiffusionConfiguration = NonNullable<
   NonNullable<ChemicalPhysicalKineticsState['verticalTransport']>['molecularDiffusion']
 >;
@@ -1771,6 +1788,9 @@ export function configurePrimaryPhysicalChemicalKinetics(
                 ? [...config.verticalTransport.eddyDiffusivityM2S]
                 : config.verticalTransport.eddyDiffusivityM2S,
               diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance },
+                  ...(config.verticalTransport.dryConvectiveMixing === undefined
+                    ? {}
+                    : { dryConvectiveMixing: clonePrimaryDryConvectiveMixingConfiguration(config.verticalTransport.dryConvectiveMixing) }),
                   ...(config.verticalTransport.molecularDiffusion === undefined
                     ? {}
                     : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(config.verticalTransport.molecularDiffusion) })
@@ -2413,6 +2433,9 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
             ? [...config.verticalTransport.eddyDiffusivityM2S]
             : config.verticalTransport.eddyDiffusivityM2S,
           diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance },
+                  ...(config.verticalTransport.dryConvectiveMixing === undefined
+                    ? {}
+                    : { dryConvectiveMixing: clonePrimaryDryConvectiveMixingConfiguration(config.verticalTransport.dryConvectiveMixing) }),
                   ...(config.verticalTransport.molecularDiffusion === undefined
                     ? {}
                     : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(config.verticalTransport.molecularDiffusion) })
@@ -2522,6 +2545,9 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
                     ? [...config.verticalTransport.eddyDiffusivityM2S]
                     : config.verticalTransport.eddyDiffusivityM2S,
                   diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance },
+                  ...(config.verticalTransport.dryConvectiveMixing === undefined
+                    ? {}
+                    : { dryConvectiveMixing: clonePrimaryDryConvectiveMixingConfiguration(config.verticalTransport.dryConvectiveMixing) }),
                   ...(config.verticalTransport.molecularDiffusion === undefined
                     ? {}
                     : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(config.verticalTransport.molecularDiffusion) })
