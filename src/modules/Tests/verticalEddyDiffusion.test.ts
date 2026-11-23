@@ -154,6 +154,7 @@ describe('vertical eddy diffusion', () => {
       result.layers[1]!.columnInventoriesMolM2.no! / result.audit.layers[1]!.airColumnInventoryMolM2;
     expect(lowerMixingRatio).toBeCloseTo(upperMixingRatio, 7);
     expect(result.audit.columnTotalsMolM2.no!.relativeDeviation).toBeLessThan(1e-10);
+    expect(result.audit.interfaces[0]!.species.no!.fluxClosureRelativeDeviation).toBeLessThan(1e-4);
   });
 
   it('does not change inventories when every explicit interface Kzz is zero', () => {
