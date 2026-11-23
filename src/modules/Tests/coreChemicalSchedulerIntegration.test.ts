@@ -192,6 +192,12 @@ function makePhysicalKineticWorld(temperatureK = 350): GeneratedWorld {
     },
     physicalKinetics: {
       maximumMacroStepS: 1e10,
+      totalInventoryProvenance: Object.fromEntries(
+        ['o', 'no', 'no2', 'h', 'o2', 'ho2', 'n2'].map((speciesId) => [
+          speciesId,
+          provenance('fixture:global-inventory:' + speciesId)
+        ])
+      ),
       layers: [
         {
           layerId: 'explicit-test-layer',
@@ -297,6 +303,12 @@ describe('Stage 4.2: configure explicit physical kinetics in primary chemical st
     });
     const config: ChemicalPhysicalKineticsState = {
       maximumMacroStepS: 10,
+      totalInventoryProvenance: Object.fromEntries(
+        ['h', 'o2', 'ho2', 'n2'].map((speciesId) => [
+          speciesId,
+          source('config:global-inventory:' + speciesId)
+        ])
+      ),
       layers: [
         {
           layerId: 'configured-test-layer',
@@ -425,6 +437,7 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(stepAudit.layers[0]!.layerThicknessM).toBe(100);
     expect(stepAudit.layers[0]!.temperatureProvenance.sourceId).toBe('fixture:layer-temperature');
     expect(stepAudit.layers[0]!.thicknessProvenance.sourceId).toBe('fixture:layer-thickness');
+    expect(stepAudit.layers[0]!.totalInventoryProvenance.h!.sourceId).toBe('fixture:global-inventory:h');
     expect(stepAudit.layers[0]!.initialColumnInventoriesMolM2.h).toBe(8e-6);
     expect(stepAudit.layers[0]!.finalColumnInventoriesMolM2.h).toBeLessThan(8e-6);
     expect(stepAudit.layers[0]!.thirdBody).toMatchObject({ speciesId: 'N2', inventoryMolM2: 4.2e3 });
