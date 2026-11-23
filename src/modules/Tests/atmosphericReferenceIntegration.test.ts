@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import type { GenerationSettings, GeneratedWorld } from '../../types';
 import { generateWorld } from '../Generator/generator';
 import {
+  computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn,
   computeUssa1976ReferenceHydrostaticColumn,
   createUssa1976AtmosphericTemperatureProfile
 } from '../Core/atmosphericReferenceAdapters';
@@ -197,17 +198,45 @@ describe('Stage 4.2: reference profile integration', () => {
       .toBe('NASA TM-X-74335');
   });
 
-  it('feeds hydrostatic pressure, bulk composition and derived N2/O2 columns into Scheduler layer state', () => {
-    const column = computeUssa1976ReferenceHydrostaticColumn();
-    expect(column.status).toBe('completed');
-    if (column.status !== 'completed') return;
-    expect(column.layerBoundaries).toHaveLength(7);
-    expect(column.requestedHeightPoints).toHaveLength(7);
+  it('rejects coarse third-body averaging and adaptively refines hydrostatic layers before Scheduler import', () => {
+    const coarseColumn = computeUssa1976ReferenceHydrostaticColumn();
+    expect(coarseColumn.status).toBe('completed');
+    if (coarseColumn.status !== 'completed') return;
+    expect(coarseColumn.layerBoundaries).toHaveLength(7);
+    expect(coarseColumn.requestedHeightPoints).toHaveLength(7);
+
+    const coarseDerived = deriveDryAirKineticInventoriesFromHydrostaticColumn(coarseColumn, [R89]);
+    expect(coarseDerived.status).toBe('derived');
+    if (coarseDerived.status !== 'derived') return;
+    const profile = createUssa1976AtmosphericTemperatureProfile();
+    const coarseBuild = buildPhysicalKineticsConfigurationFromSourcedProfile(profile, {
+      maximumMacroStepS: 0.1,
+      totalInventoryProvenance: coarseDerived.totalInventoryProvenance,
+      layers: coarseDerived.layers,
+      hydrostaticColumn: coarseColumn
+    });
+    expect(coarseBuild.status).toBe('rejected');
+    if (coarseBuild.status === 'rejected') {
+      expect(coarseBuild.diagnostics.join('; ')).toContain('требуется дополнительное вертикальное разбиение');
+    }
+
+    const adaptive = computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn();
+    expect(adaptive.status).toBe('completed');
+    if (adaptive.status !== 'completed') return;
+    const column = adaptive.column;
+    expect(column.layerBoundaries.length).toBeGreaterThan(7);
+    expect(column.requestedHeightPoints).toHaveLength(column.layerBoundaries.length);
+    expect(adaptive.refinements.every((layer) => layer.subdivisions >= 1)).toBe(true);
+    expect(adaptive.refinements.every((layer) =>
+      layer.maximumChildLogPressureChange <= adaptive.policy.maximumLogPressureChange * (1 + 1e-8) &&
+      layer.maximumChildRelativeTemperatureChange <= adaptive.policy.maximumRelativeTemperatureChange * (1 + 1e-8) &&
+      layer.maximumChildLogNumberDensityChange <= adaptive.policy.maximumLogNumberDensityChange * (1 + 1e-8)
+    )).toBe(true);
 
     const derived = deriveDryAirKineticInventoriesFromHydrostaticColumn(column, [R89]);
     expect(derived.status).toBe('derived');
     if (derived.status !== 'derived') return;
-    expect(derived.layers).toHaveLength(7);
+    expect(derived.layers).toHaveLength(column.layerBoundaries.length);
     expect(derived.totalColumnInventoriesMolM2.n2).toBeGreaterThan(0);
     expect(derived.totalColumnInventoriesMolM2.o2).toBeGreaterThan(0);
     expect(derived.layers.every((layer) =>
@@ -219,7 +248,6 @@ describe('Stage 4.2: reference profile integration', () => {
       !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, 'ho2')
     )).toBe(true);
 
-    const profile = createUssa1976AtmosphericTemperatureProfile();
     const built = buildPhysicalKineticsConfigurationFromSourcedProfile(profile, {
       maximumMacroStepS: 0.1,
       totalInventoryProvenance: derived.totalInventoryProvenance,
@@ -228,7 +256,7 @@ describe('Stage 4.2: reference profile integration', () => {
     });
     expect(built.status).toBe('configured');
     if (built.status !== 'configured') return;
-    expect(built.configuration.layers).toHaveLength(7);
+    expect(built.configuration.layers).toHaveLength(column.layerBoundaries.length);
     const first = built.configuration.layers[0]!;
     expect(first.hydrostaticState).toBeDefined();
     expect(first.hydrostaticState!.bottom.pressurePa).toBeGreaterThan(
@@ -243,6 +271,12 @@ describe('Stage 4.2: reference profile integration', () => {
       derived.layers[0]!.columnInventoriesMolM2.n2,
       12
     );
+    expect(first.hydrostaticState!.thirdBodyConsistency.relativeDeviation).toBeLessThan(0.02);
+    expect(first.hydrostaticState!.thirdBodyConsistency.inventoryRelativeDeviation).toBeLessThan(1e-6);
+    expect(derived.layers.reduce((sum, layer) => sum + layer.columnInventoriesMolM2.n2, 0))
+      .toBeCloseTo(derived.totalColumnInventoriesMolM2.n2, 10);
+    expect(derived.layers.reduce((sum, layer) => sum + layer.columnInventoriesMolM2.o2, 0))
+      .toBeCloseTo(derived.totalColumnInventoriesMolM2.o2, 10);
 
     // The bridge deliberately does not create radicals required by #89.
     const world = generateReferenceWorld();
@@ -324,10 +358,11 @@ describe('Stage 4.2: reference profile integration', () => {
     )).toHaveLength(7);
   });
 
-  it('retains hydrostatic P(z) and bulk composition through a physical Scheduler commit with explicit synthetic radicals', () => {
-    const column = computeUssa1976ReferenceHydrostaticColumn();
-    expect(column.status).toBe('completed');
-    if (column.status !== 'completed') return;
+  it('retains refined hydrostatic P(z) and third-body consistency through a Scheduler commit', () => {
+    const adaptive = computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn();
+    expect(adaptive.status).toBe('completed');
+    if (adaptive.status !== 'completed') return;
+    const column = adaptive.column;
 
     const derived = deriveDryAirKineticInventoriesFromHydrostaticColumn(column, [R89]);
     expect(derived.status).toBe('derived');
@@ -387,14 +422,19 @@ describe('Stage 4.2: reference profile integration', () => {
     expect(result.status).toBe('committed');
     if (result.status !== 'committed') return;
     const audit = result.world.chemicalState!.physicalKineticsHistory![0]!;
-    expect(audit.layers).toHaveLength(7);
+    expect(audit.layers).toHaveLength(column.layerBoundaries.length);
     expect(audit.layers.every((layer) => layer.hydrostaticState !== undefined)).toBe(true);
     const firstLayer = audit.layers[0]!.hydrostaticState!;
     expect(firstLayer.bottom.pressurePa).toBeGreaterThan(firstLayer.representative.pressurePa);
     expect(firstLayer.representative.pressurePa).toBeGreaterThan(firstLayer.top.pressurePa);
     expect(firstLayer.molarFractions.n2).toBeCloseTo(0.7808, 8);
     expect(firstLayer.molarFractions.o2).toBeCloseTo(0.2095, 8);
+    expect(firstLayer.thirdBodyConsistency.relativeDeviation).toBeLessThan(0.02);
     expect(audit.layers[0]!.initialColumnInventoriesMolM2.n2).toBeGreaterThan(0);
+    expect(audit.layers[0]!.thirdBody.concentrationMoleculeCm3).toBeCloseTo(
+      firstLayer.thirdBodyConsistency.layerAverageConcentrationMoleculeCm3,
+      8
+    );
   });
 
   it('does not infer missing radicals from the sourced dry-air profile', () => {
