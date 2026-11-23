@@ -314,8 +314,15 @@ WorldClock
   Scheduler-траектория сохраняет исходный golden SHA-256
   877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20;
   modelTimeYears=100000000; WorldClock и Scheduler bookkeeping продвинулись
-  ровно 100 раз. CI #501: TypeScript, тесты, lint, production build — success
-  (86 файлов passed / 2 skipped; 3126 passed / 53 skipped; lint 0 ошибок,
+  ровно 100 раз. Ревизия Scheduler (23.11.2026): добавлен
+  executionMode=state_dependent — runtime solver предлагает положительный
+  maximum dt по изолированному снимку текущего состояния; при нескольких
+  процессах выбирается минимум, фактический dt отражается в WorldClock
+  и step log. Постоянное τ не выдумывается; proposal callback без
+  валидного результата блокирует транзакцию до apply. Это generic
+  инфраструктура Scheduler, а не ещё подключённая химическая кинетика.
+  CI #505: TypeScript, тесты, lint, production build — success
+  (86 файлов passed / 2 skipped; 3130 passed / 53 skipped; lint 0 ошибок,
   62 предупреждения).
   
   **Почему полное закрытие пока НЕ заявляется:** пользовательский режим A
@@ -326,6 +333,9 @@ WorldClock
   пользовательский stateless/experimental путь с явно заданными
   концентрациями, N₂ и толщиной слоя; он не эволюционирует основной
   ChemicalEvolutionState и не подключён к production ChemicalEvolution.
+  Новый state_dependent контракт пока покрывает только механизм выбора
+  шага Scheduler: он не создаёт кинетические rates, не строит состав
+  атмосферного слоя и сам по себе не активирует ни одну реакцию.
   
   **Дополнительный критерий полного закрытия 4.2 (расширение требования
   владельца, 23.11.2026):** основная химическая эволюция мира должна
