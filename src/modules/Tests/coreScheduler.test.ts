@@ -160,6 +160,11 @@ describe('Stage 4.2.1 Scheduler: детерминированный порядо
     expect(dynA.lastRunElapsedS).toBe(10);
     expect(dynA.lastRunTime).toEqual({ segmentIndex: 0, localTimeS: 10 });
     expect(result.log.every((entry) => entry.status === 'committed' && entry.phase === 'lie')).toBe(true);
+    expect(result.log[0]!.worldStartTime).toEqual({ segmentIndex: 0, localTimeS: 0 });
+    expect(result.log[0]!.worldEndTime).toEqual({ segmentIndex: 0, localTimeS: 10 });
+    expect(result.bookkeeping.stepLog[0]!.worldStartTime).toEqual({ segmentIndex: 0, localTimeS: 0 });
+    expect(result.bookkeeping.stepLog[0]!.worldEndTime).toEqual({ segmentIndex: 0, localTimeS: 10 });
+    expect(validateSchedulerBookkeeping(result.bookkeeping)).toEqual([]);
   });
 });
 
@@ -1274,6 +1279,52 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
       .toContain('не может быть отрицательным elapsed-временем');
   });
 
+  it('валидирует парные worldStartTime/worldEndTime в stepLog и их строгий порядок', () => {
+    const base = runMacroStep(
+      testWorld(),
+      makeRegistry([descriptor('a')]),
+      [recorder('a', [])],
+      { durationS: 2, splitting: 'lie' }
+    );
+    expect(base.status).toBe('committed');
+    const validBookkeeping = base.bookkeeping;
+    expect(validateSchedulerBookkeeping(validBookkeeping)).toEqual([]);
+
+    const missingEnd = {
+      ...validBookkeeping,
+      stepLog: [{
+        ...validBookkeeping.stepLog[0]!,
+        worldStartTime: { segmentIndex: 0, localTimeS: 0 }
+      }]
+    };
+    expect(validateSchedulerBookkeeping(missingEnd).join(' '))
+      .toContain('worldStartTime и worldEndTime должны задаваться вместе');
+
+    const reversed = {
+      ...validBookkeeping,
+      stepLog: [{
+        ...validBookkeeping.stepLog[0]!,
+        worldStartTime: { segmentIndex: 0, localTimeS: 2 },
+        worldEndTime: { segmentIndex: 0, localTimeS: 1 }
+      }]
+    };
+    expect(validateSchedulerBookkeeping(reversed).join(' '))
+      .toContain('worldEndTime должен быть строго позже worldStartTime');
+
+    const legacy = {
+      ...validBookkeeping,
+      stepLog: [{
+        stepIndex: 0,
+        processId: 'legacy',
+        phase: 'lie' as const,
+        durationS: 2,
+        intervalStartS: 0,
+        status: 'committed' as const
+      }]
+    };
+    expect(validateSchedulerBookkeeping(legacy)).toEqual([]);
+  });
+
   it('состояние планировщика JSON-сериализуемо и проходит валидацию после round-trip', () => {
     let bk = createSchedulerBookkeeping();
     bk = enqueueEvent(bk, { id: 'ev-json', time: { segmentIndex: 1, localTimeS: 2.5 }, type: 'phase_transition', data: { pressure: 101325 }, source: 'test' });
@@ -1344,6 +1395,18 @@ describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', 
     expect(rollover.status).toBe('committed');
     expect(rollover.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
     expect(rollover.world.clock.localTimeS).toBe(1);
+    expect(rollover.log[0]!.worldStartTime).toEqual({
+      segmentIndex: largeClock.segmentIndex,
+      localTimeS: largeClock.localTimeS
+    });
+    expect(rollover.log[0]!.worldEndTime).toEqual({
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 1
+    });
+    expect(rollover.bookkeeping.stepLog[0]!.worldEndTime).toEqual({
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 1
+    });
     expect(rollover.bookkeeping.eventQueue.map((event) => [
       event.id,
       event.status,
