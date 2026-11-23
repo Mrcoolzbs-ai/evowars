@@ -732,6 +732,11 @@
 > Основа rate data и численный исполнитель принадлежат уже существующим
 > контрактам 4.5.1–4.5.5; в рамках этого шага файлы и статус этапа 4.5
 > не изменялись. Неизвестные rates и скорости не синтезируются.
-> CI #522 на HEAD a44e3e216de58ea994472b7fe341720d7e93e6c1 — success:
-> 86 файлов passed / 2 skipped; 3135 тестов passed / 53 skipped.
-> Run #523 (добавлены проверки явного uncertainty=not_quantified) выполняется.
+> Append-only physical audit сохраняет применённые T/толщину,
+> provenance, запасы слоя до/после, явную концентрацию N₂, rate provenance
+> и статус uncertainty=not_quantified. UI различает физический Scheduler-
+> режим и игровой режим A и показывает последний физический аудит.
+>
+> CI #533 на HEAD c744ae4553d0d1431a79952b9412983bd8be3f82 — success:
+> 86 файлов passed / 2 skipped; 3137 тестов passed / 53 skipped;
+> TypeScript, lint (62 предупреждения, 0 ошибок), production build.
