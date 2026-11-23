@@ -2010,6 +2010,10 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
       durationS: chemical.physicalKinetics.maximumMacroStepS,
       splitting: 'lie',
       processIds: [PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID],
+      // The physical kinetics operator is continuous: a user-triggered
+      // step may start early, but it must stop at its own future exact
+      // deadline rather than integrating past the scheduled wake-up.
+      respectSelectedProcessDeadlines: true,
       audit: {
         speciesCatalog: physicalKineticSpeciesCatalog(),
         boundary: 'complete'
