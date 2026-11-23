@@ -11,11 +11,21 @@
 // A backward-Euler finite-volume solve keeps the update stable for large
 // diffusion time steps and conserves each selected column inventory.
 
-import type { ChemicalPhysicalKineticLayer } from '../../types';
+import type {
+  ChemicalPhysicalKineticLayer,
+  ChemicalPhysicalLennardJonesTransportSpecies,
+  ChemicalPhysicalMolecularDiffusionConfiguration,
+  ChemicalPhysicalMolecularDiffusionSpecies
+} from '../../types';
 import type { DataProvenance } from '../Core/scientificValue';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
-const VERTICAL_DIFFUSION_MODEL_VERSION = 'stage-4.2-vertical-eddy-diffusion-1';
+const VERTICAL_DIFFUSION_MODEL_VERSION = 'stage-4.2-vertical-atmospheric-diffusion-2';
+const TRACE_SPECIES_MAX_MOLE_FRACTION = 0.01;
+const STANDARD_ATMOSPHERE_PRESSURE_PA = 101325;
+const GRAMS_PER_KILOGRAM = 1000;
+const ANGSTROM_TO_METRE = 1e-10;
+const SQUARE_METRES_PER_SQUARE_CENTIMETRE = 1e-4;
 const MAX_INTERFACE_PRESSURE_RELATIVE_MISMATCH = 1e-6;
 const MAX_INVENTORY_RELATIVE_ERROR = 1e-10;
 const LOCAL_BALANCE_RELATIVE_TOLERANCE = 1e-9;
@@ -32,6 +42,8 @@ export interface VerticalEddyDiffusionInput {
   eddyDiffusivityM2S: number | readonly number[];
   /** Optional provenance; required by physical ChemicalEvolution Scheduler configuration. */
   diffusivityProvenance?: DataProvenance;
+  /** Optional Chapman-Enskog molecular diffusion data; all collision and thermal data are explicit. */
+  molecularDiffusion?: ChemicalPhysicalMolecularDiffusionConfiguration;
 }
 
 export interface VerticalEddyDiffusionLayerSpeciesAudit {
@@ -57,6 +69,14 @@ export interface VerticalEddyDiffusionInterfaceSpeciesAudit {
   /** Relative mismatch between the balance-closed and constitutive flux. */
   fluxClosureRelativeDeviation: number;
   transferredMolM2: number;
+  eddyGradientFluxMolM2S?: number;
+  molecularGradientFluxMolM2S?: number;
+  molecularDriftFluxMolM2S?: number;
+  molecularDiffusivityM2S?: number;
+  binaryDiffusivitiesM2S?: Record<string, number>;
+  barodiffusionVelocityMs?: number;
+  thermalDiffusionVelocityMs?: number;
+  molecularDriftVelocityMs?: number;
 }
 
 export interface VerticalEddyDiffusionInterfaceAudit {
@@ -79,6 +99,11 @@ export interface VerticalEddyDiffusionAudit {
   durationS: number;
   speciesIds: string[];
   diffusivityProvenance?: DataProvenance;
+  molecularDiffusion?: {
+    method: 'chapman_enskog_neufeld_effective_binary_trace_species';
+    species: Record<string, ChemicalPhysicalMolecularDiffusionSpecies>;
+    backgroundSpecies: Record<string, ChemicalPhysicalLennardJonesTransportSpecies>;
+  };
   layers: VerticalEddyDiffusionLayerAudit[];
   interfaces: VerticalEddyDiffusionInterfaceAudit[];
   columnTotalsMolM2: Record<string, {
@@ -118,6 +143,72 @@ interface InterfaceGeometry {
   temperatureK: number;
   airMolarDensityMolM3: number;
   conductanceMolM2S: number;
+}
+
+interface MolecularInterfaceState {
+  diffusivityM2S: number;
+  binaryDiffusivitiesM2S: Record<string, number>;
+  barodiffusionVelocityMs: number;
+  thermalDiffusionVelocityMs: number;
+  driftVelocityMs: number;
+  lowerFluxCoefficientMolM2S: number;
+  upperFluxCoefficientMolM2S: number;
+}
+
+function hasIdentifiedProvenance(value: unknown): value is DataProvenance {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return ['sourceName', 'sourceId', 'reference', 'datasetId', 'url']
+    .some((key) => typeof record[key] === 'string' && (record[key] as string).trim() !== '');
+}
+
+function validateLennardJonesTransportSpecies(
+  value: unknown,
+  label: string
+): value is ChemicalPhysicalLennardJonesTransportSpecies {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    isFinitePositive(record.molarMassKgMol) &&
+    hasIdentifiedProvenance(record.molarMassProvenance) &&
+    isFinitePositive(record.collisionDiameterAngstrom) &&
+    isFinitePositive(record.characteristicEnergyOverKBK) &&
+    hasIdentifiedProvenance(record.collisionParametersProvenance)
+  );
+}
+
+/**
+ * Chapman–Enskog binary diffusivity with the Neufeld collision-integral
+ * correlation. Inputs use kg/mol, Angstrom, K and Pa; output is m²/s.
+ * The conventional 0.0018583 prefactor returns cm²/s for g/mol, Angstrom,
+ * atm and K, then is converted to SI.
+ */
+function computeChapmanEnskogBinaryDiffusivityM2S(args: {
+  temperatureK: number;
+  pressurePa: number;
+  speciesA: ChemicalPhysicalLennardJonesTransportSpecies;
+  speciesB: ChemicalPhysicalLennardJonesTransportSpecies;
+}): number {
+  const sigmaAngstrom =
+    (args.speciesA.collisionDiameterAngstrom + args.speciesB.collisionDiameterAngstrom) / 2;
+  const epsilonOverKBK = Math.sqrt(
+    args.speciesA.characteristicEnergyOverKBK * args.speciesB.characteristicEnergyOverKBK
+  );
+  const reducedTemperature = args.temperatureK / epsilonOverKBK;
+  const omega =
+    1.06036 / Math.pow(reducedTemperature, 0.15610) +
+    0.19300 * Math.exp(-0.47635 * reducedTemperature) +
+    1.03587 * Math.exp(-1.52996 * reducedTemperature) +
+    1.76487 * Math.exp(-3.89411 * reducedTemperature);
+  const massA = args.speciesA.molarMassKgMol * GRAMS_PER_KILOGRAM;
+  const massB = args.speciesB.molarMassKgMol * GRAMS_PER_KILOGRAM;
+  const pressureAtm = args.pressurePa / STANDARD_ATMOSPHERE_PRESSURE_PA;
+  const diffusivityCm2S =
+    0.0018583 *
+    Math.pow(args.temperatureK, 1.5) *
+    Math.sqrt(1 / massA + 1 / massB) /
+    (pressureAtm * sigmaAngstrom * sigmaAngstrom * omega);
+  return diffusivityCm2S * SQUARE_METRES_PER_SQUARE_CENTIMETRE;
 }
 
 function rejected(message: string): VerticalEddyDiffusionResult {
