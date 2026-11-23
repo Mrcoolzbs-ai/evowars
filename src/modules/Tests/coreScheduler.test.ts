@@ -20,6 +20,7 @@ import {
   processEvent,
   processWorldEvent,
   processDueWorldEvents,
+  runScheduledWorldTurn,
   readyProcessIds,
   readyProcessIdsAt,
   runReadyProcessesAt,
@@ -894,6 +895,90 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(result.world.clock).toEqual(clock);
     expect(result.world.scheduling!.eventQueue[0]!.status).toBe('failed');
     expect(result.world.scheduling!.eventQueue[0]!.failReason).toContain('ретроактивное');
+  });
+
+  it('runScheduledWorldTurn сначала применяет due events и только потом запускает готовые процессы', () => {
+    let scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
+      segmentIndex: 0,
+      localTimeS: 0
+    });
+    scheduling = enqueueEvent(scheduling, {
+      id: 'turn-phase-event',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      type: 'phase_transition',
+      data: { phase: 'post-event' },
+      source: 'turn test'
+    });
+    const world = { ...testWorld(), scheduling };
+    let observedEventStatus: string | undefined;
+    const operator: ProcessOperator = {
+      processId: 'a',
+      apply: (state) => {
+        observedEventStatus = state.scheduling?.eventQueue.find((event) => event.id === 'turn-phase-event')?.status;
+        return state;
+      }
+    };
+
+    const result = runScheduledWorldTurn(
+      world,
+      makeRegistry([descriptor('a')]),
+      [operator],
+      { phase_transition: (state) => state },
+      {
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 1 }
+      }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.eventDispatch?.results.map((entry) => entry.event.status)).toEqual(['processed']);
+    expect(observedEventStatus).toBe('processed');
+    expect(result.processRun?.status).toBe('committed');
+    expect(result.processRun?.readyProcessIds).toEqual(['a']);
+    expect(result.world.clock.localTimeS).toBe(1);
+    expect(result.world.scheduling!.eventQueue[0]!.status).toBe('processed');
+    expect(result.world.scheduling!.processDynamics.a!.nextDueTime).toBeNull();
+    expect(world.clock.localTimeS).toBe(0);
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+  });
+
+  it('failed due event blocks every scheduled process in the same world turn', () => {
+    const scheduling = enqueueEvent(
+      scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
+        segmentIndex: 0,
+        localTimeS: 0
+      }),
+      {
+        id: 'turn-missing-handler',
+        time: { segmentIndex: 0, localTimeS: 0 },
+        type: 'unregistered-transition',
+        data: {},
+        source: 'turn test'
+      }
+    );
+    const world = { ...testWorld(), scheduling };
+    const calls: Call[] = [];
+    const result = runScheduledWorldTurn(
+      world,
+      makeRegistry([descriptor('a')]),
+      [recorder('a', calls)],
+      {},
+      {
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 1 }
+      }
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.processRun).toBeUndefined();
+    expect(calls).toEqual([]);
+    expect(result.world.clock).toEqual(world.clock);
+    expect(result.world.scheduling!.eventQueue[0]!.status).toBe('failed');
+    expect(result.world.scheduling!.processDynamics.a!.nextDueTime).toEqual({
+      segmentIndex: 0,
+      localTimeS: 0
+    });
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
   });
 
   it('глубоко изолирует payload события при enqueue и при чтении очереди', () => {
