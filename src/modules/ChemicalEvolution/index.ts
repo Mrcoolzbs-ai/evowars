@@ -26,6 +26,7 @@ import type {
   ChemicalEvolutionState,
   ChemicalPhysicalKineticsState,
   ChemicalPhysicalKineticLayer,
+  ChemicalKineticHydrostaticLayerState,
   ChemicalPhysicalKineticsStepAudit,
   ChemicalKineticLayerStepAudit,
   ChemicalKineticReactionAudit,
@@ -937,6 +938,23 @@ function hasIdentifiedPhysicalProvenance(value: unknown): boolean {
   });
 }
 
+function cloneKineticHydrostaticState(
+  state: ChemicalKineticHydrostaticLayerState
+): ChemicalKineticHydrostaticLayerState {
+  return {
+    ...state,
+    bottom: { ...state.bottom },
+    representative: { ...state.representative },
+    top: { ...state.top },
+    molarFractions: { ...state.molarFractions },
+    provenance: {
+      pressure: { ...state.provenance.pressure },
+      composition: { ...state.provenance.composition },
+      model: { ...state.provenance.model }
+    }
+  };
+}
+
 /**
  * Проверка primary-state конфигурации. Отсутствующий вид никогда не
  * дополняется нулём; общий атмосферный инвентарь обязан покрывать сумму
@@ -1044,6 +1062,88 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
     }
     if (!hasIdentifiedPhysicalProvenance(layer.inventoryProvenance)) {
       problems.push(prefix + '.inventoryProvenance обязан идентифицировать источник подстолбовых запасов');
+    }
+    if (layer.hydrostaticState !== undefined) {
+      const hydro = layer.hydrostaticState as unknown;
+      if (!isPlainChemicalRecord(hydro)) {
+        problems.push(prefix + '.hydrostaticState должен быть plain object');
+      } else {
+        const points = ['bottom', 'representative', 'top'].map((key) => hydro[key]);
+        if (points.some((point) => !isPlainChemicalRecord(point))) {
+          problems.push(prefix + '.hydrostaticState должен содержать bottom/representative/top snapshots');
+        } else {
+          for (const [pointIndex, point] of points.entries()) {
+            const pointLabel = ['bottom', 'representative', 'top'][pointIndex];
+            for (const field of [
+              'heightM', 'pressurePa', 'temperatureK', 'densityKgPerM3',
+              'meanMolarMassKgPerMol', 'gravityMs2', 'scaleHeightM',
+              'columnMassKgPerM2', 'columnMolesPerM2'
+            ]) {
+              const value = point[field];
+              if (typeof value !== 'number' || !Number.isFinite(value)) {
+                problems.push(prefix + '.hydrostaticState.' + pointLabel + '.' + field + ' должен быть конечным числом');
+              } else if (
+                ['pressurePa', 'temperatureK', 'densityKgPerM3', 'meanMolarMassKgPerMol', 'gravityMs2', 'scaleHeightM'].includes(field) &&
+                value <= 0
+              ) {
+                problems.push(prefix + '.hydrostaticState.' + pointLabel + '.' + field + ' должен быть положительным');
+              }
+            }
+          }
+          const bottom = points[0] as Record<string, unknown>;
+          const representative = points[1] as Record<string, unknown>;
+          const top = points[2] as Record<string, unknown>;
+          if (
+            typeof bottom.pressurePa === 'number' &&
+            typeof representative.pressurePa === 'number' &&
+            typeof top.pressurePa === 'number' &&
+            !(bottom.pressurePa >= representative.pressurePa && representative.pressurePa >= top.pressurePa)
+          ) {
+            problems.push(prefix + '.hydrostaticState pressure must be non-increasing with height');
+          }
+          if (
+            typeof bottom.columnMolesPerM2 === 'number' &&
+            typeof top.columnMolesPerM2 === 'number' &&
+            top.columnMolesPerM2 <= bottom.columnMolesPerM2
+          ) {
+            problems.push(prefix + '.hydrostaticState molar column must increase across the layer');
+          }
+        }
+        const representativeHeightM = hydro.representativeHeightM;
+        if (
+          typeof representativeHeightM !== 'number' ||
+          !Number.isFinite(representativeHeightM) ||
+          layer.altitudeRangeM === undefined ||
+          representativeHeightM <= layer.altitudeRangeM.min ||
+          representativeHeightM >= layer.altitudeRangeM.max
+        ) {
+          problems.push(prefix + '.hydrostaticState representativeHeightM must lie inside sourced altitudeRangeM');
+        }
+        const fractions = hydro.molarFractions;
+        if (!isPlainChemicalRecord(fractions)) {
+          problems.push(prefix + '.hydrostaticState.molarFractions must be a plain composition record');
+        } else {
+          const values = Object.values(fractions);
+          const sum = values.reduce((total, value) => total + (typeof value === 'number' ? value : NaN), 0);
+          if (
+            values.length === 0 ||
+            values.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value <= 0) ||
+            !Number.isFinite(sum) ||
+            Math.abs(sum - 1) > 1e-6
+          ) {
+            problems.push(prefix + '.hydrostaticState.molarFractions must be positive and sum to 1');
+          }
+        }
+        const provenance = hydro.provenance;
+        if (
+          !isPlainChemicalRecord(provenance) ||
+          !hasIdentifiedPhysicalProvenance(provenance.pressure) ||
+          !hasIdentifiedPhysicalProvenance(provenance.composition) ||
+          !hasIdentifiedPhysicalProvenance(provenance.model)
+        ) {
+          problems.push(prefix + '.hydrostaticState provenance must identify pressure, composition and solver model');
+        }
+      }
     }
 
     const selected: MechanismReactionDef[] = [];
@@ -1258,6 +1358,9 @@ export function configurePrimaryPhysicalChemicalKinetics(
         temperatureProvenance: { ...layer.temperatureProvenance },
         inventoryProvenance: { ...layer.inventoryProvenance },
         columnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
+        ...(layer.hydrostaticState === undefined
+          ? {}
+          : { hydrostaticState: cloneKineticHydrostaticState(layer.hydrostaticState) }),
         reactionIds: [...layer.reactionIds]
       }))
     }
@@ -1833,6 +1936,9 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           thicknessProvenance: { ...layer.thicknessProvenance },
           altitudeRangeM: layer.altitudeRangeM ? { ...layer.altitudeRangeM } : null,
           altitudeProvenance: layer.altitudeProvenance ? { ...layer.altitudeProvenance } : null,
+          ...(layer.hydrostaticState === undefined
+            ? {}
+            : { hydrostaticState: cloneKineticHydrostaticState(layer.hydrostaticState) }),
           inventoryProvenance: { ...layer.inventoryProvenance },
           totalInventoryProvenance: Object.fromEntries(
             Object.keys(layer.columnInventoriesMolM2).map((speciesId) => [
