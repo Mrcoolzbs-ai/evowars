@@ -1966,3 +1966,165 @@ describe('Stage 4.2.3.3 Scheduler: explicit_only-процессы', () => {
     expect(result.world.clock.localTimeS).toBe(10);
   });
 });
+
+describe('Stage 4.2 Scheduler: state-dependent macro-step selection', () => {
+  function stateDependent(id: string): ProcessDescriptor {
+    return descriptor(id, {
+      tau: unknownValue('характерное время зависит от текущего состояния и вычисляется runtime-решателем'),
+      executionMode: 'state_dependent'
+    });
+  }
+
+  it('state-dependent процесс готов к автоисполнению только при наличии proposeStep()', () => {
+    const dynamic = stateDependent('dynamic_chemistry');
+    const registry = makeRegistry([dynamic]);
+    const due = scheduleProcess(createSchedulerBookkeeping(), dynamic.id, 0);
+
+    expect(readyProcessIds(due, registry, [recorder(dynamic.id, [])], 0)).toEqual([]);
+
+    const operator: ProcessOperator = {
+      processId: dynamic.id,
+      proposeStep: (_world, maximum) => ({
+        durationS: maximum / 2,
+        method: 'test state-dependent limiter'
+      }),
+      apply: (world) => world
+    };
+    expect(readyProcessIds(due, registry, [operator], 0)).toEqual([dynamic.id]);
+    // Постоянное числовое τ не должно подменять state-dependent семантику.
+    expect(() =>
+      makeRegistry([
+        descriptor('invalid_dynamic_tau', {
+          executionMode: 'state_dependent',
+          tau: knownValue(quantity(10, 's'))
+        })
+      ])
+    ).toThrow(/state_dependent.*числовое τ запрещено/);
+  });
+
+  it('выбирает минимум нескольких предложений и продвигает часы на фактический dt', () => {
+    const registry = makeRegistry([stateDependent('a_chemistry'), stateDependent('b_chemistry')]);
+    const calls: Call[] = [];
+    const proposalCalls: string[] = [];
+    const operator = (
+      processId: string,
+      proposedDurationS: number,
+      characteristicTimeS: number
+    ): ProcessOperator => ({
+      processId,
+      proposeStep: (snapshot, maximum) => {
+        proposalCalls.push(processId + ':' + maximum);
+        // Callback получает отдельную копию: мутация не дойдёт до apply()
+        // и не изменит снимок, который будет зафиксирован Scheduler.
+        if (processId === 'a_chemistry') {
+          (snapshot as CoreWorldState).note = 'must not leak from proposal';
+        } else {
+          expect(snapshot.note).toBeUndefined();
+        }
+        return {
+          durationS: proposedDurationS,
+          characteristicTimeS,
+          method: 'state-dependent solver bound',
+          diagnostics: [processId + ' selected ' + proposedDurationS + ' s']
+        };
+      },
+      apply: (world, durationS, intervalStartS) => {
+        expect(world.note).toBeUndefined();
+        calls.push({ processId, durationS, intervalStartS });
+        return world;
+      }
+    });
+
+    const world = testWorld();
+    const result = runMacroStep(
+      world,
+      registry,
+      [operator('b_chemistry', 2.5, 5), operator('a_chemistry', 6, 12)],
+      { durationS: 10, splitting: 'lie' }
+    );
+
+    expect(result.status).toBe('committed');
+    expect(proposalCalls).toEqual(['a_chemistry:10', 'b_chemistry:10']);
+    expect(calls).toEqual([
+      { processId: 'a_chemistry', durationS: 2.5, intervalStartS: 0 },
+      { processId: 'b_chemistry', durationS: 2.5, intervalStartS: 0 }
+    ]);
+    expect(result.stepSize).toEqual({
+      requestedDurationS: 10,
+      effectiveDurationS: 2.5,
+      limitingProcessIds: ['b_chemistry'],
+      proposals: [
+        {
+          processId: 'a_chemistry',
+          durationS: 6,
+          characteristicTimeS: 12,
+          method: 'state-dependent solver bound',
+          diagnostics: ['a_chemistry selected 6 s']
+        },
+        {
+          processId: 'b_chemistry',
+          durationS: 2.5,
+          characteristicTimeS: 5,
+          method: 'state-dependent solver bound',
+          diagnostics: ['b_chemistry selected 2.5 s']
+        }
+      ],
+      diagnostics: ['[a_chemistry] a_chemistry selected 6 s', '[b_chemistry] b_chemistry selected 2.5 s']
+    });
+    expect(result.world.clock.localTimeS).toBe(2.5);
+    expect(result.world.clock.stepCount).toBe(1);
+    expect(world.clock.localTimeS).toBe(0);
+    expect(result.log.every((entry) => entry.durationS === 2.5)).toBe(true);
+    expect(result.diagnostics).toContain('[b_chemistry] b_chemistry selected 2.5 s');
+  });
+
+  it('недопустимое предложение отклоняет macro-шаг до вызова apply()', () => {
+    for (const proposedDurationS of [0, Number.NaN, 11]) {
+      const world = testWorld();
+      const registry = makeRegistry([stateDependent('adaptive')]);
+      const calls: Call[] = [];
+      const operator: ProcessOperator = {
+        processId: 'adaptive',
+        proposeStep: () => ({
+          durationS: proposedDurationS,
+          method: 'deliberately invalid test proposal'
+        }),
+        apply: (state, durationS, intervalStartS) => {
+          calls.push({ processId: 'adaptive', durationS, intervalStartS });
+          return state;
+        }
+      };
+
+      const result = runMacroStep(world, registry, [operator], { durationS: 10, splitting: 'lie' });
+      expect(result.status).toBe('rejected');
+      expect(result.world).toBe(world);
+      expect(result.bookkeeping.stepCount).toBe(0);
+      expect(result.diagnostics.join(' ')).toContain('state-dependent solver-предложение');
+      expect(calls).toEqual([]);
+      expect(world.clock.localTimeS).toBe(0);
+    }
+  });
+
+  it('ошибка proposeStep() не вызывает оператор и не меняет мир', () => {
+    const world = testWorld();
+    const registry = makeRegistry([stateDependent('adaptive')]);
+    const calls: Call[] = [];
+    const operator: ProcessOperator = {
+      processId: 'adaptive',
+      proposeStep: () => {
+        throw new Error('physical timescale unavailable');
+      },
+      apply: (state, durationS, intervalStartS) => {
+        calls.push({ processId: 'adaptive', durationS, intervalStartS });
+        return state;
+      }
+    };
+
+    const result = runMacroStep(world, registry, [operator], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.diagnostics.join(' ')).toContain('physical timescale unavailable');
+    expect(calls).toEqual([]);
+    expect(world.clock.localTimeS).toBe(0);
+  });
+});
