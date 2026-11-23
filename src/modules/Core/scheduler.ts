@@ -1625,25 +1625,26 @@ export function runMacroStep(
           }
 
           const eventLocalTimeS = currentPoint.localTimeS + candidate.offsetS;
-          if (!Number.isSafeInteger(currentPoint.segmentIndex + 1)) {
+          const eventFitsCurrentSegment =
+            Number.isFinite(eventLocalTimeS) &&
+            eventLocalTimeS > currentPoint.localTimeS &&
+            eventLocalTimeS - currentPoint.localTimeS === candidate.offsetS;
+          if (!eventFitsCurrentSegment && !Number.isSafeInteger(currentPoint.segmentIndex + 1)) {
             proposalProblems.push(eventLabel + ': segmentIndex исчерпал диапазон безопасных целых для переноса root-события');
             return;
           }
-          const eventTime: FluxTime =
-            Number.isFinite(eventLocalTimeS) &&
-            eventLocalTimeS > currentPoint.localTimeS &&
-            eventLocalTimeS - currentPoint.localTimeS === candidate.offsetS
-              ? {
-                  segmentIndex: currentPoint.segmentIndex,
-                  localTimeS: eventLocalTimeS
-                }
-              : {
-                  // The offset is positive but smaller than the next
-                  // representable increment at this large local time.
-                  // The matching exact coordinate is in the next segment.
-                  segmentIndex: currentPoint.segmentIndex + 1,
-                  localTimeS: candidate.offsetS
-                };
+          const eventTime: FluxTime = eventFitsCurrentSegment
+            ? {
+                segmentIndex: currentPoint.segmentIndex,
+                localTimeS: eventLocalTimeS
+              }
+            : {
+                // The offset is positive but smaller than the next
+                // representable increment at this large local time.
+                // The matching exact coordinate is in the next segment.
+                segmentIndex: currentPoint.segmentIndex + 1,
+                localTimeS: candidate.offsetS
+              };
 
           let dataSnapshot: Record<string, unknown>;
           try {
@@ -1841,6 +1842,17 @@ export function runMacroStep(
     const nextSegmentEvent = pendingEvents(originalBk).find(
       (event) => event.time.segmentIndex === nextSegmentIndex
     );
+    const nextSegmentSolverEvent = proposedEvents
+      .filter((event) =>
+        event.time.segmentIndex === nextSegmentIndex &&
+        event.offsetS <= effectiveDurationS
+      )
+      .slice()
+      .sort((a, b) =>
+        comparePoints(a.time, b.time) ||
+        a.processId.localeCompare(b.processId) ||
+        a.id.localeCompare(b.id)
+      )[0];
     const nextSegmentProcesses = exactProcessDeadlines.filter(([processId, dynamics]) =>
       !selectedProcessIds.has(processId) &&
       dynamics.nextDueTime.segmentIndex === nextSegmentIndex
@@ -1867,6 +1879,9 @@ export function runMacroStep(
     if (nextSegmentEvent !== undefined && nextSegmentEvent.time.localTimeS <= effectiveDurationS) {
       nextBoundaryPoints.push({ ...nextSegmentEvent.time });
     }
+    if (nextSegmentSolverEvent !== undefined) {
+      nextBoundaryPoints.push({ ...nextSegmentSolverEvent.time });
+    }
     if (nextSegmentProcesses.length > 0) {
       const nextProcessDeadline = nextSegmentProcesses
         .map(([processId, dynamics]) => ({ processId, point: dynamics.nextDueTime }))
@@ -1880,12 +1895,20 @@ export function runMacroStep(
     const nextBoundaryPoint = nextBoundaryPoints[0];
     if (nextBoundaryPoint !== undefined) {
       effectiveDurationS = nextBoundaryPoint.localTimeS;
-      if (
+      const queuedEventAtBoundary =
         nextSegmentEvent !== undefined &&
         comparePoints(nextSegmentEvent.time, nextBoundaryPoint) === 0
-      ) {
+          ? nextSegmentEvent
+          : undefined;
+      const solverEventAtBoundary =
+        nextSegmentSolverEvent !== undefined &&
+        comparePoints(nextSegmentSolverEvent.time, nextBoundaryPoint) === 0
+          ? nextSegmentSolverEvent
+          : undefined;
+      const anyEventAtBoundary = queuedEventAtBoundary !== undefined || solverEventAtBoundary !== undefined;
+      if (anyEventAtBoundary) {
         eventBoundary = {
-          eventId: nextSegmentEvent.id,
+          eventId: queuedEventAtBoundary?.id ?? solverEventAtBoundary!.id,
           time: { ...nextBoundaryPoint }
         };
       } else {
