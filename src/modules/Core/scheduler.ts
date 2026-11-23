@@ -638,7 +638,10 @@ export function processWorldEvent(
       eventId
     );
   }
-  if (comparePoints(event.time, now(world.clock)) !== 0) {
+  if (comparePoints(event.time, {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  }) !== 0) {
     throw new SchedulerError(
       'invalid_event',
       'событие «' + eventId + '» можно применять только в его точной временной точке; событие=' +
