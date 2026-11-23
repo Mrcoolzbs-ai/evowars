@@ -1091,7 +1091,7 @@ export function runMacroStep(
       }
     }
 
-    const normalizedEvents: ProcessEventProposal[] = [];
+    const normalizedEvents: Array<ProcessEventProposal & { time: FluxTime }> = [];
     if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && raw.events !== undefined) {
       if (!Array.isArray(raw.events)) {
         proposalProblems.push('events, если заданы, должны быть массивом ProcessEventProposal');
@@ -1147,6 +1147,10 @@ export function runMacroStep(
           }
 
           const eventLocalTimeS = currentPoint.localTimeS + candidate.offsetS;
+          if (!Number.isSafeInteger(currentPoint.segmentIndex + 1)) {
+            proposalProblems.push(eventLabel + ': segmentIndex исчерпал диапазон безопасных целых для переноса root-события');
+            return;
+          }
           const eventTime: FluxTime =
             Number.isFinite(eventLocalTimeS) &&
             eventLocalTimeS > currentPoint.localTimeS &&
@@ -1179,7 +1183,8 @@ export function runMacroStep(
             id: candidate.id,
             offsetS: candidate.offsetS,
             type: candidate.type,
-            data: dataSnapshot
+            data: dataSnapshot,
+            time: eventTime
           });
         });
       }
@@ -1207,16 +1212,9 @@ export function runMacroStep(
     };
     proposals.push(normalized);
     for (const event of normalizedEvents) {
-      const eventLocalTimeS = currentPoint.localTimeS + event.offsetS;
       proposedEvents.push({
         ...event,
-        processId,
-        time:
-          Number.isFinite(eventLocalTimeS) &&
-          eventLocalTimeS > currentPoint.localTimeS &&
-          eventLocalTimeS - currentPoint.localTimeS === event.offsetS
-            ? { segmentIndex: currentPoint.segmentIndex, localTimeS: eventLocalTimeS }
-            : { segmentIndex: currentPoint.segmentIndex + 1, localTimeS: event.offsetS }
+        processId
       });
     }
     if (Array.isArray(normalized.diagnostics)) {
