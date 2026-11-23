@@ -99,6 +99,36 @@ function explicitKineticInputs(
   };
 }
 
+function syntheticMolecularDiffusionForSchedulerTest() {
+  const syntheticTransportProvenance = (recordId: string) => ({
+    sourceName: 'synthetic-only molecular transport test fixture (not Earth transport data)',
+    sourceId: 'test:synthetic:molecular:' + recordId,
+    limitations: 'Values only verify Scheduler wiring and are not measured Lennard-Jones or thermal-diffusion parameters'
+  });
+  const bulk = (id: string, molarMassKgMol: number, sigma: number, epsilonOverKBK: number) => ({
+    molarMassKgMol,
+    molarMassProvenance: syntheticTransportProvenance('mass:' + id),
+    collisionDiameterAngstrom: sigma,
+    characteristicEnergyOverKBK: epsilonOverKBK,
+    collisionParametersProvenance: syntheticTransportProvenance('lj:' + id)
+  });
+  return {
+    species: {
+      no: {
+        ...bulk('no', 0.030, 3.5, 100),
+        thermalDiffusionFactor: 0,
+        thermalDiffusionProvenance: syntheticTransportProvenance('thermal:no')
+      }
+    },
+    backgroundSpecies: {
+      n2: bulk('n2', 0.028, 3.8, 70),
+      o2: bulk('o2', 0.032, 3.5, 100),
+      ar: bulk('ar', 0.040, 3.4, 120),
+      co2: bulk('co2', 0.044, 3.9, 190)
+    }
+  };
+}
+
 function withSyntheticColumnState(
   world: GeneratedWorld,
   speciesTotals: Readonly<Record<string, number>>
@@ -440,7 +470,8 @@ describe('Stage 4.2: reference profile integration', () => {
           sourceId: 'test:synthetic:Kzz',
           method: 'explicit test fixture',
           limitations: 'Not calibrated and not intended as an Earth-atmosphere Kzz estimate'
-        }
+        },
+        molecularDiffusion: syntheticMolecularDiffusionForSchedulerTest()
       }
     };
     const configured = configurePrimaryPhysicalChemicalKinetics(
@@ -474,6 +505,14 @@ describe('Stage 4.2: reference profile integration', () => {
     expect(audit.verticalTransport!.durationS).toBe(audit.durationS);
     expect(audit.verticalTransport!.speciesIds).toEqual(['no']);
     expect(audit.verticalTransport!.diffusivityProvenance?.sourceId).toBe('test:synthetic:Kzz');
+    expect(audit.verticalTransport!.molecularDiffusion?.method)
+      .toBe('chapman_enskog_neufeld_effective_binary_trace_species');
+    expect(audit.verticalTransport!.molecularDiffusion?.species.no?.thermalDiffusionProvenance.sourceId)
+      .toBe('test:synthetic:molecular:thermal:no');
+    expect(audit.verticalTransport!.interfaces[0]!.species.no!.molecularDiffusivityM2S)
+      .toBeGreaterThan(0);
+    expect(Object.keys(audit.verticalTransport!.interfaces[0]!.species.no!.binaryDiffusivitiesM2S ?? {}).sort())
+      .toEqual(['ar', 'co2', 'n2', 'o2']);
     expect(audit.verticalTransport!.layers).toHaveLength(column.layerBoundaries.length);
     expect(audit.verticalTransport!.columnTotalsMolM2.no!.after).toBeCloseTo(
       audit.verticalTransport!.columnTotalsMolM2.no!.before,
