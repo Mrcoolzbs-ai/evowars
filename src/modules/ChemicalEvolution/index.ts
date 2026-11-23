@@ -806,6 +806,7 @@ export function runChemicalEvolutionStep(
  * каждом запуске передаёт вызывающая сторона.
  */
 export const CHEMICAL_EVOLUTION_STEP_PROCESS_ID = 'chemical_evolution_step';
+export const PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID = 'physical_chemical_kinetics';
 
 /**
  * Реестр процессов с единственным explicit_only-процессом шага
@@ -843,7 +844,32 @@ export function createChemicalEvolutionStepRegistry(): ProcessRegistry {
   for (const legacyDescriptor of chemicalProcessesToCoreDescriptors(createDefaultProcessRegistry())) {
     registry.register(legacyDescriptor);
   }
-  return registry.register(descriptor);
+  registry.register(descriptor);
+
+  // Физический режим — отдельный autonomous state-dependent процесс:
+  // постоянное τ остаётся unknown, а runtime оператор вычисляет
+  // характеристическое время из текущего RHS механизма и выбирает dt.
+  const physicalKineticsDescriptor: ProcessDescriptor = {
+    id: PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+    name: 'Физическая химическая кинетика атмосферных слоёв',
+    processKind: 'chemical',
+    tau: unknownValue('постоянное τ неприменимо: локальное характерное время вычисляется из кинетического RHS текущего состояния'),
+    stepPolicy: {
+      kind: 'unspecified',
+      note: 'state-dependent: runtime оператор выбирает dt ≤ min(запрошенного максимума, локальное время истощения/20)'
+    },
+    solverAvailability: 'available',
+    enabled: true,
+    executionMode: 'state_dependent',
+    provenance: {
+      sourceName: 'Production ChemicalEvolutionState kinetic layer contract',
+      reference: 'src/modules/ChemicalEvolution/index.ts',
+      note: 'скорости и их источники берутся только из проверенного каталога кинетического механизма; конфигурация слоёв и начальные запасы задаются явно'
+    },
+    applicability: 'только column_inventory с явно заданными слоями, температурой, толщиной, подстолбовыми запасами и provenance',
+    assumptions: 'каждый слой однороден и изотермичен; перенос между слоями/диффузия/конвекция/пополнение не моделируются; недостающие виды не трактуются как ноль'
+  };
+  return registry.register(physicalKineticsDescriptor);
 }
 
 /** Результат пользовательского шага химии через Scheduler. */
