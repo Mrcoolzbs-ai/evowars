@@ -1802,18 +1802,25 @@ export function runMacroStep(
     const secondsUntilDeadline =
       nextUnselectedProcessDeadline[1].nextDueTime.localTimeS - currentPoint.localTimeS;
     if (secondsUntilDeadline <= effectiveDurationS) {
+      const deadlinePoint = nextUnselectedProcessDeadline[1].nextDueTime;
+      const existingEventIsSamePoint =
+        eventBoundary !== undefined &&
+        comparePoints(eventBoundary.time, deadlinePoint) === 0;
       effectiveDurationS = secondsUntilDeadline;
       const sameTimeProcessIds = exactProcessDeadlines
         .filter(([processId, dynamics]) =>
           !selectedProcessIds.has(processId) &&
-          comparePoints(dynamics.nextDueTime, nextUnselectedProcessDeadline[1].nextDueTime) === 0
+          comparePoints(dynamics.nextDueTime, deadlinePoint) === 0
         )
         .map(([processId]) => processId)
         .sort();
       processBoundary = {
         processIds: sameTimeProcessIds,
-        time: { ...nextUnselectedProcessDeadline[1].nextDueTime }
+        time: { ...deadlinePoint }
       };
+      if (eventBoundary !== undefined && !existingEventIsSamePoint) {
+        eventBoundary = undefined;
+      }
     }
   }
 
@@ -1856,13 +1863,9 @@ export function runMacroStep(
       };
     }
 
-    const nextBoundaryCandidates: Array<{ point: FluxTime; kind: 'event' | 'process'; eventId?: string; processIds?: string[] }> = [];
+    const nextBoundaryPoints: FluxTime[] = [];
     if (nextSegmentEvent !== undefined && nextSegmentEvent.time.localTimeS <= effectiveDurationS) {
-      nextBoundaryCandidates.push({
-        point: { ...nextSegmentEvent.time },
-        kind: 'event',
-        eventId: nextSegmentEvent.id
-      });
+      nextBoundaryPoints.push({ ...nextSegmentEvent.time });
     }
     if (nextSegmentProcesses.length > 0) {
       const nextProcessDeadline = nextSegmentProcesses
@@ -1870,37 +1873,31 @@ export function runMacroStep(
         .filter((entry) => entry.point.localTimeS > 0 && entry.point.localTimeS <= effectiveDurationS)
         .sort((a, b) => a.point.localTimeS - b.point.localTimeS || a.processId.localeCompare(b.processId))[0];
       if (nextProcessDeadline !== undefined) {
-        const processIdsAtBoundary = nextSegmentProcesses
-          .filter(([, dynamics]) => comparePoints(dynamics.nextDueTime, nextProcessDeadline.point) === 0)
-          .map(([processId]) => processId)
-          .sort();
-        nextBoundaryCandidates.push({
-          point: { ...nextProcessDeadline.point },
-          kind: 'process',
-          processIds: processIdsAtBoundary
-        });
+        nextBoundaryPoints.push({ ...nextProcessDeadline.point });
       }
     }
-    nextBoundaryCandidates.sort((a, b) =>
-      comparePoints(a.point, b.point) ||
-      (a.kind === 'event' ? -1 : 1)
-    );
-    const nextBoundary = nextBoundaryCandidates[0];
-    if (nextBoundary !== undefined) {
-      effectiveDurationS = nextBoundary.point.localTimeS;
-      if (nextBoundary.kind === 'event') {
+    nextBoundaryPoints.sort(comparePoints);
+    const nextBoundaryPoint = nextBoundaryPoints[0];
+    if (nextBoundaryPoint !== undefined) {
+      effectiveDurationS = nextBoundaryPoint.localTimeS;
+      if (
+        nextSegmentEvent !== undefined &&
+        comparePoints(nextSegmentEvent.time, nextBoundaryPoint) === 0
+      ) {
         eventBoundary = {
-          eventId: nextBoundary.eventId!,
-          time: { ...nextBoundary.point }
+          eventId: nextSegmentEvent.id,
+          time: { ...nextBoundaryPoint }
         };
-        processBoundary = undefined;
       } else {
-        processBoundary = {
-          processIds: nextBoundary.processIds!,
-          time: { ...nextBoundary.point }
-        };
         eventBoundary = undefined;
       }
+      const processesAtBoundary = nextSegmentProcesses
+        .filter(([, dynamics]) => comparePoints(dynamics.nextDueTime, nextBoundaryPoint) === 0)
+        .map(([processId]) => processId)
+        .sort();
+      processBoundary = processesAtBoundary.length > 0
+        ? { processIds: processesAtBoundary, time: { ...nextBoundaryPoint } }
+        : undefined;
     }
   }
 
