@@ -1387,7 +1387,13 @@ describe('Stage 4.2 Persistence: invalid Scheduler bookkeeping fails closed', ()
   });
 
   it('getAllWorlds не возвращает повреждённое расписание, но raw-сохранение остаётся доступным', () => {
-    writeRawEntries([savedWorldWithInvalidScheduler('w-bad-scheduler'), makeGeneratedWorld('w-good')]);
+    const good: SavedWorld = {
+      ...makeGeneratedWorld('w-good'),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings
+    } as SavedWorld;
+    writeRawEntries([savedWorldWithInvalidScheduler('w-bad-scheduler'), good]);
     const loaded = getAllWorlds();
     expect(loaded.map((world) => world.id)).toEqual(['w-good']);
 
