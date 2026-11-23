@@ -115,13 +115,16 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
     throw new SimulationClockError('invalid_step', 'переполнение времени при сложении шага');
   }
 
-  // Segment only when THIS addition fails to preserve the requested
-  // interval exactly. The representableStep estimate is diagnostic only:
-  // it must not force rollover for an exactly representable concrete sum,
-  // nor allow a rounded sum to silently change the physical dt.
+  // A binary64 sum is allowed its normal rounding error. Rollover is
+  // required only when the rounded increment is materially different from
+  // the requested dt (relative error > 1e-12), or disappears completely.
+  // This preserves ordinary small steps such as 1e-6 after 1e-3, while
+  // preventing 1e16 + 3 from silently becoming a 4-second clock advance.
+  const representedIncrement = localTimeS - clock.localTimeS;
+  const incrementRelativeError = Math.abs(representedIncrement - dtS) / dtS;
   if (
     clock.localTimeS > 0 &&
-    (localTimeS === clock.localTimeS || localTimeS - clock.localTimeS !== dtS)
+    (representedIncrement === 0 || incrementRelativeError > 1e-12)
   ) {
     const nextSegment = startNewSegment(clock);
     return {
