@@ -774,6 +774,24 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
   });
 
+  it('rejects overlapping layer column inventories whose sum double-counts the same atmospheric material', () => {
+    const world = makePhysicalKineticWorld();
+    const config = world.chemicalState!.physicalKinetics!;
+    const originalLayer = config.layers[0]!;
+    config.layers = [
+      { ...originalLayer, layerId: 'duplicate-layer-a' },
+      { ...originalLayer, layerId: 'duplicate-layer-b' }
+    ];
+
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.reason).toContain('сумма реакционных подстолбов вида');
+    expect(result.reason).toContain('превышает основной атмосферный инвентарь');
+    expect(world.coreWorldState).toBeUndefined();
+    expect(vi.mocked(runMacroStep)).not.toHaveBeenCalled();
+  });
+
   it('rejects a missing provenance or missing species instead of silently using zero or game mode', () => {
     const noProvenance = makePhysicalKineticWorld();
     noProvenance.chemicalState!.physicalKinetics!.layers[0]!.thicknessProvenance = {};
