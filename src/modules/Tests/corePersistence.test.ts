@@ -1284,6 +1284,16 @@ describe('Stage 4.2.1 Persistence: segmented process schedule round-trip', () =>
       segmentIndex: 123455,
       localTimeS: 9.5e15
     };
+    scheduling.stepLog = [{
+      stepIndex: 7,
+      processId: 'physical-chemistry',
+      phase: 'lie',
+      durationS: 0.125,
+      intervalStartS: 0,
+      worldStartTime: { segmentIndex: 123455, localTimeS: 9.5e15 },
+      worldEndTime: { segmentIndex: 123456, localTimeS: 0.125 },
+      status: 'committed'
+    }];
     core.scheduling = scheduling;
     expect(validateWorldState(core)).toEqual([]);
 
@@ -1308,6 +1318,14 @@ describe('Stage 4.2.1 Persistence: segmented process schedule round-trip', () =>
       localTimeS: 0.125
     });
     expect(coreBack?.scheduling?.processDynamics['physical-chemistry']?.nextDueElapsedS).toBeNull();
+    expect(coreBack?.scheduling?.stepLog[0]?.worldStartTime).toEqual({
+      segmentIndex: 123455,
+      localTimeS: 9.5e15
+    });
+    expect(coreBack?.scheduling?.stepLog[0]?.worldEndTime).toEqual({
+      segmentIndex: 123456,
+      localTimeS: 0.125
+    });
     expect(coreBack === undefined ? ['core отсутствует'] : validateWorldState(coreBack)).toEqual([]);
   });
 
