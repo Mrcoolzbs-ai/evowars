@@ -1199,6 +1199,9 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
             }
           }
 
+          const representativeHydroPoint = isPlainChemicalRecord(hydro.representative)
+            ? hydro.representative
+            : {};
           const n2MoleFraction = isPlainChemicalRecord(fractions) ? fractions.n2 : undefined;
           const n2Inventory = isPlainChemicalRecord(layer.columnInventoriesMolM2)
             ? layer.columnInventoriesMolM2.n2
@@ -1206,12 +1209,12 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
           if (
             typeof n2MoleFraction === 'number' && n2MoleFraction > 0 &&
             typeof n2Inventory === 'number' && Number.isFinite(n2Inventory) && n2Inventory > 0 &&
-            typeof representative.pressurePa === 'number' &&
-            typeof representative.temperatureK === 'number'
+            typeof representativeHydroPoint.pressurePa === 'number' &&
+            typeof representativeHydroPoint.temperatureK === 'number'
           ) {
             const expectedLocal = (
-              n2MoleFraction * representative.pressurePa /
-              (UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * representative.temperatureK)
+              n2MoleFraction * representativeHydroPoint.pressurePa /
+              (UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * representativeHydroPoint.temperatureK)
             ) * AVOGADRO_NUMBER_PER_MOL / 1e6;
             const recomputedMean =
               (n2Inventory / layer.layerThicknessM) * AVOGADRO_NUMBER_PER_MOL / 1e6;
