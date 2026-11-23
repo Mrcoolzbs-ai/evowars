@@ -1070,6 +1070,100 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
   return problems;
 }
 
+export interface ConfigurePrimaryPhysicalChemicalKineticsResult {
+  status: 'configured' | 'rejected';
+  /** On rejection this is the original object and is not mutated. */
+  state: ChemicalEvolutionState;
+  diagnostics: readonly string[];
+}
+
+/**
+ * Public, fail-closed configuration entry point for the primary physical
+ * chemistry state. Caller supplies independently sourced total column
+ * amounts for new/updated species; the function never manufactures them.
+ * Layer subcolumn amounts must remain ≤ their corresponding global totals.
+ */
+export function configurePrimaryPhysicalChemicalKinetics(
+  state: ChemicalEvolutionState,
+  config: ChemicalPhysicalKineticsState,
+  totalColumnInventoriesMolM2: Readonly<Record<string, number>>
+): ConfigurePrimaryPhysicalChemicalKineticsResult {
+  const diagnostics: string[] = [];
+  if (state.mode !== 'column_inventory') {
+    return {
+      status: 'rejected',
+      state,
+      diagnostics: ['physical chemistry requires column_inventory; normalized game inventory cannot be converted to molecules/cm³']
+    };
+  }
+  if (!isPlainChemicalRecord(totalColumnInventoriesMolM2)) {
+    return {
+      status: 'rejected',
+      state,
+      diagnostics: ['totalColumnInventoriesMolM2 must be a plain object of explicitly supplied mol/m² values']
+    };
+  }
+  const additions: Record<string, number> = {};
+  for (const [speciesId, amount] of Object.entries(totalColumnInventoriesMolM2)) {
+    if (!Object.prototype.hasOwnProperty.call(CHEMICAL_TO_MECHANISM_SPECIES, speciesId)) {
+      diagnostics.push('unsupported physical chemical species ID «' + speciesId + '»');
+      continue;
+    }
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+      diagnostics.push('total column amount for «' + speciesId + '» must be finite and non-negative mol/m²; zero must be explicit');
+      continue;
+    }
+    additions[speciesId] = amount;
+  }
+  if (diagnostics.length > 0) {
+    return { status: 'rejected', state, diagnostics };
+  }
+
+  const inventory = { ...state.inventory, ...additions };
+  const candidate: ChemicalEvolutionState = {
+    ...state,
+    inventory,
+    reservoirs: {
+      ...state.reservoirs,
+      atmospheric: { ...state.reservoirs.atmospheric, ...inventory }
+    },
+    physicalKinetics: {
+      maximumMacroStepS: config.maximumMacroStepS,
+      layers: config.layers.map((layer) => ({
+        ...layer,
+        thicknessProvenance: { ...layer.thicknessProvenance },
+        temperatureProvenance: { ...layer.temperatureProvenance },
+        inventoryProvenance: { ...layer.inventoryProvenance },
+        columnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
+        reactionIds: [...layer.reactionIds]
+      }))
+    }
+  };
+  const configProblems = physicalChemicalKineticsConfigurationProblems(candidate);
+  if (configProblems.length > 0) {
+    return {
+      status: 'rejected',
+      state,
+      diagnostics: configProblems
+    };
+  }
+  recomputeFractions(candidate);
+  // The mechanism includes neutral radicals whose molar masses are not
+  // present in the primary gas catalog. Never retain stale pressure.
+  if (candidate.meanMolarMassKgMol === null) {
+    candidate.surfacePressurePa = null;
+    candidate.notes = [
+      ...candidate.notes,
+      'поверхностное давление сброшено в unknown: физический инвентарь содержит виды с неизвестной молярной массой'
+    ];
+  }
+  return {
+    status: 'configured',
+    state: candidate,
+    diagnostics: ['physicalKinetics configured from explicit, provenance-backed layer inputs; no rates, species inventories or geometry were inferred']
+  };
+}
+
 function mechanismInventoriesFromChemicalLayer(
   layer: ChemicalPhysicalKineticLayer
 ): Record<string, number> {
