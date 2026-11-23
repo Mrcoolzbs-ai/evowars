@@ -2271,6 +2271,55 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         assumptions.push(...compartment.assumptions.map((assumption) => '[' + layer.layerId + '] ' + assumption));
       }
 
+      let verticalTransportAudit: ChemicalPhysicalKineticsStepAudit['verticalTransport'];
+      if (config.verticalTransport !== undefined) {
+        const transportLayers = updatedLayers.slice().sort((a, b) =>
+          a.altitudeRangeM!.min - b.altitudeRangeM!.min ||
+          a.altitudeRangeM!.max - b.altitudeRangeM!.max ||
+          a.layerId.localeCompare(b.layerId)
+        );
+        const transport = runVerticalEddyDiffusionStep({
+          layers: transportLayers,
+          speciesIds: [...config.verticalTransport.speciesIds],
+          durationS,
+          eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
+            ? [...config.verticalTransport.eddyDiffusivityM2S]
+            : config.verticalTransport.eddyDiffusivityM2S
+        });
+        if (transport.status !== 'completed') {
+          throw new Error(
+            'вертикальный перенос отклонён; химические изменения не будут зафиксированы отдельно: ' +
+            transport.diagnostics.join('; ')
+          );
+        }
+
+        // Diffusion changes only the explicitly selected subcolumn allocations.
+        // The total atmospheric inventory is unchanged because the transport
+        // operator enforces closed boundaries and column conservation.
+        const transportedByLayerId = new Map(
+          transport.layers.map((layer) => [layer.layerId, layer] as const)
+        );
+        for (let layerIndex = 0; layerIndex < updatedLayers.length; layerIndex++) {
+          const current = updatedLayers[layerIndex]!;
+          const transported = transportedByLayerId.get(current.layerId);
+          if (transported === undefined) {
+            throw new Error('вертикальный перенос вернул неизвестный или отсутствующий слой «' + current.layerId + '»');
+          }
+          updatedLayers[layerIndex] = transported;
+          const layerAudit = layerAudits.find((entry) => entry.layerId === current.layerId);
+          if (layerAudit === undefined) {
+            throw new Error('не найден kinetic audit слоя «' + current.layerId + '» после вертикального переноса');
+          }
+          layerAudit.finalColumnInventoriesMolM2 = { ...transported.columnInventoriesMolM2 };
+        }
+        verticalTransportAudit = transport.audit;
+        assumptions.push(
+          'Scheduler macro-step использует последовательное Lie-разделение: сначала Radau IIA химия по слоям, затем backward-Euler вертикальная турбулентная диффузия за тот же dt=' +
+          durationS + ' s; процессы атомарны, но не решаются как одна связанная система'
+        );
+        assumptions.push(...transport.audit.assumptions);
+      }
+
       const elapsedYears = convert(quantity(durationS, 's'), 'yr').value;
       if (!Number.isFinite(elapsedYears) || elapsedYears <= 0) {
         throw new Error('физическая длительность Scheduler не преобразуется в конечные положительные юлианские годы');
@@ -2284,6 +2333,7 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         stepSelectionMethod: lastProposal?.method ?? 'state-dependent proposal',
         layers: layerAudits,
         unmodeledColumnResiduals,
+        ...(verticalTransportAudit === undefined ? {} : { verticalTransport: verticalTransportAudit }),
         warnings,
         assumptions
       };
@@ -2330,7 +2380,19 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         physicalKinetics: {
           maximumMacroStepS: config.maximumMacroStepS,
           totalInventoryProvenance: derivedGlobalInventoryProvenance,
-          layers: updatedLayers
+          layers: updatedLayers,
+          ...(config.verticalTransport === undefined
+            ? {}
+            : {
+                verticalTransport: {
+                  ...config.verticalTransport,
+                  speciesIds: [...config.verticalTransport.speciesIds],
+                  eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
+                    ? [...config.verticalTransport.eddyDiffusivityM2S]
+                    : config.verticalTransport.eddyDiffusivityM2S,
+                  diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance }
+                }
+              })
         },
         physicalKineticsHistory: [...(working.physicalKineticsHistory ?? []), audit]
       };
