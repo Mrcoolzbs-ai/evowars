@@ -901,26 +901,34 @@
 > фиксируются одним commit. Ошибка переноса откатывает и предшествующую
 > химию. Проверено E2E на явно синтетическом Kzz; при overflow Kzz
 > Scheduler возвращает rejected и исходный мир остаётся неизменным.
-> Расширение Stage 4.2: тот же вертикальный оператор теперь опционально
-> включает молекулярную диффузию выбранных trace species. На каждом
-> интерфейсе бинарные D_ij рассчитываются Chapman–Enskog + Neufeld из
-> явных Lennard–Jones collision diameter/energy и локальных P/T;
-> mixture-averaged D_i использует локальные mole fractions. Поток
-> дополнен gravitational/barodiffusion separation и thermal diffusion
-> alpha_T/T*dT/dz; molecular drift аппроксимируется upwind внутри
-> консервативного backward-Euler finite-volume solve. Входные molar mass,
-> sigma, epsilon/kB, alpha_T и их provenance обязательны как для каждого
-> tracer, так и для каждого ненулевого bulk-компонента. Отсутствующие
-> параметры дают fail-closed; значения не извлекаются по имени/формуле.
-> Ограничение: effective-binary trace approximation, x_i ≤ 1%, а не
-> полная Stefan–Maxwell система; фон и гидростатика фиксированы, N2/O2
-> не переносятся, Kzz остаётся caller-supplied и не калиброван. E2E
-> проверка Scheduler использует только синтетические LJ/alphaT параметры
-> и явно маркирует их как тестовые, не земные наблюдения. Химия и оба
-> вида переноса входят в один атомарный Scheduler commit, но идут
-> последовательно (Lie splitting), а не решаются как единая связанная
-> система. Конвекция, фотохимия и пополнение всё ещё не реализованы.
-> Полное закрытие атмосферного переноса и Stage 4.2 остаётся открытым.
-> Формулировка molecular flux опирается на Belikov et al. (2019,
-> https://doi.org/10.5194/acp-19-5349-2019); Chapman–Enskog/Neufeld:
-> NASA/AIAA 2003-0545.
+> Расширение Stage 4.2: молекулярная диффузия и gravitational/barodiffusion
+> separation реализованы как опциональное дополнение к Kzz. Бинарные D_ij
+> рассчитываются Chapman–Enskog + Neufeld из явных Lennard–Jones параметров
+> и локальных P/T; trace mixture D_i использует локальные mole fractions.
+> Поток включает barodiffusion и thermal diffusion alpha_T/T*dT/dz;
+> drift аппроксимируется upwind внутри консервативного backward-Euler solve.
+> Все molar mass, sigma, epsilon/kB, alpha_T и provenance обязательны;
+> отсутствие данных даёт fail-closed. Применимость: effective-binary trace
+> approximation, x_i ≤ 1%, а не полная Stefan–Maxwell система.
+>
+> Добавлен новый опциональный dry-convective tracer-mixing closure.
+> NASA CEA Cp(T) и гидростатический состав дают theta_v; устойчивость
+> диагностируется по N²=g*dln(theta_v)/dz. При N²<0 вычисляется
+> Kconv=C*l²*sqrt(-N²), l=min(alpha*sqrt(H_lower*H_upper), dz_centres).
+> Kconv добавляется к caller-supplied Kzz только для выбранных trace species;
+> alpha, efficiency и provenance задаются явно, NASA Cp вне диапазона
+> либо отсутствующая термодинамика дают fail-closed. E2E и unit tests
+> используют явно синтетические и некалиброванные closure/LJ параметры.
+>
+> Важная граница: реализован только перенос tracer-веществ вследствие
+> сухой конвективной неустойчивости; нет конвективного теплового потока,
+> коррекции T(z), сухой адиабатической перестройки слоя, влажной конвекции,
+> скрытой теплоты или облачности. Гидростатический фон фиксирован; N2/O2
+> не перемещаются. Kzz и mixing-length closure не откалиброваны.
+> Химия, eddy, molecular и dry-convective transport остаются одним
+> атомарным Scheduler commit, но идут последовательно (Lie splitting),
+> а не в одной связанной системе. Photochemistry и replenishment отсутствуют.
+> Полное закрытие переноса и Stage 4.2 всё ещё открыто.
+> Источники: Belikov et al. 2019, https://doi.org/10.5194/acp-19-5349-2019;
+> Exo_k dry convection, https://perso.astrophy.u-bordeaux.fr/~jleconte/exo_k-doc/exo_k_evol.html;
+> Teixeira & Cheinet 2004, https://doi.org/10.1023/B:BOUN.0000007230.96303.0D.
