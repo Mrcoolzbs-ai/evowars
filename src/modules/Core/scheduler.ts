@@ -1147,16 +1147,21 @@ export function runMacroStep(
           }
 
           const eventLocalTimeS = currentPoint.localTimeS + candidate.offsetS;
-          if (
-            !Number.isFinite(eventLocalTimeS) ||
-            eventLocalTimeS <= currentPoint.localTimeS ||
-            eventLocalTimeS - currentPoint.localTimeS !== candidate.offsetS
-          ) {
-            proposalProblems.push(
-              eventLabel + ': временная точка события не представима точно в текущем сегменте double; решатель должен повторно предложить её после сегментации времени'
-            );
-            return;
-          }
+          const eventTime: FluxTime =
+            Number.isFinite(eventLocalTimeS) &&
+            eventLocalTimeS > currentPoint.localTimeS &&
+            eventLocalTimeS - currentPoint.localTimeS === candidate.offsetS
+              ? {
+                  segmentIndex: currentPoint.segmentIndex,
+                  localTimeS: eventLocalTimeS
+                }
+              : {
+                  // The offset is positive but smaller than the next
+                  // representable increment at this large local time.
+                  // The matching exact coordinate is in the next segment.
+                  segmentIndex: currentPoint.segmentIndex + 1,
+                  localTimeS: candidate.offsetS
+                };
 
           let dataSnapshot: Record<string, unknown>;
           try {
@@ -1202,13 +1207,16 @@ export function runMacroStep(
     };
     proposals.push(normalized);
     for (const event of normalizedEvents) {
+      const eventLocalTimeS = currentPoint.localTimeS + event.offsetS;
       proposedEvents.push({
         ...event,
         processId,
-        time: {
-          segmentIndex: currentPoint.segmentIndex,
-          localTimeS: currentPoint.localTimeS + event.offsetS
-        }
+        time:
+          Number.isFinite(eventLocalTimeS) &&
+          eventLocalTimeS > currentPoint.localTimeS &&
+          eventLocalTimeS - currentPoint.localTimeS === event.offsetS
+            ? { segmentIndex: currentPoint.segmentIndex, localTimeS: eventLocalTimeS }
+            : { segmentIndex: currentPoint.segmentIndex + 1, localTimeS: event.offsetS }
       });
     }
     if (Array.isArray(normalized.diagnostics)) {
@@ -1479,14 +1487,16 @@ export function runMacroStep(
   // rebased by their exact local offset from the old current point.
   const targetLocalTimeS = current.clock.localTimeS + effectiveDurationS;
   const newClock =
-    eventBoundary !== undefined
+    eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex
       ? advanceTo(current.clock, eventBoundary.time)
-      : Number.isFinite(targetLocalTimeS) && targetLocalTimeS > current.clock.localTimeS
-        ? advanceTo(current.clock, {
-            segmentIndex: current.clock.segmentIndex,
-            localTimeS: targetLocalTimeS
-          })
-        : advance(current.clock, effectiveDurationS);
+      : eventBoundary !== undefined
+        ? advance(current.clock, effectiveDurationS)
+        : Number.isFinite(targetLocalTimeS) && targetLocalTimeS > current.clock.localTimeS
+          ? advanceTo(current.clock, {
+              segmentIndex: current.clock.segmentIndex,
+              localTimeS: targetLocalTimeS
+            })
+          : advance(current.clock, effectiveDurationS);
 
   const eventQueue =
     newClock.segmentIndex === current.clock.segmentIndex
