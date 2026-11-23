@@ -95,8 +95,11 @@ export interface VerticalEddyDiffusionInterfaceAudit {
   interfacePressurePa: number;
   interfaceTemperatureK: number;
   airMolarDensityMolM3: number;
-  /** Conductance multiplying the mixing-ratio difference, mol m⁻² s⁻¹. */
+  /** Effective eddy + dry-convective conductance, mol m⁻² s⁻¹. */
   conductanceMolM2S: number;
+  eddyConductanceMolM2S: number;
+  convectiveConductanceMolM2S: number;
+  effectiveEddyConductanceMolM2S: number;
   species: Record<string, VerticalEddyDiffusionInterfaceSpeciesAudit>;
 }
 
