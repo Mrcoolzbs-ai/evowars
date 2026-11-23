@@ -2284,7 +2284,8 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           durationS,
           eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
             ? [...config.verticalTransport.eddyDiffusivityM2S]
-            : config.verticalTransport.eddyDiffusivityM2S
+            : config.verticalTransport.eddyDiffusivityM2S,
+          diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance }
         });
         if (transport.status !== 'completed') {
           throw new Error(
