@@ -69,7 +69,7 @@ import type { ProcessRegistry } from './processRegistry';
 import { isProcessAutoRunnable, tauSeconds } from './processRegistry';
 import type { FluxAuditScope, FluxTime } from './fluxLedger';
 import type { SimulationClockState } from './simulationClock';
-import { advance, advanceTo, comparePoints, totalElapsedSeconds } from './simulationClock';
+import { advance, advanceTo, comparePoints, startNewSegment, totalElapsedSeconds } from './simulationClock';
 import { isPlainRecord } from './reservoir';
 import { auditWorldTransition } from './invariantAuditor';
 import { reactionLedgerAppendOnlyIssues } from './reactionLedger';
@@ -1488,7 +1488,7 @@ export function runMacroStep(
     eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex
       ? advanceTo(current.clock, eventBoundary.time)
       : eventBoundary !== undefined
-        ? advance(current.clock, effectiveDurationS)
+        ? advance(startNewSegment(current.clock), effectiveDurationS)
         : Number.isFinite(targetLocalTimeS) && targetLocalTimeS > current.clock.localTimeS
           ? advanceTo(current.clock, {
               segmentIndex: current.clock.segmentIndex,
