@@ -2229,3 +2229,94 @@ export function runReadyProcessesAt(
   }
 }
 
+export interface ScheduledWorldTurnOptions {
+  /** Mandatory audit for every world event dispatched before process execution. */
+  eventAudit: ProcessWorldEventOptions;
+  /** Maximum duration and optional invariant audit for due process execution. */
+  process: ScheduledProcessRunOptions;
+}
+
+export interface ScheduledWorldTurnResult {
+  status: 'completed' | 'idle' | 'failed';
+  world: CoreWorldState;
+  eventDispatch?: ProcessDueWorldEventsResult;
+  processRun?: ScheduledProcessRunResult;
+  diagnostics: readonly string[];
+}
+
+/**
+ * Execute one deterministic scheduler turn at the current WorldClock point:
+ * 1) dispatch every due world event in (TimePoint, sequence) order;
+ * 2) if and only if all events succeeded, run processes whose exact
+ *    nextDueTime has arrived at that same TimePoint.
+ *
+ * No time is advanced when there is no due work. A failed/missing event
+ * handler stops the turn before any process operator can observe a
+ * partially transitioned world.
+ */
+export function runScheduledWorldTurn(
+  world: CoreWorldState,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  eventHandlers: Readonly<Record<string, WorldEventHandler>>,
+  options: ScheduledWorldTurnOptions
+): ScheduledWorldTurnResult {
+  let eventDispatch: ProcessDueWorldEventsResult;
+  try {
+    eventDispatch = processDueWorldEvents(world, eventHandlers, options.eventAudit);
+  } catch (error) {
+    return {
+      status: 'failed',
+      world,
+      diagnostics: [
+        'ход Scheduler остановлен до обработки событий: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+  if (eventDispatch.status === 'failed') {
+    return {
+      status: 'failed',
+      world: eventDispatch.world,
+      eventDispatch,
+      diagnostics: [...eventDispatch.diagnostics, 'процессы текущего хода не запускались из-за ошибки события']
+    };
+  }
+
+  const processRun = runReadyProcessesAt(
+    eventDispatch.world,
+    registry,
+    operators,
+    options.process
+  );
+  if (processRun.status === 'rejected') {
+    return {
+      status: 'failed',
+      world: processRun.world,
+      eventDispatch,
+      processRun,
+      diagnostics: [...eventDispatch.diagnostics, ...processRun.diagnostics]
+    };
+  }
+
+  const didEventWork = eventDispatch.results.length > 0;
+  if (processRun.status === 'idle' && !didEventWork) {
+    return {
+      status: 'idle',
+      world: processRun.world,
+      eventDispatch,
+      processRun,
+      diagnostics: [...eventDispatch.diagnostics, ...processRun.diagnostics]
+    };
+  }
+
+  return {
+    status: 'completed',
+    world: processRun.world,
+    eventDispatch,
+    processRun,
+    diagnostics: [...eventDispatch.diagnostics, ...processRun.diagnostics]
+  };
+}
+
+
