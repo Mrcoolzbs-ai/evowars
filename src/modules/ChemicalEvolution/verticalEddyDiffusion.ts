@@ -142,6 +142,9 @@ interface InterfaceGeometry {
   temperatureK: number;
   airMolarDensityMolM3: number;
   conductanceMolM2S: number;
+  meanMolarMassKgMol: number;
+  gravityMs2: number;
+  temperatureGradientKPerM: number;
 }
 
 interface MolecularInterfaceState {
@@ -558,7 +561,14 @@ export function runVerticalEddyDiffusionStep(
       pressurePa: interfacePressurePa,
       temperatureK: interfaceTemperatureK,
       airMolarDensityMolM3,
-      conductanceMolM2S
+      conductanceMolM2S,
+      meanMolarMassKgMol: Math.sqrt(
+        lowerEdge.meanMolarMassKgPerMol * upperEdge.meanMolarMassKgPerMol
+      ),
+      gravityMs2: Math.sqrt(lowerEdge.gravityMs2 * upperEdge.gravityMs2),
+      temperatureGradientKPerM:
+        (upper.layer.hydrostaticState!.representative.temperatureK -
+          lower.layer.hydrostaticState!.representative.temperatureK) / centerDistanceM
     });
   }
 
@@ -587,6 +597,100 @@ export function runVerticalEddyDiffusionStep(
     const initialMixingRatios = initial.map((amount, index) =>
       amount / validatedLayers[index]!.airColumnInventoryMolM2
     );
+
+    const molecularStates: MolecularInterfaceState[] | undefined =
+      molecularConfiguration === undefined
+        ? undefined
+        : interfaces.map((interfaceGeometry, interfaceIndex) => {
+            const lower = validatedLayers[interfaceGeometry.lowerLayerIndex]!;
+            const upper = validatedLayers[interfaceGeometry.upperLayerIndex]!;
+            const lowerFractions = lower.layer.hydrostaticState!.molarFractions;
+            const upperFractions = upper.layer.hydrostaticState!.molarFractions;
+            const lowerIds = Object.keys(lowerFractions).sort();
+            const upperIds = Object.keys(upperFractions).sort();
+            if (lowerIds.join('|') !== upperIds.join('|')) {
+              throw new Error('bulk composition species differ across molecular-diffusion interface ' + interfaceIndex);
+            }
+            const traceMoleFraction =
+              (initialMixingRatios[interfaceGeometry.lowerLayerIndex]! +
+                initialMixingRatios[interfaceGeometry.upperLayerIndex]!) / 2;
+            if (
+              !Number.isFinite(traceMoleFraction) ||
+              traceMoleFraction < 0 ||
+              traceMoleFraction > TRACE_SPECIES_MAX_MOLE_FRACTION
+            ) {
+              throw new Error(
+                'молекулярная Chapman-Enskog смесь требует trace mixing ratio ≤ ' +
+                TRACE_SPECIES_MAX_MOLE_FRACTION + ' для вида «' + speciesId +
+                '» на интерфейсе ' + interfaceIndex
+              );
+            }
+            const speciesParameters = molecularConfiguration.species[speciesId]!;
+            const binaryDiffusivitiesM2S: Record<string, number> = {};
+            let reciprocalMixtureDiffusivity = 0;
+            for (const backgroundId of lowerIds) {
+              const lowerFraction = lowerFractions[backgroundId]!;
+              const upperFraction = upperFractions[backgroundId]!;
+              const backgroundFraction = (lowerFraction + upperFraction) / 2;
+              const backgroundParameters = molecularConfiguration.backgroundSpecies[backgroundId]!;
+              const binaryDiffusivity = computeChapmanEnskogBinaryDiffusivityM2S({
+                temperatureK: interfaceGeometry.temperatureK,
+                pressurePa: interfaceGeometry.pressurePa,
+                speciesA: speciesParameters,
+                speciesB: backgroundParameters
+              });
+              if (!isFinitePositive(binaryDiffusivity)) {
+                throw new Error('Chapman-Enskog D_ij неконечен для пары «' + speciesId + '/' + backgroundId + '»');
+              }
+              binaryDiffusivitiesM2S[backgroundId] = binaryDiffusivity;
+              reciprocalMixtureDiffusivity += backgroundFraction / binaryDiffusivity;
+            }
+            const molecularDiffusivityM2S =
+              (1 - traceMoleFraction) / reciprocalMixtureDiffusivity;
+            const gravityGradientMInverse =
+              (speciesParameters.molarMassKgMol - interfaceGeometry.meanMolarMassKgMol) *
+              interfaceGeometry.gravityMs2 /
+              (UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * interfaceGeometry.temperatureK);
+            const thermalGradientMInverse =
+              speciesParameters.thermalDiffusionFactor *
+              interfaceGeometry.temperatureGradientKPerM /
+              interfaceGeometry.temperatureK;
+            const barodiffusionVelocityMs = -molecularDiffusivityM2S * gravityGradientMInverse;
+            const thermalDiffusionVelocityMs = -molecularDiffusivityM2S * thermalGradientMInverse;
+            const driftVelocityMs = barodiffusionVelocityMs + thermalDiffusionVelocityMs;
+            const totalGradientConductance =
+              interfaceGeometry.airMolarDensityMolM3 *
+              (interfaceGeometry.eddyDiffusivityM2S + molecularDiffusivityM2S) /
+              interfaceGeometry.centerDistanceM;
+            const driftFluxCoefficientMolM2S =
+              interfaceGeometry.airMolarDensityMolM3 * driftVelocityMs;
+            const lowerFluxCoefficientMolM2S =
+              totalGradientConductance + Math.max(0, driftFluxCoefficientMolM2S);
+            const upperFluxCoefficientMolM2S =
+              -totalGradientConductance + Math.min(0, driftFluxCoefficientMolM2S);
+            if (
+              !isFinitePositive(molecularDiffusivityM2S) ||
+              !Number.isFinite(gravityGradientMInverse) ||
+              !Number.isFinite(thermalGradientMInverse) ||
+              !Number.isFinite(barodiffusionVelocityMs) ||
+              !Number.isFinite(thermalDiffusionVelocityMs) ||
+              !Number.isFinite(driftVelocityMs) ||
+              !Number.isFinite(lowerFluxCoefficientMolM2S) ||
+              !Number.isFinite(upperFluxCoefficientMolM2S)
+            ) {
+              throw new Error('молекулярные интерфейсные коэффициенты неконечны для вида «' + speciesId + '»');
+            }
+            return {
+              diffusivityM2S: molecularDiffusivityM2S,
+              binaryDiffusivitiesM2S,
+              barodiffusionVelocityMs,
+              thermalDiffusionVelocityMs,
+              driftVelocityMs,
+              lowerFluxCoefficientMolM2S,
+              upperFluxCoefficientMolM2S
+            };
+          });
+
     const initialDifferences = interfaces.map((_entry, index) =>
       initialMixingRatios[index]! - initialMixingRatios[index + 1]!
     );
