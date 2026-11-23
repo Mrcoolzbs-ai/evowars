@@ -1336,16 +1336,51 @@ function WorldDisplay(props: {
                           <li key={reaction.reactionId}>
                             {reaction.reactionId}: k={reaction.rateConstant.value.toExponential(4)} {reaction.rateConstant.unit};{' '}
                             диапазон {reaction.appliedRangeK.min}–{reaction.appliedRangeK.max} K;{' '}
+                            источник: {reaction.provenance.sourceName ?? reaction.provenance.reference ?? 'не указан'};{' '}
                             неопределённость: {reaction.uncertainty.status}
                           </li>
                         ))}
                       </ul>
+                      <details>
+                        <summary>Проверяемое происхождение входных данных</summary>
+                        <p>
+                          Температура: {layer.temperatureProvenance.sourceName ?? '—'};{' '}
+                          {layer.temperatureProvenance.reference ?? layer.temperatureProvenance.sourceId ?? 'reference не указан'}
+                        </p>
+                        <p>
+                          Толщина: {layer.thicknessProvenance.sourceName ?? '—'};{' '}
+                          {layer.thicknessProvenance.reference ?? layer.thicknessProvenance.sourceId ?? 'reference не указан'}
+                        </p>
+                        <p>
+                          Подстолбовые запасы: {layer.inventoryProvenance.sourceName ?? '—'};{' '}
+                          {layer.inventoryProvenance.reference ?? layer.inventoryProvenance.sourceId ?? 'reference не указан'}
+                        </p>
+                        <ul>
+                          {Object.entries(layer.totalInventoryProvenance).map(([speciesId, provenance]) => (
+                            <li key={speciesId}>
+                              {speciesId}: {provenance.sourceName ?? '—'};{' '}
+                              {provenance.reference ?? provenance.sourceId ?? 'reference не указан'}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
                     </div>
                   ))}
                   {audit.warnings.length > 0 && (
-                    <ul>
-                      {audit.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
-                    </ul>
+                    <>
+                      <strong>Предупреждения источников/вычисления</strong>
+                      <ul>
+                        {audit.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+                      </ul>
+                    </>
+                  )}
+                  {audit.assumptions.length > 0 && (
+                    <details>
+                      <summary>Допущения текущего кинетического шага</summary>
+                      <ul>
+                        {audit.assumptions.map((assumption, index) => <li key={index}>{assumption}</li>)}
+                      </ul>
+                    </details>
                   )}
                 </div>
               ))}
