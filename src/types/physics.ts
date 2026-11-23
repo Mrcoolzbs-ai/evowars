@@ -452,6 +452,19 @@ export interface ChemicalKineticReactionAudit {
   dataStatus: 'known';
   rateConstant: { value: number; unit: string };
   appliedRangeK: { min: number; max: number };
+  /**
+   * Для текущих fall-off записей эффективная неопределённость остаётся
+   * неизвестной: контракт вычислителя не объединяет неопределённости
+   * k0/k∞, а выбранные компонентные параметризации не задают полного
+   * количественного бюджета. null — честно неизвестно, не ноль.
+   */
+  uncertainty: {
+    status: 'not_quantified';
+    effectiveRate: null;
+    lowPressureLimit: null;
+    highPressureLimit: null;
+    reason: string;
+  };
   provenance: DataProvenance;
   parameterProvenance: {
     lowPressureLimit: DataProvenance;
