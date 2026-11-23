@@ -280,6 +280,8 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
         const v = dynamics[key];
         if (v !== null && (typeof v !== 'number' || !Number.isFinite(v))) {
           issues.push('processDynamics[' + processId + '].' + key + ' должен быть конечным числом или null');
+        } else if (typeof v === 'number' && v < 0) {
+          issues.push('processDynamics[' + processId + '].' + key + ' не может быть отрицательным elapsed-временем');
         }
       }
       for (const key of ['macroStepsCompleted', 'operatorCallsCompleted'] as const) {
@@ -295,6 +297,8 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
     issues.push('eventQueue должен быть массивом событий');
   } else {
     const seenEventIds = new Set<string>();
+    const seenEventSequences = new Set<number>();
+    let maxEventSequence = -1;
     bk.eventQueue.forEach((event, index) => {
       const label = 'eventQueue[' + String(index) + ']';
       if (!isPlainRecord(event)) {
@@ -332,6 +336,13 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
       }
       if (typeof event.sequence !== 'number' || !Number.isInteger(event.sequence) || event.sequence < 0) {
         issues.push(label + ': sequence должен быть неотрицательным целым');
+      } else {
+        if (seenEventSequences.has(event.sequence)) {
+          issues.push(label + ': дублирующийся sequence события ' + String(event.sequence));
+        } else {
+          seenEventSequences.add(event.sequence);
+        }
+        maxEventSequence = Math.max(maxEventSequence, event.sequence);
       }
     });
   }
@@ -368,6 +379,11 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
 
   if (typeof bk.nextSequence !== 'number' || !Number.isInteger(bk.nextSequence) || bk.nextSequence < 0) {
     issues.push('nextSequence должен быть неотрицательным целым');
+  } else if (maxEventSequence >= bk.nextSequence) {
+    issues.push(
+      'nextSequence должен быть строго больше всех уже назначенных sequence (max=' +
+        String(maxEventSequence) + ', next=' + String(bk.nextSequence) + ')'
+    );
   }
   if (typeof bk.stepCount !== 'number' || !Number.isInteger(bk.stepCount) || bk.stepCount < 0) {
     issues.push('stepCount должен быть неотрицательным целым');
@@ -384,6 +400,14 @@ export function enqueueEvent(
   bk: SchedulerBookkeeping,
   event: { id: string; time: FluxTime; type: string; data: Record<string, unknown>; source: string }
 ): SchedulerBookkeeping {
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя поставить событие в некорректное состояние Scheduler: ' + bookkeepingIssues.join('; '),
+      null
+    );
+  }
   const issues: string[] = [];
   if (typeof event.id !== 'string' || event.id.trim() === '') {
     issues.push('id события должен быть непустой строкой');
@@ -483,6 +507,14 @@ export function processEvent(
   eventId: string,
   handler: (event: WorldEvent) => void
 ): EventProcessingResult {
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя обработать событие в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      eventId
+    );
+  }
   const index = bk.eventQueue.findIndex((e) => e.id === eventId);
   if (index === -1) {
     throw new SchedulerError('invalid_event', 'событие «' + eventId + '» не найдено в очереди', eventId);
