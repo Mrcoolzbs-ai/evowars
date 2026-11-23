@@ -181,7 +181,7 @@ describe('Stage 4.9a.1 (A): вещества и каталоги видов', ()
     // аддитивность и уникальность id сохранены.
     // Stage 4.9f: добавлены ca2_aq (ион кальция) и aragonite (полиморф
     // CaCO3 отдельной записью); caco3 сохранён как кальцит.
-    expect(GEOCHEMICAL_SPECIES_DEFINITIONS.map((d) => d.id).sort()).toEqual(['aragonite', 'c_org', 'caco3', 'ca2_aq', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    expect(GEOCHEMICAL_SPECIES_DEFINITIONS.map((d) => d.id).sort()).toEqual(['aragonite', 'c_org', 'ca2_aq', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(validateGeochemicalSpeciesDefinitions()).toEqual([]);
     const geo = buildGeochemicalSpeciesCatalog();
     expect(geo.size()).toBe(10);
@@ -192,12 +192,12 @@ describe('Stage 4.9a.1 (A): вещества и каталоги видов', ()
     const merged = addGeochemicalSpeciesToCatalog(production);
     expect(merged.issues).toEqual([]);
     expect(merged.conflicts).toEqual([]);
-    expect([...merged.added].sort()).toEqual(['aragonite', 'c_org', 'caco3', 'ca2_aq', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    expect([...merged.added].sort()).toEqual(['aragonite', 'c_org', 'ca2_aq', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(merged.catalog.size()).toBe(production.size() + 10);
     // повторное слияние идемпотентно: ничего не добавляется заново
     const again = addGeochemicalSpeciesToCatalog(merged.catalog);
     expect(again.added).toEqual([]);
-    expect([...again.skipped].sort()).toEqual(['aragonite', 'c_org', 'caco3', 'ca2_aq', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
+    expect([...again.skipped].sort()).toEqual(['aragonite', 'c_org', 'ca2_aq', 'caco3', 'co2_aq', 'co3_aq', 'h2o_aq', 'hco3_aq', 'hplus_aq', 'oh_aq']);
     expect(again.conflicts).toEqual([]);
   });
 
