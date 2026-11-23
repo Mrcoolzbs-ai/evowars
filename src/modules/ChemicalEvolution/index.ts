@@ -187,6 +187,12 @@ export interface CreateChemicalStateInput {
   surfaceGravityMs2?: number | null;
   /** Длительность шага, лет (игровое допущение; по умолчанию 1 млн лет) */
   stepDurationYears?: number;
+  /**
+   * Опциональная конфигурация физической химической кинетики основного
+   * ChemicalEvolutionState. Она не создаётся из пресета автоматически:
+   * слои/толщина/температура/подстолбовые запасы должны быть заданы явно.
+   */
+  physicalKinetics?: ChemicalPhysicalKineticsState;
 }
 
 /** Молярная масса газа в кг/моль; null, если неизвестна. */
@@ -263,6 +269,22 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
     modelTimeYears: 0,
     stepDurationYears,
     history: [],
+    ...(input.physicalKinetics === undefined
+      ? {}
+      : {
+          physicalKinetics: {
+            maximumMacroStepS: input.physicalKinetics.maximumMacroStepS,
+            layers: input.physicalKinetics.layers.map((layer) => ({
+              ...layer,
+              thicknessProvenance: { ...layer.thicknessProvenance },
+              temperatureProvenance: { ...layer.temperatureProvenance },
+              inventoryProvenance: { ...layer.inventoryProvenance },
+              columnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
+              reactionIds: [...layer.reactionIds]
+            }))
+          },
+          physicalKineticsHistory: []
+        }),
     oxygenBalance: {
       production: 0,
       consumption: 0,
@@ -272,7 +294,7 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
     notes: [
       `длительность шага — ${stepDurationYears} лет: игровое допущение, а не рассчитанное время`,
       'скорости реакций задаются степенью превращения за шаг (режим A) и являются игровым предположением',
-      'кинетический режим B недоступен: у реакций каталога нет проверенных кинетических констант'
+      'физическая кинетика включается только при явно заданной конфигурации слоёв; отсутствие конфигурации не создаёт кинетических условий автоматически'
     ]
   };
 }
