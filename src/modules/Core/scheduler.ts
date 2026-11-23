@@ -331,8 +331,14 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
       if (typeof event.status !== 'string' || !(WORLD_EVENT_STATUSES as readonly string[]).includes(event.status)) {
         issues.push(label + ': status должен быть одним из: ' + WORLD_EVENT_STATUSES.join(', '));
       }
-      if (event.failReason !== undefined && typeof event.failReason !== 'string') {
-        issues.push(label + ': failReason должен быть строкой, если задан');
+      if (event.failReason !== undefined && (typeof event.failReason !== 'string' || event.failReason.trim() === '')) {
+        issues.push(label + ': failReason должен быть непустой строкой, если задан');
+      }
+      if (event.status === 'failed' && (typeof event.failReason !== 'string' || event.failReason.trim() === '')) {
+        issues.push(label + ': событие failed обязано содержать непустой failReason');
+      }
+      if (event.status !== 'failed' && event.failReason !== undefined) {
+        issues.push(label + ': failReason допустим только при status=failed');
       }
       if (typeof event.sequence !== 'number' || !Number.isInteger(event.sequence) || event.sequence < 0) {
         issues.push(label + ': sequence должен быть неотрицательным целым');
@@ -532,7 +538,10 @@ export function processEvent(
     // annotate its local copy, but cannot mutate the persisted queue row.
     handler(structuredClone(event));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const rawReason = error instanceof Error ? error.message : String(error);
+    const reason = rawReason.trim() === ''
+      ? 'обработчик завершился ошибкой без диагностического сообщения'
+      : rawReason;
     const queue = [...bk.eventQueue];
     queue[index] = { ...event, status: 'failed', failReason: reason };
     return { bookkeeping: { ...bk, eventQueue: queue }, status: 'failed', failReason: reason };
