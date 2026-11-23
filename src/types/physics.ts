@@ -424,7 +424,15 @@ export interface ChemicalStepRecord {
  */
 export interface ChemicalPhysicalKineticLayer {
   layerId: string;
-  /** Геометрическая толщина однородного слоя, м; выводить из масштаба высоты запрещено. */
+  /**
+   * Абсолютный интервал высот над принятой опорной поверхностью, м.
+   * Для многослойной конфигурации обязателен во всех слоях, чтобы
+   * проверять неперекрытие и согласованность с геометрической толщиной.
+   * Для одиночного компартмента остаётся необязательным.
+   */
+  altitudeRangeM?: { min: number; max: number };
+  altitudeProvenance?: DataProvenance;
+  /** Геометрическая толщина однородного слоя, м; при altitudeRangeM должна равняться max-min. */
   layerThicknessM: number;
   thicknessProvenance: DataProvenance;
   /** Локальная изотермическая температура слоя, K. */
@@ -490,6 +498,8 @@ export interface ChemicalKineticLayerStepAudit {
   layerThicknessM: number;
   temperatureProvenance: DataProvenance;
   thicknessProvenance: DataProvenance;
+  altitudeRangeM: { min: number; max: number } | null;
+  altitudeProvenance: DataProvenance | null;
   inventoryProvenance: DataProvenance;
   /** Источники полных атмосферных запасов видов, относящихся к слою. */
   totalInventoryProvenance: Record<string, DataProvenance>;
