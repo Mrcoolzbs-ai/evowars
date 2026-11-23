@@ -360,6 +360,113 @@ describe('vertical eddy diffusion', () => {
     }
   });
 
+  it('keeps dry-statically stable layers free of a convective diffusivity contribution', () => {
+    const layers = twoLayerColumn();
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['no'],
+      durationS: 100,
+      eddyDiffusivityM2S: 0,
+      dryConvectiveMixing: {
+        speciesIds: ['no'],
+        mixingLengthScaleHeightFraction: 0.5,
+        efficiencyCoefficient: 0.1,
+        provenance: {
+          sourceName: 'synthetic mixing-length closure used for unit testing',
+          sourceId: 'test:dry-convection:stable'
+        }
+      }
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.audit.dryConvectiveMixing?.method)
+      .toBe('dry_mixing_length_virtual_potential_temperature');
+    expect(result.audit.dryConvectiveMixing!.interfaces[0]!.bruntVaisalaFrequencySquaredS2)
+      .toBeGreaterThan(0);
+    expect(result.audit.dryConvectiveMixing!.interfaces[0]!.convectiveDiffusivityM2S).toBe(0);
+    expect(result.audit.interfaces[0]!.convectiveDiffusivityM2S).toBe(0);
+    expect(result.layers[0]!.columnInventoriesMolM2.no).toBe(0.5);
+    expect(result.layers[1]!.columnInventoriesMolM2.no).toBe(0);
+  });
+
+  it('adds a conservative convective tracer diffusivity only across dry-unstable interfaces', () => {
+    const stable = twoLayerColumn();
+    const lower = stable[0]!;
+    const upper = stable[1]!;
+    const unstableUpper = {
+      ...upper,
+      temperatureK: 274,
+      hydrostaticState: {
+        ...upper.hydrostaticState!,
+        bottom: { ...upper.hydrostaticState!.bottom, temperatureK: 274 },
+        representative: { ...upper.hydrostaticState!.representative, temperatureK: 274 },
+        top: { ...upper.hydrostaticState!.top, temperatureK: 274 }
+      }
+    };
+    const layers = [lower, unstableUpper];
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['no'],
+      durationS: 100,
+      eddyDiffusivityM2S: 0,
+      dryConvectiveMixing: {
+        speciesIds: ['no'],
+        mixingLengthScaleHeightFraction: 0.5,
+        efficiencyCoefficient: 0.05,
+        provenance: {
+          sourceName: 'synthetic mixing-length closure used for unit testing',
+          sourceId: 'test:dry-convection:unstable'
+        }
+      }
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    const convection = result.audit.dryConvectiveMixing!.interfaces[0]!;
+    expect(convection.bruntVaisalaFrequencySquaredS2).toBeLessThan(0);
+    expect(convection.isDryConvectivelyUnstable).toBe(true);
+    expect(convection.convectiveDiffusivityM2S).toBeGreaterThan(0);
+    expect(result.audit.interfaces[0]!.effectiveEddyDiffusivityM2S)
+      .toBeCloseTo(convection.convectiveDiffusivityM2S, 12);
+    expect(result.audit.interfaces[0]!.species.no!.convectiveGradientFluxMolM2S).toBeDefined();
+    expect(result.layers[0]!.columnInventoriesMolM2.no).toBeLessThan(0.5);
+    expect(result.layers[1]!.columnInventoriesMolM2.no).toBeGreaterThan(0);
+    expect(result.audit.columnTotalsMolM2.no!.after).toBeCloseTo(
+      result.audit.columnTotalsMolM2.no!.before,
+      10
+    );
+  });
+
+  it('fails closed when a bulk species lacks NASA CEA heat-capacity data', () => {
+    const layers = twoLayerColumn().map((layer) => ({
+      ...layer,
+      hydrostaticState: {
+        ...layer.hydrostaticState!,
+        molarFractions: { xenon: 1 }
+      }
+    }));
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['no'],
+      durationS: 1,
+      eddyDiffusivityM2S: 0,
+      dryConvectiveMixing: {
+        speciesIds: ['no'],
+        mixingLengthScaleHeightFraction: 0.5,
+        efficiencyCoefficient: 0.1,
+        provenance: {
+          sourceName: 'synthetic closure test',
+          sourceId: 'test:dry-convection:missing-cp'
+        }
+      }
+    });
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') {
+      expect(result.diagnostics.join('; ')).toContain('NASA CEA');
+    }
+  });
+
   it('fails closed for bulk species, missing inventories, vertical gaps, and pressure discontinuities', () => {
     const layers = twoLayerColumn();
     expect(runVerticalEddyDiffusionStep({
