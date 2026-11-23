@@ -135,6 +135,34 @@ describe('vertical eddy diffusion', () => {
     }
   });
 
+  it('handles three layers with a distinct Kzz at each interface', () => {
+    const layers = [
+      makeLayer('lower', 0, 100, 100000, 99000, 100, 110, { no: 0.8 }),
+      makeLayer('middle', 100, 250, 99000, 97500, 110, 125, { no: 0 }),
+      makeLayer('upper', 250, 450, 97500, 95500, 125, 145, { no: 0 })
+    ];
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['no'],
+      durationS: 100,
+      eddyDiffusivityM2S: [3, 1]
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.layers).toHaveLength(3);
+    expect(result.audit.interfaces).toHaveLength(2);
+    const total = result.audit.columnTotalsMolM2.no!;
+    expect(total.after).toBeCloseTo(total.before, 11);
+    const transfer0 = result.audit.interfaces[0]!.species.no!.transferredMolM2;
+    const transfer1 = result.audit.interfaces[1]!.species.no!.transferredMolM2;
+    expect(result.layers[0]!.columnInventoriesMolM2.no).toBeCloseTo(0.8 - transfer0, 10);
+    expect(result.layers[1]!.columnInventoriesMolM2.no).toBeCloseTo(transfer0 - transfer1, 10);
+    expect(result.layers[2]!.columnInventoriesMolM2.no).toBeCloseTo(transfer1, 10);
+    expect(result.audit.interfaces[0]!.eddyDiffusivityM2S).toBe(3);
+    expect(result.audit.interfaces[1]!.eddyDiffusivityM2S).toBe(1);
+  });
+
   it('uses an implicit solve that remains non-negative and conservative for a stiff diffusion step', () => {
     const result = runVerticalEddyDiffusionStep({
       layers: twoLayerColumn(),
