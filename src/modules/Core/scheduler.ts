@@ -844,6 +844,14 @@ export function runMacroStep(
 ): MacroStepResult {
   const originalBk: SchedulerBookkeeping = world.scheduling ?? createSchedulerBookkeeping();
   const stepIndex = originalBk.stepCount;
+  const bookkeepingIssues = validateSchedulerBookkeeping(originalBk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'состояние Scheduler отклонено до macro-step: ' + bookkeepingIssues.join('; '),
+      null
+    );
+  }
 
   if (!Number.isFinite(opts.durationS) || opts.durationS <= 0) {
     throw new SchedulerError('invalid_step', 'durationS должен быть положительным конечным числом, получено ' + String(opts.durationS), null);
@@ -1014,6 +1022,12 @@ export function runMacroStep(
 
   const proposals: Array<ProcessStepProposal & { processId: string }> = [];
   const proposalDiagnostics: string[] = [];
+  const currentPoint: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const proposedEventIds = new Set(originalBk.eventQueue.map((event) => event.id));
+  const proposedEvents: Array<ProcessEventProposal & { processId: string; time: FluxTime }> = [];
   let effectiveDurationS = opts.durationS;
   for (const processId of processIds) {
     const descriptor = registry.get(processId);
@@ -1076,6 +1090,96 @@ export function runMacroStep(
         proposalProblems.push('diagnostics, если заданы, должны быть массивом строк');
       }
     }
+
+    const normalizedEvents: ProcessEventProposal[] = [];
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && raw.events !== undefined) {
+      if (!Array.isArray(raw.events)) {
+        proposalProblems.push('events, если заданы, должны быть массивом ProcessEventProposal');
+      } else {
+        raw.events.forEach((candidate, index) => {
+          const eventLabel = 'events[' + String(index) + ']';
+          if (!isPlainRecord(candidate)) {
+            proposalProblems.push(eventLabel + ' должен быть объектом-словарём');
+            return;
+          }
+          if (typeof candidate.id !== 'string' || candidate.id.trim() === '') {
+            proposalProblems.push(eventLabel + '.id должен быть непустой строкой');
+          } else if (proposedEventIds.has(candidate.id)) {
+            proposalProblems.push(eventLabel + ': дублирующийся id события «' + candidate.id + '»');
+          }
+          if (
+            typeof candidate.offsetS !== 'number' ||
+            !Number.isFinite(candidate.offsetS) ||
+            candidate.offsetS <= 0
+          ) {
+            proposalProblems.push(eventLabel + '.offsetS должен быть конечным строго положительным временем в секундах');
+          } else if (
+            typeof raw.durationS === 'number' &&
+            Number.isFinite(raw.durationS) &&
+            raw.durationS > 0 &&
+            candidate.offsetS > raw.durationS
+          ) {
+            proposalProblems.push(eventLabel + '.offsetS выходит за предложенный интервал процесса');
+          }
+          if (typeof candidate.type !== 'string' || candidate.type.trim() === '') {
+            proposalProblems.push(eventLabel + '.type должен быть непустой строкой');
+          }
+          if (!isPlainRecord(candidate.data)) {
+            proposalProblems.push(eventLabel + '.data должен быть JSON-словарём');
+          } else {
+            const dataIssues = jsonSerializableIssues(candidate.data, eventLabel + '.data');
+            if (dataIssues.length > 0) {
+              proposalProblems.push(...dataIssues);
+            }
+          }
+
+          if (
+            typeof candidate.id !== 'string' || candidate.id.trim() === '' ||
+            proposedEventIds.has(candidate.id) ||
+            typeof candidate.offsetS !== 'number' || !Number.isFinite(candidate.offsetS) || candidate.offsetS <= 0 ||
+            typeof raw.durationS !== 'number' || !Number.isFinite(raw.durationS) || raw.durationS <= 0 ||
+            candidate.offsetS > raw.durationS ||
+            typeof candidate.type !== 'string' || candidate.type.trim() === '' ||
+            !isPlainRecord(candidate.data) ||
+            jsonSerializableIssues(candidate.data, eventLabel + '.data').length > 0
+          ) {
+            return;
+          }
+
+          const eventLocalTimeS = currentPoint.localTimeS + candidate.offsetS;
+          if (
+            !Number.isFinite(eventLocalTimeS) ||
+            eventLocalTimeS <= currentPoint.localTimeS ||
+            eventLocalTimeS - currentPoint.localTimeS !== candidate.offsetS
+          ) {
+            proposalProblems.push(
+              eventLabel + ': временная точка события не представима точно в текущем сегменте double; решатель должен повторно предложить её после сегментации времени'
+            );
+            return;
+          }
+
+          let dataSnapshot: Record<string, unknown>;
+          try {
+            dataSnapshot = structuredClone(candidate.data);
+          } catch (error) {
+            proposalProblems.push(
+              eventLabel + '.data не удалось изолировать: ' +
+                (error instanceof Error ? error.message : String(error))
+            );
+            return;
+          }
+
+          proposedEventIds.add(candidate.id);
+          normalizedEvents.push({
+            id: candidate.id,
+            offsetS: candidate.offsetS,
+            type: candidate.type,
+            data: dataSnapshot
+          });
+        });
+      }
+    }
+
     if (proposalProblems.length > 0) {
       return {
         status: 'rejected',
@@ -1093,9 +1197,20 @@ export function runMacroStep(
       durationS: raw.durationS as number,
       method: raw.method as string,
       ...(raw.characteristicTimeS === undefined ? {} : { characteristicTimeS: raw.characteristicTimeS as number }),
-      ...(raw.diagnostics === undefined ? {} : { diagnostics: [...(raw.diagnostics as string[])] })
+      ...(raw.diagnostics === undefined ? {} : { diagnostics: [...(raw.diagnostics as string[])] }),
+      ...(normalizedEvents.length === 0 ? {} : { events: normalizedEvents })
     };
     proposals.push(normalized);
+    for (const event of normalizedEvents) {
+      proposedEvents.push({
+        ...event,
+        processId,
+        time: {
+          segmentIndex: currentPoint.segmentIndex,
+          localTimeS: currentPoint.localTimeS + event.offsetS
+        }
+      });
+    }
     if (Array.isArray(normalized.diagnostics)) {
       proposalDiagnostics.push(...normalized.diagnostics.map((message) => '[' + processId + '] ' + message));
     }
@@ -1105,10 +1220,6 @@ export function runMacroStep(
   // segment. Segment indices are ordered exactly, but priorSegmentsS is
   // only an elapsed-time estimate; therefore we never translate a future
   // segment's event into a delta using that approximate sum.
-  const currentPoint = {
-    segmentIndex: world.clock.segmentIndex,
-    localTimeS: world.clock.localTimeS
-  };
   const pendingEventTime = nextEventTime(originalBk);
   let eventBoundary: MacroStepSizeReport['eventBoundary'];
   if (pendingEventTime !== null) {
