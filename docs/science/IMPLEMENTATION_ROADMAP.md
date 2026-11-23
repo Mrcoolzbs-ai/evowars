@@ -679,3 +679,22 @@
 > maxSteps/maxNewtonIterations, неотрицательность y0,
 > покомпонентный допуск линейных инвариантов
 > (absTolerance/relTolerance), честная статистика шагов
+
+> **Закрытие Stage 4.2 (2026-11-23, CI run #500): выполнены и сквозно
+> проверены все критерии раздела 4.2.** WorldClock поверх сегментированных
+> SimulationClock; Core ProcessRegistry и Scheduler; InvariantAuditor;
+> температурная иерархия 4.2.2; snapshot-изоляция macro-шага; ReactionLedger
+> в CoreWorldState/Storage и аудит реакции относительно материальных
+> инвентарей (4.2.3.2–4.2.3.4.1). Пользовательский шаг химической эволюции
+> в production UI использует runChemicalEvolutionSchedulerStep →
+> runMacroStep. Контрольная 100-шаговая траектория через Scheduler
+> совпала с прежним legacy golden SHA-256
+> 877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20;
+> модельное время — 100000000 лет, часы и bookkeeping Scheduler продвинулись
+> ровно 100 раз. Мост всех 11 процессов легаси-каталога включён в Core
+> ProcessRegistry, но они остаются disabled с tau=unknown и
+> solverAvailability=not_implemented; пользовательский стехиометрический
+> шаг — explicit_only. **Физическая кинетика и автоматические скорости не
+> заявляются и остаются вне закрытия 4.2.** CI: TypeScript, тесты, lint и
+> production build — success; 86 файлов / 3126 passed / 53 skipped,
+> 62 lint-предупреждения, 0 lint-ошибок.
