@@ -496,6 +496,59 @@ export interface ChemicalPhysicalKineticLayer {
   reactionIds: string[];
 }
 
+/** Явная конфигурация вертикального турбулентного переноса для Scheduler. */
+export interface ChemicalPhysicalVerticalTransportConfiguration {
+  /** Следовые species ID, явно присутствующие в каждом переносимом слое; n2/o2 запрещены. */
+  speciesIds: string[];
+  /** Kzz, м²/с: одно значение для всех интерфейсов или массив длиной layers.length - 1. */
+  eddyDiffusivityM2S: number | number[];
+  /** Источник/обоснование Kzz; без provenance перенос не считается физически заданным. */
+  diffusivityProvenance: DataProvenance;
+}
+
+/** Аудит вертикального обмена вещества за тот же Scheduler dt, что и химия. */
+export interface ChemicalPhysicalVerticalTransportAudit {
+  method: 'backward_euler_finite_volume';
+  boundaryCondition: 'closed_zero_flux';
+  durationS: number;
+  speciesIds: string[];
+  layers: Array<{
+    layerId: string;
+    altitudeRangeM: { min: number; max: number };
+    airColumnInventoryMolM2: number;
+    species: Record<string, {
+      initialColumnInventoryMolM2: number;
+      finalColumnInventoryMolM2: number;
+      initialMixingRatio: number;
+      finalMixingRatio: number;
+    }>;
+  }>;
+  interfaces: Array<{
+    lowerLayerId: string;
+    upperLayerId: string;
+    interfaceHeightM: number;
+    centerDistanceM: number;
+    eddyDiffusivityM2S: number;
+    interfacePressurePa: number;
+    interfaceTemperatureK: number;
+    airMolarDensityMolM3: number;
+    conductanceMolM2S: number;
+    species: Record<string, {
+      fluxMolM2S: number;
+      constitutiveFluxMolM2S: number;
+      fluxClosureRelativeDeviation: number;
+      transferredMolM2: number;
+    }>;
+  }>;
+  columnTotalsMolM2: Record<string, {
+    before: number;
+    after: number;
+    absoluteDifference: number;
+    relativeDeviation: number;
+  }>;
+  assumptions: string[];
+}
+
 /** Конфигурация физической кинетики, подключённая к основному ChemicalEvolutionState. */
 export interface ChemicalPhysicalKineticsState {
   /** Верхний численный предел macro dt, с; это ограничение исполнения, не характерное время реакции. */
@@ -504,6 +557,8 @@ export interface ChemicalPhysicalKineticsState {
   totalInventoryProvenance: Record<string, DataProvenance>;
   /** Явные однородные слои, каждый со своими температурой, толщиной и подстолбовым составом. */
   layers: ChemicalPhysicalKineticLayer[];
+  /** Опциональный явный Kzz-перенос; отсутствие поля оставляет прежнюю химию без transport. */
+  verticalTransport?: ChemicalPhysicalVerticalTransportConfiguration;
 }
 
 /** Снимок трассируемости одной реально применённой кинетической параметризации. */
@@ -596,6 +651,8 @@ export interface ChemicalPhysicalKineticsStepAudit {
     amountMolM2: number;
     provenance: DataProvenance;
   }>;
+  /** Присутствует только когда transport явно сконфигурирован и выполнен в этой же транзакции. */
+  verticalTransport?: ChemicalPhysicalVerticalTransportAudit;
   warnings: string[];
   assumptions: string[];
 }
