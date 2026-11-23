@@ -1985,12 +1985,18 @@ export function runMacroStep(
       processId,
       lastRunElapsedS: null,
       nextDueElapsedS: null,
+      lastRunTime: null,
+      nextDueTime: null,
       macroStepsCompleted: 0,
       operatorCallsCompleted: 0
     };
     newDynamics[processId] = {
       ...dynamics,
       lastRunElapsedS,
+      lastRunTime: {
+        segmentIndex: newClock.segmentIndex,
+        localTimeS: newClock.localTimeS
+      },
       macroStepsCompleted: dynamics.macroStepsCompleted + 1,
       operatorCallsCompleted: dynamics.operatorCallsCompleted + calls
     };
