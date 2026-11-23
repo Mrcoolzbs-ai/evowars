@@ -20,8 +20,10 @@ import {
   processEvent,
   processWorldEvent,
   readyProcessIds,
+  readyProcessIdsAt,
   runMacroStep,
   scheduleProcess,
+  scheduleProcessAt,
   sortedEvents,
   validateSchedulerBookkeeping
 } from '../Core/scheduler';
@@ -1155,6 +1157,79 @@ describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', 
 });
 
 describe('Stage 4.2.1 Scheduler: расписания процессов', () => {
+  it('точное расписание сравнивается по сегменту/локальному времени, а не через elapsed-сумму', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b'), descriptor('off', { enabled: false })]);
+    const opA: ProcessOperator = { processId: 'a', apply: (w) => w };
+    const opB: ProcessOperator = { processId: 'b', apply: (w) => w };
+    const opOff: ProcessOperator = { processId: 'off', apply: (w) => w };
+    let bk = createSchedulerBookkeeping();
+    bk = scheduleProcessAt(bk, 'a', { segmentIndex: 100000, localTimeS: 0.25 });
+    bk = scheduleProcessAt(bk, 'b', { segmentIndex: 100001, localTimeS: 0 });
+    bk = scheduleProcessAt(bk, 'off', { segmentIndex: 100000, localTimeS: 0 });
+
+    expect(readyProcessIdsAt(bk, registry, [opA, opB, opOff], {
+      segmentIndex: 99999,
+      localTimeS: 1e300
+    })).toEqual([]);
+    expect(readyProcessIdsAt(bk, registry, [opA, opB, opOff], {
+      segmentIndex: 100000,
+      localTimeS: 0.249
+    })).toEqual([]);
+    expect(readyProcessIdsAt(bk, registry, [opA, opB, opOff], {
+      segmentIndex: 100000,
+      localTimeS: 0.25
+    })).toEqual(['a']);
+    expect(readyProcessIdsAt(bk, registry, [opA, opB, opOff], {
+      segmentIndex: 100001,
+      localTimeS: 0
+    })).toEqual(['a', 'b']);
+    // Legacy elapsed-time readiness does not reinterpret exact segmented deadlines.
+    expect(readyProcessIds(bk, registry, [opA, opB, opOff], Number.MAX_VALUE)).toEqual([]);
+    expect(validateSchedulerBookkeeping(bk)).toEqual([]);
+    expect(validateSchedulerBookkeeping(JSON.parse(JSON.stringify(bk)) as unknown)).toEqual([]);
+  });
+
+  it('legacy elapsed schedule and exact schedule are mutually exclusive and can replace each other', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const opA: ProcessOperator = { processId: 'a', apply: (w) => w };
+    let bk = scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
+      segmentIndex: 4,
+      localTimeS: 0.5
+    });
+    expect(readyProcessIdsAt(bk, registry, [opA], { segmentIndex: 4, localTimeS: 0.5 })).toEqual(['a']);
+    expect(readyProcessIds(bk, registry, [opA], 1e300)).toEqual([]);
+
+    bk = scheduleProcess(bk, 'a', 12);
+    expect(bk.processDynamics.a!.nextDueTime).toBeNull();
+    expect(readyProcessIdsAt(bk, registry, [opA], { segmentIndex: 100, localTimeS: 0 })).toEqual([]);
+    expect(readyProcessIds(bk, registry, [opA], 12)).toEqual(['a']);
+
+    bk = scheduleProcessAt(bk, 'a', { segmentIndex: 6, localTimeS: 0.125 });
+    expect(bk.processDynamics.a!.nextDueElapsedS).toBeNull();
+    expect(readyProcessIds(bk, registry, [opA], 1e300)).toEqual([]);
+    expect(readyProcessIdsAt(bk, registry, [opA], { segmentIndex: 6, localTimeS: 0.125 })).toEqual(['a']);
+  });
+
+  it('валидация не допускает два одновременно активных представления следующего запуска', () => {
+    const scheduled = scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
+      segmentIndex: 2,
+      localTimeS: 1
+    });
+    const invalid = {
+      ...scheduled,
+      processDynamics: {
+        ...scheduled.processDynamics,
+        a: { ...scheduled.processDynamics.a!, nextDueElapsedS: 10 }
+      }
+    };
+    expect(validateSchedulerBookkeeping(invalid).join(' '))
+      .toContain('не может одновременно задавать nextDueTime и nextDueElapsedS');
+    expect(() => scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
+      segmentIndex: Number.MAX_SAFE_INTEGER + 1,
+      localTimeS: 0
+    })).toThrow(SchedulerError);
+  });
+
   it('готовность: срок, autorunnable и переданный оператор', () => {
     const registry = makeRegistry([
       descriptor('a'),
