@@ -37,7 +37,7 @@ import { createReservoir, setEnergyInventory, setMaterialInventory } from '../Co
 import { createSpeciesCatalog } from '../Core/species';
 import { registerReaction } from '../Core/reactionLedger';
 import type { ReactionLedger, ReactionRecord } from '../Core/reactionLedger';
-import { applyFlux, createFluxLedger, EXTERNAL, registerFlux } from '../Core/fluxLedger';
+import { applyFlux, createFluxLedger, EXTERNAL, registerFlux, revertFlux } from '../Core/fluxLedger';
 import type { ReservoirRecord } from '../Core/reservoir';
 
 function descriptor(id: string, overrides?: Partial<ProcessDescriptor>): ProcessDescriptor {
@@ -589,6 +589,69 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(world.reservoirs[0]!.material!.entries.co2).toBe(100);
     expect(world.fluxLedger.records).toHaveLength(0);
     expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+  });
+
+  it('аудирует откат ранее применённого FluxLedger как обратный физический перенос', () => {
+    const base = testWorld();
+    const registered = registerFlux(base.fluxLedger, {
+      id: 'pre-event-output',
+      kind: 'external_output',
+      from: 'atm',
+      to: EXTERNAL,
+      subject: {
+        subjectType: 'substance',
+        speciesId: 'co2',
+        quantityKind: 'integrated',
+        amount: 5,
+        basis: 'amount'
+      },
+      time: { segmentIndex: 0, localTimeS: 0 },
+      note: 'pre-event output'
+    });
+    const applied = applyFlux(
+      registered,
+      Object.fromEntries(base.reservoirs.map((reservoir) => [reservoir.id, reservoir])),
+      'pre-event-output'
+    );
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'undo-pre-event-output',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      type: 'regime_change',
+      data: { fluxId: 'pre-event-output' },
+      source: 'test'
+    });
+    const world = {
+      ...base,
+      reservoirs: base.reservoirs.map((reservoir) => applied.reservoirs[reservoir.id]!),
+      fluxLedger: applied.ledger,
+      scheduling
+    };
+
+    const result = processWorldEvent(
+      world,
+      'undo-pre-event-output',
+      (state) => {
+        const reverted = revertFlux(
+          state.fluxLedger,
+          Object.fromEntries(state.reservoirs.map((reservoir) => [reservoir.id, reservoir])),
+          'pre-event-output'
+        );
+        return {
+          ...state,
+          reservoirs: state.reservoirs.map((reservoir) => reverted.reservoirs[reservoir.id]!),
+          fluxLedger: reverted.ledger
+        };
+      },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('processed');
+    expect(result.audit?.status).toBe('balanced');
+    expect(result.world.reservoirs[0]!.material!.entries.co2).toBe(100);
+    expect(result.world.fluxLedger.records[0]!.status).toBe('reverted');
+    expect(result.event.status).toBe('processed');
+    expect(world.reservoirs[0]!.material!.entries.co2).toBe(95);
+    expect(world.fluxLedger.records[0]!.status).toBe('applied');
   });
 
   it('отклоняет несбалансированное событие, сохраняет физический мир и отмечает событие failed', () => {
