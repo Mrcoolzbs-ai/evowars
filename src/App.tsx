@@ -1646,13 +1646,15 @@ function WorldDisplay(props: {
                         </p>
                         <p>
                           Подстолбовые запасы: {layer.inventoryProvenance.sourceName ?? '—'};{' '}
-                          {layer.inventoryProvenance.reference ?? layer.inventoryProvenance.sourceId ?? 'reference не указан'}
+                          {layer.inventoryProvenance.reference ?? layer.inventoryProvenance.sourceId ?? 'reference не указан'};{' '}
+                          метод: {layer.inventoryProvenance.method ?? 'первичный вход'}
                         </p>
                         <ul>
                           {Object.entries(layer.totalInventoryProvenance).map(([speciesId, provenance]) => (
                             <li key={speciesId}>
                               {speciesId}: {provenance.sourceName ?? '—'};{' '}
-                              {provenance.reference ?? provenance.sourceId ?? 'reference не указан'}
+                              {provenance.reference ?? provenance.sourceId ?? 'reference не указан'};{' '}
+                              метод: {provenance.method ?? 'первичный вход'}
                             </li>
                           ))}
                         </ul>
@@ -1670,7 +1672,8 @@ function WorldDisplay(props: {
                           <li key={speciesId}>
                             {speciesId}: {residual.amountMolM2.toExponential(5)} моль/м²;{' '}
                             источник: {residual.provenance.sourceName ?? '—'};{' '}
-                            {residual.provenance.reference ?? residual.provenance.sourceId ?? 'reference не указан'}
+                            {residual.provenance.reference ?? residual.provenance.sourceId ?? 'reference не указан'};{' '}
+                            метод: {residual.provenance.method ?? 'первичный вход'}
                           </li>
                         ))}
                       </ul>
