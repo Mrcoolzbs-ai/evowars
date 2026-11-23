@@ -167,11 +167,11 @@ function distributionOfSolve(
 
 /**
  * Baseline для очередного минерального цикла: углеродные формы — из
- * решения Stage 4.9c по DIC/TA_C, вычисленным из ТЕКУЩЕГО инвентаря
- * океана; протонные концентрации (H+, OH-) — из ФАКТИЧЕСКОГО инвентаря
- * (exchange 4.9e этого же/прошлых шагов сдвигает co2_aq без переспециации
- * протонов, поэтому H из решения не согласуется с инвентарём, а
- * baseline обязан быть согласован с фактическим инвентарём).
+ * ФАКТИЧЕСКОГО распределения инвентаря океана: ВСЕ концентрации (углеродные
+ * формы и протоны H+/OH-) читаются напрямую из инвентаря. Solve(DIC, TA)
+ * вызывается только ради метаданных распределения — фактическое распределение
+ * может быть не equilibrium после exchange 4.9e (сдвиг co2_aq без
+ * переспециации), а baseline обязан точно совпадать с инвентарём.
  */
 function baselineFromInventory(core: CoreWorldState, recordId: string): CarbonateSpeciationDistribution {
   const ocean = core.reservoirs.find((r) => r.id === 'ocean');
@@ -179,10 +179,17 @@ function baselineFromInventory(core: CoreWorldState, recordId: string): Carbonat
     throw new Error('фикстура: резервуар ocean без инвентаря');
   }
   const entries = ocean.material.entries as Record<string, number>;
-  const co2Aq = entries['co2_aq'] ?? 0;
+  // Baseline = ФАКТИЧЕСКОЕ распределение инвентаря: концентрации читаются
+  // напрямую из инвентаря. Solve(DIC, TA) вызывается ТОЛЬКО ради метаданных
+  // (phScale/activityModel/temperature и т.п.) и NOT для концентраций:
+  // фаза обмена 4.9e сдвигает co2_aq без переспециации, поэтому фактическое
+  // распределение может быть не equilibrium, и концентрации из solve не
+  // совпали бы с инвентарём (baseline_inconsistent при допуске 1e-12).
+  // Executor 4.9d/4.9f допускает любой baseline, согласованный с инвентарём.
+  const co2Star = entries['co2_aq'] ?? 0;
   const hco3 = entries['hco3_aq'] ?? 0;
   const co3 = entries['co3_aq'] ?? 0;
-  const dic = (co2Aq + hco3 + co3) / MASS;
+  const dic = (co2Star + hco3 + co3) / MASS;
   const alk = (hco3 + 2 * co3) / MASS;
   const solved = solveFixture(dic, alk);
   return {
@@ -193,16 +200,16 @@ function baselineFromInventory(core: CoreWorldState, recordId: string): Carbonat
     pressurePa: solved.pressurePa,
     approximationKind: solved.approximation.kind,
     concentrations: {
-      co2StarMolPerKgSw: solved.speciesMolPerKgSw.co2_aq,
-      hco3MolPerKgSw: solved.speciesMolPerKgSw.hco3_aq,
-      co3MolPerKgSw: solved.speciesMolPerKgSw.co3_aq,
+      co2StarMolPerKgSw: co2Star / MASS,
+      hco3MolPerKgSw: hco3 / MASS,
+      co3MolPerKgSw: co3 / MASS,
       hydrogenMolPerKgSw: (entries['hplus_aq'] ?? 0) / MASS,
       ohMolPerKgSw: (entries['oh_aq'] ?? 0) / MASS
     },
     provenance: {
       ...PROV,
       recordId,
-      method: 'synthetic test fixture: baseline из производственного решателя Stage 4.9c по DIC/TA_C инвентаря; протонные концентрации — из фактического инвентаря (согласованность baseline)'
+      method: 'synthetic test fixture: baseline = фактическое распределение инвентаря океана (все концентрации из инвентаря); согласованность с инвентарём по построению'
     }
   };
 }
