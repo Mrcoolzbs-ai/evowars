@@ -575,16 +575,18 @@ export function runVerticalEddyDiffusionStep(
       temperatureK: interfaceTemperatureK,
       airMolarDensityMolM3,
       conductanceMolM2S,
-      meanMolarMassKgMol: (() => {
-        const lowerFractions = lower.layer.hydrostaticState!.molarFractions;
-        const upperFractions = upper.layer.hydrostaticState!.molarFractions;
-        return Object.keys(lowerFractions).reduce((sum, backgroundId) => {
-          const interfaceFraction =
-            (lowerFractions[backgroundId]! + upperFractions[backgroundId]!) / 2;
-          return sum +
-            interfaceFraction * molecularConfiguration!.backgroundSpecies[backgroundId]!.molarMassKgMol;
-        }, 0);
-      })(),
+      meanMolarMassKgMol: molecularConfiguration === undefined
+        ? (lowerEdge.meanMolarMassKgPerMol + upperEdge.meanMolarMassKgPerMol) / 2
+        : (() => {
+            const lowerFractions = lower.layer.hydrostaticState!.molarFractions;
+            const upperFractions = upper.layer.hydrostaticState!.molarFractions;
+            return Object.keys(lowerFractions).reduce((sum, backgroundId) => {
+              const interfaceFraction =
+                (lowerFractions[backgroundId]! + upperFractions[backgroundId]!) / 2;
+              return sum +
+                interfaceFraction * molecularConfiguration.backgroundSpecies[backgroundId]!.molarMassKgMol;
+            }, 0);
+          })(),
       gravityMs2: (lowerEdge.gravityMs2 + upperEdge.gravityMs2) / 2,
       temperatureGradientKPerM:
         (upper.layer.hydrostaticState!.representative.temperatureK -
