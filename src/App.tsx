@@ -1516,6 +1516,23 @@ function WorldDisplay(props: {
                       </details>
                     </div>
                   ))}
+                  {Object.keys(audit.unmodeledColumnResiduals).length > 0 && (
+                    <details>
+                      <summary>Часть атмосферного столба вне реакционных слоёв</summary>
+                      <p className="model-note">
+                        Эти запасы не участвовали в кинетическом RHS, остаются неизменными и не перераспределяются между слоями.
+                      </p>
+                      <ul>
+                        {Object.entries(audit.unmodeledColumnResiduals).map(([speciesId, residual]) => (
+                          <li key={speciesId}>
+                            {speciesId}: {residual.amountMolM2.toExponential(5)} моль/м²;{' '}
+                            источник: {residual.provenance.sourceName ?? '—'};{' '}
+                            {residual.provenance.reference ?? residual.provenance.sourceId ?? 'reference не указан'}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                   {audit.warnings.length > 0 && (
                     <>
                       <strong>Предупреждения источников/вычисления</strong>
