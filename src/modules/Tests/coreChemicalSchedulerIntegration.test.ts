@@ -326,6 +326,68 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(world.coreWorldState).toBeUndefined();
   });
 
+  it('executes the #89 NOx reaction in the primary ChemicalEvolutionState at its valid temperature', () => {
+    const world = makePhysicalKineticWorld(250);
+    const state = world.chemicalState!;
+    const additions = { o: 1e-5, no: 5e-6, no2: 2e-7 };
+    state.inventory = { ...state.inventory, ...additions };
+    state.reservoirs = {
+      ...state.reservoirs,
+      atmospheric: { ...state.inventory }
+    };
+    state.physicalKinetics = {
+      maximumMacroStepS: 0.1,
+      layers: [
+        {
+          layerId: 'explicit-nox-test-layer',
+          layerThicknessM: 100,
+          thicknessProvenance: {
+            sourceName: 'synthetic integration test fixture',
+            sourceId: 'fixture:layer-thickness',
+            reference: 'test-only; not planetary source data'
+          },
+          temperatureK: 250,
+          temperatureProvenance: {
+            sourceName: 'synthetic integration test fixture',
+            sourceId: 'fixture:layer-temperature',
+            reference: 'test-only; not planetary source data'
+          },
+          columnInventoriesMolM2: {
+            o: 1e-5,
+            no: 5e-6,
+            no2: 2e-7,
+            n2: 4.2e3
+          },
+          inventoryProvenance: {
+            sourceName: 'synthetic integration test fixture',
+            sourceId: 'fixture:layer-inventory',
+            reference: 'test-only; not planetary source data'
+          },
+          reactionIds: ['kida-tb-2015-03-19-89']
+        }
+      ]
+    };
+    const before = { ...state.inventory };
+    const result = runChemicalEvolutionSchedulerStep(world);
+
+    expect(result.status).toBe('committed');
+    const updated = result.world.chemicalState!;
+    expect(updated.inventory.o).toBeLessThan(before.o!);
+    expect(updated.inventory.no).toBeLessThan(before.no!);
+    expect(updated.inventory.no2).toBeGreaterThan(before.no2!);
+    const audit = updated.physicalKineticsHistory![0]!;
+    expect(audit.layers[0]!.reactions.map((reaction) => reaction.reactionId)).toEqual([
+      'kida-tb-2015-03-19-89'
+    ]);
+    expect(audit.warnings.some((warning) => warning.includes('№89'))).toBe(true);
+    const ledger = result.world.coreWorldState!.reactionLedger!.records;
+    expect(ledger.some((record) =>
+      record.reactionId === 'kida-tb-2015-03-19-89' &&
+      record.processId === PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID &&
+      record.extentBasis === 'column_amount'
+    )).toBe(true);
+  });
+
   it('rejects a missing provenance or missing species instead of silently using zero or game mode', () => {
     const noProvenance = makePhysicalKineticWorld();
     noProvenance.chemicalState!.physicalKinetics!.layers[0]!.thicknessProvenance = {};
