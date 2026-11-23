@@ -1759,6 +1759,27 @@ describe('Stage 4.2.1 Scheduler: расписания процессов', () =>
     })).toEqual([]);
   });
 
+  it('runReadyProcessesAt отклоняет наступивший deadline заблокированного процесса вместо idle', () => {
+    const registry = makeRegistry([descriptor('disabled', { enabled: false })]);
+    const world = {
+      ...testWorld(),
+      scheduling: scheduleProcessAt(createSchedulerBookkeeping(), 'disabled', {
+        segmentIndex: 0,
+        localTimeS: 0
+      })
+    };
+    const result = runReadyProcessesAt(world, registry, [recorder('disabled', [])], {
+      durationS: 1
+    });
+
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.readyProcessIds).toEqual([]);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(result.world.clock.localTimeS).toBe(0);
+    expect(result.diagnostics.join(' ')).toContain('отключён (enabled=false)');
+  });
+
   it('runReadyProcessesAt возвращает idle без продвижения времени, если точных сроков нет', () => {
     const registry = makeRegistry([descriptor('a')]);
     const calls: Call[] = [];
