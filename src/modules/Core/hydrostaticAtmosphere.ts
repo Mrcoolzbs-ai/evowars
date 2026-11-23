@@ -961,6 +961,14 @@ export function computeAdaptivelyRefinedHydrostaticColumn(
   input: HydrostaticColumnInput,
   policy: HydrostaticRefinementPolicy = HYDROSTATIC_REFINEMENT_DEFAULTS
 ): AdaptiveHydrostaticColumnResult {
+  return computeAdaptivelyRefinedHydrostaticColumnInternal(input, { ...policy }, 0);
+}
+
+function computeAdaptivelyRefinedHydrostaticColumnInternal(
+  input: HydrostaticColumnInput,
+  policy: HydrostaticRefinementPolicy,
+  refinementPass: number
+): AdaptiveHydrostaticColumnResult {
   const policyErrors: string[] = [];
   for (const [field, value] of [
     ['maximumLogPressureChange', policy.maximumLogPressureChange],
@@ -1194,10 +1202,44 @@ export function computeAdaptivelyRefinedHydrostaticColumn(
     return issues;
   });
   if (violations.length > 0) {
+    if (refinementPass >= 4) {
+      return {
+        status: 'rejected',
+        reason: 'локальные градиенты не удовлетворяют политике после максимального числа адаптивных проходов',
+        diagnostics: [
+          'превышен предел в 5 проходов адаптивного разбиения',
+          ...violations
+        ]
+      };
+    }
+    if (refinedLayers.length > 4096) {
+      return {
+        status: 'rejected',
+        reason: 'адаптивное разбиение превысило безопасный предел числа слоёв',
+        diagnostics: ['получено ' + refinedLayers.length + ' слоёв; предел 4096', ...violations]
+      };
+    }
+    const nextPass = computeAdaptivelyRefinedHydrostaticColumnInternal(
+      refinedInput,
+      policy,
+      refinementPass + 1
+    );
+    if (nextPass.status !== 'completed') {
+      return {
+        ...nextPass,
+        diagnostics: [
+          'адаптивный проход ' + (refinementPass + 2) + ' не завершился после уточнения локальных градиентов',
+          ...nextPass.diagnostics
+        ]
+      };
+    }
     return {
-      status: 'rejected',
-      reason: 'после повторного интегрирования политика градиентов не соблюдена',
-      diagnostics: violations
+      ...nextPass,
+      diagnostics: [
+        'Выполнено дополнительных адаптивных проходов: ' + (refinementPass + 1) +
+          '; дробились только дочерние слои, нарушившие локальные пределы P/T/P-T.',
+        ...nextPass.diagnostics
+      ]
     };
   }
 
@@ -1209,6 +1251,9 @@ export function computeAdaptivelyRefinedHydrostaticColumn(
     policy: { ...policy },
     diagnostics: [
       'Адаптивное разбиение рассчитано по P(z), T(z) и идеальногазовой численной плотности P/T; для каждого дочернего слоя выполнено повторное Radau IIA интегрирование.',
+      ...(refinementPass > 0
+        ? ['Локальные градиенты уточнялись дополнительными проходами после проверки повторно интегрированной колонки.']
+        : []),
       'Температурный закон и состав исходного слоя сохранены; подстолбовые количества следует брать из разности новых интегрированных границ, не масштабировать старые столбы линейно.'
     ]
   };
