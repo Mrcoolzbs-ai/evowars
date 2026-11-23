@@ -813,6 +813,33 @@ export const PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID = 'physical_chemical_kinetics
  * химии. Дескриптор регистрируется стандартной валидацией
  * ProcessRegistry; числовое τ не назначается.
  */
+function createPhysicalChemicalKineticsDescriptor(): ProcessDescriptor {
+  return {
+    id: PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+    name: 'Физическая химическая кинетика атмосферных слоёв',
+    processKind: 'chemical',
+    tau: unknownValue('постоянное τ неприменимо: локальное характерное время вычисляется из кинетического RHS текущего состояния'),
+    stepPolicy: {
+      kind: 'unspecified',
+      note: 'state-dependent: runtime оператор выбирает dt ≤ min(запрошенного максимума, локальное время истощения/20)'
+    },
+    solverAvailability: 'available',
+    enabled: true,
+    executionMode: 'state_dependent',
+    provenance: {
+      sourceName: 'Production ChemicalEvolutionState kinetic layer contract',
+      reference: 'src/modules/ChemicalEvolution/index.ts',
+      note: 'скорости и их источники берутся только из проверенного каталога кинетического механизма; конфигурация слоёв и начальные запасы задаются явно'
+    },
+    applicability: 'только column_inventory с явно заданными слоями, температурой, толщиной, подстолбовыми запасами и provenance',
+    assumptions: 'каждый слой однороден и изотермичен; перенос между слоями/диффузия/конвекция/пополнение не моделируются; недостающие виды не трактуются как ноль'
+  };
+}
+
+/**
+ * Реестр прежнего режима A и легаси-процессов. Состав намеренно
+ * сохранён для legacy/golden совместимости.
+ */
 export function createChemicalEvolutionStepRegistry(): ProcessRegistry {
   const descriptor: ProcessDescriptor = {
     id: CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
@@ -837,39 +864,16 @@ export function createChemicalEvolutionStepRegistry(): ProcessRegistry {
       'степень превращения за шаг — игровое допущение (extentFraction), не кинетический расчёт; длительность шага (stepDurationYears) — тоже игровое допущение',
     timescaleNote: 'реакции каталога не имеют подтверждённых характерных времён'
   };
-  // Легаси-каталог также проходит через канонический Core ProcessRegistry.
-  // Все его процессы остаются отключёнными: их числовые τ и решатели
-  // неизвестны/не реализованы; регистрация не включает и не запускает их.
   const registry = createProcessRegistry();
   for (const legacyDescriptor of chemicalProcessesToCoreDescriptors(createDefaultProcessRegistry())) {
     registry.register(legacyDescriptor);
   }
-  registry.register(descriptor);
+  return registry.register(descriptor);
+}
 
-  // Физический режим — отдельный autonomous state-dependent процесс:
-  // постоянное τ остаётся unknown, а runtime оператор вычисляет
-  // характеристическое время из текущего RHS механизма и выбирает dt.
-  const physicalKineticsDescriptor: ProcessDescriptor = {
-    id: PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
-    name: 'Физическая химическая кинетика атмосферных слоёв',
-    processKind: 'chemical',
-    tau: unknownValue('постоянное τ неприменимо: локальное характерное время вычисляется из кинетического RHS текущего состояния'),
-    stepPolicy: {
-      kind: 'unspecified',
-      note: 'state-dependent: runtime оператор выбирает dt ≤ min(запрошенного максимума, локальное время истощения/20)'
-    },
-    solverAvailability: 'available',
-    enabled: true,
-    executionMode: 'state_dependent',
-    provenance: {
-      sourceName: 'Production ChemicalEvolutionState kinetic layer contract',
-      reference: 'src/modules/ChemicalEvolution/index.ts',
-      note: 'скорости и их источники берутся только из проверенного каталога кинетического механизма; конфигурация слоёв и начальные запасы задаются явно'
-    },
-    applicability: 'только column_inventory с явно заданными слоями, температурой, толщиной, подстолбовыми запасами и provenance',
-    assumptions: 'каждый слой однороден и изотермичен; перенос между слоями/диффузия/конвекция/пополнение не моделируются; недостающие виды не трактуются как ноль'
-  };
-  return registry.register(physicalKineticsDescriptor);
+/** Реестр физического пути: legacy-процессы + отдельный state-dependent процесс. */
+export function createPhysicalChemicalEvolutionStepRegistry(): ProcessRegistry {
+  return createChemicalEvolutionStepRegistry().register(createPhysicalChemicalKineticsDescriptor());
 }
 
 /** Результат пользовательского шага химии через Scheduler. */
@@ -1597,7 +1601,7 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
 
   let result: MacroStepResult;
   try {
-    result = runMacroStep(core, createChemicalEvolutionStepRegistry(), [operator], {
+    result = runMacroStep(core, createPhysicalChemicalEvolutionStepRegistry(), [operator], {
       durationS: chemical.physicalKinetics.maximumMacroStepS,
       splitting: 'lie',
       processIds: [PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID],
