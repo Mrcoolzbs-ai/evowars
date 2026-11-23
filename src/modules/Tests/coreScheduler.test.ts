@@ -615,6 +615,74 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     );
   });
 
+  it('требует уникальные sequence и nextSequence выше каждого уже назначенного номера', () => {
+    let duplicate = enqueueEvent(
+      enqueueEvent(createSchedulerBookkeeping(), {
+        id: 'sequence-a',
+        time: { segmentIndex: 0, localTimeS: 1 },
+        type: 'solver_detected',
+        data: {},
+        source: 'test'
+      }),
+      {
+        id: 'sequence-b',
+        time: { segmentIndex: 0, localTimeS: 1 },
+        type: 'solver_detected',
+        data: {},
+        source: 'test'
+      }
+    );
+    duplicate = {
+      ...duplicate,
+      eventQueue: duplicate.eventQueue.map((event) => ({ ...event, sequence: 0 }))
+    };
+    expect(validateSchedulerBookkeeping(duplicate).join(' ')).toContain('дублирующийся sequence');
+
+    const staleNext = {
+      ...enqueueEvent(createSchedulerBookkeeping(), {
+        id: 'sequence-stale',
+        time: { segmentIndex: 0, localTimeS: 1 },
+        type: 'solver_detected',
+        data: {},
+        source: 'test'
+      }),
+      nextSequence: 0
+    };
+    expect(validateSchedulerBookkeeping(staleNext).join(' '))
+      .toContain('nextSequence должен быть строго больше');
+    expectSchedulerError(
+      () => enqueueEvent(staleNext, {
+        id: 'sequence-next',
+        time: { segmentIndex: 0, localTimeS: 2 },
+        type: 'solver_detected',
+        data: {},
+        source: 'test'
+      }),
+      'invalid_bookkeeping'
+    );
+    expectSchedulerError(
+      () => processEvent(duplicate, 'sequence-a', () => undefined),
+      'invalid_bookkeeping'
+    );
+  });
+
+  it('отклоняет отрицательные elapsed-времена в динамике процесса', () => {
+    const bk = {
+      ...createSchedulerBookkeeping(),
+      processDynamics: {
+        invalid: {
+          processId: 'invalid',
+          lastRunElapsedS: -1,
+          nextDueElapsedS: 0,
+          macroStepsCompleted: 0,
+          operatorCallsCompleted: 0
+        }
+      }
+    };
+    expect(validateSchedulerBookkeeping(bk).join(' '))
+      .toContain('не может быть отрицательным elapsed-временем');
+  });
+
   it('состояние планировщика JSON-сериализуемо и проходит валидацию после round-trip', () => {
     let bk = createSchedulerBookkeeping();
     bk = enqueueEvent(bk, { id: 'ev-json', time: { segmentIndex: 1, localTimeS: 2.5 }, type: 'phase_transition', data: { pressure: 101325 }, source: 'test' });
