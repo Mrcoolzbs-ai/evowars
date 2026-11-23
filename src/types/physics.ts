@@ -534,6 +534,15 @@ export interface ChemicalPhysicalKineticsStepAudit {
   characteristicTimeS: number | null;
   stepSelectionMethod: string;
   layers: ChemicalKineticLayerStepAudit[];
+  /**
+   * Части полного атмосферного столба, не включённые ни в один
+   * реакционный компартмент; не реагируют в этом шаге и не переносятся
+   * автоматически. Содержат provenance исходного глобального столба.
+   */
+  unmodeledColumnResiduals: Record<string, {
+    amountMolM2: number;
+    provenance: DataProvenance;
+  }>;
   warnings: string[];
   assumptions: string[];
 }
