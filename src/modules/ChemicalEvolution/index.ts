@@ -966,6 +966,7 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
 
   const seenLayerIds = new Set<string>();
   const subcolumnTotals: Record<string, number> = {};
+  const altitudeRanges: Array<{ layerId: string; min: number; max: number }> = [];
   for (let layerIndex = 0; layerIndex < config.layers.length; layerIndex++) {
     const layer = config.layers[layerIndex] as ChemicalPhysicalKineticLayer;
     const prefix = 'physicalKinetics.layers[' + layerIndex + ']';
@@ -989,6 +990,45 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
     }
     if (!hasIdentifiedPhysicalProvenance(layer.thicknessProvenance)) {
       problems.push(prefix + '.thicknessProvenance обязан идентифицировать источник толщины');
+    }
+    if (layer.altitudeRangeM !== undefined) {
+      if (!isPlainChemicalRecord(layer.altitudeRangeM)) {
+        problems.push(prefix + '.altitudeRangeM должен быть объектом {min, max}');
+      } else {
+        const min = layer.altitudeRangeM.min;
+        const max = layer.altitudeRangeM.max;
+        if (typeof min !== 'number' || !Number.isFinite(min) || min < 0) {
+          problems.push(prefix + '.altitudeRangeM.min должен быть конечной неотрицательной высотой в метрах');
+        }
+        if (typeof max !== 'number' || !Number.isFinite(max) || max <= (typeof min === 'number' ? min : 0)) {
+          problems.push(prefix + '.altitudeRangeM.max должен быть конечной высотой в метрах строго выше min');
+        }
+        if (
+          typeof min === 'number' && Number.isFinite(min) && min >= 0 &&
+          typeof max === 'number' && Number.isFinite(max) && max > min
+        ) {
+          altitudeRanges.push({ layerId: layer.layerId, min, max });
+          if (
+            typeof layer.layerThicknessM === 'number' &&
+            Number.isFinite(layer.layerThicknessM) &&
+            layer.layerThicknessM > 0
+          ) {
+            const geometryToleranceM = 1e-8 * Math.max(1, Math.abs(min), Math.abs(max), layer.layerThicknessM);
+            if (Math.abs((max - min) - layer.layerThicknessM) > geometryToleranceM) {
+              problems.push(
+                prefix + ': геометрическая толщина ' + layer.layerThicknessM +
+                ' м не согласована с altitudeRangeM (' + min + '–' + max +
+                ' м); толщина должна равняться max - min'
+              );
+            }
+          }
+        }
+      }
+      if (!hasIdentifiedPhysicalProvenance(layer.altitudeProvenance)) {
+        problems.push(prefix + '.altitudeProvenance обязан идентифицировать источник высотных границ');
+      }
+    } else if (layer.altitudeProvenance !== undefined) {
+      problems.push(prefix + '.altitudeProvenance задан без altitudeRangeM');
     }
     if (
       typeof layer.temperatureK !== 'number' ||
@@ -1080,6 +1120,24 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
       layer.columnInventoriesMolM2.n2 <= 0
     ) {
       problems.push(prefix + ': запас третьего тела N₂ должен быть строго положительным для выбранной кинетической сети');
+    }
+  }
+
+  if (config.layers.length > 1 && altitudeRanges.length !== config.layers.length) {
+    problems.push('многослойная физическая кинетика требует altitudeRangeM и altitudeProvenance для каждого слоя; без абсолютных высот нельзя проверить вертикальное неперекрытие');
+  }
+  if (altitudeRanges.length > 0 && altitudeRanges.length !== config.layers.length) {
+    problems.push('altitudeRangeM должен быть задан либо для всех реакционных слоёв, либо ни для одного');
+  }
+  altitudeRanges.sort((a, b) => a.min - b.min || a.max - b.max || a.layerId.localeCompare(b.layerId));
+  for (let index = 1; index < altitudeRanges.length; index++) {
+    const previous = altitudeRanges[index - 1]!;
+    const current = altitudeRanges[index]!;
+    if (current.min < previous.max) {
+      problems.push(
+        'слои «' + previous.layerId + '» и «' + current.layerId +
+        '» перекрываются по высоте (' + current.min + ' м < ' + previous.max + ' м)'
+      );
     }
   }
 
@@ -1644,6 +1702,8 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           layerThicknessM: layer.layerThicknessM,
           temperatureProvenance: { ...layer.temperatureProvenance },
           thicknessProvenance: { ...layer.thicknessProvenance },
+          altitudeRangeM: layer.altitudeRangeM ? { ...layer.altitudeRangeM } : null,
+          altitudeProvenance: layer.altitudeProvenance ? { ...layer.altitudeProvenance } : null,
           inventoryProvenance: { ...layer.inventoryProvenance },
           totalInventoryProvenance: Object.fromEntries(
             Object.keys(layer.columnInventoriesMolM2).map((speciesId) => [
