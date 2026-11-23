@@ -179,3 +179,216 @@ export function importSourcedAtmosphericTemperatureProfileForKinetics(
     ]
   };
 }
+
+// ============================================
+// SOURCED PROFILE → PHYSICAL SCHEDULER CONFIGURATION
+// ============================================
+// Geometry and temperature are imported from the sourced profile.
+// Chemical inventories, global-column provenance, and reaction selection
+// remain explicit caller inputs; this adapter never invents radicals,
+// zero inventories, or a reaction network.
+
+import type { ChemicalPhysicalKineticsState } from '../../types';
+
+export interface SourcedKineticLayerInventoryInput {
+  sourceLayerId: string;
+  columnInventoriesMolM2: Readonly<Record<string, number>>;
+  inventoryProvenance: DataProvenance;
+  reactionIds: readonly string[];
+}
+
+export interface SourcedProfileSchedulerConfigurationInput {
+  maximumMacroStepS: number;
+  totalInventoryProvenance: Readonly<Record<string, DataProvenance>>;
+  /** Exactly one explicit inventory/reaction selection for every profile layer. */
+  layers: readonly SourcedKineticLayerInventoryInput[];
+}
+
+export type SourcedProfileSchedulerConfigurationResult =
+  | {
+      status: 'configured';
+      configuration: ChemicalPhysicalKineticsState;
+      diagnostics: readonly string[];
+    }
+  | {
+      status: 'rejected';
+      diagnostics: readonly string[];
+    };
+
+function isPlainSourcedRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * Build a Scheduler-ready geometry/temperature configuration from a
+ * provenance-backed vertical profile plus explicit per-layer chemistry.
+ *
+ * This function does not configure a world or infer total column amounts.
+ * Pass the returned configuration and separately sourced total column
+ * inventories to configurePrimaryPhysicalChemicalKinetics(). That second
+ * gate checks species support, reaction applicability, subcolumn bounds,
+ * third-body availability and atomic state consistency.
+ */
+export function buildPhysicalKineticsConfigurationFromSourcedProfile(
+  profile: AtmosphericTemperatureProfile | null | undefined,
+  input: SourcedProfileSchedulerConfigurationInput
+): SourcedProfileSchedulerConfigurationResult {
+  const diagnostics: string[] = [];
+  const imported = importSourcedAtmosphericTemperatureProfileForKinetics(profile);
+  if (imported.status !== 'imported') {
+    return { status: 'rejected', diagnostics: [...imported.diagnostics] };
+  }
+
+  if (
+    typeof input.maximumMacroStepS !== 'number' ||
+    !Number.isFinite(input.maximumMacroStepS) ||
+    input.maximumMacroStepS <= 0
+  ) {
+    diagnostics.push('maximumMacroStepS должен быть конечным положительным числом секунд');
+  }
+  if (!isPlainSourcedRecord(input.totalInventoryProvenance)) {
+    diagnostics.push('totalInventoryProvenance должен быть plain record с отдельным provenance полного запаса каждого вида');
+  }
+  if (!Array.isArray(input.layers)) {
+    diagnostics.push('layers должен быть массивом явных подстолбовых инвентарей');
+  }
+  if (diagnostics.length > 0) {
+    return { status: 'rejected', diagnostics };
+  }
+
+  const expectedIds = imported.layers.map((layer) => layer.sourceLayerId);
+  const suppliedById = new Map<string, SourcedKineticLayerInventoryInput>();
+  for (const [index, layer] of input.layers.entries()) {
+    if (!isPlainSourcedRecord(layer)) {
+      diagnostics.push('layers[' + index + '] должен быть plain record');
+      continue;
+    }
+    if (typeof layer.sourceLayerId !== 'string' || layer.sourceLayerId.trim() === '') {
+      diagnostics.push('layers[' + index + '].sourceLayerId должен быть непустой строкой');
+      continue;
+    }
+    if (suppliedById.has(layer.sourceLayerId)) {
+      diagnostics.push('дублирующийся явный inventory для profile layer «' + layer.sourceLayerId + '»');
+      continue;
+    }
+    suppliedById.set(layer.sourceLayerId, layer);
+  }
+
+  for (const expectedId of expectedIds) {
+    if (!suppliedById.has(expectedId)) {
+      diagnostics.push('для profile layer «' + expectedId + '» отсутствует явный подстолбовой inventory и выбор реакций');
+    }
+  }
+  for (const suppliedId of suppliedById.keys()) {
+    if (!expectedIds.includes(suppliedId)) {
+      diagnostics.push('inventory указан для отсутствующего profile layer «' + suppliedId + '»');
+    }
+  }
+
+  const configurationLayers: ChemicalPhysicalKineticsState['layers'] = [];
+  for (const seed of imported.layers) {
+    const supplied = suppliedById.get(seed.sourceLayerId);
+    if (supplied === undefined) continue;
+    const prefix = 'profile layer «' + seed.sourceLayerId + '»';
+
+    if (!isPlainSourcedRecord(supplied.columnInventoriesMolM2)) {
+      diagnostics.push(prefix + ': columnInventoriesMolM2 должен быть plain record; отсутствие вида не означает ноль');
+      continue;
+    }
+    if (
+      typeof supplied.inventoryProvenance !== 'object' ||
+      supplied.inventoryProvenance === null ||
+      !hasIdentifiedSource(supplied.inventoryProvenance)
+    ) {
+      diagnostics.push(prefix + ': отсутствует идентифицируемый provenance подстолбового состава');
+    }
+    if (!Array.isArray(supplied.reactionIds) || supplied.reactionIds.length === 0) {
+      diagnostics.push(prefix + ': reactionIds должен быть непустым явным списком поддерживаемых реакций');
+    } else {
+      const seen = new Set<string>();
+      for (const reactionId of supplied.reactionIds) {
+        if (typeof reactionId !== 'string' || reactionId.trim() === '') {
+          diagnostics.push(prefix + ': reactionIds содержит пустой или нестроковый ID');
+        } else if (seen.has(reactionId)) {
+          diagnostics.push(prefix + ': дублирующийся reactionId «' + reactionId + '»');
+        } else {
+          seen.add(reactionId);
+        }
+      }
+    }
+
+    const inventories: Record<string, number> = {};
+    for (const [speciesId, amount] of Object.entries(supplied.columnInventoriesMolM2)) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+        diagnostics.push(prefix + ': запас «' + speciesId + '» должен быть конечным неотрицательным числом моль/м²; неизвестный запас не равен нулю');
+      } else {
+        inventories[speciesId] = amount;
+      }
+      const totalProvenance = (input.totalInventoryProvenance as Readonly<Record<string, DataProvenance>>)[speciesId];
+      if (
+        totalProvenance === undefined ||
+        typeof totalProvenance !== 'object' ||
+        totalProvenance === null ||
+        !hasIdentifiedSource(totalProvenance)
+      ) {
+        diagnostics.push(prefix + ': отсутствует provenance полного атмосферного запаса вида «' + speciesId + '»');
+      }
+    }
+
+    configurationLayers.push({
+      layerId: seed.sourceLayerId,
+      altitudeRangeM: {
+        min: seed.bottomAltitudeM,
+        max: seed.topAltitudeM
+      },
+      altitudeProvenance: { ...seed.altitudeProvenance },
+      layerThicknessM: seed.topAltitudeM - seed.bottomAltitudeM,
+      thicknessProvenance: { ...seed.altitudeProvenance },
+      temperatureK: seed.temperatureK,
+      temperatureProvenance: { ...seed.temperatureProvenance },
+      columnInventoriesMolM2: inventories,
+      inventoryProvenance:
+        isPlainSourcedRecord(supplied.inventoryProvenance)
+          ? { ...supplied.inventoryProvenance } as DataProvenance
+          : {},
+      reactionIds: Array.isArray(supplied.reactionIds)
+        ? [...supplied.reactionIds]
+        : []
+    });
+  }
+
+  if (diagnostics.length > 0) {
+    return { status: 'rejected', diagnostics };
+  }
+
+  const totalProvenance: Record<string, DataProvenance> = {};
+  for (const [speciesId, provenance] of Object.entries(input.totalInventoryProvenance)) {
+    if (
+      typeof provenance !== 'object' ||
+      provenance === null ||
+      !hasIdentifiedSource(provenance)
+    ) {
+      diagnostics.push('totalInventoryProvenance[«' + speciesId + '»] не идентифицирует источник');
+      continue;
+    }
+    totalProvenance[speciesId] = { ...provenance };
+  }
+  if (diagnostics.length > 0) {
+    return { status: 'rejected', diagnostics };
+  }
+
+  return {
+    status: 'configured',
+    configuration: {
+      maximumMacroStepS: input.maximumMacroStepS,
+      totalInventoryProvenance: totalProvenance,
+      layers: configurationLayers
+    },
+    diagnostics: [
+      'Геометрия и температурные представители импортированы из source-backed profile; подстолбовые и полные запасы, provenance запасов и reactionIds переданы явно. Финальная физическая валидация выполняется configurePrimaryPhysicalChemicalKinetics().'
+    ]
+  };
+}
+
