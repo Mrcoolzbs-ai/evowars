@@ -69,7 +69,7 @@ import type { ProcessRegistry } from './processRegistry';
 import { isProcessAutoRunnable, tauSeconds } from './processRegistry';
 import type { FluxAuditScope, FluxTime } from './fluxLedger';
 import type { SimulationClockState } from './simulationClock';
-import { advance, comparePoints, totalElapsedSeconds } from './simulationClock';
+import { advance, advanceTo, comparePoints, totalElapsedSeconds } from './simulationClock';
 import { isPlainRecord } from './reservoir';
 import { auditWorldTransition } from './invariantAuditor';
 import { reactionLedgerAppendOnlyIssues } from './reactionLedger';
@@ -1284,7 +1284,13 @@ export function runMacroStep(
   }
 
   // --- ЕДИНСТВЕННОЕ продвижение мирового времени ---
-  const newClock = advance(current.clock, effectiveDurationS);
+  // Use the exact scheduled event point when the macro-step was clipped
+  // to one. advance(dt) may start a new segment for a small but already
+  // representable absolute event point; advanceTo preserves that point.
+  const newClock =
+    eventBoundary === undefined
+      ? advance(current.clock, effectiveDurationS)
+      : advanceTo(current.clock, eventBoundary.time);
   const lastRunElapsedS = totalElapsedSeconds(newClock);
   const callsPerProcess = new Map<string, number>();
   for (const call of plan) {
