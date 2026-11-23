@@ -35,6 +35,7 @@ import {
 } from '../Core/adapters';
 import type { LegacyGasRecord, LegacyCompositionRecord, LegacyWorldInput } from '../Core/adapters';
 import { validateWorldState } from '../Core/worldState';
+import { createSchedulerBookkeeping, scheduleProcessAt } from '../Core/scheduler';
 import type { CoreWorldState } from '../Core/worldState';
 import type { ReactionLedger, ReactionRecord } from '../Core/reactionLedger';
 import { createRandom } from '../Generator/random';
@@ -1264,6 +1265,81 @@ describe('Stage 4.2.3.3 Persistence: reactionLedger в миграциях и rou
     if (coreBack !== undefined) {
       expect(validateWorldState(coreBack)).toEqual([]);
     }
+  });
+});
+
+// ============================================
+// STAGE 4.2.1 - ТОЧНОЕ РАСПИСАНИЕ ПРОЦЕССОВ В СОХРАНЕНИЯХ
+// ============================================
+
+describe('Stage 4.2.1 Persistence: segmented process schedule round-trip', () => {
+  it('сохраняет lastRunTime и nextDueTime без преобразования в elapsed-сумму', () => {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    const scheduling = scheduleProcessAt(
+      createSchedulerBookkeeping(),
+      'physical-chemistry',
+      { segmentIndex: 123456, localTimeS: 0.125 }
+    );
+    scheduling.processDynamics['physical-chemistry']!.lastRunTime = {
+      segmentIndex: 123455,
+      localTimeS: 9.5e15
+    };
+    core.scheduling = scheduling;
+    expect(validateWorldState(core)).toEqual([]);
+
+    const saved: SavedWorld = {
+      ...makeGeneratedWorld('w-scheduler-time'),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+
+    const json = exportWorldToJSON(saved);
+    const imported = importWorldFromJSON(json);
+    expect(imported).not.toBeNull();
+    const coreBack = (imported as unknown as { coreWorldState?: CoreWorldState }).coreWorldState;
+    expect(coreBack?.scheduling?.processDynamics['physical-chemistry']?.lastRunTime).toEqual({
+      segmentIndex: 123455,
+      localTimeS: 9.5e15
+    });
+    expect(coreBack?.scheduling?.processDynamics['physical-chemistry']?.nextDueTime).toEqual({
+      segmentIndex: 123456,
+      localTimeS: 0.125
+    });
+    expect(coreBack?.scheduling?.processDynamics['physical-chemistry']?.nextDueElapsedS).toBeNull();
+    expect(coreBack === undefined ? ['core отсутствует'] : validateWorldState(coreBack)).toEqual([]);
+  });
+
+  it('старое сохранение Scheduler без exact-time полей остаётся валидным и не дополняется вымышленными сроками', () => {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    core.scheduling = {
+      ...createSchedulerBookkeeping(),
+      processDynamics: {
+        legacy: {
+          processId: 'legacy',
+          lastRunElapsedS: 123,
+          nextDueElapsedS: 456,
+          macroStepsCompleted: 1,
+          operatorCallsCompleted: 1
+        }
+      }
+    };
+    expect(validateWorldState(core)).toEqual([]);
+
+    const saved: SavedWorld = {
+      ...makeGeneratedWorld('w-legacy-scheduler'),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+    const imported = importWorldFromJSON(exportWorldToJSON(saved));
+    const coreBack = (imported as unknown as { coreWorldState?: CoreWorldState } | null)?.coreWorldState;
+    expect(coreBack?.scheduling?.processDynamics.legacy?.nextDueElapsedS).toBe(456);
+    expect(coreBack?.scheduling?.processDynamics.legacy?.nextDueTime).toBeUndefined();
+    expect(coreBack?.scheduling?.processDynamics.legacy?.lastRunTime).toBeUndefined();
+    expect(coreBack === undefined ? ['core отсутствует'] : validateWorldState(coreBack)).toEqual([]);
   });
 });
 
