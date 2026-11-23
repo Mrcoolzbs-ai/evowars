@@ -31,6 +31,7 @@ import { knownValue, unknownValue } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 import { createCoreWorldState } from '../Core/worldState';
 import type { CoreWorldState } from '../Core/worldState';
+import { advance, createSimulationClock } from '../Core/simulationClock';
 import { createReservoir, setEnergyInventory, setMaterialInventory } from '../Core/reservoir';
 import { createSpeciesCatalog } from '../Core/species';
 import { registerReaction } from '../Core/reactionLedger';
@@ -620,6 +621,90 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     bk = scheduleProcess(bk, 'proc-a', 42.5);
     const restored = JSON.parse(JSON.stringify(bk)) as unknown;
     expect(validateSchedulerBookkeeping(restored)).toEqual([]);
+  });
+});
+
+describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', () => {
+  it('clips the macro-step at the next event in the current segment and leaves it pending', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'phase-boundary',
+      time: { segmentIndex: 0, localTimeS: 3 },
+      type: 'phase_transition',
+      data: { reservoirId: 'surface' },
+      source: 'test solver'
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const result = runMacroStep(world, registry, [recorder('a', calls)], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+
+    expect(result.status).toBe('committed');
+    expect(calls).toEqual([{ processId: 'a', durationS: 3, intervalStartS: 0 }]);
+    expect(result.stepSize?.requestedDurationS).toBe(10);
+    expect(result.stepSize?.effectiveDurationS).toBe(3);
+    expect(result.stepSize?.eventBoundary).toEqual({
+      eventId: 'phase-boundary',
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(result.world.clock.localTimeS).toBe(3);
+    expect(result.bookkeeping.eventQueue[0]!.status).toBe('pending');
+    expect(dueEvents(result.bookkeeping, { segmentIndex: 0, localTimeS: 3 }).map((event) => event.id))
+      .toEqual(['phase-boundary']);
+  });
+
+  it('rejects a new macro-step while an event at the current point is still pending', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'already-due',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      type: 'reagent_exhausted',
+      data: { speciesId: 'co2' },
+      source: 'test solver'
+    });
+    const world = { ...testWorld(), scheduling };
+    const result = runMacroStep(world, registry, [recorder('a', calls)], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.world.clock.localTimeS).toBe(0);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(calls).toEqual([]);
+    expect(result.diagnostics.join(' ')).toContain('остаётся pending');
+  });
+
+  it('lands on a representable event point without rolling the clock into a new segment', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const eventLocalTimeS = largeClock.localTimeS + 2;
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'ulp-event',
+      time: { segmentIndex: largeClock.segmentIndex, localTimeS: eventLocalTimeS },
+      type: 'solver_detected',
+      data: { threshold: 'exact-double-point' },
+      source: 'test solver'
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+
+    const result = runMacroStep(world, registry, [recorder('a', calls)], {
+      durationS: 10,
+      splitting: 'lie'
+    });
+
+    expect(result.status).toBe('committed');
+    expect(calls).toEqual([{ processId: 'a', durationS: 2, intervalStartS: 0 }]);
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex);
+    expect(result.world.clock.localTimeS).toBe(eventLocalTimeS);
+    expect(result.stepSize?.eventBoundary?.eventId).toBe('ulp-event');
+    expect(result.bookkeeping.eventQueue[0]!.status).toBe('pending');
   });
 });
 
