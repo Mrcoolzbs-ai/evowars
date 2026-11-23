@@ -538,6 +538,15 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(kineticRecord!.extentBasis).toBe('column_amount');
     expect(kineticRecord!.extent).toBeGreaterThan(0);
     expect(result.world.coreWorldState!.clock.localTimeS).toBeCloseTo(result.stepSize!.effectiveDurationS, 12);
+    const scheduledDynamics =
+      result.world.coreWorldState!.scheduling!.processDynamics[PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID]!;
+    expect(scheduledDynamics.lastRunTime).toEqual({
+      segmentIndex: result.world.coreWorldState!.clock.segmentIndex,
+      localTimeS: result.world.coreWorldState!.clock.localTimeS
+    });
+    expect(scheduledDynamics.nextDueTime).toBeNull();
+    expect(scheduledDynamics.nextDueElapsedS).toBeNull();
+    expect(scheduledDynamics.macroStepsCompleted).toBe(1);
     expect(updated.modelTimeYears).toBeCloseTo(
       convert(quantity(result.stepSize!.effectiveDurationS, 's'), 'yr').value,
       12
@@ -549,6 +558,14 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     // lineage, not relabel the current inventory as a new primary measurement.
     const nextStep = runChemicalEvolutionSchedulerStep(result.world);
     expect(nextStep.status).toBe('committed');
+    const secondDynamics =
+      nextStep.world.coreWorldState!.scheduling!.processDynamics[PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID]!;
+    expect(secondDynamics.lastRunTime).toEqual({
+      segmentIndex: nextStep.world.coreWorldState!.clock.segmentIndex,
+      localTimeS: nextStep.world.coreWorldState!.clock.localTimeS
+    });
+    expect(secondDynamics.macroStepsCompleted).toBe(2);
+    expect(secondDynamics.nextDueTime).toBeNull();
     const secondAudit = nextStep.world.chemicalState!.physicalKineticsHistory![1]!;
     expect(secondAudit.layers[0]!.totalInventoryProvenance.o2!.method)
       .toContain('Derived by primary physical chemical kinetics Scheduler');
