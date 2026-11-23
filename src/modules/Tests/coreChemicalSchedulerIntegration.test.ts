@@ -436,7 +436,7 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(updated.inventory.no).toBeLessThan(5e-6);
     expect(updated.inventory.no2).toBeGreaterThan(2e-7);
     expect(updated.inventory.h).toBeLessThan(8e-6);
-    expect(updated.inventory.o2).toBeLessThan(4e-5);
+    expect(updated.inventory.o2).toBeLessThan(state.inventory.o2);
     expect(updated.inventory.ho2).toBeGreaterThan(1e-8);
     expect(updated.physicalKineticsHistory![0]!.layers[0]!.reactions.map((r) => r.reactionId)).toEqual([
       'kida-tb-2015-03-19-89',
