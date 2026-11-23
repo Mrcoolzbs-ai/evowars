@@ -831,6 +831,97 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
   });
 
+  it('runs different supported mechanisms in different layers at their separate valid temperature ranges', () => {
+    const world = makePhysicalKineticWorld(350);
+    const state = world.chemicalState!;
+    const additions = { o: 1e-5, no: 5e-6, no2: 2e-7 };
+    state.inventory = { ...state.inventory, ...additions };
+    state.reservoirs = {
+      ...state.reservoirs,
+      atmospheric: { ...state.inventory }
+    };
+    const original = state.physicalKinetics!.layers[0]!;
+    state.physicalKinetics!.layers = [
+      {
+        ...original,
+        layerId: 'lower-nox-layer',
+        altitudeRangeM: { min: 0, max: 100 },
+        altitudeProvenance: {
+          ...original.thicknessProvenance,
+          sourceId: 'fixture:lower-nox-altitude'
+        },
+        temperatureK: 250,
+        temperatureProvenance: {
+          ...original.temperatureProvenance,
+          sourceId: 'fixture:lower-nox-temperature'
+        },
+        columnInventoriesMolM2: {
+          o: 1e-5,
+          no: 5e-6,
+          no2: 2e-7,
+          n2: 2.1e3
+        },
+        inventoryProvenance: {
+          ...original.inventoryProvenance,
+          sourceId: 'fixture:lower-nox-inventory'
+        },
+        reactionIds: ['kida-tb-2015-03-19-89']
+      },
+      {
+        ...original,
+        layerId: 'upper-hox-layer',
+        altitudeRangeM: { min: 100, max: 200 },
+        altitudeProvenance: {
+          ...original.thicknessProvenance,
+          sourceId: 'fixture:upper-hox-altitude'
+        },
+        temperatureK: 350,
+        temperatureProvenance: {
+          ...original.temperatureProvenance,
+          sourceId: 'fixture:upper-hox-temperature'
+        },
+        columnInventoriesMolM2: {
+          h: 8e-6,
+          o2: 4e-5,
+          ho2: 1e-8,
+          n2: 2.1e3
+        },
+        inventoryProvenance: {
+          ...original.inventoryProvenance,
+          sourceId: 'fixture:upper-hox-inventory'
+        },
+        reactionIds: ['kida-tb-2015-03-19-106']
+      }
+    ];
+    const before = { ...state.inventory };
+
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('committed');
+    const updated = result.world.chemicalState!;
+    expect(updated.inventory.o).toBeLessThan(before.o!);
+    expect(updated.inventory.no).toBeLessThan(before.no!);
+    expect(updated.inventory.no2).toBeGreaterThan(before.no2!);
+    expect(updated.inventory.h).toBeLessThan(before.h!);
+    expect(updated.inventory.o2).toBeLessThan(before.o2!);
+    expect(updated.inventory.ho2).toBeGreaterThan(before.ho2!);
+
+    const audits = updated.physicalKineticsHistory![0]!.layers;
+    expect(audits.map((layer) => layer.temperatureK)).toEqual([250, 350]);
+    expect(audits[0]!.reactions.map((reaction) => reaction.reactionId)).toEqual([
+      'kida-tb-2015-03-19-89'
+    ]);
+    expect(audits[1]!.reactions.map((reaction) => reaction.reactionId)).toEqual([
+      'kida-tb-2015-03-19-106'
+    ]);
+    const ledger = result.world.coreWorldState!.reactionLedger!.records.filter(
+      (record) => record.processId === PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID
+    );
+    expect(ledger.map((record) => record.reactionId).sort()).toEqual([
+      'kida-tb-2015-03-19-106',
+      'kida-tb-2015-03-19-89'
+    ]);
+  });
+
   it('rejects overlapping altitude intervals even when column inventories are disjoint', () => {
     const world = makePhysicalKineticWorld();
     const config = world.chemicalState!.physicalKinetics!;
