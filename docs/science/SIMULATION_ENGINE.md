@@ -593,4 +593,31 @@ This first slice deliberately rejects `n2` and `o2` as transported species: they
 
 **Scheduler integration:** `ChemicalPhysicalKineticsState.verticalTransport` optionally enables this operator inside the same `runPhysicalChemicalEvolutionSchedulerStep` ProcessOperator as the per-layer Radau IIA chemistry. The configuration requires explicit `speciesIds`, `Kzz` and `diffusivityProvenance`; validation requires all layers to have contiguous altitude geometry and continuous hydrostatic interface pressure, and every selected species to have an explicit subcolumn inventory. The operator runs after chemistry for the exact same effective Scheduler `dt`. The single ProcessOperator then commits the updated subcolumn allocations, global reservoirs, reaction ledger, and a `verticalTransport` audit together. A transport failure throws before the commit, so chemistry is rolled back with it. The current split is sequential Lie order (chemistry then transport), not a simultaneous coupled solve; selected trace species are transported, and the global column total remains unchanged.
 
+### Molecular diffusion and gravitational separation
+
+An optional `verticalTransport.molecularDiffusion` configuration enables a trace-species molecular contribution alongside eddy diffusion. It requires, for every transported species, an explicit molar mass, Lennard–Jones collision diameter sigma, characteristic energy epsilon/kB, thermal-diffusion factor alpha_T, and independent provenance for all three data groups. The same molar-mass and Lennard–Jones inputs are required for every background gas whose hydrostatic mole fraction is nonzero in any layer. No collision data are inferred from formula or gas name, and alpha_T is not silently set to zero.
+
+Binary diffusion coefficients D_ij are calculated at each interface using the Chapman–Enskog expression and the Neufeld collision integral. The mixture-averaged trace approximation is
+
+\[
+D_{i,\mathrm{mix}} = \frac{1-X_i}{\sum_j X_j/D_{ij}},
+\]
+
+with local X_j, interface T, and interface P. The implementation uses the conventional Chapman–Enskog prefactor (cm²/s output converted to m²/s), arithmetic combining of collision diameters, and geometric combining of epsilon/kB. Thus molecular diffusivity varies with altitude through local pressure, temperature and background composition.
+
+With positive flux defined upward, the continuum flux represented by the interface discretization is
+
+\[
+\Phi_i = -c_{\rm air}(K_{zz}+D_{i,\mathrm{mix}})\frac{\partial \chi_i}{\partial z}
+-c_{\rm air}D_{i,\mathrm{mix}}\chi_i
+\left[
+\frac{(M_i-\bar M)g}{R T}+
+\frac{\alpha_{T,i}}{T}\frac{\partial T}{\partial z}
+\right].
+\]
+
+The second term includes gravitational/barodiffusive separation and thermal diffusion. Its drift part is upwinded in the implicit finite-volume operator; the resulting tridiagonal solve remains conservative and is checked against the independently reconstructed gradient and drift flux components. Molecular and eddy contributions use the same closed external boundary condition and the same Scheduler macro-step duration.
+
+**Applicability limits:** the current molecular formulation is a mixture-averaged effective-binary trace-species approximation; each configured trace mixing ratio must be ≤ 1%. It is not a full multicomponent Stefan–Maxwell solution. The background mixture and hydrostatic pressure/composition profile are fixed during this step; `n2` and `o2` remain the bulk background, not transported constituents. No built-in Lennard–Jones/thermal-diffusion data set or calibrated `Kzz(z)` profile has been introduced. The E2E transport fixture deliberately labels its LJ and alpha_T values as synthetic test parameters, not Earth observations. The formulation follows the molecular-flux treatment in Belikov et al. (2019, [ACP 19, 5349–5363](https://doi.org/10.5194/acp-19-5349-2019)) and the Chapman–Enskog/Neufeld implementation reference ([NASA/AIAA 2003-0545](https://www.grc.nasa.gov/WWW/wind/papers/AIAA-2003-0545-Lankford.pdf)).
+
 **Scope boundary:** this integration does not implement molecular diffusion, convection, photochemistry, replenishment, or transport of `n2`/`o2`. The hydrostatic background and layer geometry are held fixed during a transport step. `Kzz` remains an explicit caller-supplied value with provenance and is not a calibrated Earth-atmosphere profile. No `verticalTransport` configuration means the previous chemistry-only Scheduler behavior remains unchanged.
