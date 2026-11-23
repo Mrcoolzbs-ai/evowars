@@ -84,18 +84,33 @@ describe('Stage 4.1 SimulationClock: численная устойчивость
     expect(small.stepCount).toBe(clock.stepCount + 1);
   });
 
-  it('advanceTo lands on an exact event point even when its delta is below the conservative representable-step estimate', () => {
+  it('advance preserves an exactly representable dt even below the conservative ULP estimate', () => {
     const clock = advance(createSimulationClock(), 1e16);
     const eventPoint = { segmentIndex: clock.segmentIndex, localTimeS: clock.localTimeS + 2 };
 
     expect(2).toBeLessThan(representableStep(clock)!);
+    expect(eventPoint.localTimeS - clock.localTimeS).toBe(2);
     const relativeAdvance = advance(clock, 2);
-    expect(relativeAdvance.segmentIndex).toBe(clock.segmentIndex + 1);
+    expect(relativeAdvance.segmentIndex).toBe(clock.segmentIndex);
+    expect(relativeAdvance.localTimeS).toBe(eventPoint.localTimeS);
+    expect(relativeAdvance.stepCount).toBe(clock.stepCount + 1);
 
     const exactAdvance = advanceTo(clock, eventPoint);
     expect(exactAdvance.segmentIndex).toBe(clock.segmentIndex);
     expect(exactAdvance.localTimeS).toBe(eventPoint.localTimeS);
     expect(exactAdvance.stepCount).toBe(clock.stepCount + 1);
+  });
+
+  it('advance rolls over when a rounded floating-point sum would change the requested dt', () => {
+    const clock = advance(createSimulationClock(), 1e16);
+    const roundedSum = clock.localTimeS + 3;
+    expect(roundedSum - clock.localTimeS).not.toBe(3);
+
+    const result = advance(clock, 3);
+    expect(result.segmentIndex).toBe(clock.segmentIndex + 1);
+    expect(result.localTimeS).toBe(3);
+    expect(result.priorSegmentsS).toBe(clock.priorSegmentsS + clock.localTimeS);
+    expect(result.stepCount).toBe(clock.stepCount + 1);
   });
 
   it('advanceTo rejects past, equal and cross-segment targets', () => {
