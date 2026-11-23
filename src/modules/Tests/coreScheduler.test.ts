@@ -18,6 +18,7 @@ import {
   nextEventTime,
   pendingEvents,
   processEvent,
+  processWorldEvent,
   readyProcessIds,
   runMacroStep,
   scheduleProcess,
@@ -530,6 +531,162 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     const kept = failed.bookkeeping.eventQueue.find((e) => e.id === 'ev-2');
     expect(kept?.status).toBe('failed');
     expect(kept?.failReason).toBe('обработчик сломан');
+  });
+
+  it('применяет событие как атомарный аудируемый переход резервуара', () => {
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'release-co2',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      type: 'regime_change',
+      data: { fluxId: 'event-co2-output' },
+      source: 'test event solver'
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const result = processWorldEvent(
+      world,
+      'release-co2',
+      (state, event) => {
+        expect(event.data).toEqual({ fluxId: 'event-co2-output' });
+        const registered = registerFlux(state.fluxLedger, {
+          id: 'event-co2-output',
+          kind: 'external_output',
+          from: 'atm',
+          to: EXTERNAL,
+          subject: {
+            subjectType: 'substance',
+            speciesId: 'co2',
+            quantityKind: 'integrated',
+            amount: 5,
+            basis: 'amount'
+          },
+          time: { segmentIndex: 0, localTimeS: 0 },
+          note: 'test event transfer'
+        });
+        const applied = applyFlux(
+          registered,
+          Object.fromEntries(state.reservoirs.map((reservoir) => [reservoir.id, reservoir])),
+          'event-co2-output'
+        );
+        return {
+          ...state,
+          reservoirs: state.reservoirs.map((reservoir) => applied.reservoirs[reservoir.id]!),
+          fluxLedger: applied.ledger
+        };
+      },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('processed');
+    expect(result.audit?.status).toBe('balanced');
+    expect(result.world.reservoirs[0]!.material!.entries.co2).toBe(95);
+    expect(result.world.fluxLedger.records).toHaveLength(1);
+    expect(result.world.fluxLedger.records[0]!.status).toBe('applied');
+    expect(result.event.status).toBe('processed');
+    expect(result.world.scheduling!.eventQueue[0]!.status).toBe('processed');
+    expect(result.world.clock).toEqual(world.clock);
+    expect(result.world.scheduling!.stepCount).toBe(0);
+    expect(world.reservoirs[0]!.material!.entries.co2).toBe(100);
+    expect(world.fluxLedger.records).toHaveLength(0);
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+  });
+
+  it('отклоняет несбалансированное событие, сохраняет физический мир и отмечает событие failed', () => {
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'bad-inventory-event',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      type: 'phase_transition',
+      data: {},
+      source: 'test'
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const result = processWorldEvent(
+      world,
+      'bad-inventory-event',
+      (state) => ({
+        ...state,
+        reservoirs: state.reservoirs.map((reservoir) =>
+          reservoir.id === 'atm'
+            ? setMaterialInventory(reservoir, 'amount', { co2: 97 })
+            : reservoir
+        )
+      }),
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.audit?.status).toBe('imbalanced');
+    expect(result.event.status).toBe('failed');
+    expect(result.event.failReason).toContain('substance');
+    expect(result.world.reservoirs[0]!.material!.entries.co2).toBe(100);
+    expect(result.world.clock).toEqual(world.clock);
+    expect(result.world.scheduling!.eventQueue[0]!.status).toBe('failed');
+    expect(result.world.scheduling!.eventQueue[0]!.failReason).toContain('substance');
+    expect(world.reservoirs[0]!.material!.entries.co2).toBe(100);
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+  });
+
+  it('ошибка обработчика и попытка изменить WorldClock не фиксируют физическое состояние', () => {
+    const makeWorld = (id: string) => ({
+      ...testWorld(),
+      scheduling: enqueueEvent(createSchedulerBookkeeping(), {
+        id,
+        time: { segmentIndex: 0, localTimeS: 0 },
+        type: 'solver_detected',
+        data: {},
+        source: 'test'
+      })
+    });
+    const broken = makeWorld('broken-handler');
+    const thrown = processWorldEvent(
+      broken,
+      'broken-handler',
+      () => {
+        throw new Error('event solver failure');
+      },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+    expect(thrown.status).toBe('failed');
+    expect(thrown.event.failReason).toContain('event solver failure');
+    expect(thrown.world.reservoirs[0]!.material!.entries.co2).toBe(100);
+    expect(thrown.world.scheduling!.eventQueue[0]!.status).toBe('failed');
+
+    const clockWorld = makeWorld('clock-mutator');
+    const moved = processWorldEvent(
+      clockWorld,
+      'clock-mutator',
+      (state) => ({
+        ...state,
+        clock: { ...state.clock, localTimeS: state.clock.localTimeS + 1 }
+      }),
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+    expect(moved.status).toBe('failed');
+    expect(moved.event.failReason).toContain('изменил WorldClock');
+    expect(moved.world.clock).toEqual(clockWorld.clock);
+    expect(moved.world.scheduling!.eventQueue[0]!.status).toBe('failed');
+  });
+
+  it('отклоняет попытку обработать событие вне его точной временной точки', () => {
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'future-event',
+      time: { segmentIndex: 0, localTimeS: 10 },
+      type: 'phase_transition',
+      data: {},
+      source: 'test'
+    });
+    const world = { ...testWorld(), scheduling };
+    expectSchedulerError(
+      () => processWorldEvent(
+        world,
+        'future-event',
+        (state) => state,
+        { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+      ),
+      'invalid_event'
+    );
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
   });
 
   it('глубоко изолирует payload события при enqueue и при чтении очереди', () => {
