@@ -876,6 +876,60 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(fineState.physicalKineticsHistory).toHaveLength(2);
   });
 
+  it('converges the combined #89 + #106 mechanism at 300 K when the physical macro step is halved', () => {
+    const makeCombinedWorld = () => {
+      const world = makePhysicalKineticWorld(300);
+      const state = world.chemicalState!;
+      const additions = { o: 1e-5, no: 5e-6, no2: 2e-7 };
+      state.inventory = { ...state.inventory, ...additions };
+      state.reservoirs = {
+        ...state.reservoirs,
+        atmospheric: { ...state.inventory }
+      };
+      const layer = state.physicalKinetics!.layers[0]!;
+      layer.layerId = 'combined-kinetics-convergence-layer';
+      layer.temperatureK = 300;
+      layer.reactionIds = [
+        'kida-tb-2015-03-19-89',
+        'kida-tb-2015-03-19-106'
+      ];
+      layer.columnInventoriesMolM2 = {
+        ...layer.columnInventoriesMolM2,
+        ...additions
+      };
+      return world;
+    };
+
+    const coarse = makeCombinedWorld();
+    coarse.chemicalState!.physicalKinetics!.maximumMacroStepS = 0.1;
+    const coarseResult = runChemicalEvolutionSchedulerStep(coarse);
+    expect(coarseResult.status).toBe('committed');
+    expect(coarseResult.stepSize!.effectiveDurationS).toBeCloseTo(0.1, 12);
+
+    const fine = makeCombinedWorld();
+    fine.chemicalState!.physicalKinetics!.maximumMacroStepS = 0.05;
+    const firstHalf = runChemicalEvolutionSchedulerStep(fine);
+    expect(firstHalf.status).toBe('committed');
+    expect(firstHalf.stepSize!.effectiveDurationS).toBeCloseTo(0.05, 12);
+    const secondHalf = runChemicalEvolutionSchedulerStep(firstHalf.world);
+    expect(secondHalf.status).toBe('committed');
+    expect(secondHalf.stepSize!.effectiveDurationS).toBeCloseTo(0.05, 12);
+
+    const coarseState = coarseResult.world.chemicalState!;
+    const fineState = secondHalf.world.chemicalState!;
+    for (const speciesId of ['o', 'no', 'no2', 'h', 'o2', 'ho2']) {
+      const coarseAmount = coarseState.inventory[speciesId]!;
+      const fineAmount = fineState.inventory[speciesId]!;
+      const relativeDifference =
+        Math.abs(coarseAmount - fineAmount) / Math.max(Math.abs(coarseAmount), Math.abs(fineAmount));
+      expect(relativeDifference, speciesId + ' combined coarse/fine relative difference').toBeLessThan(5e-6);
+    }
+    expect(coarseState.physicalKineticsHistory).toHaveLength(1);
+    expect(fineState.physicalKineticsHistory).toHaveLength(2);
+    expect(coarseResult.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
+    expect(secondHalf.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
+  });
+
   it('runs against an already existing synchronized CoreWorldState without rebuilding its scheduler history', () => {
     const world = makePhysicalKineticWorld();
     const core = coreWorldStateFromLegacyWorld({
