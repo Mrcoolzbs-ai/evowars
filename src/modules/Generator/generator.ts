@@ -76,6 +76,7 @@ import {
   type AtmosphereTemperatureLayer
 } from '../Core/thermalState';
 import { unknownValue } from '../Core/scientificValue';
+import { createUssa1976AtmosphericTemperatureProfile } from '../Core/atmosphericReferenceAdapters';
 
 // ============================================
 // ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
@@ -170,6 +171,40 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
   const atmospherePhysics = computeAtmospherePhysicalModel(atmosphere, {
     surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
   });
+
+  // Optional source-backed reference profile. It is NOT silently attached
+  // to every Earth-like world: caller must select USSA 1976 and the Earth
+  // atmosphere preset explicitly. It remains a reference profile, not a
+  // claim that the generated body's random gravity/composition equal Earth.
+  const requestedAtmosphericReferenceProfile = settings.atmosphericReferenceProfile;
+  const atmosphericReferenceProfile =
+    requestedAtmosphericReferenceProfile === 'ussa_1976_earth' &&
+    settings.atmospherePreset === 'earth' &&
+    celestialBody.bodyType === 'planet'
+      ? createUssa1976AtmosphericTemperatureProfile()
+      : undefined;
+  const atmosphericReferenceProfileWarning: GenerationWarning | null =
+    requestedAtmosphericReferenceProfile === undefined
+      ? null
+      : atmosphericReferenceProfile !== undefined
+        ? {
+            id: 'note_atmospheric_reference_profile',
+            ruleId: 'atmospheric_reference_profile',
+            category: 'atmosphere',
+            severity: 'info',
+            message: 'USSA 1976 подключён как внешний reference-профиль; он не подменяет физические параметры сгенерированного тела и требует отдельной проверки совместимости перед использованием в химии.',
+            suggestions: ['Сверьте массу, радиус, гравитацию, давление и состав мира с USSA 1976 перед применением профиля как физического состояния'],
+            affectedFields: ['atmosphericReferenceProfile', 'atmospherePhysics', 'bodyPhysics']
+          }
+        : {
+            id: 'warning_atmospheric_reference_profile_not_applicable',
+            ruleId: 'atmospheric_reference_profile_not_applicable',
+            category: 'atmosphere',
+            severity: 'warning',
+            message: 'USSA 1976 reference-профиль не подключён: требуется явно выбранный atmospherePreset=earth и небесное тело типа planet.',
+            suggestions: ['Выберите preset earth для планеты либо снимите atmosphericReferenceProfile'],
+            affectedFields: ['atmosphericReferenceProfile', 'atmosphere']
+          };
 
   // 10b. Фазовый скрининг компонентов атмосферы при ЛОКАЛЬНОЙ
   // температуре приповерхностного слоя (Stage 4.2.2.1: скрининг
@@ -272,7 +307,8 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     ...modeWarnings,
     ...cradleWarnings,
     ...compatibilityWarnings,
-    presetEquilibriumDivergenceWarning
+    presetEquilibriumDivergenceWarning,
+    ...(atmosphericReferenceProfileWarning !== null ? [atmosphericReferenceProfileWarning] : [])
   ];
 
   const causalChain = createCausalChain({
@@ -328,6 +364,7 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     orbit,
     bodyPhysics,
     atmospherePhysics,
+    atmosphericReferenceProfile,
     phaseAnalysis,
     geologyAnalysis,
     energyBudget,
