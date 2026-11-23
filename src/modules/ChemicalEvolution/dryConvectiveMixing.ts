@@ -295,7 +295,7 @@ export function diagnoseDryConvectiveMixing(
     interfaces.push({
       lowerLayerId: lower.layerId,
       upperLayerId: upper.layerId,
-      centerDistanceM,
+      centerDistanceM: centreDistanceM,
       virtualPotentialTemperatureLowerK: thetaLower,
       virtualPotentialTemperatureUpperK: thetaUpper,
       bruntVaisalaFrequencySquaredS2,
