@@ -1074,12 +1074,13 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
         } else {
           for (const [pointIndex, point] of points.entries()) {
             const pointLabel = ['bottom', 'representative', 'top'][pointIndex];
+            const pointRecord = point as Record<string, unknown>;
             for (const field of [
               'heightM', 'pressurePa', 'temperatureK', 'densityKgPerM3',
               'meanMolarMassKgPerMol', 'gravityMs2', 'scaleHeightM',
               'columnMassKgPerM2', 'columnMolesPerM2'
             ]) {
-              const value = point[field];
+              const value = pointRecord[field];
               if (typeof value !== 'number' || !Number.isFinite(value)) {
                 problems.push(prefix + '.hydrostaticState.' + pointLabel + '.' + field + ' должен быть конечным числом');
               } else if (
