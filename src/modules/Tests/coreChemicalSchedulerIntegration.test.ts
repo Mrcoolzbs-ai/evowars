@@ -480,6 +480,7 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
       atmospheric: { ...state.inventory }
     };
     state.physicalKinetics = {
+      ...state.physicalKinetics!,
       maximumMacroStepS: 0.1,
       layers: [
         {
