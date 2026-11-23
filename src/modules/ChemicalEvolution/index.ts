@@ -1507,6 +1507,18 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         const stats = compartment.concentrationStep.integration.stats;
         const layerAudit: ChemicalKineticLayerStepAudit = {
           layerId: layer.layerId,
+          temperatureK: layer.temperatureK,
+          layerThicknessM: layer.layerThicknessM,
+          temperatureProvenance: { ...layer.temperatureProvenance },
+          thicknessProvenance: { ...layer.thicknessProvenance },
+          inventoryProvenance: { ...layer.inventoryProvenance },
+          initialColumnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
+          finalColumnInventoriesMolM2: { ...nextLayerInventory },
+          thirdBody: {
+            speciesId: compartment.thirdBody.speciesId,
+            inventoryMolM2: compartment.thirdBody.inventoryMolM2,
+            concentrationMoleculeCm3: compartment.thirdBody.concentrationMoleculeCm3
+          },
           integration: {
             method: compartment.concentrationStep.integration.method,
             attemptedSteps: stats.attemptedSteps,
