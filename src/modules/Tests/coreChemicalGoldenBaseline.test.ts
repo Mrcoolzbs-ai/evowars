@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error типы node:fs не подключены в tsconfig проекта
 import { writeFileSync } from 'node:fs';
 import { generateWorld } from '../Generator';
-import { runChemicalEvolutionStep } from '../ChemicalEvolution';
+import { runChemicalEvolutionSchedulerStep, runChemicalEvolutionStep } from '../ChemicalEvolution';
 import type { GenerationSettings, ChemicalEvolutionState } from '../../types';
 
 /** Seed контрольной траектории (фиксирован; смена ломает baseline). */
@@ -198,6 +198,26 @@ function runGoldenTrajectory() {
   return world;
 }
 
+/**
+ * Тот же golden-сценарий через производственный Scheduler-путь.
+ * Старый путь выше остаётся источником зафиксированного baseline;
+ * совпадение хэша доказывает сохранение поведения после интеграции.
+ */
+function runSchedulerGoldenTrajectory() {
+  let world = generateWorld(goldenSettings());
+  for (let step = 0; step < GOLDEN_STEPS; step++) {
+    const result = runChemicalEvolutionSchedulerStep(world);
+    if (result.status !== 'committed') {
+      throw new Error(
+        'Scheduler отклонил golden-шаг ' + String(step + 1) + ': ' +
+          (result.reason ?? 'причина не указана')
+      );
+    }
+    world = result.world;
+  }
+  return world;
+}
+
 /** Хэш контрольной траектории + конечное химическое состояние. */
 function goldenHash(): { hash: string; state: ChemicalEvolutionState } {
   const world = runGoldenTrajectory();
@@ -237,6 +257,20 @@ describe('Stage 4.2.1 §0.1: golden baseline химической эволюци
     // источники O₂ отключены: производство = 0, итог = −расход
     expect(state.oxygenBalance.production).toBe(0);
     expect(state.oxygenBalance.net).toBeCloseTo(-state.oxygenBalance.consumption, 12);
+  });
+
+  it('100-шаговая траектория через Scheduler сохраняет legacy golden и продвигает часы ровно 100 раз', () => {
+    const world = runSchedulerGoldenTrajectory();
+    const state = world.chemicalState;
+    if (!state) {
+      throw new Error('Scheduler golden-траектория завершилась без chemicalState');
+    }
+
+    const hash = sha256Hex(canonicalJson(chemicalSnapshot(state)));
+    expect(hash).toBe(GOLDEN_BASELINE_SHA256);
+    expect(world.coreWorldState?.clock.stepCount).toBe(GOLDEN_STEPS);
+    expect(world.coreWorldState?.scheduling?.stepCount).toBe(GOLDEN_STEPS);
+    expect(state.modelTimeYears).toBeCloseTo(GOLDEN_STEPS * state.stepDurationYears, 6);
   });
 
   it('SHA-256 канонического снимка зафиксирован', () => {
