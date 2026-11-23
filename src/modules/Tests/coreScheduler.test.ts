@@ -22,6 +22,7 @@ import {
   processDueWorldEvents,
   readyProcessIds,
   readyProcessIdsAt,
+  runReadyProcessesAt,
   runMacroStep,
   scheduleProcess,
   scheduleProcessAt,
@@ -1440,6 +1441,56 @@ describe('Stage 4.2.1 Scheduler: расписания процессов', () =>
     expect(legacyRun.status).toBe('committed');
     expect(legacyRun.bookkeeping.processDynamics.a!.nextDueElapsedS).toBe(10);
     expect(readyProcessIds(legacyRun.bookkeeping, registry, [operator], 2)).toEqual([]);
+  });
+
+  it('runReadyProcessesAt исполняет только exact deadlines, наступившие в текущем TimePoint', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const calls: Call[] = [];
+    const operators = [recorder('b', calls), recorder('a', calls)];
+    const scheduling = scheduleProcessAt(
+      scheduleProcessAt(createSchedulerBookkeeping(), 'a', { segmentIndex: 0, localTimeS: 0 }),
+      'b',
+      { segmentIndex: 0, localTimeS: 5 }
+    );
+    const world = { ...testWorld(), scheduling };
+
+    const result = runReadyProcessesAt(world, registry, operators, { durationS: 2 });
+    expect(result.status).toBe('committed');
+    expect(result.readyProcessIds).toEqual(['a']);
+    expect(calls).toEqual([{ processId: 'a', durationS: 2, intervalStartS: 0 }]);
+    expect(result.world.clock.localTimeS).toBe(2);
+    expect(result.bookkeeping.processDynamics.a!.nextDueTime).toBeNull();
+    expect(result.bookkeeping.processDynamics.b!.nextDueTime).toEqual({
+      segmentIndex: 0,
+      localTimeS: 5
+    });
+    expect(readyProcessIdsAt(result.bookkeeping, registry, operators, {
+      segmentIndex: 0,
+      localTimeS: 2
+    })).toEqual([]);
+  });
+
+  it('runReadyProcessesAt возвращает idle без продвижения времени, если точных сроков нет', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const calls: Call[] = [];
+    const world = {
+      ...testWorld(),
+      scheduling: scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
+        segmentIndex: 0,
+        localTimeS: 10
+      })
+    };
+    const result = runReadyProcessesAt(world, registry, [recorder('a', calls)], {
+      durationS: 2
+    });
+
+    expect(result.status).toBe('idle');
+    expect(result.readyProcessIds).toEqual([]);
+    expect(result.world).toBe(world);
+    expect(result.bookkeeping).toBe(world.scheduling);
+    expect(result.world.clock.localTimeS).toBe(0);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(calls).toEqual([]);
   });
 
   it('готовность: срок, autorunnable и переданный оператор', () => {
