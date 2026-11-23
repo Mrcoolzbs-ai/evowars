@@ -483,6 +483,20 @@ export interface ChemicalKineticReactionAudit {
 /** Аудит одного физического кинетического шага одного реакционного слоя. */
 export interface ChemicalKineticLayerStepAudit {
   layerId: string;
+  /** Фактическая температура и геометрия слоя во время транзакции. */
+  temperatureK: number;
+  layerThicknessM: number;
+  temperatureProvenance: DataProvenance;
+  thicknessProvenance: DataProvenance;
+  inventoryProvenance: DataProvenance;
+  /** Явные концентрационные входы/выходы; единицы обоих снимков — моль/м². */
+  initialColumnInventoriesMolM2: Record<string, number>;
+  finalColumnInventoriesMolM2: Record<string, number>;
+  thirdBody: {
+    speciesId: string;
+    inventoryMolM2: number;
+    concentrationMoleculeCm3: number;
+  };
   integration: {
     method: string;
     attemptedSteps: number;
