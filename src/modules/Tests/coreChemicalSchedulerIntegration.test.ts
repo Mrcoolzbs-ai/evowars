@@ -660,7 +660,7 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(result.status).toBe('committed');
     expect(result.world.coreWorldState).not.toBe(core);
     expect(result.world.coreWorldState!.scheduling.stepCount).toBe(priorBookkeeping.stepCount + 1);
-    expect(result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)!.inventory)
+    expect(result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)!.material!.entries)
       .toEqual(result.world.chemicalState!.inventory);
     expect(core.scheduling).toEqual(priorBookkeeping);
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
