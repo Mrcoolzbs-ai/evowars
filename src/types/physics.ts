@@ -441,6 +441,8 @@ export interface ChemicalPhysicalKineticLayer {
 export interface ChemicalPhysicalKineticsState {
   /** Верхний численный предел macro dt, с; это ограничение исполнения, не характерное время реакции. */
   maximumMacroStepS: number;
+  /** Источники полных атмосферных столбовых запасов для каждого вида, моль/м². */
+  totalInventoryProvenance: Record<string, DataProvenance>;
   /** Явные однородные слои, каждый со своими температурой, толщиной и подстолбовым составом. */
   layers: ChemicalPhysicalKineticLayer[];
 }
@@ -489,6 +491,8 @@ export interface ChemicalKineticLayerStepAudit {
   temperatureProvenance: DataProvenance;
   thicknessProvenance: DataProvenance;
   inventoryProvenance: DataProvenance;
+  /** Источники полных атмосферных запасов видов, относящихся к слою. */
+  totalInventoryProvenance: Record<string, DataProvenance>;
   /** Явные концентрационные входы/выходы; единицы обоих снимков — моль/м². */
   initialColumnInventoriesMolM2: Record<string, number>;
   finalColumnInventoriesMolM2: Record<string, number>;
