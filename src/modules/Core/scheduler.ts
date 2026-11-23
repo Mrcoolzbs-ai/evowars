@@ -958,6 +958,13 @@ export function readyProcessIds(
   operators: readonly ProcessOperator[],
   nowElapsedS: number
 ): readonly string[] {
+  if (!Number.isFinite(nowElapsedS) || nowElapsedS < 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'nowElapsedS должен быть неотрицательным конечным elapsed-временем', null);
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'состояние Scheduler некорректно: ' + bookkeepingIssues.join('; '), null);
+  }
   const operatorById = new Map(operators.map((operator) => [operator.processId, operator]));
   const ready: string[] = [];
   for (const [processId, dynamics] of Object.entries(bk.processDynamics)) {
