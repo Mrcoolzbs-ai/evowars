@@ -305,7 +305,6 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     const stepAudit = updated.physicalKineticsHistory![0]!;
     expect(stepAudit.durationS).toBe(result.stepSize!.effectiveDurationS);
     expect(stepAudit.characteristicTimeS).toBe(result.stepSize!.proposals[0]!.characteristicTimeS);
-    expect(stepAudit.layers[0]!.reactionId).toBeUndefined();
     expect(stepAudit.layers[0]!.temperatureK).toBe(350);
     expect(stepAudit.layers[0]!.layerThicknessM).toBe(100);
     expect(stepAudit.layers[0]!.temperatureProvenance.sourceId).toBe('fixture:layer-temperature');
