@@ -2004,6 +2004,11 @@ export function runMacroStep(
         segmentIndex: newClock.segmentIndex,
         localTimeS: newClock.localTimeS
       },
+      // A due time is a one-shot trigger. After the process successfully
+      // runs, it is consumed; periodic scheduling must explicitly provide
+      // the next deadline from the updated state.
+      nextDueElapsedS: null,
+      nextDueTime: null,
       macroStepsCompleted: dynamics.macroStepsCompleted + 1,
       operatorCallsCompleted: dynamics.operatorCallsCompleted + calls
     };
