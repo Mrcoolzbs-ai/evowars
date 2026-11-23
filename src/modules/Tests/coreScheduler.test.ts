@@ -2389,6 +2389,138 @@ describe('Stage 4.2 Scheduler: state-dependent macro-step selection', () => {
     expect(result.diagnostics).toContain('[b_chemistry] b_chemistry selected 2.5 s');
   });
 
+  it('clips to the earliest solver root and atomically queues simultaneous root events', () => {
+    const registry = makeRegistry([stateDependent('root_solver')]);
+    const payloadA = { transition: { from: 'liquid', to: 'gas' } };
+    const payloadB = { threshold: { saturationIndex: 1 } };
+    const calls: Call[] = [];
+    const operator: ProcessOperator = {
+      processId: 'root_solver',
+      proposeStep: () => ({
+        durationS: 10,
+        method: 'root-finding on saturation index',
+        events: [
+          { id: 'phase-root-b', offsetS: 3, type: 'phase_transition', data: payloadB },
+          { id: 'phase-root-a', offsetS: 3, type: 'phase_transition', data: payloadA },
+          { id: 'later-root', offsetS: 5, type: 'range_boundary_reached', data: { bound: 100 } }
+        ]
+      }),
+      apply: (world, durationS, intervalStartS) => {
+        calls.push({ processId: 'root_solver', durationS, intervalStartS });
+        return world;
+      }
+    };
+    const world = testWorld();
+    const result = runMacroStep(world, registry, [operator], { durationS: 10, splitting: 'lie' });
+
+    expect(result.status).toBe('committed');
+    expect(calls).toEqual([{ processId: 'root_solver', durationS: 3, intervalStartS: 0 }]);
+    expect(result.stepSize?.effectiveDurationS).toBe(3);
+    expect(result.stepSize?.eventBoundary).toEqual({
+      eventId: 'phase-root-a',
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(result.world.clock.localTimeS).toBe(3);
+    expect(result.bookkeeping.eventQueue.map((event) => ({
+      id: event.id,
+      time: event.time,
+      status: event.status,
+      sequence: event.sequence,
+      source: event.source
+    }))).toEqual([
+      {
+        id: 'phase-root-b',
+        time: { segmentIndex: 0, localTimeS: 3 },
+        status: 'pending',
+        sequence: 0,
+        source: 'root_solver'
+      },
+      {
+        id: 'phase-root-a',
+        time: { segmentIndex: 0, localTimeS: 3 },
+        status: 'pending',
+        sequence: 1,
+        source: 'root_solver'
+      }
+    ]);
+    expect(result.bookkeeping.nextSequence).toBe(2);
+    expect(dueEvents(result.bookkeeping, { segmentIndex: 0, localTimeS: 3 }).map((event) => event.id))
+      .toEqual(['phase-root-b', 'phase-root-a']);
+    expect(validateSchedulerBookkeeping(result.bookkeeping)).toEqual([]);
+
+    payloadA.transition.to = 'mutated-after-proposal';
+    payloadB.threshold.saturationIndex = 999;
+    expect(result.bookkeeping.eventQueue[0]!.data).toEqual({ threshold: { saturationIndex: 1 } });
+    expect(result.bookkeeping.eventQueue[1]!.data).toEqual({ transition: { from: 'liquid', to: 'gas' } });
+  });
+
+  it('a pre-existing earlier event wins over a later solver root; the later root is not queued prematurely', () => {
+    const registry = makeRegistry([stateDependent('root_solver')]);
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'already-scheduled-root',
+      time: { segmentIndex: 0, localTimeS: 2 },
+      type: 'reagent_exhausted',
+      data: { speciesId: 'co2' },
+      source: 'initial condition'
+    });
+    const world = { ...testWorld(), scheduling };
+    const calls: Call[] = [];
+    const operator: ProcessOperator = {
+      processId: 'root_solver',
+      proposeStep: () => ({
+        durationS: 10,
+        method: 'root-finding',
+        events: [
+          { id: 'later-root', offsetS: 3, type: 'phase_transition', data: { phase: 'gas' } }
+        ]
+      }),
+      apply: (state, durationS, intervalStartS) => {
+        calls.push({ processId: 'root_solver', durationS, intervalStartS });
+        return state;
+      }
+    };
+
+    const result = runMacroStep(world, registry, [operator], { durationS: 10, splitting: 'lie' });
+    expect(result.status).toBe('committed');
+    expect(result.stepSize?.effectiveDurationS).toBe(2);
+    expect(result.stepSize?.eventBoundary?.eventId).toBe('already-scheduled-root');
+    expect(calls).toEqual([{ processId: 'root_solver', durationS: 2, intervalStartS: 0 }]);
+    expect(result.bookkeeping.eventQueue.map((event) => event.id)).toEqual(['already-scheduled-root']);
+  });
+
+  it('rejects an invalid solver root before apply and leaves the world/queue untouched', () => {
+    const cases = [
+      { id: 'too-late', offsetS: 6, type: 'phase_transition', data: {} },
+      { id: 'zero-offset', offsetS: 0, type: 'phase_transition', data: {} },
+      { id: 'invalid-payload', offsetS: 2, type: 'phase_transition', data: { nested: Number.NaN } }
+    ];
+    for (const event of cases) {
+      const registry = makeRegistry([stateDependent('root_solver')]);
+      const world = testWorld();
+      const calls: Call[] = [];
+      const operator: ProcessOperator = {
+        processId: 'root_solver',
+        proposeStep: () => ({
+          durationS: 5,
+          method: 'deliberately invalid root proposal',
+          events: [event]
+        }),
+        apply: (state, durationS, intervalStartS) => {
+          calls.push({ processId: 'root_solver', durationS, intervalStartS });
+          return state;
+        }
+      };
+
+      const result = runMacroStep(world, registry, [operator], { durationS: 10, splitting: 'lie' });
+      expect(result.status).toBe('rejected');
+      expect(result.world).toBe(world);
+      expect(result.bookkeeping.stepCount).toBe(0);
+      expect(result.bookkeeping.eventQueue).toHaveLength(0);
+      expect(calls).toEqual([]);
+      expect(result.diagnostics.join(' ')).toContain('solver-предложение');
+    }
+  });
+
   it('недопустимое предложение отклоняет macro-шаг до вызова apply()', () => {
     for (const proposedDurationS of [0, Number.NaN, 11]) {
       const world = testWorld();
