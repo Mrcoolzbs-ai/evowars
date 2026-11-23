@@ -1275,6 +1275,16 @@ function PrimaryPhysicalKineticsConfigurator(props: {
               Доступна только single_layer_estimate: это не вертикальный профиль и он не будет размножен на несколько слоёв.
             </p>
           )}
+          {thermalProfile === null && (
+            <p className="model-note">
+              В текущем CoreWorldState нет отдельного вертикального профиля T(z). Генератор не создаёт его автоматически; используйте ручной ввод только при наличии реальных высотных/температурных данных.
+            </p>
+          )}
+          {thermalProfile?.status === 'unknown' && (
+            <p className="model-note">
+              Вертикальный профиль имеет статус unknown; импорт недоступен до появления слоя с конечными высотами, пригодной температурой и provenance.
+            </p>
+          )}
           <p className="model-note">Слои — неперекрывающиеся части одного столба. Сумма запасов каждого вида по всем слоям не может превышать полный атмосферный запас; это проверяется перед сохранением.</p>
 
           <button type="button" className="secondary" disabled={selectedReactionIds.length === 0} onClick={configure}>
