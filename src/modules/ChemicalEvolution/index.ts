@@ -1071,6 +1071,16 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
         problems.push(prefix + ': отсутствует явный подстолбовой запас вида «' + (chemicalId ?? mechanismSpeciesId) + '»; неизвестное значение не заменяется нулём');
       }
     }
+    // Для используемых fall-off механизмов N2 — явно заданное третье
+    // тело в законе скорости, не факультативный фон. Нулевой запас
+    // не даёт определённой физической концентрации M и должен быть
+    // отклонён на входе, а не позднее внутри ODE solver.
+    if (
+      Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, 'n2') &&
+      layer.columnInventoriesMolM2.n2 <= 0
+    ) {
+      problems.push(prefix + ': запас третьего тела N₂ должен быть строго положительным для выбранной кинетической сети');
+    }
   }
 
   for (const [speciesId, subcolumnAmount] of Object.entries(subcolumnTotals)) {
