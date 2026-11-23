@@ -1535,6 +1535,99 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
         problems.push(transportPrefix + '.diffusivityProvenance обязан идентифицировать источник или сценарное обоснование Kzz');
       }
 
+      if (transport.molecularDiffusion !== undefined) {
+        const molecular = transport.molecularDiffusion;
+        const molecularPrefix = transportPrefix + '.molecularDiffusion';
+        if (
+          !isPlainChemicalRecord(molecular) ||
+          !isPlainChemicalRecord(molecular.species) ||
+          !isPlainChemicalRecord(molecular.backgroundSpecies)
+        ) {
+          problems.push(molecularPrefix + ' должен содержать plain-object species и backgroundSpecies');
+        } else {
+          const molecularSpeciesIds = Object.keys(molecular.species).sort();
+          const expectedSpeciesIds = Array.isArray(speciesIds)
+            ? (speciesIds as string[]).slice().sort()
+            : [];
+          if (molecularSpeciesIds.join('|') !== expectedSpeciesIds.join('|')) {
+            problems.push(molecularPrefix + '.species должен содержать ровно один набор свойств на каждый speciesId переноса');
+          }
+          for (const speciesId of expectedSpeciesIds) {
+            const parameters = molecular.species[speciesId];
+            if (!isPlainChemicalRecord(parameters)) {
+              problems.push(molecularPrefix + ': отсутствуют molecular properties вида «' + speciesId + '»');
+              continue;
+            }
+            for (const field of [
+              'molarMassKgMol',
+              'collisionDiameterAngstrom',
+              'characteristicEnergyOverKBK',
+              'thermalDiffusionFactor'
+            ]) {
+              const value = parameters[field];
+              if (typeof value !== 'number' || !Number.isFinite(value)) {
+                problems.push(molecularPrefix + '.' + speciesId + '.' + field + ' должен быть конечным числом');
+              } else if (
+                ['molarMassKgMol', 'collisionDiameterAngstrom', 'characteristicEnergyOverKBK'].includes(field) &&
+                value <= 0
+              ) {
+                problems.push(molecularPrefix + '.' + speciesId + '.' + field + ' должен быть строго положительным');
+              }
+            }
+            if (
+              !hasIdentifiedPhysicalProvenance(parameters.molarMassProvenance) ||
+              !hasIdentifiedPhysicalProvenance(parameters.collisionParametersProvenance) ||
+              !hasIdentifiedPhysicalProvenance(parameters.thermalDiffusionProvenance)
+            ) {
+              problems.push(molecularPrefix + ': molar mass, Lennard-Jones параметры и thermal diffusion factor вида «' + speciesId + '» должны иметь provenance');
+            }
+          }
+
+          for (const [backgroundId, parameters] of Object.entries(molecular.backgroundSpecies)) {
+            if (!isPlainChemicalRecord(parameters)) {
+              problems.push(molecularPrefix + ': повреждены transport properties bulk-компонента «' + backgroundId + '»');
+              continue;
+            }
+            for (const field of ['molarMassKgMol', 'collisionDiameterAngstrom', 'characteristicEnergyOverKBK']) {
+              const value = parameters[field];
+              if (
+                typeof value !== 'number' ||
+                !Number.isFinite(value) ||
+                value <= 0
+              ) {
+                problems.push(molecularPrefix + '.backgroundSpecies.' + backgroundId + '.' + field + ' должен быть конечным положительным числом');
+              }
+            }
+            if (
+              !hasIdentifiedPhysicalProvenance(parameters.molarMassProvenance) ||
+              !hasIdentifiedPhysicalProvenance(parameters.collisionParametersProvenance)
+            ) {
+              problems.push(molecularPrefix + ': molar mass и Lennard-Jones параметры bulk-компонента «' + backgroundId + '» должны иметь provenance');
+            }
+          }
+
+          for (const layer of config.layers) {
+            const fractions = layer.hydrostaticState?.molarFractions;
+            if (!isPlainChemicalRecord(fractions)) {
+              problems.push(molecularPrefix + ': слой «' + layer.layerId + '» не содержит явный hydrostatic molarFractions');
+              continue;
+            }
+            for (const [backgroundId, fraction] of Object.entries(fractions)) {
+              if (
+                typeof fraction !== 'number' ||
+                !Number.isFinite(fraction) ||
+                fraction < 0
+              ) {
+                problems.push(molecularPrefix + ': bulk mole fraction «' + backgroundId + '» слоя «' + layer.layerId + '» повреждена');
+              }
+              if (typeof fraction === 'number' && fraction > 0 && !hasOwn(molecular.backgroundSpecies, backgroundId)) {
+                problems.push(molecularPrefix + ': отсутствуют Lennard-Jones параметры bulk-компонента «' + backgroundId + '» слоя «' + layer.layerId + '»');
+              }
+            }
+          }
+        }
+      }
+
       const transportLayers = config.layers.slice().sort((a, b) =>
         (a.altitudeRangeM?.min ?? Number.POSITIVE_INFINITY) -
           (b.altitudeRangeM?.min ?? Number.POSITIVE_INFINITY) ||
