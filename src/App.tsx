@@ -726,11 +726,12 @@ function KineticExperimentSection(props: {
 interface PrimaryPhysicalKineticLayerDraft {
   key: number;
   temperatureK: string;
-  layerThicknessM: string;
+  bottomAltitudeM: string;
+  topAltitudeM: string;
   temperatureSourceName: string;
   temperatureSourceReference: string;
-  thicknessSourceName: string;
-  thicknessSourceReference: string;
+  altitudeSourceName: string;
+  altitudeSourceReference: string;
   inventorySourceName: string;
   inventorySourceReference: string;
   inventories: Record<string, string>;
@@ -740,11 +741,12 @@ function createPrimaryPhysicalKineticLayerDraft(key: number): PrimaryPhysicalKin
   return {
     key,
     temperatureK: '',
-    layerThicknessM: '',
+    bottomAltitudeM: '',
+    topAltitudeM: '',
     temperatureSourceName: '',
     temperatureSourceReference: '',
-    thicknessSourceName: '',
-    thicknessSourceReference: '',
+    altitudeSourceName: '',
+    altitudeSourceReference: '',
     inventorySourceName: '',
     inventorySourceReference: '',
     inventories: {}
@@ -897,12 +899,19 @@ function PrimaryPhysicalKineticsConfigurator(props: {
       const prefix = 'слой ' + (index + 1);
       const temperature = positive(draft.temperatureK, prefix + ': температура, K');
       if (temperature === null) return;
-      const thickness = positive(draft.layerThicknessM, prefix + ': толщина, м');
-      if (thickness === null) return;
+      const bottomAltitudeM = numeric(draft.bottomAltitudeM, prefix + ': нижняя высота, м');
+      if (bottomAltitudeM === null) return;
+      const topAltitudeM = positive(draft.topAltitudeM, prefix + ': верхняя высота, м');
+      if (topAltitudeM === null) return;
+      if (topAltitudeM <= bottomAltitudeM) {
+        setMessage(prefix + ': верхняя высота должна быть строго выше нижней.');
+        return;
+      }
+      const thickness = topAltitudeM - bottomAltitudeM;
 
       const sourceGroups = [
         [draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': источник температуры'],
-        [draft.thicknessSourceName, draft.thicknessSourceReference, prefix + ': источник толщины'],
+        [draft.altitudeSourceName, draft.altitudeSourceReference, prefix + ': источник высотных границ'],
         [draft.inventorySourceName, draft.inventorySourceReference, prefix + ': источник подстолбового инвентаря']
       ] as const;
       for (const [name, reference, label] of sourceGroups) {
@@ -922,10 +931,17 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         columnInventoriesMolM2[item.id] = layerValue;
       }
 
+      const altitudeProvenance = makeSource(
+        draft.altitudeSourceName,
+        draft.altitudeSourceReference,
+        prefix + ': абсолютные высотные границы'
+      );
       configuredLayers.push({
         layerId: 'user-configured-layer-' + draft.key,
+        altitudeRangeM: { min: bottomAltitudeM, max: topAltitudeM },
+        altitudeProvenance,
         layerThicknessM: thickness,
-        thicknessProvenance: makeSource(draft.thicknessSourceName, draft.thicknessSourceReference, prefix + ': геометрическая толщина'),
+        thicknessProvenance: altitudeProvenance,
         temperatureK: temperature,
         temperatureProvenance: makeSource(draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': локальная температура'),
         columnInventoriesMolM2,
@@ -1047,10 +1063,17 @@ function PrimaryPhysicalKineticsConfigurator(props: {
                   <input type="number" min="0" step="any" value={layer.temperatureK}
                     onChange={(event) => updateLayerDraft(layer.key, { temperatureK: event.target.value })} />
                 </label>
-                <label>Геометрическая толщина слоя, м
-                  <input type="number" min="0" step="any" value={layer.layerThicknessM}
-                    onChange={(event) => updateLayerDraft(layer.key, { layerThicknessM: event.target.value })} />
+                <label>Нижняя высота слоя над поверхностью, м
+                  <input type="number" min="0" step="any" value={layer.bottomAltitudeM}
+                    onChange={(event) => updateLayerDraft(layer.key, { bottomAltitudeM: event.target.value })} />
                 </label>
+                <label>Верхняя высота слоя над поверхностью, м
+                  <input type="number" min="0" step="any" value={layer.topAltitudeM}
+                    onChange={(event) => updateLayerDraft(layer.key, { topAltitudeM: event.target.value })} />
+                </label>
+                <p className="model-note">
+                  Толщина вычисляется строго как верхняя минус нижняя высота; диапазоны соседних слоёв должны не перекрываться.
+                </p>
 
                 {species.length > 0 && (
                   <div>
@@ -1077,13 +1100,13 @@ function PrimaryPhysicalKineticsConfigurator(props: {
                   <input value={layer.temperatureSourceReference}
                     onChange={(event) => updateLayerDraft(layer.key, { temperatureSourceReference: event.target.value })} />
                 </label>
-                <label>Источник толщины — название
-                  <input value={layer.thicknessSourceName}
-                    onChange={(event) => updateLayerDraft(layer.key, { thicknessSourceName: event.target.value })} />
+                <label>Источник высотных границ / геометрии — название
+                  <input value={layer.altitudeSourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { altitudeSourceName: event.target.value })} />
                 </label>
-                <label>Источник толщины — reference / ID
-                  <input value={layer.thicknessSourceReference}
-                    onChange={(event) => updateLayerDraft(layer.key, { thicknessSourceReference: event.target.value })} />
+                <label>Источник высотных границ / геометрии — reference / ID
+                  <input value={layer.altitudeSourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { altitudeSourceReference: event.target.value })} />
                 </label>
                 <label>Источник подстолбовых запасов — название
                   <input value={layer.inventorySourceName}
