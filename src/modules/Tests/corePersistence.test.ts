@@ -1344,6 +1344,65 @@ describe('Stage 4.2.1 Persistence: segmented process schedule round-trip', () =>
 });
 
 // ============================================
+// STAGE 4.2 - НЕКОРРЕКТНОЕ РАСПИСАНИЕ НЕ ЗАГРУЖАЕТСЯ МОЛЧА
+// ============================================
+
+describe('Stage 4.2 Persistence: invalid Scheduler bookkeeping fails closed', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  function savedWorldWithInvalidScheduler(id: string): SavedWorld {
+    const core = coreWorldStateFromLegacyWorld(starWorld());
+    core.scheduling = {
+      ...createSchedulerBookkeeping(),
+      processDynamics: {
+        'bad-deadline': {
+          processId: 'bad-deadline',
+          lastRunElapsedS: null,
+          nextDueElapsedS: null,
+          lastRunTime: null,
+          nextDueTime: { segmentIndex: 3, localTimeS: -1 },
+          macroStepsCompleted: 0,
+          operatorCallsCompleted: 0
+        }
+      }
+    };
+    return {
+      ...makeGeneratedWorld(id),
+      savedAt: '2024-01-01T00:00:00.000Z',
+      version: CURRENT_SAVE_SCHEMA_VERSION,
+      settings: fixtureSettings,
+      coreWorldState: core
+    } as SavedWorld;
+  }
+
+  it('importWorldFromJSONDetailed отклоняет некорректную exact-time очередь с точной причиной', () => {
+    const bad = savedWorldWithInvalidScheduler('w-bad-scheduler');
+    const result = importWorldFromJSONDetailed(exportWorldToJSON(bad));
+    expect(result.world).toBeNull();
+    expect(result.reason).toContain('coreWorldState.scheduling');
+    expect(result.reason).toContain('nextDueTime');
+    expect(result.reason).toContain('localTimeS');
+  });
+
+  it('getAllWorlds не возвращает повреждённое расписание, но raw-сохранение остаётся доступным', () => {
+    writeRawEntries([savedWorldWithInvalidScheduler('w-bad-scheduler'), makeGeneratedWorld('w-good')]);
+    const loaded = getAllWorlds();
+    expect(loaded.map((world) => world.id)).toEqual(['w-good']);
+
+    const raw = readRawEntries();
+    expect(raw).toHaveLength(2);
+    expect(raw.some((entry) => entry['id'] === 'w-bad-scheduler')).toBe(true);
+    const health = getStorageHealth();
+    expect(health.loadedWorldCount).toBe(1);
+    expect(health.incompatibleEntries.some((entry) =>
+      entry.reason.includes('coreWorldState.scheduling')
+    )).toBe(true);
+  });
+});
+
+// ============================================
 // STAGE 4.2.3.3.1 - НЕКОРРЕКТНЫЙ ЖУРНАЛ НЕ ЗАГРУЖАЕТСЯ МОЛЧА
 // ============================================
 //
