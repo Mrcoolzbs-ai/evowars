@@ -320,7 +320,7 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
           continue;
         }
         const fractions = Object.fromEntries(
-          representative.moleFractions.map((entry) => [entry.gasId, entry.moleFraction])
+          representative.moleFractions.map((entry: HydrostaticProfilePoint['moleFractions'][number]) => [entry.gasId, entry.moleFraction])
         );
         const fractionValues = Object.values(fractions);
         const fractionSum = fractionValues.reduce((sum, value) => sum + value, 0);
@@ -599,7 +599,7 @@ export function deriveDryAirKineticInventoriesFromHydrostaticColumn(
       continue;
     }
     const fractions = Object.fromEntries(
-      representative.moleFractions.map((entry) => [entry.gasId, entry.moleFraction])
+      representative.moleFractions.map((entry: HydrostaticProfilePoint['moleFractions'][number]) => [entry.gasId, entry.moleFraction])
     );
     const layerInventories: Record<string, number> = {};
     for (const gasId of ['n2', 'o2']) {
@@ -628,8 +628,8 @@ export function deriveDryAirKineticInventoriesFromHydrostaticColumn(
         bottomColumnMolesPerM2: boundary.bottom.columnMolesPerM2,
         topColumnMolesPerM2: boundary.top.columnMolesPerM2,
         representativeHeightM: representative.heightM,
-        representativeMoleFractions: fractions,
-        derivedSpecies: { ...layerInventories }
+        representativeMoleFractionsJson: JSON.stringify(fractions),
+        derivedSpeciesJson: JSON.stringify(layerInventories)
       },
       limitations:
         'derives only stable N2/O2 inventories; Ar/CO2 remain outside the primary reaction mechanism; no radicals are inferred'
