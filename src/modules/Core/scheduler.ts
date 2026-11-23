@@ -1251,6 +1251,30 @@ export function runMacroStep(
     }
   }
 
+  // A solver-discovered root is another exact stop candidate. Select the
+  // earliest one that lies inside the globally admissible duration; all
+  // proposals at the selected point will be queued after a successful
+  // macro-step. Later candidates are recomputed from the next state.
+  const solverEventCandidates = proposedEvents
+    .filter((event) => event.offsetS <= effectiveDurationS)
+    .slice()
+    .sort((a, b) =>
+      a.offsetS - b.offsetS ||
+      a.processId.localeCompare(b.processId) ||
+      a.id.localeCompare(b.id)
+    );
+  const firstSolverEvent = solverEventCandidates[0];
+  if (
+    firstSolverEvent !== undefined &&
+    (eventBoundary === undefined || firstSolverEvent.offsetS < effectiveDurationS)
+  ) {
+    effectiveDurationS = firstSolverEvent.offsetS;
+    eventBoundary = {
+      eventId: firstSolverEvent.id,
+      time: { ...firstSolverEvent.time }
+    };
+  }
+
   const limitingProcessIds =
     effectiveDurationS < opts.durationS
       ? proposals.filter((proposal) => proposal.durationS === effectiveDurationS).map((proposal) => proposal.processId).sort()
