@@ -83,6 +83,7 @@ import {
 import type { AppliedReactionSummary, MechanismReactionDef } from './kineticMechanism';
 
 export * from './kineticMechanism';
+export * from './thermalProfileImport';
 
 // Stage 4.5.5 (второй реализационный срез, 2026-11-10): физически явный
 // реакционный слой (компартмент) поверх концентрационного механизма —
