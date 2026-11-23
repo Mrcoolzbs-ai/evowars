@@ -379,6 +379,22 @@ describe('Stage 4.2: configure explicit physical kinetics in primary chemical st
     expect(unsupported.state).toBe(state);
     expect(unsupported.diagnostics.join(' ')).toContain('unsupported physical chemical species ID');
 
+    const missingGlobalProvenance = {
+      ...config,
+      totalInventoryProvenance: {
+        ...config.totalInventoryProvenance,
+        h: {}
+      }
+    } as unknown as ChemicalPhysicalKineticsState;
+    const invalidGlobalSource = configurePrimaryPhysicalChemicalKinetics(
+      state,
+      missingGlobalProvenance,
+      { h: 8e-6, ho2: 1e-8 }
+    );
+    expect(invalidGlobalSource.status).toBe('rejected');
+    expect(invalidGlobalSource.state).toBe(state);
+    expect(invalidGlobalSource.diagnostics.join(' ')).toContain('provenance полного атмосферного запаса вида «h»');
+
     const missingProvenance = {
       ...config,
       layers: config.layers.map((layer) => ({
