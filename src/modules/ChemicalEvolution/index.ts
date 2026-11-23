@@ -1120,13 +1120,27 @@ export function configurePrimaryPhysicalChemicalKinetics(
   }
 
   const inventory = { ...state.inventory, ...additions };
-  const candidate: ChemicalEvolutionState = {
+  const baseCandidate: ChemicalEvolutionState = {
     ...state,
     inventory,
     reservoirs: {
       ...state.reservoirs,
       atmospheric: { ...state.reservoirs.atmospheric, ...inventory }
     },
+    // Validate the caller-owned config before cloning nested values.
+    physicalKinetics: config,
+    physicalKineticsHistory: [...(state.physicalKineticsHistory ?? [])]
+  };
+  const configProblems = physicalChemicalKineticsConfigurationProblems(baseCandidate);
+  if (configProblems.length > 0) {
+    return {
+      status: 'rejected',
+      state,
+      diagnostics: configProblems
+    };
+  }
+  const candidate: ChemicalEvolutionState = {
+    ...baseCandidate,
     physicalKinetics: {
       maximumMacroStepS: config.maximumMacroStepS,
       layers: config.layers.map((layer) => ({
@@ -1139,14 +1153,6 @@ export function configurePrimaryPhysicalChemicalKinetics(
       }))
     }
   };
-  const configProblems = physicalChemicalKineticsConfigurationProblems(candidate);
-  if (configProblems.length > 0) {
-    return {
-      status: 'rejected',
-      state,
-      diagnostics: configProblems
-    };
-  }
   recomputeFractions(candidate);
   // The mechanism includes neutral radicals whose molar masses are not
   // present in the primary gas catalog. Never retain stale pressure.
