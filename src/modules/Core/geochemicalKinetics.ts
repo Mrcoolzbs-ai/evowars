@@ -233,21 +233,21 @@ export function planGeochemicalKineticExtents(args: {
   const diagnostics: string[] = [];
   const extents: GeochemicalKineticExtent[] = [];
   const skipped: GeochemicalKineticSkip[] = [];
-  const durationYears = args.durationYears;
   for (const record of args.records) {
     const issues = validateGeochemicalKineticRateRecord(record);
     if (issues.length > 0) {
+      const recordFields = record as unknown as Record<string, unknown>;
       throw new GeochemicalKineticsError(
         'invalid_input',
-        'кинетическая запись процесса «' + String(record && (record as Record<string, unknown>).processId) + '» не проходит валидацию: ' + issues.join('; '),
-        typeof (record as Record<string, unknown> | undefined)?.processId === 'string' ? (record as Record<string, unknown>).processId as string : null
+        'кинетическая запись процесса «' + String(record && recordFields.processId) + '» не проходит валидацию: ' + issues.join('; '),
+        typeof recordFields?.processId === 'string' ? recordFields.processId as string : null
       );
     }
     if (record.status === 'unknown') {
       skipped.push({ processId: record.processId, reason: record.unknownReason ?? 'скорость неизвестна' });
       continue;
     }
-    const extent = (record.rateMolPerM2PerYear as number) * durationYears;
+    const extent = (record.rateMolPerM2PerYear as number) * args.durationYears;
     if (!Number.isFinite(extent) || extent <= 0) {
       throw new GeochemicalKineticsError('unrepresentable_extent', 'extent процесса «' + record.processId + '» непредставим или неположителен (' + String(extent) + ')', record.processId);
     }
@@ -263,7 +263,7 @@ export function planGeochemicalKineticExtents(args: {
           'extent = rateMolPerM2PerYear × durationYears (' +
           String(record.rateMolPerM2PerYear) +
           ' mol·m⁻²·yr⁻¹ × ' +
-          String(durationYears) +
+          String(args.durationYears) +
           ' yr); длительность с provenance: ' +
           (args.durationProvenance.sourceName ?? '(идентифицированный источник длительности)') +
           '; скорость постоянна на интервале интегрирования'
@@ -275,8 +275,8 @@ export function planGeochemicalKineticExtents(args: {
   }
   return {
     status: 'planned',
-    durationYears,
-    durationSeconds: durationYears * GEOCHEMICAL_YEAR_S,
+    durationYears: args.durationYears,
+    durationSeconds: args.durationYears * GEOCHEMICAL_YEAR_S,
     extents,
     skipped,
     diagnostics
