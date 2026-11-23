@@ -293,12 +293,12 @@ export function validateSchedulerBookkeeping(bk: unknown): string[] {
     }
   }
 
+  let maxEventSequence = -1;
   if (!Array.isArray(bk.eventQueue)) {
     issues.push('eventQueue должен быть массивом событий');
   } else {
     const seenEventIds = new Set<string>();
     const seenEventSequences = new Set<number>();
-    let maxEventSequence = -1;
     bk.eventQueue.forEach((event, index) => {
       const label = 'eventQueue[' + String(index) + ']';
       if (!isPlainRecord(event)) {
