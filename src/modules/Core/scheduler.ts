@@ -2389,6 +2389,9 @@ export function runScheduledWorldTurn(
 ): ScheduledWorldTurnResult {
   let eventDispatch: ProcessDueWorldEventsResult;
   try {
+    // First dispatch at the currently represented point. This ensures
+    // events from the old segment are never skipped when a segment
+    // boundary at the same physical instant is normalized below.
     eventDispatch = processDueWorldEvents(world, eventHandlers, options.eventAudit);
   } catch (error) {
     return {
@@ -2409,8 +2412,74 @@ export function runScheduledWorldTurn(
     };
   }
 
+  let turnWorld = eventDispatch.world;
+  const bookkeeping = turnWorld.scheduling ?? createSchedulerBookkeeping();
+  const nextSegmentIndex = turnWorld.clock.segmentIndex + 1;
+  const hasNextSegmentOriginEvent = pendingEvents(bookkeeping).some(
+    (event) => event.time.segmentIndex === nextSegmentIndex && event.time.localTimeS === 0
+  );
+  const hasNextSegmentOriginProcess = Object.values(bookkeeping.processDynamics).some(
+    (dynamics) =>
+      dynamics.nextDueTime !== undefined &&
+      dynamics.nextDueTime !== null &&
+      dynamics.nextDueTime.segmentIndex === nextSegmentIndex &&
+      dynamics.nextDueTime.localTimeS === 0
+  );
+
+  // A segment origin is a representation-only boundary at the current
+  // physical instant. Normalize the clock before dispatching events or
+  // waking processes scheduled at (segmentIndex + 1, 0); no physical dt is
+  // consumed and WorldClock.stepCount is unchanged.
+  if (hasNextSegmentOriginEvent || hasNextSegmentOriginProcess) {
+    try {
+      turnWorld = { ...turnWorld, clock: startNewSegment(turnWorld.clock) };
+    } catch (error) {
+      return {
+        status: 'failed',
+        world: turnWorld,
+        eventDispatch,
+        diagnostics: [
+          ...eventDispatch.diagnostics,
+          'невозможно открыть следующий сегмент для событий/deadline на его начале: ' +
+            (error instanceof Error ? error.message : String(error))
+        ]
+      };
+    }
+
+    let originDispatch: ProcessDueWorldEventsResult;
+    try {
+      originDispatch = processDueWorldEvents(turnWorld, eventHandlers, options.eventAudit);
+    } catch (error) {
+      return {
+        status: 'failed',
+        world: turnWorld,
+        eventDispatch,
+        diagnostics: [
+          ...eventDispatch.diagnostics,
+          'ошибка dispatch после нормализации начала сегмента: ' +
+            (error instanceof Error ? error.message : String(error))
+        ]
+      };
+    }
+    eventDispatch = {
+      status: originDispatch.status,
+      world: originDispatch.world,
+      results: [...eventDispatch.results, ...originDispatch.results],
+      diagnostics: [...eventDispatch.diagnostics, ...originDispatch.diagnostics]
+    };
+    turnWorld = originDispatch.world;
+    if (originDispatch.status === 'failed') {
+      return {
+        status: 'failed',
+        world: turnWorld,
+        eventDispatch,
+        diagnostics: [...eventDispatch.diagnostics, 'процессы текущего хода не запускались из-за ошибки события']
+      };
+    }
+  }
+
   const processRun = runReadyProcessesAt(
-    eventDispatch.world,
+    turnWorld,
     registry,
     operators,
     options.process
