@@ -691,71 +691,112 @@ export function runVerticalEddyDiffusionStep(
             };
           });
 
-    const initialDifferences = interfaces.map((_entry, index) =>
-      initialMixingRatios[index]! - initialMixingRatios[index + 1]!
-    );
-    const differenceCount = layerCount - 1;
-    const lowerDiagonal = new Array<number>(differenceCount).fill(0);
-    const diagonal = new Array<number>(differenceCount).fill(1);
-    const upperDiagonal = new Array<number>(differenceCount).fill(0);
+    let final: number[];
+    let finalMixingRatios: number[];
 
-    for (let index = 0; index < differenceCount; index++) {
-      const interfaceConductance = interfaces[index]!.conductanceMolM2S;
-      const lowerAirColumn = validatedLayers[index]!.airColumnInventoryMolM2;
-      const upperAirColumn = validatedLayers[index + 1]!.airColumnInventoryMolM2;
-      const integratedConductance = input.durationS * interfaceConductance;
-      const currentCoupling =
-        integratedConductance * (1 / lowerAirColumn + 1 / upperAirColumn);
-      diagonal[index] = 1 + currentCoupling;
-
-      if (index > 0) {
-        const lowerConductance = interfaces[index - 1]!.conductanceMolM2S;
-        lowerDiagonal[index] =
-          -input.durationS * lowerConductance / lowerAirColumn;
+    if (molecularStates !== undefined) {
+      // Conservative backward-Euler finite-volume solve in mixing-ratio
+      // variables. Upwind treatment of the molecular drift term preserves
+      // the M-matrix sign structure when barodiffusion or thermal diffusion
+      // dominates the concentration-gradient term.
+      const lowerDiagonal = new Array<number>(layerCount).fill(0);
+      const diagonal = validatedLayers.map((entry) => entry.airColumnInventoryMolM2);
+      const upperDiagonal = new Array<number>(layerCount).fill(0);
+      for (let interfaceIndex = 0; interfaceIndex < interfaces.length; interfaceIndex++) {
+        const molecularState = molecularStates[interfaceIndex]!;
+        const dt = input.durationS;
+        const lowerCoefficient = molecularState.lowerFluxCoefficientMolM2S;
+        const upperCoefficient = molecularState.upperFluxCoefficientMolM2S;
+        diagonal[interfaceIndex] = diagonal[interfaceIndex]! + dt * lowerCoefficient;
+        upperDiagonal[interfaceIndex] = upperDiagonal[interfaceIndex]! + dt * upperCoefficient;
+        lowerDiagonal[interfaceIndex + 1] =
+          lowerDiagonal[interfaceIndex + 1]! - dt * lowerCoefficient;
+        diagonal[interfaceIndex + 1] =
+          diagonal[interfaceIndex + 1]! - dt * upperCoefficient;
       }
-      if (index < differenceCount - 1) {
-        const upperConductance = interfaces[index + 1]!.conductanceMolM2S;
-        upperDiagonal[index] =
-          -input.durationS * upperConductance / upperAirColumn;
+      try {
+        finalMixingRatios = solveTridiagonal(
+          lowerDiagonal,
+          diagonal,
+          upperDiagonal,
+          initial
+        );
+      } catch (error) {
+        return rejected(error instanceof Error ? error.message : String(error));
       }
-      if (
-        !Number.isFinite(diagonal[index]!) ||
-        !Number.isFinite(lowerDiagonal[index]!) ||
-        !Number.isFinite(upperDiagonal[index]!)
-      ) {
-        return rejected('коэффициенты системы разностей mixing ratio переполнены на интерфейсе ' + index);
-      }
-    }
-
-    let finalDifferences: number[];
-    try {
-      finalDifferences = solveTridiagonal(
-        lowerDiagonal,
-        diagonal,
-        upperDiagonal,
-        initialDifferences
+      final = finalMixingRatios.map((mixingRatio, index) =>
+        mixingRatio * validatedLayers[index]!.airColumnInventoryMolM2
       );
-    } catch (error) {
-      return rejected(error instanceof Error ? error.message : String(error));
+    } else {
+      // In the eddy-only limit, solve adjacent mixing-ratio differences.
+      // The conserved uniform-mixing mode is reconstructed analytically,
+      // avoiding cancellation in very stiff pure-diffusion steps.
+      const initialDifferences = interfaces.map((_entry, index) =>
+        initialMixingRatios[index]! - initialMixingRatios[index + 1]!
+      );
+      const differenceCount = layerCount - 1;
+      const lowerDiagonal = new Array<number>(differenceCount).fill(0);
+      const diagonal = new Array<number>(differenceCount).fill(1);
+      const upperDiagonal = new Array<number>(differenceCount).fill(0);
+
+      for (let index = 0; index < differenceCount; index++) {
+        const interfaceConductance = interfaces[index]!.conductanceMolM2S;
+        const lowerAirColumn = validatedLayers[index]!.airColumnInventoryMolM2;
+        const upperAirColumn = validatedLayers[index + 1]!.airColumnInventoryMolM2;
+        const integratedConductance = input.durationS * interfaceConductance;
+        const currentCoupling =
+          integratedConductance * (1 / lowerAirColumn + 1 / upperAirColumn);
+        diagonal[index] = 1 + currentCoupling;
+
+        if (index > 0) {
+          const lowerConductance = interfaces[index - 1]!.conductanceMolM2S;
+          lowerDiagonal[index] =
+            -input.durationS * lowerConductance / lowerAirColumn;
+        }
+        if (index < differenceCount - 1) {
+          const upperConductance = interfaces[index + 1]!.conductanceMolM2S;
+          upperDiagonal[index] =
+            -input.durationS * upperConductance / upperAirColumn;
+        }
+        if (
+          !Number.isFinite(diagonal[index]!) ||
+          !Number.isFinite(lowerDiagonal[index]!) ||
+          !Number.isFinite(upperDiagonal[index]!)
+        ) {
+          return rejected('коэффициенты системы разностей mixing ratio переполнены на интерфейсе ' + index);
+        }
+      }
+
+      let finalDifferences: number[];
+      try {
+        finalDifferences = solveTridiagonal(
+          lowerDiagonal,
+          diagonal,
+          upperDiagonal,
+          initialDifferences
+        );
+      } catch (error) {
+        return rejected(error instanceof Error ? error.message : String(error));
+      }
+
+      const offsets = new Array<number>(layerCount).fill(0);
+      for (let index = differenceCount - 1; index >= 0; index--) {
+        offsets[index] = offsets[index + 1]! + finalDifferences[index]!;
+      }
+      const weightedOffsetMean = offsets.reduce(
+        (sum, offset, index) =>
+          sum + validatedLayers[index]!.airColumnInventoryMolM2 * offset,
+        0
+      ) / totalAirColumnInventory;
+      const conservedMeanMixingRatio = initialTotal / totalAirColumnInventory;
+      finalMixingRatios = offsets.map((offset) =>
+        conservedMeanMixingRatio + offset - weightedOffsetMean
+      );
+      final = finalMixingRatios.map((mixingRatio, index) =>
+        validatedLayers[index]!.airColumnInventoryMolM2 * mixingRatio
+      );
     }
 
-    // Reconstruct mixing ratios from their differences and the exactly
-    // conserved column mean. This preserves the null-space (uniform mixing
-    // ratio) analytically instead of asking a floating-point solve to retain it.
-    const offsets = new Array<number>(layerCount).fill(0);
-    for (let index = differenceCount - 1; index >= 0; index--) {
-      offsets[index] = offsets[index + 1]! + finalDifferences[index]!;
-    }
-    const weightedOffsetMean = offsets.reduce(
-      (sum, offset, index) =>
-        sum + validatedLayers[index]!.airColumnInventoryMolM2 * offset,
-      0
-    ) / totalAirColumnInventory;
-    const conservedMeanMixingRatio = initialTotal / totalAirColumnInventory;
-    const final = offsets.map((offset, index) =>
-      validatedLayers[index]!.airColumnInventoryMolM2 *
-      (conservedMeanMixingRatio + offset - weightedOffsetMean)
-    );
 
     for (let index = 0; index < final.length; index++) {
       const value = final[index]!;
