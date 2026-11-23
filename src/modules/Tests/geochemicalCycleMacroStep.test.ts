@@ -252,12 +252,15 @@ function chargeCompensationFor(
       (solved.hydrogenMolPerKgSw - b.hydrogenMolPerKgSw) +
       (tOh - (b.ohMolPerKgSw ?? 0)));
   // Полный кислородный дрейф: O в инвентаре несут co2_aq (×2),
-  // hco3_aq (×3), co3_aq (×3) и oh_aq (×1).
+  // hco3_aq (×3), co3_aq (×3) и oh_aq (×1). Дельта co3 берётся относительно
+  // ПОСТ-РЕАКЦИОННОГО состояния postCo3 (реакционная стадия поставляет co3
+  // из минерала с сохранением O: CaCO3 -> Ca2+ + CO3^2-), а вклад реакции
+  // в суммарный O равен нулю (caco3 и co3_aq оба O×3).
   const oxygenDriftPerM2 =
     massKgPerM2 *
     (2 * (solved.speciesMolPerKgSw.co2_aq - b.co2StarMolPerKgSw) +
       3 * (solved.speciesMolPerKgSw.hco3_aq - b.hco3MolPerKgSw) +
-      3 * (solved.speciesMolPerKgSw.co3_aq - b.co3MolPerKgSw) +
+      3 * (solved.speciesMolPerKgSw.co3_aq - postCo3) +
       (tOh - (b.ohMolPerKgSw ?? 0)));
   return {
     deltaStrongIonChargeMolPerKgSw: -modeledChargePerKg,
@@ -590,10 +593,14 @@ function runScenario(opts: ScenarioOptions): ScenarioResult {
       }
     });
     const result = runGeochemicalMacroStep(core, catalog, buildPhases(step, plan));
-    expect(result.status).toBe('applied');
     if (result.status !== 'applied') {
-      throw new Error('macro-step ' + String(step) + ' не применён: ' + JSON.stringify(result).slice(0, 400));
+      const failed = result.appliedPhases.length > 0 ? 'частично применён' : 'не применён';
+      throw new Error(
+        'macro-step ' + String(step) + ' ' + failed + ': failedPhaseIndex=' + String(result.failedPhaseIndex) +
+        ' reasonKind=' + String(result.reasonKind) + ' reason=' + String(result.reason).slice(0, 300)
+      );
     }
+    expect(result.status).toBe('applied');
     core = result.core;
     appliedPhaseCount += result.appliedPhases.length;
   }
