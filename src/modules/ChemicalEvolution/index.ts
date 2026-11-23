@@ -1552,6 +1552,53 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
         problems.push(transportPrefix + '.diffusivityProvenance обязан идентифицировать источник или сценарное обоснование Kzz');
       }
 
+      if (transport.dryConvectiveMixing !== undefined) {
+        const convective = transport.dryConvectiveMixing;
+        const convectivePrefix = transportPrefix + '.dryConvectiveMixing';
+        if (!isPlainChemicalRecord(convective)) {
+          problems.push(convectivePrefix + ' должен быть plain object');
+        } else {
+          const convectiveSpeciesIds = convective.speciesIds;
+          if (
+            !Array.isArray(convectiveSpeciesIds) ||
+            convectiveSpeciesIds.length === 0 ||
+            convectiveSpeciesIds.some((speciesId) =>
+              typeof speciesId !== 'string' ||
+              speciesId.trim() === '' ||
+              speciesId !== speciesId.trim() ||
+              !/^[a-z][a-z0-9_]*$/.test(speciesId) ||
+              !Array.isArray(speciesIds) ||
+              !speciesIds.includes(speciesId) ||
+              speciesId === 'n2' ||
+              speciesId === 'o2'
+            ) ||
+            new Set(convectiveSpeciesIds).size !== convectiveSpeciesIds.length
+          ) {
+            problems.push(convectivePrefix + '.speciesIds должен быть уникальным подмножеством transport.speciesIds без N2/O2');
+          } else {
+            for (const speciesId of convectiveSpeciesIds as string[]) {
+              for (const layer of config.layers) {
+                if (
+                  !isPlainChemicalRecord(layer.columnInventoriesMolM2) ||
+                  !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, speciesId)
+                ) {
+                  problems.push(convectivePrefix + ': в слое «' + layer.layerId + '» отсутствует явный inventory вида «' + speciesId + '»');
+                }
+              }
+            }
+          }
+          for (const field of ['mixingLengthScaleHeightFraction', 'efficiencyCoefficient']) {
+            const value = convective[field];
+            if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) {
+              problems.push(convectivePrefix + '.' + field + ' должен быть конечным числом в интервале (0, 1]');
+            }
+          }
+          if (!hasIdentifiedPhysicalProvenance(convective.provenance)) {
+            problems.push(convectivePrefix + '.provenance обязан идентифицировать выбранное замыкание mixing-length');
+          }
+        }
+      }
+
       if (transport.molecularDiffusion !== undefined) {
         const molecular = transport.molecularDiffusion;
         const molecularPrefix = transportPrefix + '.molecularDiffusion';
