@@ -28,7 +28,7 @@
 //   продвигает вызывающая сторона; длительности фаз — явные входы;
 // - НЕ источник скоростей: количество каждой фазы (extent/mol) либо
 //   приходит из planGeochemicalKineticExtents (geochemicalKinetics.ts),
-//   либо из явного входа с provenance; unknown-процессы в численные
+//   либо из явного входа с provenance; unknown-процессы в numerical
 //   вклады не попадают.
 //
 // Единицы: столбовые запасы mol/m² (basis column_amount); длительности
@@ -77,6 +77,7 @@ export function geochemicalElementSnapshot(catalog: SpeciesCatalog, core: CoreWo
   const excluded = new Set<string>();
   const unknownMaterial: string[] = [];
   const mismatched: string[] = [];
+  const bases = new Set<string>();
   for (const reservoir of core.reservoirs) {
     if (reservoir.material === undefined) {
       if (reservoir.materialApplicability !== 'not_applicable') {
@@ -87,6 +88,7 @@ export function geochemicalElementSnapshot(catalog: SpeciesCatalog, core: CoreWo
     if (reservoir.material.basis !== 'column_amount') {
       mismatched.push(reservoir.id + ':' + reservoir.material.basis);
     }
+    bases.add(reservoir.material.basis);
     for (const [speciesId, amount] of Object.entries(reservoir.material.entries)) {
       counts[speciesId] = (counts[speciesId] ?? 0) + amount;
     }
@@ -105,8 +107,8 @@ export function geochemicalElementSnapshot(catalog: SpeciesCatalog, core: CoreWo
 }
 
 /**
- * Невязки элементного баланса двух снимков
- * (независимый оракул: сравнение фактических инвентарей, не журналов).
+ * Относительная и абсолютная невязки элементного баланса двух снимков
+ * (independent oracle: сравнение фактических инвентарей, не журналов).
  */
 export function geochemicalElementResidual(
   before: GeochemicalElementSnapshot,
@@ -198,13 +200,12 @@ function reservoirsUpdated(core: CoreWorldState, updated: Record<string, Reservo
  * Исполнить ОДИН макро-шаг из фиксированной последовательности фаз.
  *
  * Гарантии макро-атомарности:
- * - каждая фаза применяет production-исполнитель (атомарность,
- *   анти-replay, stale snapshot, стехиометрия, заряд, validateWorldState —
- *   внутри исполнителей);
- * - при отказе фазы возвращается результат с ИСХОДНЫМ состоянием
- *   (ссылочно неизменённым); промежуточные состояния не «протекают»;
- * - список применённых фаз (appliedPhases) сверяется вызывающей стороной
- *   с дельтами ReactionLedger/FluxLedger/geochemicalTransactionLog
+ * - каждая фаза применяет production-исполнитель (атомарность, анти-replay,
+ *   stale snapshot, стехиометрия, заряд, validateWorldState — внутри);
+ * - при отказе фазы отдавать результат ИСХОДНОГО state (ссылочно
+ *   неизменённого); промежуточные состояния не «протекают» наружу;
+ * - ведущий журнал применённых фаз (appliedPhases) сверяется вызывающей
+ *   стороной с дельтами ReactionLedger/FluxLedger/geochemicalTransactionLog
  *   (проверка двойного применения — в тестах 4.9g).
  */
 export function runGeochemicalMacroStep(
@@ -256,7 +257,7 @@ export function runGeochemicalMacroStep(
       }
       current = reservoirsUpdated(current, result.reservoirs);
       current = { ...current, fluxLedger: result.ledger };
-      appliedPhases.push({ kind: phase.kind, applied: true, transactionIdOrFluxId: result.fluxId, processId: result.processId ?? null });
+      appliedPhases.push({ kind: phase.kind, applied: true, transactionIdOrFluxId: result.fluxId, processId: phase.spec.processId });
     } else if (phase.kind === 'co2_phase_exchange') {
       const result = executeCO2PhaseExchange(current, speciesCatalog, phase.input);
       if (result.status !== 'applied') {
@@ -317,7 +318,8 @@ export function runGeochemicalMacroStep(
 //
 // — transport-фазы собираются вызывающей стороной из spec каталога (или
 //   идентифицированной фикстуры) с durationS ЯВНО; extent из
-//   planGeochemicalKineticExtents не протаскивается в инвентарь наобум:
-//   transport-фаза интегрирует rate × Δt внутри исполнителя Stage 4.9a;
+//   planGeochemicalKineticExtents передавать в инвентарь наобум
+//   запрещено: transfer-фаза молча не «протаскивает» количество мимо
+//   интегрирования скорости (stage 4.9a executor сам интегрирует rate × Δt);
 // — co2_phase_exchange и mineral_cycle получают ВВОД адаптеров Stage
-//   4.9e/4.9f без переупаковки: второй семантики входов нет.
+//   4.9e/4.9f без переупаковки: никакой второй семантики входов нет.
