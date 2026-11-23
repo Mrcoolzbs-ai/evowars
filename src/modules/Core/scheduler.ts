@@ -1134,6 +1134,8 @@ export interface MacroStepSizeReport {
   limitingProcessIds: readonly string[];
   /** Ближайшее событие текущего временного сегмента, на котором остановлен шаг. */
   eventBoundary?: { eventId: string; time: FluxTime };
+  /** Точные deadline процессов, достигнутые на конце macro-step. */
+  processBoundary?: { processIds: readonly string[]; time: FluxTime };
   proposals: readonly (ProcessStepProposal & { processId: string })[];
   diagnostics: readonly string[];
 }
@@ -1733,10 +1735,10 @@ export function runMacroStep(
     }
   }
 
-  // A solver-discovered root is another exact stop candidate. Select the
-  // earliest one that lies inside the globally admissible duration; all
-  // proposals at the selected point will be queued after a successful
-  // macro-step. Later candidates are recomputed from the next state.
+  // Solver roots, pending world events and exact process deadlines are
+  // competing stop boundaries. The macro-step ends at the earliest one;
+  // all other processes/events remain due and are dispatched on the next
+  // scheduler turn, without being advanced past their exact TimePoint.
   const solverEventCandidates = proposedEvents
     .filter((event) => event.offsetS <= effectiveDurationS)
     .slice()
@@ -1757,41 +1759,148 @@ export function runMacroStep(
     };
   }
 
+  const selectedProcessIds = new Set(processIds);
+  const exactProcessDeadlines = Object.entries(originalBk.processDynamics)
+    .filter((entry): entry is [string, ProcessDynamics & { nextDueTime: FluxTime }] =>
+      entry[1].nextDueTime !== undefined && entry[1].nextDueTime !== null
+    )
+    .sort((a, b) =>
+      comparePoints(a[1].nextDueTime, b[1].nextDueTime) ||
+      a[0].localeCompare(b[0])
+    );
+
+  // A process whose deadline is already due must participate in this
+  // macro-step. Otherwise the caller must dispatch/execute it before any
+  // unrelated process advances the world.
+  const overdueUnselected = exactProcessDeadlines.find(([processId, dynamics]) =>
+    !selectedProcessIds.has(processId) &&
+    comparePoints(dynamics.nextDueTime, currentPoint) <= 0
+  );
+  if (overdueUnselected !== undefined) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: [],
+      diagnostics: [
+        'процесс «' + overdueUnselected[0] +
+          '» имеет наступивший exact deadline ' +
+          String(overdueUnselected[1].nextDueTime.segmentIndex) + ':' +
+          String(overdueUnselected[1].nextDueTime.localTimeS) +
+          ' и не включён в macro-шаг; сначала выполните все готовые процессы Scheduler'
+      ]
+    };
+  }
+
+  let processBoundary: MacroStepSizeReport['processBoundary'];
+  const nextUnselectedProcessDeadline = exactProcessDeadlines.find(([processId, dynamics]) =>
+    !selectedProcessIds.has(processId) &&
+    dynamics.nextDueTime.segmentIndex === currentPoint.segmentIndex &&
+    comparePoints(dynamics.nextDueTime, currentPoint) > 0
+  );
+  if (nextUnselectedProcessDeadline !== undefined) {
+    const secondsUntilDeadline =
+      nextUnselectedProcessDeadline[1].nextDueTime.localTimeS - currentPoint.localTimeS;
+    if (secondsUntilDeadline <= effectiveDurationS) {
+      effectiveDurationS = secondsUntilDeadline;
+      const sameTimeProcessIds = exactProcessDeadlines
+        .filter(([processId, dynamics]) =>
+          !selectedProcessIds.has(processId) &&
+          comparePoints(dynamics.nextDueTime, nextUnselectedProcessDeadline[1].nextDueTime) === 0
+        )
+        .map(([processId]) => processId)
+        .sort();
+      processBoundary = {
+        processIds: sameTimeProcessIds,
+        time: { ...nextUnselectedProcessDeadline[1].nextDueTime }
+      };
+    }
+  }
+
   const sameSegmentTarget = currentPoint.localTimeS + effectiveDurationS;
+  const representedIncrement = sameSegmentTarget - currentPoint.localTimeS;
+  const incrementRelativeError = Math.abs(representedIncrement - effectiveDurationS) / effectiveDurationS;
   const sameSegmentAdvanceIsExact =
     Number.isFinite(sameSegmentTarget) &&
     sameSegmentTarget > currentPoint.localTimeS &&
-    sameSegmentTarget - currentPoint.localTimeS === effectiveDurationS;
+    representedIncrement !== 0 &&
+    incrementRelativeError <= 1e-9;
   const rollsIntoNextSegment =
-    eventBoundary !== undefined
-      ? eventBoundary.time.segmentIndex === currentPoint.segmentIndex + 1
-      : !sameSegmentAdvanceIsExact;
+    (eventBoundary !== undefined && eventBoundary.time.segmentIndex === currentPoint.segmentIndex + 1) ||
+    (processBoundary !== undefined && processBoundary.time.segmentIndex === currentPoint.segmentIndex + 1) ||
+    (!sameSegmentAdvanceIsExact && eventBoundary === undefined && processBoundary === undefined);
   if (rollsIntoNextSegment) {
     const nextSegmentIndex = currentPoint.segmentIndex + 1;
     const nextSegmentEvent = pendingEvents(originalBk).find(
       (event) => event.time.segmentIndex === nextSegmentIndex
     );
-    if (nextSegmentEvent !== undefined && nextSegmentEvent.time.localTimeS === 0) {
+    const nextSegmentProcesses = exactProcessDeadlines.filter(([processId, dynamics]) =>
+      !selectedProcessIds.has(processId) &&
+      dynamics.nextDueTime.segmentIndex === nextSegmentIndex
+    );
+    const originEvent = nextSegmentEvent?.time.localTimeS === 0 ? nextSegmentEvent : undefined;
+    const originProcesses = nextSegmentProcesses.filter(([, dynamics]) => dynamics.nextDueTime.localTimeS === 0);
+    if (originEvent !== undefined || originProcesses.length > 0) {
       return {
         status: 'rejected',
         world,
         bookkeeping: originalBk,
         log: [],
         diagnostics: [
-          'событие «' + nextSegmentEvent.id +
-            '» назначено на начало следующего численного сегмента; эта точка совпадает с текущим физическим моментом. Обработайте событие до перехода сегмента; шаг не выполнен'
+          originEvent !== undefined
+            ? 'событие «' + originEvent.id +
+              '» назначено на начало следующего численного сегмента; эта точка совпадает с текущим физическим моментом. Обработайте событие до перехода сегмента; шаг не выполнен'
+            : 'процесс «' + originProcesses[0]![0] +
+              '» назначен на начало следующего численного сегмента; выполните смену представления времени и Scheduler turn до продвижения физического времени'
         ]
       };
     }
-    if (
-      nextSegmentEvent !== undefined &&
-      nextSegmentEvent.time.localTimeS <= effectiveDurationS
-    ) {
-      effectiveDurationS = nextSegmentEvent.time.localTimeS;
-      eventBoundary = {
-        eventId: nextSegmentEvent.id,
-        time: { ...nextSegmentEvent.time }
-      };
+
+    const nextBoundaryCandidates: Array<{ point: FluxTime; kind: 'event' | 'process'; eventId?: string; processIds?: string[] }> = [];
+    if (nextSegmentEvent !== undefined && nextSegmentEvent.time.localTimeS <= effectiveDurationS) {
+      nextBoundaryCandidates.push({
+        point: { ...nextSegmentEvent.time },
+        kind: 'event',
+        eventId: nextSegmentEvent.id
+      });
+    }
+    if (nextSegmentProcesses.length > 0) {
+      const nextProcessDeadline = nextSegmentProcesses
+        .map(([processId, dynamics]) => ({ processId, point: dynamics.nextDueTime }))
+        .filter((entry) => entry.point.localTimeS > 0 && entry.point.localTimeS <= effectiveDurationS)
+        .sort((a, b) => a.point.localTimeS - b.point.localTimeS || a.processId.localeCompare(b.processId))[0];
+      if (nextProcessDeadline !== undefined) {
+        const processIdsAtBoundary = nextSegmentProcesses
+          .filter(([, dynamics]) => comparePoints(dynamics.nextDueTime, nextProcessDeadline.point) === 0)
+          .map(([processId]) => processId)
+          .sort();
+        nextBoundaryCandidates.push({
+          point: { ...nextProcessDeadline.point },
+          kind: 'process',
+          processIds: processIdsAtBoundary
+        });
+      }
+    }
+    nextBoundaryCandidates.sort((a, b) =>
+      comparePoints(a.point, b.point) ||
+      (a.kind === 'event' ? -1 : 1)
+    );
+    const nextBoundary = nextBoundaryCandidates[0];
+    if (nextBoundary !== undefined) {
+      effectiveDurationS = nextBoundary.point.localTimeS;
+      if (nextBoundary.kind === 'event') {
+        eventBoundary = {
+          eventId: nextBoundary.eventId!,
+          time: { ...nextBoundary.point }
+        };
+        processBoundary = undefined;
+      } else {
+        processBoundary = {
+          processIds: nextBoundary.processIds!,
+          time: { ...nextBoundary.point }
+        };
+        eventBoundary = undefined;
+      }
     }
   }
 
@@ -1806,11 +1915,19 @@ export function runMacroStep(
         '»; событие остаётся pending и должно быть обработано до следующего шага'
     );
   }
+  if (processBoundary !== undefined) {
+    stepSizeDiagnostics.push(
+      'macro-шаг остановлен на exact deadline процессов: ' +
+        processBoundary.processIds.join(', ') +
+        '; процессы запускаются следующим Scheduler turn'
+    );
+  }
   const stepSize: MacroStepSizeReport = {
     requestedDurationS: opts.durationS,
     effectiveDurationS,
     limitingProcessIds,
     ...(eventBoundary === undefined ? {} : { eventBoundary }),
+    ...(processBoundary === undefined ? {} : { processBoundary }),
     proposals: proposals.map((proposal) => ({ ...proposal })),
     diagnostics: stepSizeDiagnostics
   };
@@ -2002,11 +2119,23 @@ export function runMacroStep(
     Number.isFinite(targetLocalTimeS) &&
     targetLocalTimeS > current.clock.localTimeS &&
     targetLocalTimeS - current.clock.localTimeS === effectiveDurationS;
-  const newClock =
+  const sameSegmentBoundary =
     eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex
-      ? advanceTo(current.clock, eventBoundary.time)
-      : eventBoundary !== undefined
-        ? advance(startNewSegment(current.clock), effectiveDurationS)
+      ? eventBoundary.time
+      : processBoundary !== undefined && processBoundary.time.segmentIndex === current.clock.segmentIndex
+        ? processBoundary.time
+        : null;
+  const nextSegmentBoundary =
+    eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex + 1
+      ? eventBoundary.time
+      : processBoundary !== undefined && processBoundary.time.segmentIndex === current.clock.segmentIndex + 1
+        ? processBoundary.time
+        : null;
+  const newClock =
+    sameSegmentBoundary !== null
+      ? advanceTo(current.clock, sameSegmentBoundary)
+      : nextSegmentBoundary !== null
+        ? advance(startNewSegment(current.clock), nextSegmentBoundary.localTimeS)
         : exactSameSegmentAdvance
           ? advanceTo(current.clock, {
               segmentIndex: current.clock.segmentIndex,
