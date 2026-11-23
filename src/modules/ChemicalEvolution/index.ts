@@ -62,6 +62,7 @@ import type { ReactionExtentBasis, ReactionRecord } from '../Core/reactionLedger
 import { registerReaction } from '../Core/reactionLedger';
 import { convert, quantity } from '../Core/physicalQuantity';
 import { unknownValue } from '../Core/scientificValue';
+import type { DataProvenance } from '../Core/scientificValue';
 import type { CoreWorldState } from '../Core/worldState';
 import type { MaterialInventory, ReservoirRecord } from '../Core/reservoir';
 import { setMaterialInventory, validateMaterialInventory } from '../Core/reservoir';
@@ -1478,6 +1479,55 @@ function toPrimaryKineticReactionAudit(summary: AppliedReactionSummary): Chemica
 }
 
 /**
+ * Сохраняет lineage столбового инвентаря после физического преобразования.
+ * Исходный источник не теряется: к нему добавляются метод, Scheduler step,
+ * dt и точные значения до/после. Следующая транзакция аудирует уже это
+ * производное состояние, а не выдаёт его за неизменённое измерение.
+ */
+function derivePhysicalInventoryProvenance(
+  parent: DataProvenance,
+  details: {
+    scope: 'global_atmospheric_column' | 'layer_subcolumn';
+    id: string;
+    schedulerStep: number;
+    durationS: number;
+    beforeMolM2: Readonly<Record<string, number>>;
+    afterMolM2: Readonly<Record<string, number>>;
+  }
+): DataProvenance {
+  const rawInput: NonNullable<DataProvenance['rawInput']> = {
+    ...(parent.rawInput ?? {}),
+    derivation: 'Stage 4.2 physical chemical kinetics Scheduler transaction',
+    scope: details.scope,
+    inventoryId: details.id,
+    schedulerStep: details.schedulerStep,
+    durationS: details.durationS
+  };
+  for (const speciesId of Object.keys(details.beforeMolM2).sort()) {
+    const before = details.beforeMolM2[speciesId];
+    const after = details.afterMolM2[speciesId];
+    if (typeof before === 'number' && Number.isFinite(before)) {
+      rawInput['before_' + speciesId + '_mol_m2'] = before;
+    }
+    if (typeof after === 'number' && Number.isFinite(after)) {
+      rawInput['after_' + speciesId + '_mol_m2'] = after;
+    }
+  }
+  const method = 'Derived by primary physical chemical kinetics Scheduler / Radau IIA';
+  const note = [
+    parent.note,
+    'Текущий запас получен из указанного исходного источника после физической кинетической транзакции Stage 4.2; см. schedulerStep и before/after в rawInput.'
+  ].filter((item): item is string => typeof item === 'string' && item.trim() !== '').join('; ');
+  return {
+    ...parent,
+    method,
+    modelVersion: 'Stage 4.2 primary physical kinetics',
+    rawInput,
+    note
+  };
+}
+
+/**
  * Production путь: основной ChemicalEvolutionState → state-dependent
  * ProcessOperator → Radau IIA compartment step → атомарные Core reservoirs
  * + ReactionLedger. Никаких game extentFraction/gameSpeedCoefficient,
@@ -1794,7 +1844,14 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           ...layer,
           thicknessProvenance: { ...layer.thicknessProvenance },
           temperatureProvenance: { ...layer.temperatureProvenance },
-          inventoryProvenance: { ...layer.inventoryProvenance },
+          inventoryProvenance: derivePhysicalInventoryProvenance(layer.inventoryProvenance, {
+            scope: 'layer_subcolumn',
+            id: layer.layerId,
+            schedulerStep,
+            durationS,
+            beforeMolM2: layer.columnInventoriesMolM2,
+            afterMolM2: nextLayerInventory
+          }),
           columnInventoriesMolM2: nextLayerInventory
         });
         warnings.push(...compartment.warnings.map((warning) => '[' + layer.layerId + '] ' + warning));
@@ -1834,6 +1891,19 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
               note: 'изменение O₂ не рассчитывалось: основной инвентарь O₂ не задан как явная физическая величина'
             };
 
+      const derivedGlobalInventoryProvenance = Object.fromEntries(
+        Object.entries(config.totalInventoryProvenance).map(([speciesId, provenance]) => [
+          speciesId,
+          derivePhysicalInventoryProvenance(provenance, {
+            scope: 'global_atmospheric_column',
+            id: speciesId,
+            schedulerStep,
+            durationS,
+            beforeMolM2: { [speciesId]: initialInventory[speciesId]! },
+            afterMolM2: { [speciesId]: updatedInventory[speciesId]! }
+          })
+        ])
+      );
       const updatedChemical: ChemicalEvolutionState = {
         ...working,
         inventory: updatedInventory,
@@ -1846,12 +1916,7 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         oxygenBalance,
         physicalKinetics: {
           maximumMacroStepS: config.maximumMacroStepS,
-          totalInventoryProvenance: Object.fromEntries(
-            Object.entries(config.totalInventoryProvenance).map(([speciesId, provenance]) => [
-              speciesId,
-              { ...provenance }
-            ])
-          ),
+          totalInventoryProvenance: derivedGlobalInventoryProvenance,
           layers: updatedLayers
         },
         physicalKineticsHistory: [...(working.physicalKineticsHistory ?? []), audit]
