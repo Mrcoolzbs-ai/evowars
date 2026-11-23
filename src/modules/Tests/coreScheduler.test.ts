@@ -822,6 +822,66 @@ describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', 
     }).map((event) => event.id)).toEqual(['event-near']);
   });
 
+  it('clips a forced segment rollover to a pending event already scheduled in the next segment', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'next-segment-event',
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 1 },
+      type: 'phase_transition',
+      data: { phase: 'new-regime' },
+      source: 'pre-scheduled boundary'
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+    const calls: Call[] = [];
+
+    const result = runMacroStep(world, registry, [recorder('a', calls)], {
+      durationS: 3,
+      splitting: 'lie'
+    });
+
+    expect(result.status).toBe('committed');
+    expect(calls).toEqual([{ processId: 'a', durationS: 1, intervalStartS: 0 }]);
+    expect(result.stepSize?.effectiveDurationS).toBe(1);
+    expect(result.stepSize?.eventBoundary).toEqual({
+      eventId: 'next-segment-event',
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 1 }
+    });
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(result.world.clock.localTimeS).toBe(1);
+    expect(result.bookkeeping.eventQueue[0]!.status).toBe('pending');
+    expect(dueEvents(result.bookkeeping, {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 1
+    }).map((event) => event.id)).toEqual(['next-segment-event']);
+  });
+
+  it('blocks a segment rollover at a pre-scheduled event at the next segment origin', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'next-segment-origin',
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 0 },
+      type: 'regime_change',
+      data: { mode: 'new-segment' },
+      source: 'pre-scheduled boundary'
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+    const calls: Call[] = [];
+
+    const result = runMacroStep(world, registry, [recorder('a', calls)], {
+      durationS: 3,
+      splitting: 'lie'
+    });
+
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.world.clock).toEqual(largeClock);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(calls).toEqual([]);
+    expect(result.diagnostics.join(' ')).toContain('совпадает с текущим физическим моментом');
+  });
+
   it('rejects a new macro-step while an event at the current point is still pending', () => {
     const registry = makeRegistry([descriptor('a')]);
     const calls: Call[] = [];
