@@ -308,6 +308,13 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(stepAudit.layers[0]!.reactions[0]!.reactionId).toBe('kida-tb-2015-03-19-106');
     expect(stepAudit.layers[0]!.reactions[0]!.dataStatus).toBe('known');
     expect(stepAudit.layers[0]!.reactions[0]!.provenance.sourceName).toBeTruthy();
+    expect(stepAudit.layers[0]!.reactions[0]!.uncertainty).toMatchObject({
+      status: 'not_quantified',
+      effectiveRate: null,
+      lowPressureLimit: null,
+      highPressureLimit: null
+    });
+    expect(stepAudit.layers[0]!.reactions[0]!.uncertainty.reason).toContain('не объединена');
     expect(stepAudit.layers[0]!.integration.method).toContain('radau');
     expect(updated.physicalKinetics!.layers[0]!.columnInventoriesMolM2.h).toBeLessThan(8e-6);
 
