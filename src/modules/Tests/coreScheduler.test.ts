@@ -3193,6 +3193,65 @@ describe('Stage 4.2 Scheduler: state-dependent macro-step selection', () => {
     });
   }
 
+  it('solver root в следующем сегменте совпадает с exact process deadline без потери обеих границ', () => {
+    const dynamic = descriptor('root_solver', {
+      tau: unknownValue('характерное время вычисляет state-dependent solver'),
+      executionMode: 'state_dependent'
+    });
+    const registry = makeRegistry([dynamic, descriptor('scheduled_process')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'scheduled_process', {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 3
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+    const operator: ProcessOperator = {
+      processId: 'root_solver',
+      proposeStep: () => ({
+        durationS: 5,
+        method: 'sub-ULP root detection',
+        events: [{
+          id: 'sub-ulp-phase-root',
+          offsetS: 3,
+          type: 'phase_transition',
+          data: { boundary: 'same as process deadline' }
+        }]
+      }),
+      apply: (state) => state
+    };
+
+    const result = runMacroStep(
+      world,
+      registry,
+      [operator],
+      { durationS: 5, splitting: 'lie', processIds: ['root_solver'] }
+    );
+
+    expect(result.status).toBe('committed');
+    expect(result.stepSize?.effectiveDurationS).toBe(3);
+    expect(result.stepSize?.eventBoundary).toEqual({
+      eventId: 'sub-ulp-phase-root',
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 3 }
+    });
+    expect(result.stepSize?.processBoundary).toEqual({
+      processIds: ['scheduled_process'],
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 3 }
+    });
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(result.world.clock.localTimeS).toBe(3);
+    expect(result.bookkeeping.eventQueue[0]!.time).toEqual({
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 3
+    });
+    expect(readyProcessIdsAt(result.bookkeeping, registry, [{
+      processId: 'scheduled_process',
+      apply: (state) => state
+    }], {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 3
+    })).toEqual(['scheduled_process']);
+  });
+
   it('state-dependent процесс готов к автоисполнению только при наличии proposeStep()', () => {
     const dynamic = stateDependent('dynamic_chemistry');
     const registry = makeRegistry([dynamic]);
