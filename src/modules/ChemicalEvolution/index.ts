@@ -1123,6 +1123,30 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
         ) {
           problems.push(prefix + '.hydrostaticState representativeHeightM must lie inside sourced altitudeRangeM');
         }
+        const hydroBottom = isPlainChemicalRecord(hydro.bottom) ? hydro.bottom : undefined;
+        const hydroRepresentative = isPlainChemicalRecord(hydro.representative) ? hydro.representative : undefined;
+        const hydroTop = isPlainChemicalRecord(hydro.top) ? hydro.top : undefined;
+        if (hydroBottom !== undefined && hydroTop !== undefined && layer.altitudeRangeM !== undefined) {
+          const bottomHeight = hydroBottom.heightM;
+          const topHeight = hydroTop.heightM;
+          const geometryToleranceM = 1e-5;
+          if (
+            typeof bottomHeight !== 'number' ||
+            typeof topHeight !== 'number' ||
+            Math.abs(bottomHeight - layer.altitudeRangeM.min) > geometryToleranceM ||
+            Math.abs(topHeight - layer.altitudeRangeM.max) > geometryToleranceM
+          ) {
+            problems.push(prefix + '.hydrostaticState bottom/top heights do not match the kinetic layer geometry');
+          }
+        }
+        if (
+          hydroRepresentative !== undefined &&
+          typeof hydroRepresentative.temperatureK === 'number' &&
+          Math.abs(layer.temperatureK - hydroRepresentative.temperatureK) >
+            1e-10 * Math.max(1, Math.abs(layer.temperatureK), Math.abs(hydroRepresentative.temperatureK))
+        ) {
+          problems.push(prefix + '.temperatureK does not match hydrostatic representative T(z)');
+        }
         const fractions = hydro.molarFractions;
         if (!isPlainChemicalRecord(fractions)) {
           problems.push(prefix + '.hydrostaticState.molarFractions must be a plain composition record');
@@ -1210,7 +1234,11 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
             typeof n2MoleFraction === 'number' && n2MoleFraction > 0 &&
             typeof n2Inventory === 'number' && Number.isFinite(n2Inventory) && n2Inventory > 0 &&
             typeof representativeHydroPoint.pressurePa === 'number' &&
-            typeof representativeHydroPoint.temperatureK === 'number'
+            typeof representativeHydroPoint.temperatureK === 'number' &&
+            hydroBottom !== undefined &&
+            hydroTop !== undefined &&
+            typeof hydroBottom.columnMolesPerM2 === 'number' &&
+            typeof hydroTop.columnMolesPerM2 === 'number'
           ) {
             const expectedLocal = (
               n2MoleFraction * representativeHydroPoint.pressurePa /
@@ -1219,15 +1247,43 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
             const recomputedMean =
               (n2Inventory / layer.layerThicknessM) * AVOGADRO_NUMBER_PER_MOL / 1e6;
             const recomputedDeviation =
-              Math.abs(recomputedMean - expectedLocal) / expectedLocal;
+              Math.abs(recomputedMean - expectedLocal) / Math.max(expectedLocal, Number.MIN_VALUE);
+            const storedLocal = thirdBodyConsistency.hydrostaticMidpointConcentrationMoleculeCm3;
+            const storedMean = thirdBodyConsistency.layerAverageConcentrationMoleculeCm3;
+            const storedDeviation = thirdBodyConsistency.relativeDeviation;
+            const expectedHydrostaticInventory =
+              (hydroTop.columnMolesPerM2 - hydroBottom.columnMolesPerM2) * n2MoleFraction;
+            const storedHydrostaticInventory = thirdBodyConsistency.hydrostaticLayerInventoryMolM2;
+            const storedSuppliedInventory = thirdBodyConsistency.suppliedLayerInventoryMolM2;
             if (
               !Number.isFinite(expectedLocal) ||
               expectedLocal <= 0 ||
               !Number.isFinite(recomputedMean) ||
               recomputedMean <= 0 ||
+              !Number.isFinite(recomputedDeviation) ||
               recomputedDeviation > (typeof maxDeviation === 'number' ? maxDeviation : 0)
             ) {
               problems.push(prefix + '.N2 concentration recomputed from Scheduler inventory/thickness is inconsistent with local hydrostatic xN2*P/(R*T)');
+            }
+            if (
+              typeof storedLocal !== 'number' ||
+              typeof storedMean !== 'number' ||
+              typeof storedDeviation !== 'number' ||
+              Math.abs(storedLocal - expectedLocal) > 1e-8 * Math.max(expectedLocal, 1) ||
+              Math.abs(storedMean - recomputedMean) > 1e-8 * Math.max(recomputedMean, 1) ||
+              Math.abs(storedDeviation - recomputedDeviation) > 1e-8
+            ) {
+              problems.push(prefix + '.thirdBodyConsistency snapshots no longer match the current N2 inventory and hydrostatic P/T');
+            }
+            if (
+              typeof storedHydrostaticInventory !== 'number' ||
+              typeof storedSuppliedInventory !== 'number' ||
+              Math.abs(storedHydrostaticInventory - expectedHydrostaticInventory) >
+                1e-8 * Math.max(expectedHydrostaticInventory, Number.MIN_VALUE) ||
+              Math.abs(storedSuppliedInventory - n2Inventory) >
+                1e-8 * Math.max(n2Inventory, Number.MIN_VALUE)
+            ) {
+              problems.push(prefix + '.thirdBodyConsistency column inventories no longer match hydrostatic ΔNmol*xN2 and Scheduler N2');
             }
           } else {
             problems.push(prefix + '.N2 hydrostatic consistency requires explicit positive n2 inventory and xN2');
