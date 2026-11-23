@@ -70,6 +70,7 @@ import { setMaterialInventory, validateMaterialInventory } from '../Core/reservo
 import type { ScientificSpecies } from '../Core/species';
 import { AVOGADRO_NUMBER_PER_MOL } from '../Core/kinetics';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
+import { runVerticalEddyDiffusionStep } from './verticalEddyDiffusion';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -297,8 +298,23 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
               temperatureProvenance: { ...layer.temperatureProvenance },
               inventoryProvenance: { ...layer.inventoryProvenance },
               columnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
+              ...(layer.altitudeRangeM === undefined ? {} : { altitudeRangeM: { ...layer.altitudeRangeM } }),
+              ...(layer.altitudeProvenance === undefined ? {} : { altitudeProvenance: { ...layer.altitudeProvenance } }),
+              ...(layer.hydrostaticState === undefined ? {} : { hydrostaticState: cloneKineticHydrostaticState(layer.hydrostaticState) }),
               reactionIds: [...layer.reactionIds]
-            }))
+            })),
+            ...(input.physicalKinetics.verticalTransport === undefined
+              ? {}
+              : {
+                  verticalTransport: {
+                    ...input.physicalKinetics.verticalTransport,
+                    speciesIds: [...input.physicalKinetics.verticalTransport.speciesIds],
+                    eddyDiffusivityM2S: Array.isArray(input.physicalKinetics.verticalTransport.eddyDiffusivityM2S)
+                      ? [...input.physicalKinetics.verticalTransport.eddyDiffusivityM2S]
+                      : input.physicalKinetics.verticalTransport.eddyDiffusivityM2S,
+                    diffusivityProvenance: { ...input.physicalKinetics.verticalTransport.diffusivityProvenance }
+                  }
+                })
           },
           physicalKineticsHistory: []
         }),
@@ -1420,6 +1436,112 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
       }
     }
   }
+  if (config.verticalTransport !== undefined) {
+    const transport = config.verticalTransport as unknown;
+    const transportPrefix = 'physicalKinetics.verticalTransport';
+    if (!isPlainChemicalRecord(transport)) {
+      problems.push(transportPrefix + ' должен быть plain object');
+    } else {
+      const speciesIds = transport.speciesIds;
+      if (
+        !Array.isArray(speciesIds) ||
+        speciesIds.length === 0 ||
+        speciesIds.some((speciesId) =>
+          typeof speciesId !== 'string' ||
+          speciesId.trim() === '' ||
+          speciesId !== speciesId.trim() ||
+          !/^[a-z][a-z0-9_]*$/.test(speciesId)
+        ) ||
+        new Set(speciesIds).size !== speciesIds.length
+      ) {
+        problems.push(transportPrefix + '.speciesIds должен содержать уникальные канонические species ID');
+      } else {
+        for (const speciesId of speciesIds as string[]) {
+          if (
+            speciesId === 'n2' ||
+            speciesId === 'o2' ||
+            !Object.prototype.hasOwnProperty.call(CHEMICAL_TO_MECHANISM_SPECIES, speciesId)
+          ) {
+            problems.push(transportPrefix + ': вид «' + speciesId + '» не является поддерживаемым следовым видом для независимой диффузии');
+            continue;
+          }
+          if (!Object.prototype.hasOwnProperty.call(state.inventory, speciesId)) {
+            problems.push(transportPrefix + ': полный атмосферный inventory не содержит явный ключ «' + speciesId + '»');
+          }
+          if (!hasIdentifiedPhysicalProvenance(config.totalInventoryProvenance[speciesId])) {
+            problems.push(transportPrefix + ': отсутствует provenance полного запаса вида «' + speciesId + '»');
+          }
+          for (let layerIndex = 0; layerIndex < config.layers.length; layerIndex++) {
+            const layer = config.layers[layerIndex]!;
+            if (
+              !isPlainChemicalRecord(layer.columnInventoriesMolM2) ||
+              !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, speciesId)
+            ) {
+              problems.push(transportPrefix + ': в слое «' + layer.layerId + '» отсутствует явный inventory вида «' + speciesId + '»');
+            }
+          }
+        }
+      }
+
+      const diffusivity = transport.eddyDiffusivityM2S;
+      const validDiffusivity = (value: unknown): value is number =>
+        typeof value === 'number' && Number.isFinite(value) && value >= 0;
+      if (typeof diffusivity === 'number') {
+        if (!validDiffusivity(diffusivity)) {
+          problems.push(transportPrefix + '.eddyDiffusivityM2S должен быть конечным неотрицательным числом');
+        }
+      } else if (Array.isArray(diffusivity)) {
+        if (
+          diffusivity.length !== Math.max(0, config.layers.length - 1) ||
+          diffusivity.some((value) => !validDiffusivity(value))
+        ) {
+          problems.push(transportPrefix + '.eddyDiffusivityM2S должен содержать конечные неотрицательные Kzz для каждого интерфейса');
+        }
+      } else {
+        problems.push(transportPrefix + '.eddyDiffusivityM2S должен быть числом или массивом по интерфейсам');
+      }
+      if (!hasIdentifiedPhysicalProvenance(transport.diffusivityProvenance)) {
+        problems.push(transportPrefix + '.diffusivityProvenance обязан идентифицировать источник или сценарное обоснование Kzz');
+      }
+
+      const transportLayers = config.layers.slice().sort((a, b) =>
+        (a.altitudeRangeM?.min ?? Number.POSITIVE_INFINITY) -
+          (b.altitudeRangeM?.min ?? Number.POSITIVE_INFINITY) ||
+        a.layerId.localeCompare(b.layerId)
+      );
+      if (transportLayers.length < 2) {
+        problems.push(transportPrefix + ' требует как минимум два слоя');
+      }
+      if (
+        altitudeRanges.length !== config.layers.length ||
+        transportLayers.some((layer) => layer.altitudeRangeM === undefined || layer.hydrostaticState === undefined)
+      ) {
+        problems.push(transportPrefix + ' требует altitudeRangeM и hydrostaticState для каждого слоя');
+      }
+      for (let layerIndex = 0; layerIndex < transportLayers.length; layerIndex++) {
+        const layer = transportLayers[layerIndex]!;
+        if (layerIndex === 0) continue;
+        const previous = transportLayers[layerIndex - 1]!;
+        const previousRange = previous.altitudeRangeM;
+        const currentRange = layer.altitudeRangeM;
+        if (previousRange === undefined || currentRange === undefined) continue;
+        const boundaryToleranceM = 1e-8 * Math.max(1, Math.abs(previousRange.max), Math.abs(currentRange.min));
+        if (Math.abs(previousRange.max - currentRange.min) > boundaryToleranceM) {
+          problems.push(transportPrefix + ': слои «' + previous.layerId + '» и «' + layer.layerId + '» должны быть смежными без разрывов и перекрытий');
+        }
+        const previousHydro = previous.hydrostaticState;
+        const currentHydro = layer.hydrostaticState;
+        if (previousHydro !== undefined && currentHydro !== undefined) {
+          const pressureMismatch = Math.abs(previousHydro.top.pressurePa - currentHydro.bottom.pressurePa) /
+            Math.max(previousHydro.top.pressurePa, currentHydro.bottom.pressurePa, Number.MIN_VALUE);
+          if (!Number.isFinite(pressureMismatch) || pressureMismatch > 1e-6) {
+            problems.push(transportPrefix + ': гидростатическое давление разрывно между слоями «' + previous.layerId + '» и «' + layer.layerId + '»');
+          }
+        }
+      }
+    }
+  }
+
   return problems;
 }
 
@@ -1508,11 +1630,25 @@ export function configurePrimaryPhysicalChemicalKinetics(
         temperatureProvenance: { ...layer.temperatureProvenance },
         inventoryProvenance: { ...layer.inventoryProvenance },
         columnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
+        ...(layer.altitudeRangeM === undefined ? {} : { altitudeRangeM: { ...layer.altitudeRangeM } }),
+        ...(layer.altitudeProvenance === undefined ? {} : { altitudeProvenance: { ...layer.altitudeProvenance } }),
         ...(layer.hydrostaticState === undefined
           ? {}
           : { hydrostaticState: cloneKineticHydrostaticState(layer.hydrostaticState) }),
         reactionIds: [...layer.reactionIds]
-      }))
+      })),
+      ...(config.verticalTransport === undefined
+        ? {}
+        : {
+            verticalTransport: {
+              ...config.verticalTransport,
+              speciesIds: [...config.verticalTransport.speciesIds],
+              eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
+                ? [...config.verticalTransport.eddyDiffusivityM2S]
+                : config.verticalTransport.eddyDiffusivityM2S,
+              diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance }
+            }
+          })
     }
   };
   recomputeFractions(candidate);
