@@ -2209,3 +2209,144 @@ describe('Stage 4.4.4.6: неверный basis и примитивные entrie
     ).toEqual({ basis: 'mol', entries: { ch4: 1 } });
   });
 });
+
+// ============================================
+// STAGE 4.2 — VERTICAL SUBDIVISION REGRESSION
+// ============================================
+// A controlled same-state profile is subdivided into 1/2/4/8 contiguous
+// layers. Every layer retains the same local concentrations and T; only
+// its geometric thickness and column inventory are scaled together.
+// Integrated column chemistry must therefore be invariant to vertical
+// partitioning. This is a numerical regression fixture, NOT a measured
+// planetary atmosphere or a model of vertical transport.
+
+describe('Stage 4.2: vertical subdivision regression benchmark', () => {
+  function makeVerticallyPartitionedWorld(layerCount: number): GeneratedWorld {
+    const world = makePhysicalKineticWorld(350);
+    const state = world.chemicalState!;
+    const config = state.physicalKinetics!;
+    const template = config.layers[0]!;
+    const totalHeightM = template.layerThicknessM;
+    const layerHeightM = totalHeightM / layerCount;
+
+    config.layers = Array.from({ length: layerCount }, (_, index) => {
+      const suffix = 'vertical-benchmark:' + layerCount + ':' + index;
+      const columnInventoriesMolM2 = Object.fromEntries(
+        Object.entries(template.columnInventoriesMolM2).map(([speciesId, amount]) => [
+          speciesId,
+          amount / layerCount
+        ])
+      );
+      return {
+        ...template,
+        layerId: 'vertical-benchmark-layer-' + index,
+        layerThicknessM: layerHeightM,
+        thicknessProvenance: {
+          ...template.thicknessProvenance,
+          sourceId: suffix + ':thickness'
+        },
+        altitudeRangeM: {
+          min: index * layerHeightM,
+          max: (index + 1) * layerHeightM
+        },
+        altitudeProvenance: {
+          ...template.thicknessProvenance,
+          sourceId: suffix + ':altitude'
+        },
+        temperatureProvenance: {
+          ...template.temperatureProvenance,
+          sourceId: suffix + ':temperature'
+        },
+        inventoryProvenance: {
+          ...template.inventoryProvenance,
+          sourceId: suffix + ':inventory'
+        },
+        columnInventoriesMolM2
+      };
+    });
+    return world;
+  }
+
+  it('preserves the integrated physical trajectory under 1/2/4/8 equal-concentration layer partitions', () => {
+    const layerCounts = [1, 2, 4, 8];
+    const runs = layerCounts.map((layerCount) => {
+      const result = runChemicalEvolutionSchedulerStep(makeVerticallyPartitionedWorld(layerCount));
+      expect(result.status, layerCount + '-layer run should commit').toBe('committed');
+      return { layerCount, result, world: result.world };
+    });
+
+    const baseline = runs[0]!;
+    const baselineState = baseline.world.chemicalState!;
+    const baselineAudit = baselineState.physicalKineticsHistory![0]!;
+    expect(baselineAudit.layers).toHaveLength(1);
+
+    for (const run of runs) {
+      const state = run.world.chemicalState!;
+      const audit = state.physicalKineticsHistory![0]!;
+      expect(audit.layers).toHaveLength(run.layerCount);
+      expect(audit.layers.map((layer) => layer.layerId)).toEqual(
+        Array.from({ length: run.layerCount }, (_, index) => 'vertical-benchmark-layer-' + index)
+      );
+
+      // The layer geometry covers the same 100 m interval without overlap
+      // or unmodelled gaps, and every layer runs the same mechanism.
+      expect(audit.layers[0]!.altitudeRangeM?.min).toBe(0);
+      expect(audit.layers[run.layerCount - 1]!.altitudeRangeM?.max).toBe(100);
+      for (let index = 0; index < run.layerCount; index++) {
+        const layer = audit.layers[index]!;
+        expect(layer.temperatureK).toBe(350);
+        expect(layer.reactions.map((reaction) => reaction.reactionId)).toEqual([
+          'kida-tb-2015-03-19-106'
+        ]);
+        if (index > 0) {
+          expect(audit.layers[index - 1]!.altitudeRangeM?.max).toBe(layer.altitudeRangeM?.min);
+        }
+      }
+
+      // Compare global column inventories with the one-layer reference.
+      for (const speciesId of ['h', 'o2', 'ho2', 'n2']) {
+        const actual = state.inventory[speciesId]!;
+        const expected = baselineState.inventory[speciesId]!;
+        const relativeDifference =
+          Math.abs(actual - expected) / Math.max(Math.abs(actual), Math.abs(expected));
+        expect(relativeDifference, run.layerCount + '-layer ' + speciesId).toBeLessThan(5e-6);
+      }
+
+      // Each layer's physical column changes must be counted exactly once
+      // in the global state and ReactionLedger.
+      const layerTotals = state.physicalKinetics!.layers.reduce(
+        (totals, layer) => {
+          for (const [speciesId, amount] of Object.entries(layer.columnInventoriesMolM2)) {
+            totals[speciesId] = (totals[speciesId] ?? 0) + amount;
+          }
+          return totals;
+        },
+        {} as Record<string, number>
+      );
+      const auditTotals = audit.layers.reduce(
+        (totals, layer) => {
+          for (const [speciesId, amount] of Object.entries(layer.columnInventoriesAfterMolM2)) {
+            totals[speciesId] = (totals[speciesId] ?? 0) + amount;
+          }
+          return totals;
+        },
+        {} as Record<string, number>
+      );
+      for (const speciesId of ['h', 'o2', 'ho2', 'n2']) {
+        expect(layerTotals[speciesId]).toBeCloseTo(auditTotals[speciesId]!, 10);
+      }
+
+      const records = run.world.coreWorldState!.reactionLedger!.records.filter(
+        (record) => record.processId === PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID
+      );
+      expect(records).toHaveLength(run.layerCount);
+      expect(records.reduce((sum, record) => sum + record.extent, 0)).toBeCloseTo(
+        baseline.world.coreWorldState!.reactionLedger!.records
+          .filter((record) => record.processId === PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID)
+          .reduce((sum, record) => sum + record.extent, 0),
+        10
+      );
+    }
+  });
+});
+
