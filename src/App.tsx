@@ -8,7 +8,8 @@ import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, get
 import { createShortDescription } from './modules/WorldModel';
 import {
   CHEMICAL_RESERVOIR_IDS,
-  bodyCharacteristicsDisplayRows
+  bodyCharacteristicsDisplayRows,
+  chemicalReservoirConsistencyIssues
 } from './modules/Core/adapters';
 import { setMaterialInventory } from './modules/Core/reservoir';
 import { getAllPresets } from './modules/Atmosphere';
@@ -967,6 +968,15 @@ function PrimaryPhysicalKineticsConfigurator(props: {
 
     let coreWorldState = props.world.coreWorldState;
     if (coreWorldState) {
+      const consistencyIssues = chemicalReservoirConsistencyIssues(coreWorldState, state);
+      if (consistencyIssues.length > 0) {
+        setMessage(
+          'Существующий CoreWorldState не согласован с основным ChemicalEvolutionState; ' +
+          'конфигурация не будет молча перезаписывать научные резервуары: ' +
+          consistencyIssues.join('; ')
+        );
+        return;
+      }
       const hasAtmosphere = coreWorldState.reservoirs.some(
         (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
       );
