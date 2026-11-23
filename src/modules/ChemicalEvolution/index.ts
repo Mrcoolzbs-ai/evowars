@@ -57,7 +57,7 @@ import {
 import { createProcessRegistry } from '../Core/processRegistry';
 import type { ProcessDescriptor, ProcessRegistry } from '../Core/processRegistry';
 import type { MacroStepResult, ProcessOperator, ProcessStepProposal } from '../Core/scheduler';
-import { runMacroStep } from '../Core/scheduler';
+import { createSchedulerBookkeeping, runMacroStep, scheduleProcessAt } from '../Core/scheduler';
 import type { ReactionExtentBasis, ReactionRecord } from '../Core/reactionLedger';
 import { registerReaction } from '../Core/reactionLedger';
 import { convert, quantity } from '../Core/physicalQuantity';
@@ -1975,8 +1975,38 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
   };
 
   let result: MacroStepResult;
+  let scheduledCore = core;
   try {
-    result = runMacroStep(core, createPhysicalChemicalEvolutionStepRegistry(), [operator], {
+    // A user-triggered physical kinetics step is represented as a
+    // one-shot scheduler deadline at the current exact TimePoint. This
+    // records the actual run in ProcessDynamics without inventing τ.
+    // An existing exact/legacy future deadline is preserved: manual early
+    // execution must not silently replace a previously scheduled trigger.
+    const currentPoint = {
+      segmentIndex: core.clock.segmentIndex,
+      localTimeS: core.clock.localTimeS
+    };
+    const currentBookkeeping = core.scheduling ?? createSchedulerBookkeeping();
+    const currentDynamics = currentBookkeeping.processDynamics[PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID];
+    if (
+      currentDynamics?.nextDueTime == null &&
+      currentDynamics?.nextDueElapsedS == null
+    ) {
+      scheduledCore = {
+        ...core,
+        scheduling: scheduleProcessAt(
+          currentBookkeeping,
+          PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+          currentPoint
+        )
+      };
+      log.push(
+        'физическая кинетика назначена как одноразовый процесс на текущий exact TimePoint (' +
+          String(currentPoint.segmentIndex) + ':' + String(currentPoint.localTimeS) +
+          '); постоянное τ не назначается'
+      );
+    }
+    result = runMacroStep(scheduledCore, createPhysicalChemicalEvolutionStepRegistry(), [operator], {
       durationS: chemical.physicalKinetics.maximumMacroStepS,
       splitting: 'lie',
       processIds: [PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID],
