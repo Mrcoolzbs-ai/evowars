@@ -112,10 +112,36 @@
 > переносятся в новый по локальному смещению от прежней точки; события
 > уже из будущих сегментов сохраняются. Это не использует
 > priorSegmentsS как точную временную координату.
-> CI #634 на HEAD 927f0d65bebcc538292e2c1a820b5a0773978b48 —
-> success: 86 файлов passed / 2 skipped, 3170 тестов passed /
+> CI #659 на HEAD 14c6d89469cbbf440f41ac878bda476a3cbc8e1c —
+> success: 86 файлов passed / 2 skipped, 3186 тестов passed /
 > 53 skipped, TypeScript, lint (62 предупреждения, 0 ошибок),
 > production build; golden baseline 4.2.1 сохранён.
+
+> Ревизия Stage 4.2.1.7 (2026-11-23): ProcessDynamics получил
+> необязательные точные TimePoint lastRunTime/nextDueTime при сохранении
+> legacy elapsed-полей для прежних сохранений. scheduleProcessAt и
+> readyProcessIdsAt назначают/сравнивают сроки только по
+> (segmentIndex, localTimeS); scheduleProcess и readyProcessIds сохраняют
+> прежний elapsed-контракт. Два представления следующего срока
+> взаимоисключающие. runReadyProcessesAt объединяет exact readiness и
+> Lie macro-step: idle не двигает часы; committed потребляет достигнутый
+> one-shot deadline; ручной ранний запуск не уничтожает ещё будущий срок.
+> lastRunTime записывается в точной координате нового WorldClock.
+> Сегментация SimulationClock теперь решается по фактической ошибке
+> представленного приращения: обычное округление double допускается до
+> относительной ошибки 1e-9; пропавший шаг или существенно округлённое
+> приращение открывает новый сегмент, например 1e16 + 3 не превращается
+> молча в +4 s, тогда как 1e16 + 2 остаётся точным шагом в том же сегменте.
+>
+> Storage проверяет явно присутствующий CoreWorldState.scheduling тем же
+> validateSchedulerBookkeeping и при чтении localStorage, и при
+> importWorldFromJSONDetailed. Отсутствующий scheduling не создаётся;
+> старые ProcessDynamics без exact-полей не дополняются вымышленными
+> сроками. Некорректная очередь становится несовместимой записью с
+> диагностикой, raw-сохранение остаётся для восстановления. CI #659:
+> 86 файлов passed / 2 skipped, 3186 тестов passed / 53 skipped;
+> TypeScript, lint и production build — success.
+
 
 > Ревизия Stage 4.2.1.5 (2026-11-23): state-dependent solver может
 > вернуть ProcessStepProposal.events — набор найденных root-событий
