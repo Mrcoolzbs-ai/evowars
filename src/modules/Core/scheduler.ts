@@ -1284,13 +1284,42 @@ export function runMacroStep(
   }
 
   // --- ЕДИНСТВЕННОЕ продвижение мирового времени ---
-  // Use the exact scheduled event point when the macro-step was clipped
-  // to one. advance(dt) may start a new segment for a small but already
-  // representable absolute event point; advanceTo preserves that point.
+  // Prefer an exact point in the current segment whenever adding dt
+  // changes the double value. The conservative representableStep estimate
+  // is not itself proof that a particular target point is unrepresentable.
+  // Only when addition rounds back to the current value do we open a new
+  // segment with advance(); pending events in the old segment are then
+  // rebased by their exact local offset from the old current point.
+  const targetLocalTimeS = current.clock.localTimeS + effectiveDurationS;
   const newClock =
-    eventBoundary === undefined
-      ? advance(current.clock, effectiveDurationS)
-      : advanceTo(current.clock, eventBoundary.time);
+    eventBoundary !== undefined
+      ? advanceTo(current.clock, eventBoundary.time)
+      : Number.isFinite(targetLocalTimeS) && targetLocalTimeS > current.clock.localTimeS
+        ? advanceTo(current.clock, {
+            segmentIndex: current.clock.segmentIndex,
+            localTimeS: targetLocalTimeS
+          })
+        : advance(current.clock, effectiveDurationS);
+
+  const eventQueue =
+    newClock.segmentIndex === current.clock.segmentIndex
+      ? originalBk.eventQueue
+      : originalBk.eventQueue.map((event) => {
+          if (
+            event.status !== 'pending' ||
+            event.time.segmentIndex !== current.clock.segmentIndex ||
+            event.time.localTimeS <= current.clock.localTimeS
+          ) {
+            return event;
+          }
+          return {
+            ...event,
+            time: {
+              segmentIndex: newClock.segmentIndex,
+              localTimeS: event.time.localTimeS - current.clock.localTimeS
+            }
+          };
+        });
   const lastRunElapsedS = totalElapsedSeconds(newClock);
   const callsPerProcess = new Map<string, number>();
   for (const call of plan) {
@@ -1323,6 +1352,7 @@ export function runMacroStep(
   const newBk: SchedulerBookkeeping = {
     ...originalBk,
     processDynamics: newDynamics,
+    eventQueue,
     stepLog: [...originalBk.stepLog, ...committedLog],
     stepCount: originalBk.stepCount + 1
   };
