@@ -2332,6 +2332,39 @@ export function runReadyProcessesAt(
 
   if (ready.length === 0) {
     const dueEventsNow = dueEvents(bookkeeping, point);
+    const dueProcessEntries = Object.entries(bookkeeping.processDynamics).filter(([, dynamics]) =>
+      dynamics.nextDueTime !== undefined &&
+      dynamics.nextDueTime !== null &&
+      comparePoints(dynamics.nextDueTime, point) <= 0
+    );
+    if (dueProcessEntries.length > 0) {
+      const operatorIds = new Set(operators.map((operator) => operator.processId));
+      const blockedDiagnostics = dueProcessEntries.map(([processId]) => {
+        const descriptor = registry.get(processId);
+        if (descriptor === null) return 'процесс «' + processId + '» отсутствует в ProcessRegistry';
+        if (!descriptor.enabled) return 'процесс «' + processId + '» отключён (enabled=false)';
+        if (descriptor.executionMode === 'explicit_only') return 'процесс «' + processId + '» требует explicit-вызова и не может запускаться автоматически';
+        if (!operatorIds.has(processId)) return 'для процесса «' + processId + '» не передан runtime-оператор';
+        const operator = operators.find((candidate) => candidate.processId === processId);
+        if (descriptor.executionMode === 'state_dependent' && typeof operator?.proposeStep !== 'function') {
+          return 'для state_dependent процесса «' + processId + '» отсутствует runtime proposeStep()';
+        }
+        if (descriptor.executionMode !== 'state_dependent' && tauSeconds(descriptor.tau) === null) {
+          return 'у автономного процесса «' + processId + '» неизвестно числовое τ';
+        }
+        return 'процесс «' + processId + '» не прошёл проверку auto-runnable';
+      });
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping,
+        readyProcessIds: [],
+        diagnostics: [
+          'наступившие точные deadline не могут быть исполнены; Scheduler остановлен без продвижения времени',
+          ...blockedDiagnostics
+        ]
+      };
+    }
     return {
       status: 'idle',
       world,
