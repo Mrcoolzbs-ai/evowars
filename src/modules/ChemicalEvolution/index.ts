@@ -312,7 +312,10 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
                     eddyDiffusivityM2S: Array.isArray(input.physicalKinetics.verticalTransport.eddyDiffusivityM2S)
                       ? [...input.physicalKinetics.verticalTransport.eddyDiffusivityM2S]
                       : input.physicalKinetics.verticalTransport.eddyDiffusivityM2S,
-                    diffusivityProvenance: { ...input.physicalKinetics.verticalTransport.diffusivityProvenance }
+                    diffusivityProvenance: { ...input.physicalKinetics.verticalTransport.diffusivityProvenance },
+                    ...(input.physicalKinetics.verticalTransport.molecularDiffusion === undefined
+                      ? {}
+                      : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(input.physicalKinetics.verticalTransport.molecularDiffusion) })
                   }
                 })
           },
@@ -983,6 +986,34 @@ function cloneKineticHydrostaticState(
  * дополняется нулём; общий атмосферный инвентарь обязан покрывать сумму
  * явно указанных подстолбовых запасов всех реакционных слоёв.
  */
+type PrimaryMolecularDiffusionConfiguration = NonNullable<
+  NonNullable<ChemicalPhysicalKineticsState['verticalTransport']>['molecularDiffusion']
+>;
+
+function clonePrimaryMolecularDiffusionConfiguration(
+  configuration: PrimaryMolecularDiffusionConfiguration
+): PrimaryMolecularDiffusionConfiguration {
+  return {
+    species: Object.fromEntries(Object.entries(configuration.species).map(([speciesId, parameters]) => [
+      speciesId,
+      {
+        ...parameters,
+        molarMassProvenance: { ...parameters.molarMassProvenance },
+        collisionParametersProvenance: { ...parameters.collisionParametersProvenance },
+        thermalDiffusionProvenance: { ...parameters.thermalDiffusionProvenance }
+      }
+    ])),
+    backgroundSpecies: Object.fromEntries(Object.entries(configuration.backgroundSpecies).map(([speciesId, parameters]) => [
+      speciesId,
+      {
+        ...parameters,
+        molarMassProvenance: { ...parameters.molarMassProvenance },
+        collisionParametersProvenance: { ...parameters.collisionParametersProvenance }
+      }
+    ]))
+  };
+}
+
 function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionState): string[] {
   const problems: string[] = [];
   if (state.mode !== 'column_inventory') {
@@ -1646,7 +1677,10 @@ export function configurePrimaryPhysicalChemicalKinetics(
               eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
                 ? [...config.verticalTransport.eddyDiffusivityM2S]
                 : config.verticalTransport.eddyDiffusivityM2S,
-              diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance }
+              diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance },
+                  ...(config.verticalTransport.molecularDiffusion === undefined
+                    ? {}
+                    : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(config.verticalTransport.molecularDiffusion) })
             }
           })
     }
@@ -2285,7 +2319,10 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
             ? [...config.verticalTransport.eddyDiffusivityM2S]
             : config.verticalTransport.eddyDiffusivityM2S,
-          diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance }
+          diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance },
+                  ...(config.verticalTransport.molecularDiffusion === undefined
+                    ? {}
+                    : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(config.verticalTransport.molecularDiffusion) })
         });
         if (transport.status !== 'completed') {
           throw new Error(
@@ -2391,7 +2428,10 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
                   eddyDiffusivityM2S: Array.isArray(config.verticalTransport.eddyDiffusivityM2S)
                     ? [...config.verticalTransport.eddyDiffusivityM2S]
                     : config.verticalTransport.eddyDiffusivityM2S,
-                  diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance }
+                  diffusivityProvenance: { ...config.verticalTransport.diffusivityProvenance },
+                  ...(config.verticalTransport.molecularDiffusion === undefined
+                    ? {}
+                    : { molecularDiffusion: clonePrimaryMolecularDiffusionConfiguration(config.verticalTransport.molecularDiffusion) })
                 }
               })
         },
