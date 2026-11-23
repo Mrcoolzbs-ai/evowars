@@ -96,6 +96,17 @@ export type AtmosphereTemperatureModel =
       /** Измеренные узлы (heightM, temperatureK); интерполяция — линейная, документирована. */
       readonly nodes: readonly { readonly heightM: number; readonly temperatureK: number }[];
       readonly interpolation: 'linear';
+    }
+  | {
+      readonly kind: 'geopotentialLapseRate';
+      /** Радиус преобразования геопотенциальной высоты h = R*z/(R+z), м. */
+      readonly referenceRadiusM: number;
+      /** Геопотенциальная высота нижней границы, м. */
+      readonly bottomGeopotentialHeightM: number;
+      /** Температура на нижней границе, K. */
+      readonly bottomTemperatureK: number;
+      /** Знаковый dT/dh в K/м; сохраняет исходную конвенцию источника. */
+      readonly lapseRateKPerM: number;
     };
 
 /** Молярная доля одного газа в слое. */
@@ -297,6 +308,12 @@ function temperatureAt(model: AtmosphereTemperatureModel, layerBottomM: number, 
       return model.temperatureK;
     case 'lapseRate':
       return model.bottomTemperatureK - model.lapseRateKPerM * (z - layerBottomM);
+    case 'geopotentialLapseRate': {
+      const geopotentialHeightM =
+        (model.referenceRadiusM * z) / (model.referenceRadiusM + z);
+      return model.bottomTemperatureK +
+        model.lapseRateKPerM * (geopotentialHeightM - model.bottomGeopotentialHeightM);
+    }
     case 'measuredNodes': {
       const nodes = model.nodes;
       // Валидация гарантирует покрытие [bottom, top] и строгий рост высот.
@@ -342,6 +359,45 @@ function validateTemperatureModel(
       errors.push(
         `слой "${layerId}": линейная модель temperatureK пересекает 0 K внутри слоя (T(top) = ${tTop})`
       );
+    }
+    return;
+  }
+  if (model.kind === 'geopotentialLapseRate') {
+    if (!Number.isFinite(model.referenceRadiusM) || model.referenceRadiusM <= 0) {
+      errors.push(`слой "${layerId}": geopotentialLapseRate referenceRadiusM должна быть конечным положительным радиусом`);
+    }
+    if (
+      !Number.isFinite(model.bottomGeopotentialHeightM) ||
+      model.bottomGeopotentialHeightM < 0 ||
+      model.bottomGeopotentialHeightM >= model.referenceRadiusM
+    ) {
+      errors.push(`слой "${layerId}": bottomGeopotentialHeightM должна быть конечной неотрицательной высотой меньше referenceRadiusM`);
+    }
+    if (!Number.isFinite(model.bottomTemperatureK) || model.bottomTemperatureK <= 0) {
+      errors.push(`слой "${layerId}": geopotentialLapseRate bottomTemperatureK должна быть конечной положительной`);
+    }
+    if (!Number.isFinite(model.lapseRateKPerM)) {
+      errors.push(`слой "${layerId}": geopotentialLapseRate lapseRateKPerM должна быть конечной`);
+    }
+    if (
+      Number.isFinite(model.referenceRadiusM) && model.referenceRadiusM > 0 &&
+      Number.isFinite(bottomM) && Number.isFinite(topM) &&
+      Number.isFinite(model.bottomGeopotentialHeightM) &&
+      Number.isFinite(model.bottomTemperatureK) &&
+      Number.isFinite(model.lapseRateKPerM)
+    ) {
+      const geopotentialBottomM =
+        (model.referenceRadiusM * bottomM) / (model.referenceRadiusM + bottomM);
+      const geopotentialTopM =
+        (model.referenceRadiusM * topM) / (model.referenceRadiusM + topM);
+      if (Math.abs(geopotentialBottomM - model.bottomGeopotentialHeightM) > tolM) {
+        errors.push(`слой "${layerId}": нижняя геопотенциальная высота модели не согласована с geometric bottomHeightM`);
+      }
+      const tTop = model.bottomTemperatureK +
+        model.lapseRateKPerM * (geopotentialTopM - model.bottomGeopotentialHeightM);
+      if (!Number.isFinite(tTop) || tTop <= 0) {
+        errors.push(`слой "${layerId}": geopotential temperature law пересекает 0 K внутри слоя`);
+      }
     }
     return;
   }
