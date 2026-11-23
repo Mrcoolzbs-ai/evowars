@@ -654,20 +654,28 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
         : null,
       chemicalState: world.chemicalState!
     });
-    const priorBookkeeping = core.scheduling;
-    if (!priorBookkeeping) throw new Error('test fixture must initialize scheduler bookkeeping');
-    const result = runChemicalEvolutionSchedulerStep({ ...world, coreWorldState: core });
+    // Этот fixture явно начинает с существующей Scheduler-истории:
+    // adapter legacy → CoreWorldState сам по себе её не создаёт.
+    const priorBookkeeping = scheduleProcess(
+      createSchedulerBookkeeping(),
+      'preexisting_scheduled_process',
+      12
+    );
+    const seededCore = { ...core, scheduling: priorBookkeeping };
+    const result = runChemicalEvolutionSchedulerStep({ ...world, coreWorldState: seededCore });
 
     expect(result.status).toBe('committed');
-    expect(result.world.coreWorldState).not.toBe(core);
+    expect(result.world.coreWorldState).not.toBe(seededCore);
     const updatedCore = result.world.coreWorldState;
     if (!updatedCore?.scheduling) throw new Error('committed physical step must preserve scheduler bookkeeping');
     expect(updatedCore.scheduling.stepCount).toBe(priorBookkeeping.stepCount + 1);
+    expect(updatedCore.scheduling.processDynamics.preexisting_scheduled_process)
+      .toEqual(priorBookkeeping.processDynamics.preexisting_scheduled_process);
     const updatedAtmosphere = updatedCore.reservoirs.find(
       (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
     );
     expect(updatedAtmosphere?.material?.entries).toEqual(result.world.chemicalState!.inventory);
-    expect(core.scheduling).toEqual(priorBookkeeping);
+    expect(seededCore.scheduling).toEqual(priorBookkeeping);
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
   });
 
