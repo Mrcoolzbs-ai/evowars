@@ -476,8 +476,8 @@ export function runVerticalEddyDiffusionStep(
       ) {
         return rejected('молекулярная диффузия требует явный hydrostatic molarFractions в слое «' + layer.layerId + '»');
       }
-      const fractionValues = Object.values(fractions);
-      const fractionSum = fractionValues.reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
+      const fractionValues: unknown[] = Object.values(fractions);
+      const fractionSum = fractionValues.reduce<number>((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
       if (
         fractionValues.some((value) => !isFinitePositive(value)) ||
         !Number.isFinite(fractionSum) ||
