@@ -1018,7 +1018,9 @@ function WorldDisplay(props: {
                     <div key={layer.layerId}>
                       <strong>Слой {layer.layerId}</strong>
                       <p>
-                        T={world.chemicalState!.physicalKinetics!.layers.find((configured) => configured.layerId === layer.layerId)?.temperatureK ?? 'unknown'} K;{' '}
+                        T={layer.temperatureK} K; толщина={layer.layerThicknessM} м;{' '}
+                        N₂={layer.thirdBody.inventoryMolM2.toExponential(3)} моль/м² (
+                        {layer.thirdBody.concentrationMoleculeCm3.toExponential(3)} молекул/см³);{' '}
                         принято шагов ODE: {layer.integration.acceptedSteps}; отброшено: {layer.integration.rejectedSteps};{' '}
                         метод: {layer.integration.method}
                       </p>
