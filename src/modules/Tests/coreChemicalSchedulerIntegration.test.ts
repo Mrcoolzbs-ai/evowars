@@ -465,6 +465,16 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(updated.inventory.ho2).toBeGreaterThan(before.ho2!);
     expect(updated.history.some((entry) => entry.mode === 'kinetic' && entry.applied)).toBe(true);
     expect(updated.physicalKineticsHistory).toHaveLength(1);
+    const globalProvenance = updated.physicalKinetics!.totalInventoryProvenance.o2!;
+    expect(globalProvenance.sourceId).toBe('fixture:global-inventory:o2');
+    expect(globalProvenance.method).toContain('Derived by primary physical chemical kinetics Scheduler');
+    expect(globalProvenance.rawInput!.before_o2_mol_m2).toBe(before.o2);
+    expect(globalProvenance.rawInput!.after_o2_mol_m2).toBe(updated.inventory.o2);
+    const layerProvenance = updated.physicalKinetics!.layers[0]!.inventoryProvenance;
+    expect(layerProvenance.method).toContain('Derived by primary physical chemical kinetics Scheduler');
+    expect(layerProvenance.rawInput!.before_h_mol_m2).toBe(8e-6);
+    expect(layerProvenance.rawInput!.after_h_mol_m2)
+      .toBe(updated.physicalKinetics!.layers[0]!.columnInventoriesMolM2.h);
     const stepAudit = updated.physicalKineticsHistory![0]!;
     expect(stepAudit.durationS).toBe(result.stepSize!.effectiveDurationS);
     expect(stepAudit.characteristicTimeS).toBe(result.stepSize!.proposals[0]!.characteristicTimeS);
@@ -508,6 +518,16 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     );
     expect(world.chemicalState!.inventory).toEqual(before);
     expect(world.coreWorldState).toBeUndefined();
+
+    // The second Scheduler transaction must preserve source + derivation
+    // lineage, not relabel the current inventory as a new primary measurement.
+    const nextStep = runChemicalEvolutionSchedulerStep(result.world);
+    expect(nextStep.status).toBe('committed');
+    const secondAudit = nextStep.world.chemicalState!.physicalKineticsHistory![1]!;
+    expect(secondAudit.layers[0]!.totalInventoryProvenance.o2!.method)
+      .toContain('Derived by primary physical chemical kinetics Scheduler');
+    expect(secondAudit.layers[0]!.totalInventoryProvenance.o2!.rawInput!.before_o2_mol_m2)
+      .toBe(updated.inventory.o2);
   });
 
   it('evolves two disjoint physical layers and adds their column deltas exactly once to the global inventory', () => {
