@@ -30,6 +30,7 @@ import {
   createChemicalEvolutionStepRegistry,
   createPhysicalChemicalEvolutionStepRegistry,
   createChemicalState,
+  configurePrimaryPhysicalChemicalKinetics,
   createDefaultProcessRegistry,
   elementTotalsOf,
   runChemicalEvolutionSchedulerStep,
@@ -68,7 +69,12 @@ import { totalElapsedSeconds } from '../Core/simulationClock';
 import chemicalReactions from '../Data/chemicalReactions';
 import gases from '../Data/gases';
 import { elementCompositions } from '../Data/elementCompositions';
-import type { AtmospherePhysicalModel, ChemicalEvolutionState, GeneratedWorld } from '../../types';
+import type {
+  AtmospherePhysicalModel,
+  ChemicalEvolutionState,
+  ChemicalPhysicalKineticsState,
+  GeneratedWorld
+} from '../../types';
 
 // ============================================
 // ХЕЛПЕРЫ
@@ -273,6 +279,116 @@ describe('Stage 4.2.3.3: пользовательский шаг химии вы
 // ============================================
 // 1а. ФИЗИЧЕСКАЯ КИНЕТИКА В ОСНОВНОМ CHEMICALEVOLUTIONSTATE
 // ============================================
+
+describe('Stage 4.2: configure explicit physical kinetics in primary chemical state', () => {
+  function setup() {
+    const model = makeModel(
+      { n2: 0.8, o2: 0.2 },
+      { columnMolM2: { value: 5250, unit: 'моль/м²', confidence: 'derived' } }
+    );
+    const state = createChemicalState({
+      atmospherePhysicalModel: model,
+      surfaceGravityMs2: 9.81
+    });
+    const source = (sourceId: string) => ({
+      sourceName: 'synthetic configuration test fixture',
+      sourceId,
+      reference: 'test-only'
+    });
+    const config: ChemicalPhysicalKineticsState = {
+      maximumMacroStepS: 10,
+      layers: [
+        {
+          layerId: 'configured-test-layer',
+          layerThicknessM: 100,
+          thicknessProvenance: source('config:thickness'),
+          temperatureK: 350,
+          temperatureProvenance: source('config:temperature'),
+          columnInventoriesMolM2: {
+            h: 8e-6,
+            o2: 4e-5,
+            ho2: 1e-8,
+            n2: 4.2e3
+          },
+          inventoryProvenance: source('config:inventory'),
+          reactionIds: ['kida-tb-2015-03-19-106']
+        }
+      ]
+    };
+    return { state, config };
+  }
+
+  it('configures explicit layers and merges supplied total columns without mutating the original state', () => {
+    const { state, config } = setup();
+    const original = JSON.stringify(state);
+    const result = configurePrimaryPhysicalChemicalKinetics(state, config, {
+      h: 8e-6,
+      ho2: 1e-8
+    });
+
+    expect(result.status).toBe('configured');
+    expect(result.state).not.toBe(state);
+    expect(JSON.stringify(state)).toBe(original);
+    expect(result.state.physicalKinetics).toEqual(config);
+    expect(result.state.physicalKineticsHistory).toEqual([]);
+    expect(result.state.inventory.h).toBe(8e-6);
+    expect(result.state.inventory.ho2).toBe(1e-8);
+    expect(result.state.inventory.o2).toBe(state.inventory.o2);
+    expect(result.state.inventory.n2).toBe(state.inventory.n2);
+    expect(result.state.reservoirs.atmospheric.h).toBe(8e-6);
+    expect(result.state.reservoirs.atmospheric.ho2).toBe(1e-8);
+    expect(result.state.surfacePressurePa).toBeNull();
+    expect(result.diagnostics.join(' ')).toContain('no rates, species inventories or geometry were inferred');
+
+    // Nested configuration values are copied: later caller edits do not
+    // silently alter the active physical model.
+    config.layers[0]!.columnInventoriesMolM2.h = 1;
+    expect(result.state.physicalKinetics!.layers[0]!.columnInventoriesMolM2.h).toBe(8e-6);
+  });
+
+  it('rejects incomplete, unsupported or physically excessive inputs without changing state', () => {
+    const { state, config } = setup();
+    const original = JSON.stringify(state);
+    const excessive = configurePrimaryPhysicalChemicalKinetics(state, config, {
+      h: 1e-7,
+      ho2: 1e-8
+    });
+    expect(excessive.status).toBe('rejected');
+    expect(excessive.state).toBe(state);
+    expect(excessive.diagnostics.join(' ')).toContain('превышает основной атмосферный инвентарь');
+    expect(JSON.stringify(state)).toBe(original);
+
+    const unsupported = configurePrimaryPhysicalChemicalKinetics(state, config, {
+      h: 8e-6,
+      ho2: 1e-8,
+      ch4: 1
+    });
+    expect(unsupported.status).toBe('rejected');
+    expect(unsupported.state).toBe(state);
+    expect(unsupported.diagnostics.join(' ')).toContain('unsupported physical chemical species ID');
+
+    const missingProvenance = {
+      ...config,
+      layers: config.layers.map((layer) => ({
+        ...layer,
+        temperatureProvenance: {}
+      }))
+    } as unknown as ChemicalPhysicalKineticsState;
+    expect(() =>
+      configurePrimaryPhysicalChemicalKinetics(state, missingProvenance, {
+        h: 8e-6,
+        ho2: 1e-8
+      })
+    ).not.toThrow();
+    const invalid = configurePrimaryPhysicalChemicalKinetics(state, missingProvenance, {
+      h: 8e-6,
+      ho2: 1e-8
+    });
+    expect(invalid.status).toBe('rejected');
+    expect(invalid.state).toBe(state);
+    expect(JSON.stringify(state)).toBe(original);
+  });
+});
 
 describe('Stage 4.2: physical kinetics runs in the primary world Scheduler transaction', () => {
   it('uses explicit layer inventory and geometry, proposes a state-dependent dt and commits the actual kinetic reaction', () => {
