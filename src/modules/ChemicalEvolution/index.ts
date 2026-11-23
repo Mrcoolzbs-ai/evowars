@@ -881,6 +881,753 @@ export interface ChemicalEvolutionSchedulerStepResult {
   log: string[];
   /** Причина отказа; null при успехе. */
   reason: string | null;
+  /** Фактический динамический шаг Scheduler для физических кинетических вызовов. */
+  stepSize?: MacroStepResult['stepSize'];
+}
+
+
+/**
+ * Канонические имена видов ограниченного кинетического механизма
+ * переводятся в ID основного атмосферного ChemicalEvolution inventory.
+ * Существующие o2/n2 остаются теми же видами; радикалы получают
+ * отдельные lower-case ID и не добавляются в генератор preset-газов.
+ */
+const MECHANISM_TO_CHEMICAL_SPECIES: Readonly<Record<string, string>> = {
+  O: 'o',
+  NO: 'no',
+  NO2: 'no2',
+  H: 'h',
+  O2: 'o2',
+  HO2: 'ho2',
+  N2: 'n2'
+};
+
+const CHEMICAL_TO_MECHANISM_SPECIES: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(MECHANISM_TO_CHEMICAL_SPECIES).map(([mechanismId, chemicalId]) => [chemicalId, mechanismId])
+);
+
+function isPlainChemicalRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** Для физических входов нужен явно идентифицируемый источник происхождения. */
+function hasIdentifiedPhysicalProvenance(value: unknown): boolean {
+  if (!isPlainChemicalRecord(value)) return false;
+  return ['sourceName', 'sourceId', 'datasetId', 'reference'].some((key) => {
+    const candidate = value[key];
+    return typeof candidate === 'string' && candidate.trim() !== '';
+  });
+}
+
+/**
+ * Проверка primary-state конфигурации. Отсутствующий вид никогда не
+ * дополняется нулём; общий атмосферный инвентарь обязан покрывать сумму
+ * явно указанных подстолбовых запасов всех реакционных слоёв.
+ */
+function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionState): string[] {
+  const problems: string[] = [];
+  if (state.mode !== 'column_inventory') {
+    problems.push('физическая кинетика требует mode=column_inventory; arbitrary_units не преобразуются в молекулярные концентрации');
+  }
+  const config = state.physicalKinetics as ChemicalPhysicalKineticsState | undefined;
+  if (config === undefined || !isPlainChemicalRecord(config)) {
+    return [...problems, 'physicalKinetics отсутствует или не является plain object'];
+  }
+  if (
+    typeof config.maximumMacroStepS !== 'number' ||
+    !Number.isFinite(config.maximumMacroStepS) ||
+    config.maximumMacroStepS <= 0
+  ) {
+    problems.push('physicalKinetics.maximumMacroStepS должен быть конечным положительным числом секунд');
+  }
+  if (!Array.isArray(config.layers) || config.layers.length === 0) {
+    problems.push('physicalKinetics.layers должен содержать хотя бы один явно заданный реакционный слой');
+    return problems;
+  }
+
+  const seenLayerIds = new Set<string>();
+  const subcolumnTotals: Record<string, number> = {};
+  for (let layerIndex = 0; layerIndex < config.layers.length; layerIndex++) {
+    const layer = config.layers[layerIndex] as ChemicalPhysicalKineticLayer;
+    const prefix = 'physicalKinetics.layers[' + layerIndex + ']';
+    if (!isPlainChemicalRecord(layer)) {
+      problems.push(prefix + ' должен быть plain object');
+      continue;
+    }
+    if (typeof layer.layerId !== 'string' || layer.layerId.trim() === '') {
+      problems.push(prefix + '.layerId должен быть непустой строкой');
+    } else if (seenLayerIds.has(layer.layerId)) {
+      problems.push(prefix + ': повторный layerId «' + layer.layerId + '»');
+    } else {
+      seenLayerIds.add(layer.layerId);
+    }
+    if (
+      typeof layer.layerThicknessM !== 'number' ||
+      !Number.isFinite(layer.layerThicknessM) ||
+      layer.layerThicknessM <= 0
+    ) {
+      problems.push(prefix + '.layerThicknessM должен быть конечной положительной геометрической толщиной в метрах');
+    }
+    if (!hasIdentifiedPhysicalProvenance(layer.thicknessProvenance)) {
+      problems.push(prefix + '.thicknessProvenance обязан идентифицировать источник толщины');
+    }
+    if (
+      typeof layer.temperatureK !== 'number' ||
+      !Number.isFinite(layer.temperatureK) ||
+      layer.temperatureK <= 0
+    ) {
+      problems.push(prefix + '.temperatureK должен быть конечной положительной температурой в K');
+    }
+    if (!hasIdentifiedPhysicalProvenance(layer.temperatureProvenance)) {
+      problems.push(prefix + '.temperatureProvenance обязан идентифицировать источник локальной температуры');
+    }
+    if (!hasIdentifiedPhysicalProvenance(layer.inventoryProvenance)) {
+      problems.push(prefix + '.inventoryProvenance обязан идентифицировать источник подстолбовых запасов');
+    }
+
+    const selected: MechanismReactionDef[] = [];
+    if (!Array.isArray(layer.reactionIds) || layer.reactionIds.length === 0) {
+      problems.push(prefix + '.reactionIds должен быть непустым списком параметризованных реакций');
+    } else {
+      const seenReactionIds = new Set<string>();
+      for (const reactionId of layer.reactionIds) {
+        if (typeof reactionId !== 'string' || reactionId.trim() === '') {
+          problems.push(prefix + '.reactionIds содержит пустой или нестроковый ID');
+          continue;
+        }
+        if (seenReactionIds.has(reactionId)) {
+          problems.push(prefix + '.reactionIds содержит дубликат «' + reactionId + '»');
+          continue;
+        }
+        seenReactionIds.add(reactionId);
+        const definition = MECHANISM_REACTIONS.find((entry) => entry.reactionId === reactionId);
+        if (definition === undefined) {
+          problems.push(prefix + ': реакция «' + reactionId + '» не имеет включённого механистического rate law');
+        } else {
+          selected.push(definition);
+        }
+      }
+    }
+
+    if (!isPlainChemicalRecord(layer.columnInventoriesMolM2)) {
+      problems.push(prefix + '.columnInventoriesMolM2 должен быть plain object');
+      continue;
+    }
+    for (const [speciesId, amount] of Object.entries(layer.columnInventoriesMolM2)) {
+      if (!Object.prototype.hasOwnProperty.call(CHEMICAL_TO_MECHANISM_SPECIES, speciesId)) {
+        problems.push(prefix + ': неизвестный или неподдерживаемый chemical species ID «' + speciesId + '»');
+        continue;
+      }
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+        problems.push(prefix + ': запас «' + speciesId + '» должен быть конечным неотрицательным числом моль/м² (ноль допустим явно)');
+        continue;
+      }
+      if (!Object.prototype.hasOwnProperty.call(state.inventory, speciesId)) {
+        problems.push(prefix + ': основной ChemicalEvolutionState.inventory не содержит явный ключ «' + speciesId + '» (отсутствие не является нулём)');
+      } else {
+        const globalAmount = state.inventory[speciesId];
+        if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) {
+          problems.push('основной атмосферный инвентарь вида «' + speciesId + '» повреждён');
+        }
+      }
+      subcolumnTotals[speciesId] = (subcolumnTotals[speciesId] ?? 0) + amount;
+    }
+
+    const required = new Set<string>(['N2']);
+    for (const definition of selected) {
+      for (const mechanismSpeciesId of definition.species) required.add(mechanismSpeciesId);
+    }
+    for (const mechanismSpeciesId of required) {
+      const chemicalId = MECHANISM_TO_CHEMICAL_SPECIES[mechanismSpeciesId];
+      if (
+        chemicalId === undefined ||
+        !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, chemicalId)
+      ) {
+        problems.push(prefix + ': отсутствует явный подстолбовой запас вида «' + (chemicalId ?? mechanismSpeciesId) + '»; неизвестное значение не заменяется нулём');
+      }
+    }
+  }
+
+  for (const [speciesId, subcolumnAmount] of Object.entries(subcolumnTotals)) {
+    const globalAmount = state.inventory[speciesId];
+    if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) continue;
+    const tolerance = 1e-12 * Math.max(Math.abs(globalAmount), Math.abs(subcolumnAmount), Number.MIN_VALUE);
+    if (subcolumnAmount > globalAmount + tolerance) {
+      problems.push(
+        'сумма реакционных подстолбов вида «' + speciesId + '» (' + subcolumnAmount +
+        ' моль/м²) превышает основной атмосферный инвентарь (' + globalAmount + ' моль/м²)'
+      );
+    }
+  }
+  return problems;
+}
+
+function mechanismInventoriesFromChemicalLayer(
+  layer: ChemicalPhysicalKineticLayer
+): Record<string, number> {
+  const inventories: Record<string, number> = {};
+  for (const [chemicalId, amount] of Object.entries(layer.columnInventoriesMolM2)) {
+    const mechanismId = CHEMICAL_TO_MECHANISM_SPECIES[chemicalId];
+    if (mechanismId === undefined) {
+      throw new Error('неподдерживаемый species ID реакционного слоя: ' + chemicalId);
+    }
+    inventories[mechanismId] = amount;
+  }
+  return inventories;
+}
+
+function mechanismConcentrationsFromChemicalLayer(
+  layer: ChemicalPhysicalKineticLayer
+): Record<string, number> {
+  const concentrations: Record<string, number> = {};
+  for (const [mechanismId, inventory] of Object.entries(mechanismInventoriesFromChemicalLayer(layer))) {
+    concentrations[mechanismId] = columnInventoryMolM2ToConcentrationMoleculeCm3(
+      inventory,
+      layer.layerThicknessM
+    );
+  }
+  return concentrations;
+}
+
+/**
+ * State-dependent timestep из реального начального RHS каждой конфигурации
+ * слоя. Используется только численный safety policy dt ≤ τ_local/20;
+ * τ_local вычисляется как n/|dn/dt| для реально истощающихся реагентов.
+ * Если ни один вид не истощается, постоянное время не выдумывается —
+ * используется только явно заданный максимум macro шага.
+ */
+function proposePhysicalChemicalStep(
+  state: ChemicalEvolutionState,
+  requestedMaximumDurationS: number
+): ProcessStepProposal {
+  const config = state.physicalKinetics;
+  if (config === undefined) {
+    throw new Error('physicalKinetics отсутствует в основном химическом состоянии');
+  }
+  const timescales: Array<{ layerId: string; speciesId: string; characteristicTimeS: number }> = [];
+  const diagnostics: string[] = [];
+  for (const layer of config.layers) {
+    const built = buildConcentrationKineticProblem({
+      temperatureK: layer.temperatureK,
+      dtSeconds: requestedMaximumDurationS,
+      reactionIds: [...layer.reactionIds],
+      concentrations: mechanismConcentrationsFromChemicalLayer(layer)
+    });
+    const derivative = built.problem.rhs(built.problem.t0, built.problem.y0);
+    if (!Array.isArray(derivative) || derivative.length !== built.speciesOrder.length) {
+      throw new Error('кинетический RHS вернул вектор неверной размерности для слоя «' + layer.layerId + '»');
+    }
+    for (let index = 0; index < derivative.length; index++) {
+      const value = derivative[index];
+      const initial = built.problem.y0[index];
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error('кинетический RHS вернул неконечную производную для слоя «' + layer.layerId + '»');
+      }
+      if (initial > 0 && value < 0) {
+        const characteristicTimeS = initial / -value;
+        if (!Number.isFinite(characteristicTimeS) || characteristicTimeS <= 0) {
+          throw new Error('локальное характерное время истощения непредставимо для слоя «' + layer.layerId + '»');
+        }
+        timescales.push({
+          layerId: layer.layerId,
+          speciesId: built.speciesOrder[index],
+          characteristicTimeS
+        });
+      }
+    }
+    diagnostics.push(
+      'слой «' + layer.layerId + '»: RHS рассчитан при T=' + layer.temperatureK +
+      ' K; явная толщина=' + layer.layerThicknessM + ' м'
+    );
+  }
+
+  if (timescales.length === 0) {
+    return {
+      durationS: requestedMaximumDurationS,
+      method: 'explicit maximum macro-step; no initially depleting reactant',
+      diagnostics: [
+        ...diagnostics,
+        'ни один реагент не имеет положительного текущего истощения: числовое τ не назначено, используется только maximumMacroStepS'
+      ]
+    };
+  }
+
+  timescales.sort((a, b) =>
+    a.characteristicTimeS - b.characteristicTimeS ||
+    a.layerId.localeCompare(b.layerId) ||
+    a.speciesId.localeCompare(b.speciesId)
+  );
+  const limiting = timescales[0]!;
+  const durationS = Math.min(requestedMaximumDurationS, limiting.characteristicTimeS / 20);
+  if (!Number.isFinite(durationS) || durationS <= 0) {
+    throw new Error('локальная оценка dt=τ/20 не представима конечным положительным числом секунд');
+  }
+  return {
+    durationS,
+    method: 'minimum local reactant depletion time / 20',
+    characteristicTimeS: limiting.characteristicTimeS,
+    diagnostics: [
+      ...diagnostics,
+      'ограничивающий реагент: ' + limiting.speciesId + ' в слое «' + limiting.layerId +
+        '»; τ_local=' + limiting.characteristicTimeS + ' s; выбран dt=' + durationS + ' s'
+    ]
+  };
+}
+
+/** Дополнительные радикальные виды для Conservation/ReactionLedger аудита. */
+function physicalKineticSpeciesCatalog() {
+  const catalog = buildSpeciesCatalogFromLegacy(gases, elementCompositions);
+  const radicals: ScientificSpecies[] = [
+    {
+      id: 'o', formula: 'O', name: 'атомарный кислород',
+      elements: { O: 1 }, charge: 0, phase: 'gas',
+      molarMassKgMol: null, molarMassStatus: 'unknown', dataStatus: 'known',
+      provenance: {
+        sourceName: 'типизированная стехиометрия механизма Stage 4.5.5',
+        sourceId: 'src/modules/ChemicalEvolution/kineticMechanism.ts',
+        recordId: 'species:O',
+        note: 'молярная масса намеренно не задаётся; элементный состав следует из формулы механизма'
+      },
+      note: 'радикал; термодинамические свойства и молярная масса не заявлены'
+    },
+    {
+      id: 'no', formula: 'NO', name: 'оксид азота',
+      elements: { N: 1, O: 1 }, charge: 0, phase: 'gas',
+      molarMassKgMol: null, molarMassStatus: 'unknown', dataStatus: 'known',
+      provenance: {
+        sourceName: 'типизированная стехиометрия механизма Stage 4.5.5',
+        sourceId: 'src/modules/ChemicalEvolution/kineticMechanism.ts',
+        recordId: 'species:NO',
+        note: 'молярная масса намеренно не задаётся; элементный состав следует из формулы механизма'
+      },
+      note: 'реакционноспособный вид; термодинамические свойства и молярная масса не заявлены'
+    },
+    {
+      id: 'no2', formula: 'NO2', name: 'диоксид азота',
+      elements: { N: 1, O: 2 }, charge: 0, phase: 'gas',
+      molarMassKgMol: null, molarMassStatus: 'unknown', dataStatus: 'known',
+      provenance: {
+        sourceName: 'типизированная стехиометрия механизма Stage 4.5.5',
+        sourceId: 'src/modules/ChemicalEvolution/kineticMechanism.ts',
+        recordId: 'species:NO2',
+        note: 'молярная масса намеренно не задаётся; элементный состав следует из формулы механизма'
+      },
+      note: 'реакционноспособный вид; термодинамические свойства и молярная масса не заявлены'
+    },
+    {
+      id: 'h', formula: 'H', name: 'атомарный водород',
+      elements: { H: 1 }, charge: 0, phase: 'gas',
+      molarMassKgMol: null, molarMassStatus: 'unknown', dataStatus: 'known',
+      provenance: {
+        sourceName: 'типизированная стехиометрия механизма Stage 4.5.5',
+        sourceId: 'src/modules/ChemicalEvolution/kineticMechanism.ts',
+        recordId: 'species:H',
+        note: 'молярная масса намеренно не задаётся; элементный состав следует из формулы механизма'
+      },
+      note: 'радикал; термодинамические свойства и молярная масса не заявлены'
+    },
+    {
+      id: 'ho2', formula: 'HO2', name: 'гидропероксильный радикал',
+      elements: { H: 1, O: 2 }, charge: 0, phase: 'gas',
+      molarMassKgMol: null, molarMassStatus: 'unknown', dataStatus: 'known',
+      provenance: {
+        sourceName: 'типизированная стехиометрия механизма Stage 4.5.5',
+        sourceId: 'src/modules/ChemicalEvolution/kineticMechanism.ts',
+        recordId: 'species:HO2',
+        note: 'молярная масса намеренно не задаётся; элементный состав следует из формулы механизма'
+      },
+      note: 'радикал; термодинамические свойства и молярная масса не заявлены'
+    }
+  ];
+  for (const species of radicals) {
+    if (!catalog.has(species.id)) catalog.register(species);
+  }
+  return catalog;
+}
+
+/** Точные rate-данные сохраняются в primary-state истории без реконструкции. */
+function toPrimaryKineticReactionAudit(summary: AppliedReactionSummary): ChemicalKineticReactionAudit {
+  if (summary.dataStatus !== 'known') {
+    throw new Error('физическая кинетика допускает только известные rate data; получен статус ' + summary.dataStatus);
+  }
+  return {
+    reactionId: summary.reactionId,
+    label: summary.label,
+    dataStatus: 'known',
+    rateConstant: { ...summary.rateConstant },
+    appliedRangeK: { min: summary.appliedRangeK.min, max: summary.appliedRangeK.max },
+    provenance: { ...summary.provenance },
+    parameterProvenance: {
+      lowPressureLimit: { ...summary.parameterProvenance.lowPressureLimit },
+      highPressureLimit: { ...summary.parameterProvenance.highPressureLimit },
+      broadening: { ...summary.parameterProvenance.broadening }
+    },
+    fallOff: { ...summary.fallOff }
+  };
+}
+
+/**
+ * Production путь: основной ChemicalEvolutionState → state-dependent
+ * ProcessOperator → Radau IIA compartment step → атомарные Core reservoirs
+ * + ReactionLedger. Никаких game extentFraction/gameSpeedCoefficient,
+ * автоматического заполнения отсутствующих видов или синтетической
+ * геометрии в этом пути нет.
+ */
+export function runPhysicalChemicalEvolutionSchedulerStep(
+  world: GeneratedWorld
+): ChemicalEvolutionSchedulerStepResult {
+  const log: string[] = [];
+  const reject = (reason: string): ChemicalEvolutionSchedulerStepResult => ({
+    world,
+    status: 'rejected',
+    log: [...log, reason],
+    reason
+  });
+  if (!world.chemicalState) return reject('основное ChemicalEvolutionState отсутствует: физическая кинетика не выполнялась');
+  if (!world.atmospherePhysics) return reject('физическая модель атмосферы отсутствует: физическая кинетика не выполнялась');
+  const chemical = world.chemicalState;
+  if (chemical.physicalKinetics === undefined) {
+    return reject('physicalKinetics не сконфигурирован в основном ChemicalEvolutionState');
+  }
+  const configIssues = physicalChemicalKineticsConfigurationProblems(chemical);
+  if (configIssues.length > 0) {
+    return reject('физическая кинетическая конфигурация отклонена: ' + configIssues.join('; '));
+  }
+
+  let core: CoreWorldState;
+  if (world.coreWorldState === undefined || world.coreWorldState === null) {
+    try {
+      core = coreWorldStateFromLegacyWorld({
+        id: world.id,
+        seed: world.seed,
+        generatorVersion: world.generatorVersion,
+        centralObjectSystem: world.centralObjectSystem ?? null,
+        orbit: world.orbit ? { frame: world.orbit.frame } : null,
+        bodyPhysics: world.bodyPhysics
+          ? {
+              massKg: world.bodyPhysics.massKg,
+              radiusM: world.bodyPhysics.radiusM,
+              densityKgM3: world.bodyPhysics.densityKgM3,
+              surfaceGravityMs2: world.bodyPhysics.surfaceGravityMs2
+            }
+          : null,
+        atmosphere: world.atmosphere
+          ? {
+              temperature: world.atmosphere.temperature,
+              presetKind: world.atmosphere.presetKind,
+              presetNotes: world.atmosphere.presetNotes,
+              presetSourceName: world.atmosphere.presetSourceName
+            }
+          : null,
+        energyBudget: world.energyBudget
+          ? {
+              incidentFlux: world.energyBudget.incidentFlux,
+              equilibriumTemperature: world.energyBudget.equilibriumTemperature
+            }
+          : null,
+        chemicalState: chemical
+      });
+      log.push('научное ядро инициализировано из основного ChemicalEvolutionState; физические слои сохранены без преобразования оснований');
+    } catch (error) {
+      return reject(
+        'инициализация научного ядра для физической кинетики отклонена: ' +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
+  } else {
+    core = world.coreWorldState;
+    const issues = chemicalReservoirConsistencyIssues(core, chemical);
+    if (issues.length > 0) {
+      return reject(
+        'резервуары научного ядра не согласованы с основным ChemicalEvolutionState: ' +
+          issues.join('; ') + ' — ядро не перезаписывается, шаг не выполнен'
+      );
+    }
+  }
+
+  const coreChemical = chemicalStateFromCoreReservoirs(core, chemical);
+  const projectedIssues = physicalChemicalKineticsConfigurationProblems(coreChemical);
+  if (projectedIssues.length > 0) {
+    return reject('проверка подстолбовых запасов относительно CoreWorldState отклонена: ' + projectedIssues.join('; '));
+  }
+
+  const box: { chemical: ChemicalEvolutionState | null } = { chemical: null };
+  let lastProposal: ProcessStepProposal | null = null;
+  const operator: ProcessOperator = {
+    processId: PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+    proposeStep(snapshot, requestedMaximumDurationS): ProcessStepProposal {
+      const projected = chemicalStateFromCoreReservoirs(snapshot as CoreWorldState, chemical);
+      const issues = physicalChemicalKineticsConfigurationProblems(projected);
+      if (issues.length > 0) {
+        throw new Error('физическая кинетическая конфигурация не согласована со снимком CoreWorldState: ' + issues.join('; '));
+      }
+      lastProposal = proposePhysicalChemicalStep(projected, requestedMaximumDurationS);
+      return lastProposal;
+    },
+    apply(coreWorld, durationS): CoreWorldState {
+      const working = chemicalStateFromCoreReservoirs(coreWorld, chemical);
+      const issues = physicalChemicalKineticsConfigurationProblems(working);
+      if (issues.length > 0) {
+        throw new Error('физическая кинетическая конфигурация изменилась до apply: ' + issues.join('; '));
+      }
+      const config = working.physicalKinetics!;
+      const initialInventory = { ...working.inventory };
+      const updatedInventory = { ...working.inventory };
+      const updatedLayers: ChemicalPhysicalKineticLayer[] = [];
+      const layerAudits: ChemicalKineticLayerStepAudit[] = [];
+      const historyRecords: ChemicalStepRecord[] = [];
+      const warnings: string[] = [];
+      const assumptions: string[] = [];
+      let reactionLedger = coreWorld.reactionLedger ?? { records: [] };
+      const time = {
+        segmentIndex: coreWorld.clock.segmentIndex,
+        localTimeS: coreWorld.clock.localTimeS
+      };
+      const schedulerStep = coreWorld.scheduling?.stepCount ?? 0;
+
+      for (const layer of config.layers) {
+        const mechanismInventories = mechanismInventoriesFromChemicalLayer(layer);
+        const compartment = runKineticCompartmentStep({
+          temperatureK: layer.temperatureK,
+          dtSeconds: durationS,
+          layerThicknessM: layer.layerThicknessM,
+          reactionIds: [...layer.reactionIds],
+          columnInventoriesMolM2: mechanismInventories
+        });
+        const nextLayerInventory: Record<string, number> = { ...layer.columnInventoriesMolM2 };
+        const layerChanges: Record<string, number> = {};
+        for (const [mechanismId, oldAmount] of Object.entries(mechanismInventories)) {
+          const chemicalId = MECHANISM_TO_CHEMICAL_SPECIES[mechanismId];
+          const newAmount = compartment.updatedColumnInventoriesMolM2[mechanismId];
+          if (chemicalId === undefined || typeof newAmount !== 'number' || !Number.isFinite(newAmount) || newAmount < 0) {
+            throw new Error('кинетический слой «' + layer.layerId + '» вернул недопустимый запас вида ' + mechanismId);
+          }
+          const delta = newAmount - oldAmount;
+          const globalBefore = updatedInventory[chemicalId];
+          if (!Object.prototype.hasOwnProperty.call(updatedInventory, chemicalId) ||
+              typeof globalBefore !== 'number' || !Number.isFinite(globalBefore) || globalBefore < 0) {
+            throw new Error('основной атмосферный инвентарь не содержит проверенный вид «' + chemicalId + '»');
+          }
+          const globalAfter = globalBefore + delta;
+          if (!Number.isFinite(globalAfter) || globalAfter < 0) {
+            throw new Error('кинетический шаг дал недопустимый общий столбовый запас вида «' + chemicalId + '»');
+          }
+          updatedInventory[chemicalId] = globalAfter;
+          nextLayerInventory[chemicalId] = newAmount;
+          layerChanges[chemicalId] = delta;
+        }
+
+        const reactionSummaries = compartment.concentrationStep.reactions;
+        for (const summary of reactionSummaries) {
+          const definition = MECHANISM_REACTIONS.find((entry) => entry.reactionId === summary.reactionId);
+          if (definition === undefined) {
+            throw new Error('исполнитель вернул reactionId вне типизированной сети: ' + summary.reactionId);
+          }
+          const productId = MECHANISM_TO_CHEMICAL_SPECIES[definition.product];
+          if (productId === undefined) throw new Error('для продукта нет ChemicalEvolution species ID: ' + definition.product);
+          const extent = nextLayerInventory[productId] - layer.columnInventoriesMolM2[productId];
+          if (!Number.isFinite(extent) || extent < 0) {
+            throw new Error('физическая реакция «' + summary.reactionId + '» дала отрицательную или неконечную степень протекания');
+          }
+          const reactionChanges: Record<string, number> = {};
+          for (const mechanismSpeciesId of definition.species) {
+            const chemicalId = MECHANISM_TO_CHEMICAL_SPECIES[mechanismSpeciesId]!;
+            reactionChanges[chemicalId] =
+              nextLayerInventory[chemicalId] - layer.columnInventoriesMolM2[chemicalId];
+          }
+          const applied = extent > 0;
+          const reason =
+            'Radau IIA физическая кинетика; k=' + summary.rateConstant.value + ' ' +
+            summary.rateConstant.unit + '; source=' +
+            (summary.provenance.sourceName ?? summary.provenance.reference ?? summary.provenance.datasetId ?? 'идентификация в provenance отсутствует');
+          historyRecords.push({
+            stepNumber: working.history.length + historyRecords.length + 1,
+            reactionId: summary.reactionId,
+            applied,
+            mode: 'kinetic',
+            extent: applied ? extent : null,
+            limitingReactant: null,
+            reason: applied ? reason : reason + '; начальная скорость/конечное изменение не привели к положительной степени протекания',
+            changes: reactionChanges,
+            confidence: 'derived'
+          });
+
+          if (applied) {
+            const participant = (mechanismSpeciesId: string) => ({
+              reservoirId: CHEMICAL_RESERVOIR_IDS.atmospheric,
+              speciesId: MECHANISM_TO_CHEMICAL_SPECIES[mechanismSpeciesId]!,
+              coefficient: 1
+            });
+            const record: ReactionRecord = {
+              id: 'physical-chemical:' + String(schedulerStep) + ':' + layer.layerId + ':' + summary.reactionId,
+              reactionId: summary.reactionId,
+              reactants: [
+                ...definition.reactants.map((speciesId) => participant(speciesId)),
+                participant(definition.thirdBody)
+              ],
+              products: [participant(definition.product), participant(definition.thirdBody)],
+              extent,
+              extentBasis: 'column_amount',
+              time,
+              processId: PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+              note:
+                'Физическое применение механизма в основном ChemicalEvolutionState; слой=' +
+                layer.layerId + '; dt=' + durationS + ' s; k=' + summary.rateConstant.value + ' ' +
+                summary.rateConstant.unit + '; source=' +
+                (summary.provenance.sourceName ?? summary.provenance.reference ?? summary.provenance.datasetId ?? 'см. physicalKineticsHistory')
+            };
+            reactionLedger = registerReaction(reactionLedger, record);
+          }
+          log.push(
+            '[' + layer.layerId + '] ' + summary.reactionId +
+            (applied ? ': extent=' + extent + ' mol/m²' : ': extent=0')
+          );
+        }
+
+        const stats = compartment.concentrationStep.integration.stats;
+        const layerAudit: ChemicalKineticLayerStepAudit = {
+          layerId: layer.layerId,
+          integration: {
+            method: compartment.concentrationStep.integration.method,
+            attemptedSteps: stats.attemptedSteps,
+            acceptedSteps: stats.acceptedSteps,
+            rejectedSteps: stats.rejectedSteps,
+            newtonFailures: stats.newtonFailures,
+            rhsEvaluations: stats.rhsEvaluations,
+            jacobianEvaluations: stats.jacobianEvaluations,
+            minorNegativeCount: compartment.concentrationStep.integration.minorNegativeCount,
+            invariantChecks: compartment.concentrationStep.integration.invariantChecks
+          },
+          reactions: reactionSummaries.map(toPrimaryKineticReactionAudit)
+        };
+        layerAudits.push(layerAudit);
+        updatedLayers.push({
+          ...layer,
+          thicknessProvenance: { ...layer.thicknessProvenance },
+          temperatureProvenance: { ...layer.temperatureProvenance },
+          inventoryProvenance: { ...layer.inventoryProvenance },
+          columnInventoriesMolM2: nextLayerInventory
+        });
+        warnings.push(...compartment.warnings.map((warning) => '[' + layer.layerId + '] ' + warning));
+        assumptions.push(...compartment.assumptions.map((assumption) => '[' + layer.layerId + '] ' + assumption));
+      }
+
+      const elapsedYears = convert(quantity(durationS, 's'), 'yr').value;
+      if (!Number.isFinite(elapsedYears) || elapsedYears <= 0) {
+        throw new Error('физическая длительность Scheduler не преобразуется в конечные положительные юлианские годы');
+      }
+      const audit: ChemicalPhysicalKineticsStepAudit = {
+        schedulerStep,
+        startSegmentIndex: time.segmentIndex,
+        startLocalTimeS: time.localTimeS,
+        durationS,
+        characteristicTimeS: lastProposal?.characteristicTimeS ?? null,
+        stepSelectionMethod: lastProposal?.method ?? 'state-dependent proposal',
+        layers: layerAudits,
+        warnings,
+        assumptions
+      };
+      const oldO2 = initialInventory.o2;
+      const newO2 = updatedInventory.o2;
+      const oxygenBalance =
+        typeof oldO2 === 'number' && typeof newO2 === 'number'
+          ? {
+              production: Math.max(0, newO2 - oldO2),
+              consumption: Math.max(0, oldO2 - newO2),
+              net: newO2 - oldO2,
+              note: 'физическое изменение O₂ за принятый кинетический macro-шаг; единицы моль/м² атмосферного столба'
+            }
+          : {
+              production: 0,
+              consumption: 0,
+              net: 0,
+              note: 'изменение O₂ не рассчитывалось: основной инвентарь O₂ не задан как явная физическая величина'
+            };
+
+      const updatedChemical: ChemicalEvolutionState = {
+        ...working,
+        inventory: updatedInventory,
+        reservoirs: {
+          ...working.reservoirs,
+          atmospheric: { ...updatedInventory }
+        },
+        modelTimeYears: working.modelTimeYears + elapsedYears,
+        history: [...working.history, ...historyRecords],
+        oxygenBalance,
+        physicalKinetics: {
+          maximumMacroStepS: config.maximumMacroStepS,
+          layers: updatedLayers
+        },
+        physicalKineticsHistory: [...(working.physicalKineticsHistory ?? []), audit]
+      };
+      recomputeFractions(updatedChemical);
+      if (updatedChemical.mode === 'column_inventory' && updatedChemical.meanMolarMassKgMol === null) {
+        updatedChemical.surfacePressurePa = null;
+        updatedChemical.notes = [
+          ...updatedChemical.notes,
+          'surfacePressurePa сброшено в unknown после включения радикальных видов с неизвестной молярной массой; прежнее значение не сохраняется как будто неизменная физическая величина'
+        ];
+      }
+
+      const atmosphereInventory: MaterialInventory = {
+        basis: 'column_amount',
+        entries: { ...updatedChemical.inventory }
+      };
+      const inventoryCheck = validateMaterialInventory(atmosphereInventory);
+      if (!inventoryCheck.valid) {
+        throw new Error('обновлённый физический атмосферный инвентарь отклонён: ' + inventoryCheck.errors.join('; '));
+      }
+      const atmosphereReservoir = coreWorld.reservoirs.find(
+        (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+      );
+      if (atmosphereReservoir === undefined) {
+        throw new Error('CoreWorldState не содержит атмосферный резервуар для физической химической транзакции');
+      }
+      const reservoirs = coreWorld.reservoirs.map((reservoir) =>
+        reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+          ? setMaterialInventory(reservoir, 'column_amount', atmosphereInventory.entries)
+          : reservoir
+      );
+      box.chemical = updatedChemical;
+      return { ...coreWorld, reservoirs, reactionLedger };
+    }
+  };
+
+  let result: MacroStepResult;
+  try {
+    result = runMacroStep(core, createChemicalEvolutionStepRegistry(), [operator], {
+      durationS: chemical.physicalKinetics.maximumMacroStepS,
+      splitting: 'lie',
+      processIds: [PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID],
+      audit: {
+        speciesCatalog: physicalKineticSpeciesCatalog(),
+        boundary: 'complete'
+      }
+    });
+  } catch (error) {
+    return reject('физическая химическая кинетика отклонена Scheduler: ' +
+      (error instanceof Error ? error.message : String(error)));
+  }
+  if (result.status !== 'committed') {
+    return reject('физический химический шаг отклонён без commit: ' + result.diagnostics.join('; '));
+  }
+  const chemicalAfter = box.chemical ?? chemical;
+  log.push(
+    'физическая химическая кинетика зафиксирована Scheduler: dt=' +
+    (result.stepSize?.effectiveDurationS ?? 0) + ' s; шаг часов один; ReactionLedger append-only'
+  );
+  if (result.stepSize !== undefined) {
+    log.push(...result.stepSize.diagnostics);
+  }
+  return {
+    world: { ...world, coreWorldState: result.world, chemicalState: chemicalAfter },
+    status: 'committed',
+    log,
+    reason: null,
+    stepSize: result.stepSize
+  };
 }
 
 /**
