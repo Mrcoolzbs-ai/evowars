@@ -28,6 +28,7 @@ import {
   CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
   PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
   createChemicalEvolutionStepRegistry,
+  createPhysicalChemicalEvolutionStepRegistry,
   createChemicalState,
   createDefaultProcessRegistry,
   elementTotalsOf,
@@ -723,10 +724,10 @@ describe('Stage 4.2.3.3: explicit_only-процесс и запрет автом
 
     expect(registry.list().map((entry) => entry.id)).toEqual([
       ...legacyProcesses.map((process) => process.id),
-      CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
-      PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID
+      CHEMICAL_EVOLUTION_STEP_PROCESS_ID
     ]);
-    const physical = registry.get(PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID)!;
+    const physicalRegistry = createPhysicalChemicalEvolutionStepRegistry();
+    const physical = physicalRegistry.get(PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID)!;
     expect(physical.executionMode).toBe('state_dependent');
     expect(physical.enabled).toBe(true);
     expect(physical.solverAvailability).toBe('available');
