@@ -67,7 +67,7 @@
 import type { CoreWorldState } from './worldState';
 import type { ProcessRegistry } from './processRegistry';
 import { isProcessAutoRunnable, tauSeconds } from './processRegistry';
-import type { FluxAuditScope, FluxTime } from './fluxLedger';
+import type { FluxAuditScope, FluxRecord, FluxTime } from './fluxLedger';
 import type { SimulationClockState } from './simulationClock';
 import { advance, advanceTo, comparePoints, startNewSegment, totalElapsedSeconds } from './simulationClock';
 import { isPlainRecord } from './reservoir';
@@ -549,6 +549,256 @@ export function processEvent(
   const queue = [...bk.eventQueue];
   queue[index] = { ...event, status: 'processed' };
   return { bookkeeping: { ...bk, eventQueue: queue }, status: 'processed' };
+}
+
+export interface WorldEventProcessingResult {
+  status: 'processed' | 'failed';
+  /** Updated world; failed events retain the pre-handler physical state. */
+  world: CoreWorldState;
+  event: WorldEvent;
+  audit?: WorldTransitionAudit;
+  diagnostics: readonly string[];
+}
+
+export interface ProcessWorldEventOptions {
+  /** Mandatory: every world event is checked against material/energy invariants. */
+  audit: MacroStepAuditOptions;
+}
+
+/** Stable JSON comparison for the serializable records owned by Scheduler. */
+function schedulerCanonicalJson(value: unknown, active = new Set<object>()): string {
+  const normalize = (item: unknown): unknown => {
+    if (item === null || typeof item !== 'object') return item;
+    if (active.has(item)) throw new Error('циклическая ссылка в сериализуемом состоянии Scheduler');
+    active.add(item);
+    try {
+      if (Array.isArray(item)) return item.map(normalize);
+      if (!isPlainRecord(item)) throw new Error('состояние Scheduler содержит не-plain объект');
+      const result: Record<string, unknown> = {};
+      for (const key of Object.keys(item).sort()) {
+        result[key] = normalize((item as Record<string, unknown>)[key]);
+      }
+      return result;
+    } finally {
+      active.delete(item);
+    }
+  };
+  return JSON.stringify(normalize(value));
+}
+
+function sameFluxRecordExceptStatus(a: FluxRecord, b: FluxRecord): boolean {
+  const withoutStatus = (record: FluxRecord): Record<string, unknown> => {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (key !== 'status') result[key] = value;
+    }
+    return result;
+  };
+  try {
+    return schedulerCanonicalJson(withoutStatus(a)) === schedulerCanonicalJson(withoutStatus(b));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Apply a due world event as a transaction over CoreWorldState.
+ *
+ * The handler receives detached snapshots and must return the complete
+ * next CoreWorldState. Time and Scheduler bookkeeping are owned by the
+ * scheduler and may not be changed by the handler. FluxLedger changes
+ * must use its public apply/revert APIs; ReactionLedger is append-only.
+ * The resulting physical transition is audited before the event is marked
+ * processed. Handler/audit failures leave physical state untouched and
+ * mark only the queue row as failed for diagnosis.
+ */
+export function processWorldEvent(
+  world: CoreWorldState,
+  eventId: string,
+  handler: (world: CoreWorldState, event: WorldEvent) => CoreWorldState,
+  options: ProcessWorldEventOptions
+): WorldEventProcessingResult {
+  const bookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const bookkeepingIssues = validateSchedulerBookkeeping(bookkeeping);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя обработать событие в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      eventId
+    );
+  }
+  const event = bookkeeping.eventQueue.find((entry) => entry.id === eventId);
+  if (event === undefined) {
+    throw new SchedulerError('invalid_event', 'событие «' + eventId + '» не найдено в очереди', eventId);
+  }
+  if (event.status !== 'pending') {
+    throw new SchedulerError(
+      'already_processed',
+      'событие «' + eventId + '» уже обработано (status: ' + event.status + '): повторная обработка запрещена',
+      eventId
+    );
+  }
+  if (comparePoints(event.time, now(world.clock)) !== 0) {
+    throw new SchedulerError(
+      'invalid_event',
+      'событие «' + eventId + '» можно применять только в его точной временной точке; событие=' +
+        String(event.time.segmentIndex) + ':' + String(event.time.localTimeS) +
+        ', часы=' + String(world.clock.segmentIndex) + ':' + String(world.clock.localTimeS),
+      eventId
+    );
+  }
+
+  const markFailed = (
+    reason: string,
+    audit?: WorldTransitionAudit
+  ): WorldEventProcessingResult => {
+    const safeReason = reason.trim() === ''
+      ? 'обработка события завершилась ошибкой без диагностического сообщения'
+      : reason;
+    const failed = processEvent(bookkeeping, eventId, () => {
+      throw new Error(safeReason);
+    });
+    const failedEvent = failed.bookkeeping.eventQueue.find((entry) => entry.id === eventId)!;
+    return {
+      status: 'failed',
+      world: { ...world, scheduling: failed.bookkeeping },
+      event: structuredClone(failedEvent),
+      ...(audit === undefined ? {} : { audit }),
+      diagnostics: [safeReason]
+    };
+  };
+
+  let working: CoreWorldState;
+  try {
+    working = snapshotWorldState(world);
+  } catch (error) {
+    return markFailed(
+      'не удалось создать изолированный снимок мира перед событием: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  let handled: CoreWorldState;
+  try {
+    handled = handler(working, structuredClone(event));
+  } catch (error) {
+    return markFailed(
+      'обработчик события «' + eventId + '» завершился ошибкой: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  if (handled === null || typeof handled !== 'object' || handled.clock === undefined) {
+    return markFailed('обработчик события «' + eventId + '» вернул некорректное CoreWorldState');
+  }
+  if (!clocksEqual(handled.clock, world.clock)) {
+    return markFailed('обработчик события «' + eventId + '» изменил WorldClock: время двигает только Scheduler');
+  }
+  try {
+    if (schedulerCanonicalJson(handled.scheduling ?? null) !== schedulerCanonicalJson(working.scheduling ?? null)) {
+      return markFailed('обработчик события «' + eventId + '» изменил SchedulerBookkeeping напрямую; очередь и расписания принадлежат Scheduler');
+    }
+  } catch (error) {
+    return markFailed(
+      'SchedulerBookkeeping после обработчика события непредставим: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  let after: CoreWorldState;
+  try {
+    after = snapshotWorldState(handled);
+  } catch (error) {
+    return markFailed(
+      'не удалось изолировать состояние после события «' + eventId + '»: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  const beforeFlux = world.fluxLedger.records;
+  const afterFlux = after.fluxLedger.records;
+  const fluxIssues: string[] = [];
+  if (afterFlux.length < beforeFlux.length) {
+    fluxIssues.push('FluxLedger: обработчик удалил ранее существовавшие записи');
+  }
+  const commonLength = Math.min(beforeFlux.length, afterFlux.length);
+  for (let index = 0; index < commonLength; index++) {
+    const beforeRecord = beforeFlux[index]!;
+    const afterRecord = afterFlux[index]!;
+    if (beforeRecord.id !== afterRecord.id || !sameFluxRecordExceptStatus(beforeRecord, afterRecord)) {
+      fluxIssues.push('FluxLedger: существующая запись на позиции ' + String(index) + ' была удалена, переставлена или изменена');
+      continue;
+    }
+    const allowedStatusChange =
+      beforeRecord.status === afterRecord.status ||
+      (beforeRecord.status === 'pending' && afterRecord.status === 'applied') ||
+      (beforeRecord.status === 'applied' && afterRecord.status === 'reverted');
+    if (!allowedStatusChange) {
+      fluxIssues.push(
+        'FluxLedger: недопустимый переход статуса записи «' + beforeRecord.id +
+          '»: ' + beforeRecord.status + ' → ' + afterRecord.status
+      );
+    }
+  }
+  if (fluxIssues.length > 0) {
+    return markFailed(fluxIssues.join('; '));
+  }
+
+  const beforeFluxById = new Map(beforeFlux.map((record) => [record.id, record]));
+  const stepFluxRecords = afterFlux.filter((record) =>
+    record.status === 'applied' && beforeFluxById.get(record.id)?.status !== 'applied'
+  );
+  const appendOnlyIssues = reactionLedgerAppendOnlyIssues(world.reactionLedger, after.reactionLedger);
+  if (appendOnlyIssues.length > 0) {
+    return markFailed(
+      appendOnlyIssues.join('; ') +
+        ' — ReactionLedger события должен сохранять старый префикс и добавлять новые записи только в конец'
+    );
+  }
+  const beforeReactionCount =
+    world.reactionLedger !== undefined && Array.isArray(world.reactionLedger.records)
+      ? world.reactionLedger.records.length
+      : 0;
+  const afterReactionRecords =
+    after.reactionLedger !== undefined && Array.isArray(after.reactionLedger.records)
+      ? after.reactionLedger.records
+      : [];
+  const stepReactionRecords = afterReactionRecords.slice(beforeReactionCount);
+
+  let audit: WorldTransitionAudit;
+  try {
+    audit = auditWorldTransition(world, after, { records: stepFluxRecords }, {
+      speciesCatalog: options.audit.speciesCatalog,
+      boundary: options.audit.boundary,
+      tolerance: options.audit.tolerance,
+      scope: options.audit.scope,
+      reactionLedger: { records: stepReactionRecords }
+    });
+  } catch (error) {
+    return markFailed(
+      'InvariantAuditor не смог проверить событие «' + eventId + '»: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+  if (audit.status === 'imbalanced') {
+    return markFailed(
+      'событие «' + eventId + '» не прошло обязательный аудит: ' + audit.diagnostics.join('; '),
+      audit
+    );
+  }
+
+  const processed = processEvent(bookkeeping, eventId, () => undefined);
+  const processedEvent = processed.bookkeeping.eventQueue.find((entry) => entry.id === eventId)!;
+  return {
+    status: 'processed',
+    world: { ...after, scheduling: processed.bookkeeping },
+    event: structuredClone(processedEvent),
+    audit,
+    diagnostics: [
+      'событие «' + eventId + '» применено атомарно без продвижения времени',
+      ...audit.diagnostics
+    ]
+  };
 }
 
 // ============================================
