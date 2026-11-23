@@ -322,8 +322,8 @@ WorldClock
   валидного результата блокирует транзакцию до apply. Этот generic
   механизм Scheduler уже используется подключённым физическим химическим
   процессом ниже.
-  CI #547 на HEAD 6c56347e9b3f3e42bd9a0b71a23a0806152182a0 — success:
-  TypeScript, 86 файлов passed / 2 skipped, 3139 тестов passed / 53 skipped,
+  CI #554 на HEAD 37ee38a2d23fdb28331dcdb6ed4a878676845c8b — success:
+  TypeScript, 86 файлов passed / 2 skipped, 3140 тестов passed / 53 skipped,
   lint 0 ошибок (62 предупреждения), production build.
   
   **Физический кинетический путь теперь подключён к основному
