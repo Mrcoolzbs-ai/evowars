@@ -578,6 +578,16 @@ export function runVerticalEddyDiffusionStep(
   const transfersBySpecies: Record<string, number[]> = {};
   const constitutiveFluxesBySpecies: Record<string, number[]> = {};
   const fluxClosureBySpecies: Record<string, number[]> = {};
+  const interfaceSpeciesAudits: Record<string, Array<{
+    eddyGradientFluxMolM2S: number;
+    molecularGradientFluxMolM2S?: number;
+    molecularDriftFluxMolM2S?: number;
+    molecularDiffusivityM2S?: number;
+    binaryDiffusivitiesM2S?: Record<string, number>;
+    barodiffusionVelocityMs?: number;
+    thermalDiffusionVelocityMs?: number;
+    molecularDriftVelocityMs?: number;
+  }>> = {};
 
   for (const speciesId of speciesIds) {
     const initial = validatedLayers.map((entry) => entry.layer.columnInventoriesMolM2[speciesId]!);
@@ -822,17 +832,55 @@ export function runVerticalEddyDiffusionStep(
       return rejected('вертикальная диффузия не сохранила полный столб вида «' + speciesId + '» в пределах численного допуска');
     }
 
-    const transfers = interfaces.map((interfaceGeometry, index) =>
-      interfaceGeometry.conductanceMolM2S * finalDifferences[index]! * input.durationS
-    );
+    const transfers = new Array<number>(layerCount - 1).fill(0);
+    let cumulativeTransfer = 0;
+    for (let index = 0; index < layerCount - 1; index++) {
+      cumulativeTransfer += initial[index]! - final[index]!;
+      transfers[index] = cumulativeTransfer;
+    }
     const fluxes = transfers.map((transfer) => transfer / input.durationS);
-    const constitutiveFluxes = interfaces.map((interfaceGeometry, index) => {
-      const lowerMixingRatio = final[index]! /
-        validatedLayers[index]!.airColumnInventoryMolM2;
-      const upperMixingRatio = final[index + 1]! /
-        validatedLayers[index + 1]!.airColumnInventoryMolM2;
-      return interfaceGeometry.conductanceMolM2S * (lowerMixingRatio - upperMixingRatio);
+    const interfaceDetails = interfaces.map((interfaceGeometry, index) => {
+      const lowerMixingRatio =
+        final[index]! / validatedLayers[index]!.airColumnInventoryMolM2;
+      const upperMixingRatio =
+        final[index + 1]! / validatedLayers[index + 1]!.airColumnInventoryMolM2;
+      const mixingRatioGradientNumerator = lowerMixingRatio - upperMixingRatio;
+      const eddyGradientFluxMolM2S =
+        interfaceGeometry.airMolarDensityMolM3 *
+        interfaceGeometry.eddyDiffusivityM2S *
+        mixingRatioGradientNumerator / interfaceGeometry.centerDistanceM;
+      if (molecularStates === undefined) {
+        return {
+          constitutiveFluxMolM2S: eddyGradientFluxMolM2S,
+          eddyGradientFluxMolM2S
+        };
+      }
+      const molecularState = molecularStates[index]!;
+      const molecularGradientFluxMolM2S =
+        interfaceGeometry.airMolarDensityMolM3 *
+        molecularState.diffusivityM2S *
+        mixingRatioGradientNumerator / interfaceGeometry.centerDistanceM;
+      const upwindMixingRatio =
+        molecularState.driftVelocityMs >= 0 ? lowerMixingRatio : upperMixingRatio;
+      const molecularDriftFluxMolM2S =
+        interfaceGeometry.airMolarDensityMolM3 *
+        molecularState.driftVelocityMs * upwindMixingRatio;
+      return {
+        constitutiveFluxMolM2S:
+          eddyGradientFluxMolM2S +
+          molecularGradientFluxMolM2S +
+          molecularDriftFluxMolM2S,
+        eddyGradientFluxMolM2S,
+        molecularGradientFluxMolM2S,
+        molecularDriftFluxMolM2S,
+        molecularDiffusivityM2S: molecularState.diffusivityM2S,
+        binaryDiffusivitiesM2S: { ...molecularState.binaryDiffusivitiesM2S },
+        barodiffusionVelocityMs: molecularState.barodiffusionVelocityMs,
+        thermalDiffusionVelocityMs: molecularState.thermalDiffusionVelocityMs,
+        molecularDriftVelocityMs: molecularState.driftVelocityMs
+      };
     });
+    const constitutiveFluxes = interfaceDetails.map((entry) => entry.constitutiveFluxMolM2S);
     const fluxClosureRelativeDeviations = fluxes.map((flux, index) =>
       Math.abs(flux - constitutiveFluxes[index]!) /
       Math.max(Math.abs(flux), Math.abs(constitutiveFluxes[index]!), Number.MIN_VALUE)
@@ -865,6 +913,16 @@ export function runVerticalEddyDiffusionStep(
     transfersBySpecies[speciesId] = transfers;
     constitutiveFluxesBySpecies[speciesId] = constitutiveFluxes;
     fluxClosureBySpecies[speciesId] = fluxClosureRelativeDeviations;
+    interfaceSpeciesAudits[speciesId] = interfaceDetails.map((entry) => ({
+      eddyGradientFluxMolM2S: entry.eddyGradientFluxMolM2S,
+      ...(entry.molecularGradientFluxMolM2S === undefined ? {} : { molecularGradientFluxMolM2S: entry.molecularGradientFluxMolM2S }),
+      ...(entry.molecularDriftFluxMolM2S === undefined ? {} : { molecularDriftFluxMolM2S: entry.molecularDriftFluxMolM2S }),
+      ...(entry.molecularDiffusivityM2S === undefined ? {} : { molecularDiffusivityM2S: entry.molecularDiffusivityM2S }),
+      ...(entry.binaryDiffusivitiesM2S === undefined ? {} : { binaryDiffusivitiesM2S: { ...entry.binaryDiffusivitiesM2S } }),
+      ...(entry.barodiffusionVelocityMs === undefined ? {} : { barodiffusionVelocityMs: entry.barodiffusionVelocityMs }),
+      ...(entry.thermalDiffusionVelocityMs === undefined ? {} : { thermalDiffusionVelocityMs: entry.thermalDiffusionVelocityMs }),
+      ...(entry.molecularDriftVelocityMs === undefined ? {} : { molecularDriftVelocityMs: entry.molecularDriftVelocityMs })
+    }));
   }
 
   const updatedLayers = validatedLayers.map((entry, layerIndex) => {
@@ -936,7 +994,8 @@ export function runVerticalEddyDiffusionStep(
         fluxMolM2S: fluxesBySpecies[speciesId]![interfaceIndex]!,
         constitutiveFluxMolM2S: constitutiveFluxesBySpecies[speciesId]![interfaceIndex]!,
         fluxClosureRelativeDeviation: fluxClosureBySpecies[speciesId]![interfaceIndex]!,
-        transferredMolM2: transfersBySpecies[speciesId]![interfaceIndex]!
+        transferredMolM2: transfersBySpecies[speciesId]![interfaceIndex]!,
+        ...interfaceSpeciesAudits[speciesId]![interfaceIndex]!
       }
     ]))
   }));
