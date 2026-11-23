@@ -221,8 +221,9 @@ describe('Stage 4.2: reference profile integration', () => {
     }
 
     const adaptive = computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn();
-    expect(adaptive.status).toBe('completed');
-    if (adaptive.status !== 'completed') return;
+    if (adaptive.status !== 'completed') {
+      throw new Error(adaptive.reason + ': ' + adaptive.diagnostics.join('; '));
+    }
     const column = adaptive.column;
     expect(column.layerBoundaries.length).toBeGreaterThan(7);
     expect(column.requestedHeightPoints).toHaveLength(column.layerBoundaries.length);
@@ -360,8 +361,9 @@ describe('Stage 4.2: reference profile integration', () => {
 
   it('retains refined hydrostatic P(z) and third-body consistency through a Scheduler commit', () => {
     const adaptive = computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn();
-    expect(adaptive.status).toBe('completed');
-    if (adaptive.status !== 'completed') return;
+    if (adaptive.status !== 'completed') {
+      throw new Error(adaptive.reason + ': ' + adaptive.diagnostics.join('; '));
+    }
     const column = adaptive.column;
 
     const derived = deriveDryAirKineticInventoriesFromHydrostaticColumn(column, [R89]);
