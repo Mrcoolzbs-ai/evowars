@@ -846,6 +846,87 @@ export function processWorldEvent(
   };
 }
 
+export type WorldEventHandler = (
+  world: CoreWorldState,
+  event: WorldEvent
+) => CoreWorldState;
+
+export interface ProcessDueWorldEventsResult {
+  status: 'completed' | 'failed';
+  world: CoreWorldState;
+  results: readonly WorldEventProcessingResult[];
+  diagnostics: readonly string[];
+}
+
+/**
+ * Dispatch all events due at the world's current TimePoint.
+ *
+ * Events are processed in deterministic (segmentIndex, localTimeS,
+ * sequence) order. A failed event stops dispatch: later events remain
+ * pending and can be inspected/retried after the failure is resolved.
+ * A due event from an earlier time point is treated as a missed boundary
+ * and marked failed rather than being applied retroactively.
+ * Missing handlers also produce a durable failed event record.
+ */
+export function processDueWorldEvents(
+  world: CoreWorldState,
+  handlers: Readonly<Record<string, WorldEventHandler>>,
+  options: ProcessWorldEventOptions
+): ProcessDueWorldEventsResult {
+  let current = world;
+  const results: WorldEventProcessingResult[] = [];
+  const diagnostics: string[] = [];
+  const point: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const initialBookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const due = dueEvents(initialBookkeeping, point);
+
+  for (const event of due) {
+    const liveBookkeeping = current.scheduling ?? createSchedulerBookkeeping();
+    const ordering = comparePoints(event.time, point);
+    if (ordering < 0) {
+      const reason =
+        'событие «' + event.id +
+        '» пропущено: его временная точка раньше WorldClock; ретроактивное применение запрещено';
+      const failed = processEvent(liveBookkeeping, event.id, () => {
+        throw new Error(reason);
+      });
+      const failedEvent = failed.bookkeeping.eventQueue.find((entry) => entry.id === event.id)!;
+      current = { ...current, scheduling: failed.bookkeeping };
+      const result: WorldEventProcessingResult = {
+        status: 'failed',
+        world: current,
+        event: structuredClone(failedEvent),
+        diagnostics: [reason]
+      };
+      results.push(result);
+      diagnostics.push(reason);
+      return { status: 'failed', world: current, results, diagnostics };
+    }
+
+    const hasHandler = Object.prototype.hasOwnProperty.call(handlers, event.type);
+    const handler = hasHandler ? handlers[event.type] : undefined;
+    const result = processWorldEvent(
+      current,
+      event.id,
+      handler ?? (() => {
+        throw new Error('для типа события «' + event.type + '» не зарегистрирован обработчик');
+      }),
+      options
+    );
+    current = result.world;
+    results.push(result);
+    diagnostics.push(...result.diagnostics);
+    if (result.status === 'failed') {
+      return { status: 'failed', world: current, results, diagnostics };
+    }
+  }
+
+  return { status: 'completed', world: current, results, diagnostics };
+}
+
 // ============================================
 // 6. РАСПИСАНИЯ ПРОЦЕССОВ
 // ============================================
