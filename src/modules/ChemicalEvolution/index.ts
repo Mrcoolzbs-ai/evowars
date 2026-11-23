@@ -1620,7 +1620,7 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
               ) {
                 problems.push(molecularPrefix + ': bulk mole fraction «' + backgroundId + '» слоя «' + layer.layerId + '» повреждена');
               }
-              if (typeof fraction === 'number' && fraction > 0 && !hasOwn(molecular.backgroundSpecies, backgroundId)) {
+              if (typeof fraction === 'number' && fraction > 0 && !Object.prototype.hasOwnProperty.call(molecular.backgroundSpecies, backgroundId)) {
                 problems.push(molecularPrefix + ': отсутствуют Lennard-Jones параметры bulk-компонента «' + backgroundId + '» слоя «' + layer.layerId + '»');
               }
             }
