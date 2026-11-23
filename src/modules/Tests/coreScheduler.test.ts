@@ -19,6 +19,7 @@ import {
   pendingEvents,
   processEvent,
   processWorldEvent,
+  processDueWorldEvents,
   readyProcessIds,
   readyProcessIdsAt,
   runMacroStep,
@@ -784,6 +785,114 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
       'invalid_event'
     );
     expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+  });
+
+  it('диспетчеризует все наступившие события по sequence и применяет каждый ровно один раз', () => {
+    const firstScheduling = enqueueEvent(
+      enqueueEvent(createSchedulerBookkeeping(), {
+        id: 'event-second',
+        time: { segmentIndex: 0, localTimeS: 0 },
+        type: 'second',
+        data: { order: 2 },
+        source: 'test'
+      }),
+      {
+        id: 'event-first',
+        time: { segmentIndex: 0, localTimeS: 0 },
+        type: 'first',
+        data: { order: 1 },
+        source: 'test'
+      }
+    );
+    const world = { ...testWorld(), scheduling: firstScheduling };
+    const handled: string[] = [];
+    const result = processDueWorldEvents(
+      world,
+      {
+        first: (state, event) => {
+          handled.push(event.id);
+          return state;
+        },
+        second: (state, event) => {
+          handled.push(event.id);
+          return state;
+        }
+      },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(handled).toEqual(['event-second', 'event-first']);
+    expect(result.results.map((entry) => entry.event.status)).toEqual(['processed', 'processed']);
+    expect(result.world.scheduling!.eventQueue.map((event) => event.status)).toEqual(['processed', 'processed']);
+    expect(result.world.clock).toEqual(world.clock);
+    expect(world.scheduling!.eventQueue.map((event) => event.status)).toEqual(['pending', 'pending']);
+  });
+
+  it('при первом failed событии останавливает dispatch и оставляет последующие события pending', () => {
+    const scheduling = enqueueEvent(
+      enqueueEvent(
+        enqueueEvent(createSchedulerBookkeeping(), {
+          id: 'dispatch-ok',
+          time: { segmentIndex: 0, localTimeS: 0 },
+          type: 'ok',
+          data: {},
+          source: 'test'
+        }),
+        {
+          id: 'dispatch-missing',
+          time: { segmentIndex: 0, localTimeS: 0 },
+          type: 'not-registered',
+          data: {},
+          source: 'test'
+        }
+      ),
+      {
+        id: 'dispatch-after-failure',
+        time: { segmentIndex: 0, localTimeS: 0 },
+        type: 'ok',
+        data: {},
+        source: 'test'
+      }
+    );
+    const result = processDueWorldEvents(
+      { ...testWorld(), scheduling },
+      { ok: (state) => state },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.results.map((entry) => entry.event.id)).toEqual(['dispatch-ok', 'dispatch-missing']);
+    expect(result.world.scheduling!.eventQueue.map((event) => [event.id, event.status])).toEqual([
+      ['dispatch-ok', 'processed'],
+      ['dispatch-missing', 'failed'],
+      ['dispatch-after-failure', 'pending']
+    ]);
+    expect(result.world.scheduling!.eventQueue[1]!.failReason).toContain('не зарегистрирован обработчик');
+  });
+
+  it('не применяет пропущенное событие ретроактивно и сохраняет failReason', () => {
+    const clock = advance(createSimulationClock(), 5);
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'missed-event',
+      time: { segmentIndex: 0, localTimeS: 2 },
+      type: 'phase_transition',
+      data: {},
+      source: 'test'
+    });
+    const world = { ...testWorld(), clock, scheduling };
+    const result = processDueWorldEvents(
+      world,
+      { phase_transition: (state) => state },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.results).toHaveLength(1);
+    expect(result.world.reservoirs[0]!.material!.entries.co2).toBe(100);
+    expect(result.world.clock).toEqual(clock);
+    expect(result.world.scheduling!.eventQueue[0]!.status).toBe('failed');
+    expect(result.world.scheduling!.eventQueue[0]!.failReason).toContain('Ретроактивное');
   });
 
   it('глубоко изолирует payload события при enqueue и при чтении очереди', () => {
