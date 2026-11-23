@@ -49,6 +49,7 @@ import {
   readyProcessIds,
   runMacroStep,
   scheduleProcess,
+  scheduleProcessAt,
   SchedulerError
 } from '../Core/scheduler';
 import type { MacroStepResult, ProcessOperator } from '../Core/scheduler';
@@ -994,8 +995,16 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     });
     // Этот fixture явно начинает с существующей Scheduler-истории:
     // adapter legacy → CoreWorldState сам по себе её не создаёт.
+    const physicalFutureDeadline = {
+      segmentIndex: core.clock.segmentIndex,
+      localTimeS: 1e20
+    };
     const priorBookkeeping = scheduleProcess(
-      createSchedulerBookkeeping(),
+      scheduleProcessAt(
+        createSchedulerBookkeeping(),
+        PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+        physicalFutureDeadline
+      ),
       'preexisting_scheduled_process',
       12
     );
@@ -1009,6 +1018,15 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(updatedCore.scheduling.stepCount).toBe(priorBookkeeping.stepCount + 1);
     expect(updatedCore.scheduling.processDynamics.preexisting_scheduled_process)
       .toEqual(priorBookkeeping.processDynamics.preexisting_scheduled_process);
+    const physicalDynamics =
+      updatedCore.scheduling.processDynamics[PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID]!;
+    expect(physicalDynamics.lastRunTime).toEqual({
+      segmentIndex: updatedCore.clock.segmentIndex,
+      localTimeS: updatedCore.clock.localTimeS
+    });
+    expect(physicalDynamics.nextDueTime).toEqual(physicalFutureDeadline);
+    expect(physicalDynamics.nextDueElapsedS).toBeNull();
+    expect(physicalDynamics.macroStepsCompleted).toBe(1);
     const updatedAtmosphere = updatedCore.reservoirs.find(
       (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
     );
