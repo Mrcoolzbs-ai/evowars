@@ -656,6 +656,73 @@ describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', 
       .toEqual(['phase-boundary']);
   });
 
+  it('rebases all pending current-segment events when a sub-ULP macro-step opens a new segment', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = enqueueEvent(
+      enqueueEvent(createSchedulerBookkeeping(), {
+        id: 'event-near',
+        time: { segmentIndex: largeClock.segmentIndex, localTimeS: largeClock.localTimeS + 2 },
+        type: 'solver_detected',
+        data: { threshold: 1 },
+        source: 'test solver'
+      }),
+      {
+        id: 'event-far',
+        time: { segmentIndex: largeClock.segmentIndex, localTimeS: largeClock.localTimeS + 4 },
+        type: 'solver_detected',
+        data: { threshold: 2 },
+        source: 'test solver'
+      }
+    );
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+
+    const rollover = runMacroStep(world, registry, [recorder('a', [])], {
+      durationS: 1,
+      splitting: 'lie'
+    });
+
+    expect(rollover.status).toBe('committed');
+    expect(rollover.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(rollover.world.clock.localTimeS).toBe(1);
+    expect(rollover.bookkeeping.eventQueue.map((event) => [
+      event.id,
+      event.status,
+      event.time.segmentIndex,
+      event.time.localTimeS
+    ])).toEqual([
+      ['event-near', 'pending', largeClock.segmentIndex + 1, 2],
+      ['event-far', 'pending', largeClock.segmentIndex + 1, 4]
+    ]);
+    expect(nextEventTime(rollover.bookkeeping)).toEqual({
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 2
+    });
+    expect(dueEvents(rollover.bookkeeping, {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 1
+    })).toHaveLength(0);
+
+    const atFirstEvent = runMacroStep(
+      rollover.world,
+      registry,
+      [recorder('a', [])],
+      { durationS: 10, splitting: 'lie' }
+    );
+    expect(atFirstEvent.status).toBe('committed');
+    expect(atFirstEvent.stepSize?.effectiveDurationS).toBe(1);
+    expect(atFirstEvent.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(atFirstEvent.world.clock.localTimeS).toBe(2);
+    expect(atFirstEvent.bookkeeping.eventQueue.map((event) => event.time)).toEqual([
+      { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 2 },
+      { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 4 }
+    ]);
+    expect(dueEvents(atFirstEvent.bookkeeping, {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 2
+    }).map((event) => event.id)).toEqual(['event-near']);
+  });
+
   it('rejects a new macro-step while an event at the current point is still pending', () => {
     const registry = makeRegistry([descriptor('a')]);
     const calls: Call[] = [];
