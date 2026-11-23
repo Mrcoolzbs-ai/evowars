@@ -2325,7 +2325,7 @@ describe('Stage 4.2: vertical subdivision regression benchmark', () => {
       );
       const auditTotals = audit.layers.reduce(
         (totals, layer) => {
-          for (const [speciesId, amount] of Object.entries(layer.columnInventoriesAfterMolM2)) {
+          for (const [speciesId, amount] of Object.entries(layer.finalColumnInventoriesMolM2)) {
             totals[speciesId] = (totals[speciesId] ?? 0) + amount;
           }
           return totals;
