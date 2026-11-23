@@ -746,6 +746,11 @@
 > режим A, предоставляет экспертную форму конфигурации и показывает
 > последний физический аудит.
 >
-> CI #544 на HEAD 0dd1cfd24c495ddbacf81fdfe7409f35f3c5c43b — success:
-> 86 файлов passed / 2 skipped; 3139 тестов passed / 53 skipped;
+> Проверяется и сценарий с уже существующим CoreWorldState: предварительная
+> Scheduler-запись сохраняется, stepCount увеличивается ровно на один,
+> атмосферный MaterialInventory совпадает с основным химическим состоянием,
+> исходный Core-объект не мутируется.
+>
+> CI #554 на HEAD 37ee38a2d23fdb28331dcdb6ed4a878676845c8b — success:
+> 86 файлов passed / 2 skipped; 3140 тестов passed / 53 skipped;
 > TypeScript, lint (62 предупреждения, 0 ошибок), production build.
