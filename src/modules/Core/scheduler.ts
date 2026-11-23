@@ -1281,6 +1281,44 @@ export function runMacroStep(
     };
   }
 
+  const sameSegmentTarget = currentPoint.localTimeS + effectiveDurationS;
+  const sameSegmentAdvanceIsExact =
+    Number.isFinite(sameSegmentTarget) &&
+    sameSegmentTarget > currentPoint.localTimeS &&
+    sameSegmentTarget - currentPoint.localTimeS === effectiveDurationS;
+  const rollsIntoNextSegment =
+    eventBoundary !== undefined
+      ? eventBoundary.time.segmentIndex === currentPoint.segmentIndex + 1
+      : !sameSegmentAdvanceIsExact;
+  if (rollsIntoNextSegment) {
+    const nextSegmentIndex = currentPoint.segmentIndex + 1;
+    const nextSegmentEvent = pendingEvents(originalBk).find(
+      (event) => event.time.segmentIndex === nextSegmentIndex
+    );
+    if (nextSegmentEvent !== undefined && nextSegmentEvent.time.localTimeS === 0) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'событие «' + nextSegmentEvent.id +
+            '» назначено на начало следующего численного сегмента; эта точка совпадает с текущим физическим моментом. Обработайте событие до перехода сегмента; шаг не выполнен'
+        ]
+      };
+    }
+    if (
+      nextSegmentEvent !== undefined &&
+      nextSegmentEvent.time.localTimeS <= effectiveDurationS
+    ) {
+      effectiveDurationS = nextSegmentEvent.time.localTimeS;
+      eventBoundary = {
+        eventId: nextSegmentEvent.id,
+        time: { ...nextSegmentEvent.time }
+      };
+    }
+  }
+
   const limitingProcessIds =
     effectiveDurationS < opts.durationS
       ? proposals.filter((proposal) => proposal.durationS === effectiveDurationS).map((proposal) => proposal.processId).sort()
