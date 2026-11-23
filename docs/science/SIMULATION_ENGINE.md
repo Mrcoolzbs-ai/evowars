@@ -166,35 +166,38 @@
 > importWorldFromJSONDetailed. Отсутствующий scheduling не создаётся;
 > старые ProcessDynamics без exact-полей не дополняются вымышленными
 > сроками. Некорректная очередь становится несовместимой записью с
+> диагностикой; raw-сохранение остаётся для восстановления.
+>
 > Ревизия Stage 4.2.1.8 (2026-11-23): macro-step ограничивает
-> effectiveDurationS ближайшим exact process deadline незапущенного
-> процесса. Наступивший, но не включённый в macro-step deadline блокирует
+> effectiveDurationS ближайшим exact process deadline, queued event или
+> solver root. Наступивший, но не включённый в шаг deadline блокирует
 > продвижение; одинаковый TimePoint может одновременно содержать
 > processBoundary и eventBoundary. При rollover выбирается ранняя граница
 > среди queued events, solver roots и deadlines следующего сегмента,
-> включая совпадающие root/deadline. Финальный commit использует ту же
-> политику округления SimulationClock.advance; advanceTo зарезервирован
-> для точно заданных точек событий и расписаний.
+> включая совпадающие root/deadline. respectSelectedProcessDeadlines
+> позволяет непрерывному процессу останавливаться на собственном будущем
+> сроке; обычный ручной runMacroStep по умолчанию сохраняет возможность
+> раннего запуска.
 >
 > runScheduledWorldTurn задаёт детерминированный порядок одного хода:
 > сначала due events по (segmentIndex, localTimeS, sequence), затем
-> ready processes. Ошибка/отсутствующий event handler переводит событие
-> в failed и не допускает запуска процессов того же хода. Срок
-> (nextSegment, 0) означает координатную границу без физического времени:
-> clock переводится в новый сегмент без роста stepCount, после чего
-> due event/process dispatch выполняется в его нуле.
+> one-shot ready processes и явно заданные continuousProcessIds. Ошибка
+> event handler блокирует процессы того же хода. Точка (nextSegment, 0)
+> означает только смену координатного представления: часы переходят в
+> новый сегмент без роста stepCount, после чего события и процессы
+> обрабатываются в его нуле.
 >
-> Ручной запуск физической химии регистрируется в Scheduler как
-> одноразовый exact deadline в текущей точке, только если у процесса
-> нет уже существующего exact или legacy deadline. После commit
-> ProcessDynamics.lastRunTime отражает точное новое время, счётчик
-> выполнений увеличен, достигнутый deadline потреблён. Будущий срок
-> того же процесса сохраняется при ручном раннем запуске. Это не
-> назначает постоянное τ и не превращает кнопку химического шага
-> в автоматический цикл.
+> Ручной запуск физической химии регистрируется как one-shot exact
+> deadline в текущем TimePoint, только если у процесса нет существующего
+> exact или legacy срока. Физический continuous operator использует
+> respectSelectedProcessDeadlines: он может стартовать до будущего срока,
+> но не пересекает его; если срок попадает внутрь запрошенного интервала,
+> шаг обрезается точно на нём и после commit срок потребляется. Далёкий
+> срок сохраняется. lastRunTime фиксирует точное время commit; постоянное
+> τ не назначается и кнопка шага не превращается в автономный цикл.
 >
-> CI #685 на HEAD 91f15d9f7f9ab1a8e8c04e3170f8cdc81ac3fc0b —
-> success: 86 файлов passed / 2 skipped, 3202 теста passed / 53 skipped;
+> CI #688 на HEAD 22e9aa9e426c5938220d4c8ca646fc4256894daa —
+> success: 86 файлов passed / 2 skipped, 3203 теста passed / 53 skipped;
 > TypeScript, lint (62 предупреждения, 0 ошибок), production build.
 > Golden baseline 4.2.1 сохранён (sha256
 > 877e17d346da3618ec5d15aced90c68da8a4bbb34ff18cb78023e756c1d85b20).
