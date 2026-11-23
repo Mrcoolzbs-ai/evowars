@@ -150,6 +150,68 @@ function makeColumnWorld(): GeneratedWorld {
   } as unknown as GeneratedWorld;
 }
 
+/**
+ * Тестовый мир с ЯВНО заданным физическим реакционным слоем.
+ * Числа и provenance синтетические, только для проверки интеграционного
+ * контракта; они не описывают реальную планетарную атмосферу.
+ */
+function makePhysicalKineticWorld(temperatureK = 350): GeneratedWorld {
+  const model = makeModel(
+    { n2: 0.8, o2: 0.2 },
+    { columnMolM2: { value: 5250, unit: 'моль/м²', confidence: 'derived' } }
+  );
+  const base = createChemicalState({
+    atmospherePhysicalModel: model,
+    surfaceGravityMs2: 9.81,
+    stepDurationYears: 7
+  });
+  const inventory = {
+    ...base.inventory,
+    h: 8e-6,
+    ho2: 1e-8
+  };
+  const provenance = (sourceId: string) => ({
+    sourceName: 'synthetic integration test fixture',
+    sourceId,
+    reference: 'test-only; not planetary source data',
+    limitations: 'synthetic values used only to validate the primary-state Scheduler adapter'
+  });
+  const chemicalState: ChemicalEvolutionState = {
+    ...base,
+    inventory,
+    reservoirs: {
+      ...base.reservoirs,
+      atmospheric: { ...inventory }
+    },
+    physicalKinetics: {
+      maximumMacroStepS: 1e10,
+      layers: [
+        {
+          layerId: 'explicit-test-layer',
+          layerThicknessM: 100,
+          thicknessProvenance: provenance('fixture:layer-thickness'),
+          temperatureK,
+          temperatureProvenance: provenance('fixture:layer-temperature'),
+          columnInventoriesMolM2: {
+            h: 8e-6,
+            o2: 4e-5,
+            ho2: 1e-8,
+            n2: 4.2e3
+          },
+          inventoryProvenance: provenance('fixture:layer-inventory'),
+          reactionIds: ['kida-tb-2015-03-19-106']
+        }
+      ]
+    },
+    physicalKineticsHistory: []
+  };
+  return {
+    ...(makeGameWorld({ n2: 0.8, o2: 0.2 }, temperatureK) as unknown as Record<string, unknown>),
+    atmospherePhysics: model,
+    chemicalState
+  } as unknown as GeneratedWorld;
+}
+
 /** Длительность шага Scheduler: stepDurationYears через единицу 'yr'. */
 function stepDurationSeconds(stepDurationYears: number): number {
   return convert(quantity(stepDurationYears, 'yr'), 's').value;
@@ -204,6 +266,103 @@ describe('Stage 4.2.3.3: пользовательский шаг химии вы
     world = second.world;
     expect(world.coreWorldState?.scheduling?.stepCount).toBe(2);
     expect(totalElapsedSeconds(world.coreWorldState!.clock)).toBeCloseTo(2 * stepDurationSeconds(1e6), 6);
+  });
+});
+
+// ============================================
+// 1а. ФИЗИЧЕСКАЯ КИНЕТИКА В ОСНОВНОМ CHEMICALEVOLUTIONSTATE
+// ============================================
+
+describe('Stage 4.2: physical kinetics runs in the primary world Scheduler transaction', () => {
+  it('uses explicit layer inventory and geometry, proposes a state-dependent dt and commits the actual kinetic reaction', () => {
+    const world = makePhysicalKineticWorld();
+    const before = { ...world.chemicalState!.inventory };
+    const requestedMaximum = world.chemicalState!.physicalKinetics!.maximumMacroStepS;
+    // extentFraction намеренно 0: физический путь не читает игровые параметры.
+    const result = runChemicalEvolutionSchedulerStep(world, { extentFraction: 0 });
+
+    expect(result.status).toBe('committed');
+    expect(result.stepSize).toBeDefined();
+    expect(result.stepSize!.requestedDurationS).toBe(requestedMaximum);
+    expect(result.stepSize!.effectiveDurationS).toBeLessThan(requestedMaximum);
+    expect(result.stepSize!.proposals[0]!.characteristicTimeS).toBeGreaterThan(0);
+    expect(result.stepSize!.proposals[0]!.method).toContain('local reactant depletion');
+    const call = vi.mocked(runMacroStep).mock.calls[0]!;
+    const [, registry, operators, options] = call;
+    expect(registry.get(PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID)?.executionMode).toBe('state_dependent');
+    expect(options.processIds).toEqual([PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID]);
+    expect(options.explicit).toBeUndefined();
+    expect(operators).toHaveLength(1);
+    expect(operators[0]!.processId).toBe(PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID);
+
+    const updated = result.world.chemicalState!;
+    expect(updated.inventory.h).toBeLessThan(before.h!);
+    expect(updated.inventory.o2).toBeLessThan(before.o2!);
+    expect(updated.inventory.ho2).toBeGreaterThan(before.ho2!);
+    expect(updated.history.some((entry) => entry.mode === 'kinetic' && entry.applied)).toBe(true);
+    expect(updated.physicalKineticsHistory).toHaveLength(1);
+    const stepAudit = updated.physicalKineticsHistory![0]!;
+    expect(stepAudit.durationS).toBe(result.stepSize!.effectiveDurationS);
+    expect(stepAudit.characteristicTimeS).toBe(result.stepSize!.proposals[0]!.characteristicTimeS);
+    expect(stepAudit.layers[0]!.reactions[0]!.reactionId).toBe('kida-tb-2015-03-19-106');
+    expect(stepAudit.layers[0]!.reactions[0]!.dataStatus).toBe('known');
+    expect(stepAudit.layers[0]!.reactions[0]!.provenance.sourceName).toBeTruthy();
+    expect(stepAudit.layers[0]!.integration.method).toContain('radau');
+    expect(updated.physicalKinetics!.layers[0]!.columnInventoriesMolM2.h).toBeLessThan(8e-6);
+
+    const ledger = result.world.coreWorldState!.reactionLedger!.records;
+    const kineticRecord = ledger.find((record) => record.reactionId === 'kida-tb-2015-03-19-106');
+    expect(kineticRecord).toBeDefined();
+    expect(kineticRecord!.processId).toBe(PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID);
+    expect(kineticRecord!.extentBasis).toBe('column_amount');
+    expect(kineticRecord!.extent).toBeGreaterThan(0);
+    expect(result.world.coreWorldState!.clock.localTimeS).toBeCloseTo(result.stepSize!.effectiveDurationS, 12);
+    expect(updated.modelTimeYears).toBeCloseTo(
+      7 + convert(quantity(result.stepSize!.effectiveDurationS, 's'), 'yr').value,
+      12
+    );
+    expect(world.chemicalState!.inventory).toEqual(before);
+    expect(world.coreWorldState).toBeUndefined();
+  });
+
+  it('rejects a missing provenance or missing species instead of silently using zero or game mode', () => {
+    const noProvenance = makePhysicalKineticWorld();
+    noProvenance.chemicalState!.physicalKinetics!.layers[0]!.thicknessProvenance = {};
+    const rejectedProvenance = runChemicalEvolutionSchedulerStep(noProvenance, { extentFraction: 0.9 });
+    expect(rejectedProvenance.status).toBe('rejected');
+    expect(rejectedProvenance.world).toBe(noProvenance);
+    expect(rejectedProvenance.reason).toContain('thicknessProvenance');
+    expect(vi.mocked(runMacroStep)).not.toHaveBeenCalled();
+
+    const missingSpecies = makePhysicalKineticWorld();
+    delete missingSpecies.chemicalState!.physicalKinetics!.layers[0]!.columnInventoriesMolM2.ho2;
+    const rejectedSpecies = runChemicalEvolutionSchedulerStep(missingSpecies);
+    expect(rejectedSpecies.status).toBe('rejected');
+    expect(rejectedSpecies.world).toBe(missingSpecies);
+    expect(rejectedSpecies.reason).toContain('отсутствует явный подстолбовой запас вида «ho2»');
+    expect(vi.mocked(runMacroStep)).not.toHaveBeenCalled();
+  });
+
+  it('rejects layer material exceeding the primary atmospheric column inventory', () => {
+    const world = makePhysicalKineticWorld();
+    world.chemicalState!.physicalKinetics!.layers[0]!.columnInventoriesMolM2.n2 = 5000;
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.reason).toContain('превышает основной атмосферный инвентарь');
+    expect(world.coreWorldState).toBeUndefined();
+    expect(vi.mocked(runMacroStep)).not.toHaveBeenCalled();
+  });
+
+  it('temperature outside the rate record validity domain rejects before apply and preserves the world', () => {
+    const world = makePhysicalKineticWorld(250);
+    const before = JSON.stringify(world.chemicalState);
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.reason).toContain('температур');
+    expect(JSON.stringify(world.chemicalState)).toBe(before);
+    expect(world.coreWorldState).toBeUndefined();
   });
 });
 
