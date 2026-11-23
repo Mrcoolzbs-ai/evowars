@@ -1684,6 +1684,13 @@ export function runChemicalEvolutionSchedulerStep(
   }
   const chemical = world.chemicalState;
 
+  // Явно сконфигурированный физический механизм в основном состоянии
+  // автоматически выбирает физический Scheduler-путь. Игровые
+  // extentFraction/stepDurationYears не читаются и не влияют на него.
+  if (chemical.physicalKinetics !== undefined) {
+    return runPhysicalChemicalEvolutionSchedulerStep(world);
+  }
+
   // Ядро: инициализация ТОЛЬКО при отсутствии. Существующее ядро —
   // источник физического состояния; перезапись его резервуаров
   // легаси-проекцией молча запрещена (контролируемый отказ).
@@ -1920,6 +1927,7 @@ export default {
   substanceTotalsOf,
   runChemicalEvolutionStep,
   runChemicalEvolutionSchedulerStep,
+  runPhysicalChemicalEvolutionSchedulerStep,
   createChemicalEvolutionStepRegistry,
   CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
   runConcentrationKineticStep,
