@@ -622,6 +622,50 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(secondHalf.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
   });
 
+  it('runs against an already existing synchronized CoreWorldState without rebuilding its scheduler history', () => {
+    const world = makePhysicalKineticWorld();
+    const core = coreWorldStateFromLegacyWorld({
+      id: world.id,
+      seed: world.seed,
+      generatorVersion: world.generatorVersion,
+      centralObjectSystem: world.centralObjectSystem ?? null,
+      orbit: world.orbit ? { frame: world.orbit.frame } : null,
+      bodyPhysics: world.bodyPhysics
+        ? {
+            massKg: world.bodyPhysics.massKg,
+            radiusM: world.bodyPhysics.radiusM,
+            densityKgM3: world.bodyPhysics.densityKgM3,
+            surfaceGravityMs2: world.bodyPhysics.surfaceGravityMs2
+          }
+        : null,
+      atmosphere: world.atmosphere
+        ? {
+            temperature: world.atmosphere.temperature,
+            presetKind: world.atmosphere.presetKind,
+            presetNotes: world.atmosphere.presetNotes,
+            presetSourceName: world.atmosphere.presetSourceName
+          }
+        : null,
+      energyBudget: world.energyBudget
+        ? {
+            incidentFlux: world.energyBudget.incidentFlux,
+            equilibriumTemperature: world.energyBudget.equilibriumTemperature
+          }
+        : null,
+      chemicalState: world.chemicalState!
+    });
+    const priorBookkeeping = core.scheduling;
+    const result = runChemicalEvolutionSchedulerStep({ ...world, coreWorldState: core });
+
+    expect(result.status).toBe('committed');
+    expect(result.world.coreWorldState).not.toBe(core);
+    expect(result.world.coreWorldState!.scheduling.stepCount).toBe(priorBookkeeping.stepCount + 1);
+    expect(result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)!.inventory)
+      .toEqual(result.world.chemicalState!.inventory);
+    expect(core.scheduling).toEqual(priorBookkeeping);
+    expect(world.chemicalState!.inventory.h).toBe(8e-6);
+  });
+
   it('rejects a missing provenance or missing species instead of silently using zero or game mode', () => {
     const noProvenance = makePhysicalKineticWorld();
     noProvenance.chemicalState!.physicalKinetics!.layers[0]!.thicknessProvenance = {};
