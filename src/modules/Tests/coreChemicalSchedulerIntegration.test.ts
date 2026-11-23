@@ -400,6 +400,25 @@ describe('Stage 4.2: configure explicit physical kinetics in primary chemical st
     expect(unsupported.state).toBe(state);
     expect(unsupported.diagnostics.join(' ')).toContain('unsupported physical chemical species ID');
 
+    const withUnmodeledSpecies: ChemicalEvolutionState = {
+      ...state,
+      inventory: { ...state.inventory, co2: 0.012 },
+      reservoirs: {
+        ...state.reservoirs,
+        atmospheric: { ...state.reservoirs.atmospheric, co2: 0.012 }
+      }
+    };
+    const missingResidualSource = configurePrimaryPhysicalChemicalKinetics(
+      withUnmodeledSpecies,
+      config,
+      { h: 8e-6, ho2: 1e-8 }
+    );
+    expect(missingResidualSource.status).toBe('rejected');
+    expect(missingResidualSource.state).toBe(withUnmodeledSpecies);
+    expect(missingResidualSource.diagnostics.join(' ')).toContain(
+      'provenance полного атмосферного запаса немоделируемого вида «co2»'
+    );
+
     const missingGlobalProvenance = {
       ...config,
       totalInventoryProvenance: {
