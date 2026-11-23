@@ -13,7 +13,7 @@ import type { GenerationSettings, GeneratedWorld } from '../../types';
 import { generateWorld } from '../Generator/generator';
 import {
   computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn,
-  computeUssa1976HydrostaticColumnInput,
+  createUssa1976HydrostaticColumnInput,
   computeUssa1976ReferenceHydrostaticColumn,
   createUssa1976AtmosphericTemperatureProfile
 } from '../Core/atmosphericReferenceAdapters';
