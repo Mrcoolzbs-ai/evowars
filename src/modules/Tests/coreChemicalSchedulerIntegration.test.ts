@@ -361,6 +361,25 @@ describe('Stage 4.2: configure explicit physical kinetics in primary chemical st
   it('rejects incomplete, unsupported or physically excessive inputs without changing state', () => {
     const { state, config } = setup();
     const original = JSON.stringify(state);
+    const zeroThirdBody = {
+      ...config,
+      layers: config.layers.map((layer) => ({
+        ...layer,
+        columnInventoriesMolM2: {
+          ...layer.columnInventoriesMolM2,
+          n2: 0
+        }
+      }))
+    };
+    const rejectedThirdBody = configurePrimaryPhysicalChemicalKinetics(
+      state,
+      zeroThirdBody,
+      { h: 8e-6, ho2: 1e-8 }
+    );
+    expect(rejectedThirdBody.status).toBe('rejected');
+    expect(rejectedThirdBody.state).toBe(state);
+    expect(rejectedThirdBody.diagnostics.join(' ')).toContain('третьего тела N₂ должен быть строго положительным');
+
     const excessive = configurePrimaryPhysicalChemicalKinetics(state, config, {
       h: 1e-7,
       ho2: 1e-8
