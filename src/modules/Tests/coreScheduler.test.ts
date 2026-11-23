@@ -1355,6 +1355,136 @@ describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', 
     expect(result.diagnostics.join(' ')).toContain('остаётся pending');
   });
 
+  it('clips a macro-step at the earliest exact process deadline and wakes that process next', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const callsA: Call[] = [];
+    const callsB: Call[] = [];
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'b', {
+      segmentIndex: 0,
+      localTimeS: 3
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const first = runMacroStep(
+      world,
+      registry,
+      [recorder('a', callsA)],
+      { durationS: 10, splitting: 'lie', processIds: ['a'] }
+    );
+    expect(first.status).toBe('committed');
+    expect(callsA).toEqual([{ processId: 'a', durationS: 3, intervalStartS: 0 }]);
+    expect(first.stepSize?.effectiveDurationS).toBe(3);
+    expect(first.stepSize?.processBoundary).toEqual({
+      processIds: ['b'],
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(first.world.clock.localTimeS).toBe(3);
+    expect(readyProcessIdsAt(first.bookkeeping, registry, [recorder('b', callsB)], {
+      segmentIndex: 0,
+      localTimeS: 3
+    })).toEqual(['b']);
+
+    const next = runReadyProcessesAt(first.world, registry, [recorder('b', callsB)], {
+      durationS: 1
+    });
+    expect(next.status).toBe('committed');
+    expect(callsB).toEqual([{ processId: 'b', durationS: 1, intervalStartS: 0 }]);
+    expect(next.world.clock.localTimeS).toBe(4);
+    expect(next.bookkeeping.processDynamics.b!.nextDueTime).toBeNull();
+  });
+
+  it('сохраняет одинаковую process и event boundary в одной точке времени', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const scheduling = enqueueEvent(
+      scheduleProcessAt(createSchedulerBookkeeping(), 'b', {
+        segmentIndex: 0,
+        localTimeS: 3
+      }),
+      {
+        id: 'same-time-phase-event',
+        time: { segmentIndex: 0, localTimeS: 3 },
+        type: 'phase_transition',
+        data: { phase: 'boiling' },
+        source: 'test'
+      }
+    );
+    const world = { ...testWorld(), scheduling };
+    const result = runMacroStep(
+      world,
+      registry,
+      [recorder('a', [])],
+      { durationS: 10, splitting: 'lie', processIds: ['a'] }
+    );
+
+    expect(result.status).toBe('committed');
+    expect(result.world.clock.localTimeS).toBe(3);
+    expect(result.stepSize?.eventBoundary).toEqual({
+      eventId: 'same-time-phase-event',
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(result.stepSize?.processBoundary).toEqual({
+      processIds: ['b'],
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(result.bookkeeping.eventQueue[0]!.status).toBe('pending');
+    expect(readyProcessIdsAt(result.bookkeeping, registry, [recorder('b', [])], {
+      segmentIndex: 0,
+      localTimeS: 3
+    })).toEqual(['b']);
+  });
+
+  it('не позволяет другому процессу пропустить exact deadline, уже наступивший в текущем TimePoint', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'b', {
+      segmentIndex: 0,
+      localTimeS: 0
+    });
+    const world = { ...testWorld(), scheduling };
+    const calls: Call[] = [];
+    const result = runMacroStep(
+      world,
+      registry,
+      [recorder('a', calls)],
+      { durationS: 1, splitting: 'lie', processIds: ['a'] }
+    );
+
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.world.clock.localTimeS).toBe(0);
+    expect(result.bookkeeping.stepCount).toBe(0);
+    expect(calls).toEqual([]);
+    expect(result.diagnostics.join(' ')).toContain('имеет наступивший exact deadline');
+  });
+
+  it('клиппит rollover на exact process deadline в следующем сегменте', () => {
+    const registry = makeRegistry([descriptor('a'), descriptor('b')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'b', {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 2
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+    const result = runMacroStep(
+      world,
+      registry,
+      [recorder('a', [])],
+      { durationS: 3, splitting: 'lie', processIds: ['a'] }
+    );
+
+    expect(result.status).toBe('committed');
+    expect(result.stepSize?.effectiveDurationS).toBe(2);
+    expect(result.stepSize?.processBoundary).toEqual({
+      processIds: ['b'],
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 2 }
+    });
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(result.world.clock.localTimeS).toBe(2);
+    expect(readyProcessIdsAt(result.bookkeeping, registry, [recorder('b', [])], {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 2
+    })).toEqual(['b']);
+  });
+
   it('lands on a representable event point without rolling the clock into a new segment', () => {
     const registry = makeRegistry([descriptor('a')]);
     const calls: Call[] = [];
@@ -1380,6 +1510,80 @@ describe('Stage 4.2.1 Scheduler: macro-step respects pending event boundaries', 
     expect(result.world.clock.localTimeS).toBe(eventLocalTimeS);
     expect(result.stepSize?.eventBoundary?.eventId).toBe('ulp-event');
     expect(result.bookkeeping.eventQueue[0]!.status).toBe('pending');
+  });
+});
+
+describe('Stage 4.2.1 Scheduler: сегментный ноль — координатный переход без физического шага', () => {
+  it('нормализует nextSegment:0 и обрабатывает событие без увеличения stepCount', () => {
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'segment-origin-transition',
+      time: { segmentIndex: largeClock.segmentIndex + 1, localTimeS: 0 },
+      type: 'regime_change',
+      data: { regime: 'new-segment' },
+      source: 'segment-origin test'
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+    const handled: string[] = [];
+
+    const result = runScheduledWorldTurn(
+      world,
+      makeRegistry([]),
+      [],
+      {
+        regime_change: (state, event) => {
+          handled.push(event.id);
+          return state;
+        }
+      },
+      {
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 1 }
+      }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(handled).toEqual(['segment-origin-transition']);
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(result.world.clock.localTimeS).toBe(0);
+    expect(result.world.clock.priorSegmentsS).toBe(largeClock.priorSegmentsS + largeClock.localTimeS);
+    expect(result.world.clock.stepCount).toBe(largeClock.stepCount);
+    expect(result.eventDispatch?.results[0]?.event.status).toBe('processed');
+    expect(result.processRun?.status).toBe('idle');
+    expect(largeClock.segmentIndex).toBe(0);
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+  });
+
+  it('нормализует nextSegment:0 и запускает exact process deadline в этой точке', () => {
+    const registry = makeRegistry([descriptor('b')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'b', {
+      segmentIndex: largeClock.segmentIndex + 1,
+      localTimeS: 0
+    });
+    const world = { ...testWorld(), clock: largeClock, scheduling };
+    const calls: Call[] = [];
+
+    const result = runScheduledWorldTurn(
+      world,
+      registry,
+      [recorder('b', calls)],
+      {},
+      {
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 1 }
+      }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.world.clock.segmentIndex).toBe(largeClock.segmentIndex + 1);
+    expect(result.world.clock.localTimeS).toBe(1);
+    expect(result.world.clock.stepCount).toBe(largeClock.stepCount + 1);
+    expect(result.processRun?.readyProcessIds).toEqual(['b']);
+    expect(result.processRun?.status).toBe('committed');
+    expect(calls).toEqual([{ processId: 'b', durationS: 1, intervalStartS: 0 }]);
+    expect(result.world.scheduling!.processDynamics.b!.nextDueTime).toBeNull();
+    expect(world.clock).toEqual(largeClock);
   });
 });
 
