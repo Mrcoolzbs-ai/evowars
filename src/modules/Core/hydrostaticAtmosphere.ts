@@ -137,6 +137,8 @@ export interface AtmosphereLayerSpec {
   readonly applicability?: string;
   /** Происхождение данных слоя (структура T(z) и высот). */
   readonly provenance: DataProvenance;
+  /** Исходный слой до адаптивного вертикального разбиения. */
+  readonly parentLayerId?: string;
 }
 
 /** Вход модели гидростатической колонки (Stage 4.8.1). */
@@ -192,6 +194,8 @@ export interface HydrostaticProfilePoint {
 /** Границы слоя: снимки снизу и сверху. */
 export interface HydrostaticLayerBoundary {
   readonly layerId: string;
+  /** Исходный крупный слой, если эта граница создана adaptive refinement. */
+  readonly parentLayerId?: string;
   readonly bottom: HydrostaticProfilePoint;
   readonly top: HydrostaticProfilePoint;
 }
@@ -302,7 +306,11 @@ export function isothermalSphericalRelationPressure(input: {
 // ТЕМПЕРАТУРА СЛОЯ
 // ============================================
 
-function temperatureAt(model: AtmosphereTemperatureModel, layerBottomM: number, z: number): number {
+export function temperatureAtGeometricHeight(
+  model: AtmosphereTemperatureModel,
+  layerBottomM: number,
+  z: number
+): number {
   switch (model.kind) {
     case 'isothermal':
       return model.temperatureK;
@@ -646,7 +654,7 @@ export function computeHydrostaticColumn(input: HydrostaticColumnInput): Hydrost
 
   const makePoint = (z: number, y: readonly number[], run: LayerRun): HydrostaticProfilePoint => {
     const layer = layers.find((l) => l.layerId === run.layerId)!;
-    const temperatureK = temperatureAt(layer.temperature, run.bottomM, z);
+    const temperatureK = temperatureAtGeometricHeight(layer.temperature, run.bottomM, z);
     const gravityMs2 =
       gravitationMode === 'constant-gravity'
         ? constantGravityMs2
@@ -675,7 +683,7 @@ export function computeHydrostaticColumn(input: HydrostaticColumnInput): Hydrost
       const mbar = run.mbarKgPerMol;
 
       const rhs = (z: number, y: readonly number[]): number[] => {
-        const T = temperatureAt(layer.temperature, run.bottomM, z);
+        const T = temperatureAtGeometricHeight(layer.temperature, run.bottomM, z);
         const grav =
           gravitationMode === 'constant-gravity'
             ? constantGravityMs2
@@ -686,7 +694,7 @@ export function computeHydrostaticColumn(input: HydrostaticColumnInput): Hydrost
       };
       // Аналитический якобиан по P (T, g и Mbar от y не зависят).
       const jacobian = (z: number, _y: readonly number[]): number[][] => {
-        const T = temperatureAt(layer.temperature, run.bottomM, z);
+        const T = temperatureAtGeometricHeight(layer.temperature, run.bottomM, z);
         const grav =
           gravitationMode === 'constant-gravity'
             ? constantGravityMs2
@@ -753,7 +761,12 @@ export function computeHydrostaticColumn(input: HydrostaticColumnInput): Hydrost
       const consistency = Math.abs(deltaSigma - mbar * deltaNmol) / Math.max(Math.abs(deltaSigma), 1e-300);
       columnConsistencyMaxRel = Math.max(columnConsistencyMaxRel, consistency);
 
-      layerBoundaries.push({ layerId: run.layerId, bottom: bottomPoint, top: topPoint });
+      layerBoundaries.push({
+        layerId: run.layerId,
+        ...(layer.parentLayerId === undefined ? {} : { parentLayerId: layer.parentLayerId }),
+        bottom: bottomPoint,
+        top: topPoint
+      });
 
       // Передача состояния на следующую границу (P непрерывно).
       pressurePa = solved.y[0];
