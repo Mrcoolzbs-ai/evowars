@@ -942,6 +942,117 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
   });
 
+  it('runScheduledWorldTurn advances continuous processes when no one-shot deadline is due', () => {
+    const registry = makeRegistry([descriptor('continuous_a')]);
+    const calls: Call[] = [];
+    const world = { ...testWorld(), scheduling: createSchedulerBookkeeping() };
+    const result = runScheduledWorldTurn(
+      world,
+      registry,
+      [recorder('continuous_a', calls)],
+      {},
+      {
+        continuousProcessIds: ['continuous_a'],
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 2 }
+      }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.processRun?.status).toBe('committed');
+    expect(result.processRun?.readyProcessIds).toEqual([]);
+    expect(result.processRun?.continuousProcessIds).toEqual(['continuous_a']);
+    expect(result.processRun?.invokedProcessIds).toEqual(['continuous_a']);
+    expect(calls).toEqual([{ processId: 'continuous_a', durationS: 2, intervalStartS: 0 }]);
+    expect(result.world.clock.localTimeS).toBe(2);
+    expect(world.clock.localTimeS).toBe(0);
+  });
+
+  it('continuous process stops exactly at another process deadline and leaves it due for the next turn', () => {
+    const registry = makeRegistry([descriptor('continuous_a'), descriptor('scheduled_b')]);
+    const callsA: Call[] = [];
+    const callsB: Call[] = [];
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'scheduled_b', {
+      segmentIndex: 0,
+      localTimeS: 3
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const first = runScheduledWorldTurn(
+      world,
+      registry,
+      [recorder('continuous_a', callsA), recorder('scheduled_b', callsB)],
+      {},
+      {
+        continuousProcessIds: ['continuous_a'],
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 10 }
+      }
+    );
+
+    expect(first.status).toBe('completed');
+    expect(callsA).toEqual([{ processId: 'continuous_a', durationS: 3, intervalStartS: 0 }]);
+    expect(callsB).toEqual([]);
+    expect(first.world.clock.localTimeS).toBe(3);
+    expect(first.processRun?.macroStep?.stepSize?.processBoundary).toEqual({
+      processIds: ['scheduled_b'],
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(readyProcessIdsAt(first.world.scheduling!, registry, [recorder('scheduled_b', callsB)], {
+      segmentIndex: 0,
+      localTimeS: 3
+    })).toEqual(['scheduled_b']);
+
+    const second = runScheduledWorldTurn(
+      first.world,
+      registry,
+      [recorder('continuous_a', callsA), recorder('scheduled_b', callsB)],
+      {},
+      {
+        continuousProcessIds: ['continuous_a'],
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 1 }
+      }
+    );
+    expect(second.status).toBe('completed');
+    expect(callsB).toEqual([{ processId: 'scheduled_b', durationS: 1, intervalStartS: 0 }]);
+    expect(callsA).toHaveLength(2);
+    expect(second.processRun?.readyProcessIds).toEqual(['scheduled_b']);
+    expect(second.world.clock.localTimeS).toBe(4);
+    expect(second.world.scheduling!.processDynamics.scheduled_b!.nextDueTime).toBeNull();
+  });
+
+  it('continuous process also treats its own future deadline as a macro-step boundary', () => {
+    const registry = makeRegistry([descriptor('continuous_a')]);
+    const calls: Call[] = [];
+    const scheduling = scheduleProcessAt(createSchedulerBookkeeping(), 'continuous_a', {
+      segmentIndex: 0,
+      localTimeS: 3
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const result = runScheduledWorldTurn(
+      world,
+      registry,
+      [recorder('continuous_a', calls)],
+      {},
+      {
+        continuousProcessIds: ['continuous_a'],
+        eventAudit: { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } },
+        process: { durationS: 10 }
+      }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(calls).toEqual([{ processId: 'continuous_a', durationS: 3, intervalStartS: 0 }]);
+    expect(result.world.clock.localTimeS).toBe(3);
+    expect(result.processRun?.macroStep?.stepSize?.processBoundary).toEqual({
+      processIds: ['continuous_a'],
+      time: { segmentIndex: 0, localTimeS: 3 }
+    });
+    expect(result.world.scheduling!.processDynamics.continuous_a!.nextDueTime).toBeNull();
+  });
+
   it('failed due event blocks every scheduled process in the same world turn', () => {
     const scheduling = enqueueEvent(
       scheduleProcessAt(createSchedulerBookkeeping(), 'a', {
