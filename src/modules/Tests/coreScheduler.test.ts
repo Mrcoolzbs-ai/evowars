@@ -531,6 +531,66 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(kept?.failReason).toBe('обработчик сломан');
   });
 
+  it('глубоко изолирует payload события при enqueue и при чтении очереди', () => {
+    const sourceTime = { segmentIndex: 0, localTimeS: 5 };
+    const sourceData = {
+      layer: { temperatureK: 250 },
+      participants: [{ speciesId: 'co2', amount: 1 }]
+    };
+    const bk = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'event-isolation',
+      time: sourceTime,
+      type: 'solver_detected',
+      data: sourceData,
+      source: 'test'
+    });
+
+    sourceTime.localTimeS = 99;
+    sourceData.layer.temperatureK = 999;
+    sourceData.participants[0]!.amount = 999;
+    expect(bk.eventQueue[0]!.time).toEqual({ segmentIndex: 0, localTimeS: 5 });
+    expect(bk.eventQueue[0]!.data).toEqual({
+      layer: { temperatureK: 250 },
+      participants: [{ speciesId: 'co2', amount: 1 }]
+    });
+
+    const sorted = sortedEvents(bk);
+    sorted[0]!.time.localTimeS = 100;
+    (sorted[0]!.data.layer as { temperatureK: number }).temperatureK = 1000;
+    (pendingEvents(bk)[0]!.data.participants as Array<{ amount: number }>)[0]!.amount = 1000;
+    (dueEvents(bk, { segmentIndex: 0, localTimeS: 5 })[0]!.data.layer as { temperatureK: number }).temperatureK = 1000;
+    nextEventTime(bk)!.localTimeS = 100;
+
+    expect(bk.eventQueue[0]!.time).toEqual({ segmentIndex: 0, localTimeS: 5 });
+    expect(bk.eventQueue[0]!.data).toEqual({
+      layer: { temperatureK: 250 },
+      participants: [{ speciesId: 'co2', amount: 1 }]
+    });
+  });
+
+  it('обработчик получает копию события: его мутации не меняют очередь даже при ошибке', () => {
+    const bk = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'event-handler-isolation',
+      time: { segmentIndex: 0, localTimeS: 5 },
+      type: 'solver_detected',
+      data: { details: { reason: 'original' } },
+      source: 'test'
+    });
+    const failed = processEvent(bk, 'event-handler-isolation', (event) => {
+      (event.data.details as { reason: string }).reason = 'mutated';
+      event.time.localTimeS = 50;
+      throw new Error('handler failed after local mutation');
+    });
+
+    expect(failed.status).toBe('failed');
+    expect(failed.bookkeeping.eventQueue[0]!.status).toBe('failed');
+    expect(failed.bookkeeping.eventQueue[0]!.time.localTimeS).toBe(5);
+    expect(failed.bookkeeping.eventQueue[0]!.data).toEqual({ details: { reason: 'original' } });
+    expect(bk.eventQueue[0]!.status).toBe('pending');
+    expect(bk.eventQueue[0]!.time.localTimeS).toBe(5);
+    expect(bk.eventQueue[0]!.data).toEqual({ details: { reason: 'original' } });
+  });
+
   it('некорректные события отклоняются: дубликат id, время, несериализуемые данные', () => {
     const bk = createSchedulerBookkeeping();
     const good = { id: 'ev', time: { segmentIndex: 0, localTimeS: 1 }, type: 'regime_change', data: {}, source: 'test' };
