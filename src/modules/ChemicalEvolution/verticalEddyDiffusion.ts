@@ -485,10 +485,23 @@ export function runVerticalEddyDiffusionStep(
       ) {
         return rejected('молярные доли background состава слоя «' + layer.layerId + '» должны быть положительными, конечными и суммироваться в единицу');
       }
-      for (const backgroundId of Object.keys(fractions)) {
+      let parameterizedMeanMolarMassKgMol = 0;
+      for (const [backgroundId, fraction] of Object.entries(fractions)) {
         if (!hasOwn(molecularConfiguration.backgroundSpecies, backgroundId)) {
           return rejected('для bulk-компонента «' + backgroundId + '» слоя «' + layer.layerId + '» отсутствуют explicit Lennard-Jones данные');
         }
+        parameterizedMeanMolarMassKgMol +=
+          fraction * molecularConfiguration.backgroundSpecies[backgroundId]!.molarMassKgMol;
+      }
+      const hydrostaticMeanMolarMassKgMol = hydrostatic.representative.meanMolarMassKgPerMol;
+      if (
+        !isFinitePositive(hydrostaticMeanMolarMassKgMol) ||
+        relativeDifference(parameterizedMeanMolarMassKgMol, hydrostaticMeanMolarMassKgMol) > 1e-3
+      ) {
+        return rejected(
+          'средняя молярная масса из molecularDiffusion.backgroundSpecies не совпадает с гидростатическим Mbar слоя «' +
+          layer.layerId + '» в пределах 0.1%; collision mixture должна описывать тот же bulk composition'
+        );
       }
     }
     for (const speciesId of speciesIds) {
@@ -562,10 +575,17 @@ export function runVerticalEddyDiffusionStep(
       temperatureK: interfaceTemperatureK,
       airMolarDensityMolM3,
       conductanceMolM2S,
-      meanMolarMassKgMol: Math.sqrt(
-        lowerEdge.meanMolarMassKgPerMol * upperEdge.meanMolarMassKgPerMol
-      ),
-      gravityMs2: Math.sqrt(lowerEdge.gravityMs2 * upperEdge.gravityMs2),
+      meanMolarMassKgMol: (() => {
+        const lowerFractions = lower.layer.hydrostaticState!.molarFractions;
+        const upperFractions = upper.layer.hydrostaticState!.molarFractions;
+        return Object.keys(lowerFractions).reduce((sum, backgroundId) => {
+          const interfaceFraction =
+            (lowerFractions[backgroundId]! + upperFractions[backgroundId]!) / 2;
+          return sum +
+            interfaceFraction * molecularConfiguration!.backgroundSpecies[backgroundId]!.molarMassKgMol;
+        }, 0);
+      })(),
+      gravityMs2: (lowerEdge.gravityMs2 + upperEdge.gravityMs2) / 2,
       temperatureGradientKPerM:
         (upper.layer.hydrostaticState!.representative.temperatureK -
           lower.layer.hydrostaticState!.representative.temperatureK) / centerDistanceM
