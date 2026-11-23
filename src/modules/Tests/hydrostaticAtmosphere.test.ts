@@ -85,30 +85,26 @@ function isothermalInput(overrides?: {
   };
 }
 
-/** Полный земной USSA-вход: 7 слоёв, узлы таблицы как T(z), сферическая g(z). */
+/** Полный земной USSA-вход: 7 слоёв с точным geopotential T(h) и сферической g(z). */
 function ussaEarthInput(pressureScale = 1, rtol?: number): HydrostaticColumnInput {
-  const layers: AtmosphereLayerSpec[] = USSA_1976_LAYERS.map((l) => {
-    // Знаковый dT/dh USSA: T_top = T_base + lapse * dh.
-    const tTop = l.baseTemperatureK + (l.lapseRateKPerKm * (l.geopotentialTopM - l.geopotentialBottomM)) / 1000;
-    return {
-      layerId: `ussa_geo_l${l.layerIndex}`,
-      bottomHeightM: l.geometricBottomM,
-      topHeightM: l.geometricTopM,
-      // Двухузловая линейная интерполяция T(z) в геометрических метрах:
-      // границы слоя точно публикуемыми температурами (узлы таблицы).
-      temperature: {
-        kind: 'measuredNodes',
-        interpolation: 'linear',
-        nodes: [
-          { heightM: l.geometricBottomM, temperatureK: l.baseTemperatureK },
-          { heightM: l.geometricTopM, temperatureK: tTop }
-        ]
-      },
-      composition: { gases: DRY_AIR, provenance: USSA_1976_DRY_AIR_COMPOSITION.provenance },
-      provenance: USSA_1976_PROVENANCE,
-      applicability: 'сухой стандартный воздух, без конденсации и озонной стратификации состава'
-    };
-  });
+  const layers: AtmosphereLayerSpec[] = USSA_1976_LAYERS.map((l) => ({
+    layerId: `ussa_geo_l${l.layerIndex}`,
+    bottomHeightM: l.geometricBottomM,
+    topHeightM: l.geometricTopM,
+    // USSA задаёт линейный lapse rate по геопотенциальной высоте.
+    // Solver преобразует геометрическую z обратно в h=R*z/(R+z),
+    // поэтому внутри слоя сохраняется исходный температурный закон.
+    temperature: {
+      kind: 'geopotentialLapseRate',
+      referenceRadiusM: USSA_1976_CONSTANTS.r0M,
+      bottomGeopotentialHeightM: l.geopotentialBottomM,
+      bottomTemperatureK: l.baseTemperatureK,
+      lapseRateKPerM: l.lapseRateKPerKm / 1000
+    },
+    composition: { gases: DRY_AIR, provenance: USSA_1976_DRY_AIR_COMPOSITION.provenance },
+    provenance: USSA_1976_PROVENANCE,
+    applicability: 'сухой стандартный воздух, без конденсации и озонной стратификации состава'
+  }));
   return {
     body: {
       bodyMassKg: USSA_1976_EQUIVALENT_BODY_MASS_KG,
