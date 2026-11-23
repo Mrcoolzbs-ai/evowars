@@ -12,6 +12,7 @@
 // diffusion time steps and conserves each selected column inventory.
 
 import type { ChemicalPhysicalKineticLayer } from '../../types';
+import type { DataProvenance } from '../Core/scientificValue';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 const VERTICAL_DIFFUSION_MODEL_VERSION = 'stage-4.2-vertical-eddy-diffusion-1';
@@ -29,6 +30,8 @@ export interface VerticalEddyDiffusionInput {
   durationS: number;
   /** Explicit Kzz in m²/s, either one value for every interface or one value per interface. */
   eddyDiffusivityM2S: number | readonly number[];
+  /** Optional provenance; required by physical ChemicalEvolution Scheduler configuration. */
+  diffusivityProvenance?: DataProvenance;
 }
 
 export interface VerticalEddyDiffusionLayerSpeciesAudit {
@@ -75,6 +78,7 @@ export interface VerticalEddyDiffusionAudit {
   boundaryCondition: 'closed_zero_flux';
   durationS: number;
   speciesIds: string[];
+  diffusivityProvenance?: DataProvenance;
   layers: VerticalEddyDiffusionLayerAudit[];
   interfaces: VerticalEddyDiffusionInterfaceAudit[];
   columnTotalsMolM2: Record<string, {
@@ -651,6 +655,9 @@ export function runVerticalEddyDiffusionStep(
     boundaryCondition: 'closed_zero_flux',
     durationS: input.durationS,
     speciesIds,
+    ...(input.diffusivityProvenance === undefined
+      ? {}
+      : { diffusivityProvenance: { ...input.diffusivityProvenance } }),
     layers: layerAudits,
     interfaces: interfaceAudits,
     columnTotalsMolM2,
