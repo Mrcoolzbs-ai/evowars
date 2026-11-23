@@ -6,10 +6,32 @@ import { useState, useEffect } from 'react';
 import { generateWorld, generateRandomSeed, generateMultipleWorlds } from './modules/Generator';
 import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
 import { createShortDescription } from './modules/WorldModel';
-import { bodyCharacteristicsDisplayRows } from './modules/Core/adapters';
+import {
+  CHEMICAL_RESERVOIR_IDS,
+  bodyCharacteristicsDisplayRows
+} from './modules/Core/adapters';
+import { setMaterialInventory } from './modules/Core/reservoir';
 import { getAllPresets } from './modules/Atmosphere';
-import { runChemicalEvolutionSchedulerStep, runWorldKineticTrajectory, resetWorldKineticExperiment, kineticRunHistoryViewModel } from './modules/ChemicalEvolution';
-import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID, PhysValue, ScientificConfidence, KineticExperimentSegmentAudit, KineticExperimentRunRecord } from './types';
+import {
+  configurePrimaryPhysicalChemicalKinetics,
+  runChemicalEvolutionSchedulerStep,
+  runWorldKineticTrajectory,
+  resetWorldKineticExperiment,
+  kineticRunHistoryViewModel
+} from './modules/ChemicalEvolution';
+import type {
+  GenerationSettings,
+  GeneratedWorld,
+  SavedWorld,
+  GenerationMode,
+  FixedCategories,
+  ID,
+  PhysValue,
+  ScientificConfidence,
+  KineticExperimentSegmentAudit,
+  KineticExperimentRunRecord,
+  ChemicalPhysicalKineticsState
+} from './types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
 
 import './App.css';
@@ -697,6 +719,285 @@ function KineticExperimentSection(props: {
 }
 
 // Компонент для отображения мира
+/**
+ * Экспертный ввод физической химической конфигурации.
+ * Никакие температура, толщина, радикальные запасы или скорости здесь
+ * не генерируются: пользователь вводит каждую величину и её источник.
+ */
+function PrimaryPhysicalKineticsConfigurator(props: {
+  world: GeneratedWorld;
+  onWorldReplace: (world: GeneratedWorld) => void;
+}) {
+  const state = props.world.chemicalState;
+  const [reaction89, setReaction89] = useState(false);
+  const [reaction106, setReaction106] = useState(false);
+  const [temperatureK, setTemperatureK] = useState('');
+  const [layerThicknessM, setLayerThicknessM] = useState('');
+  const [maximumMacroStepS, setMaximumMacroStepS] = useState('');
+  const [temperatureSourceName, setTemperatureSourceName] = useState('');
+  const [temperatureSourceReference, setTemperatureSourceReference] = useState('');
+  const [thicknessSourceName, setThicknessSourceName] = useState('');
+  const [thicknessSourceReference, setThicknessSourceReference] = useState('');
+  const [layerInventorySourceName, setLayerInventorySourceName] = useState('');
+  const [layerInventorySourceReference, setLayerInventorySourceReference] = useState('');
+  const [totalInventorySourceName, setTotalInventorySourceName] = useState('');
+  const [totalInventorySourceReference, setTotalInventorySourceReference] = useState('');
+  const [globalValues, setGlobalValues] = useState<Record<string, string>>({});
+  const [layerValues, setLayerValues] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<string | null>(null);
+
+  if (!state) return null;
+
+  const species = [
+    ...(reaction89 ? [
+      { id: 'o', label: 'O — атомарный кислород' },
+      { id: 'no', label: 'NO — оксид азота' },
+      { id: 'no2', label: 'NO₂ — диоксид азота' }
+    ] : []),
+    ...(reaction106 ? [
+      { id: 'h', label: 'H — атомарный водород' },
+      { id: 'o2', label: 'O₂ — молекулярный кислород' },
+      { id: 'ho2', label: 'HO₂ — гидропероксильный радикал' }
+    ] : []),
+    ...(reaction89 || reaction106 ? [{ id: 'n2', label: 'N₂ — третье тело' }] : [])
+  ];
+  const selectedReactionIds = [
+    ...(reaction89 ? ['kida-tb-2015-03-19-89'] : []),
+    ...(reaction106 ? ['kida-tb-2015-03-19-106'] : [])
+  ];
+
+  const makeSource = (sourceName: string, reference: string, field: string) => ({
+    sourceName: sourceName.trim(),
+    sourceId: reference.trim(),
+    reference: reference.trim(),
+    note: 'Введено пользователем для ' + field
+  });
+
+  const configure = () => {
+    setMessage(null);
+    if (state.mode !== 'column_inventory') {
+      setMessage('Физическая кинетика требует абсолютных запасов в моль/м² (column_inventory); нормированный игровой инвентарь не подходит.');
+      return;
+    }
+    if (selectedReactionIds.length === 0) {
+      setMessage('Выберите хотя бы одну параметризованную реакцию.');
+      return;
+    }
+    const numeric = (value: string, label: string): number | null => {
+      if (value.trim() === '') {
+        setMessage('Не задано поле «' + label + '». Отсутствующее значение не трактуется как ноль.');
+        return null;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setMessage('Поле «' + label + '» должно быть конечным неотрицательным числом.');
+        return null;
+      }
+      return parsed;
+    };
+    const positive = (value: string, label: string): number | null => {
+      const parsed = numeric(value, label);
+      if (parsed === null) return null;
+      if (parsed <= 0) {
+        setMessage('Поле «' + label + '» должно быть строго больше нуля.');
+        return null;
+      }
+      return parsed;
+    };
+    const temperature = positive(temperatureK, 'температура, K');
+    if (temperature === null) return;
+    const thickness = positive(layerThicknessM, 'толщина слоя, м');
+    if (thickness === null) return;
+    const maximumStep = positive(maximumMacroStepS, 'максимальный macro dt, с');
+    if (maximumStep === null) return;
+
+    const sourceGroups = [
+      [temperatureSourceName, temperatureSourceReference, 'температуры'],
+      [thicknessSourceName, thicknessSourceReference, 'толщины'],
+      [layerInventorySourceName, layerInventorySourceReference, 'подстолбового инвентаря'],
+      [totalInventorySourceName, totalInventorySourceReference, 'полного атмосферного инвентаря']
+    ] as const;
+    for (const [name, reference, label] of sourceGroups) {
+      if (name.trim() === '' || reference.trim() === '') {
+        setMessage('Укажите название и ссылку/ID источника для ' + label + '.');
+        return;
+      }
+    }
+
+    const totalColumnInventoriesMolM2: Record<string, number> = {};
+    const columnInventoriesMolM2: Record<string, number> = {};
+    for (const item of species) {
+      const globalValue = numeric(
+        globalValues[item.id] ?? (state.inventory[item.id] === undefined ? '' : String(state.inventory[item.id])),
+        'полный атмосферный запас ' + item.id + ', моль/м²'
+      );
+      if (globalValue === null) return;
+      const layerValue = numeric(
+        layerValues[item.id] ?? '',
+        'подстолбовой запас ' + item.id + ', моль/м²'
+      );
+      if (layerValue === null) return;
+      totalColumnInventoriesMolM2[item.id] = globalValue;
+      columnInventoriesMolM2[item.id] = layerValue;
+    }
+
+    const totalInventoryProvenance = Object.fromEntries(
+      species.map((item) => [
+        item.id,
+        makeSource(totalInventorySourceName, totalInventorySourceReference, 'полного атмосферного запаса ' + item.id)
+      ])
+    );
+    const config: ChemicalPhysicalKineticsState = {
+      maximumMacroStepS: maximumStep,
+      totalInventoryProvenance,
+      layers: [
+        {
+          layerId: 'user-configured-layer-1',
+          layerThicknessM: thickness,
+          thicknessProvenance: makeSource(thicknessSourceName, thicknessSourceReference, 'геометрической толщины'),
+          temperatureK: temperature,
+          temperatureProvenance: makeSource(temperatureSourceName, temperatureSourceReference, 'локальной температуры'),
+          columnInventoriesMolM2,
+          inventoryProvenance: makeSource(layerInventorySourceName, layerInventorySourceReference, 'подстолбового запаса'),
+          reactionIds: selectedReactionIds
+        }
+      ]
+    };
+    const result = configurePrimaryPhysicalChemicalKinetics(
+      state,
+      config,
+      totalColumnInventoriesMolM2
+    );
+    if (result.status !== 'configured') {
+      setMessage(result.diagnostics.join('; '));
+      return;
+    }
+
+    let coreWorldState = props.world.coreWorldState;
+    if (coreWorldState) {
+      const hasAtmosphere = coreWorldState.reservoirs.some(
+        (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+      );
+      if (!hasAtmosphere) {
+        setMessage('Существующее CoreWorldState не содержит атмосферный резервуар; конфигурация не применена.');
+        return;
+      }
+      coreWorldState = {
+        ...coreWorldState,
+        reservoirs: coreWorldState.reservoirs.map((reservoir) =>
+          reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+            ? setMaterialInventory(reservoir, 'column_amount', result.state.inventory)
+            : reservoir
+        )
+      };
+    }
+    props.onWorldReplace({
+      ...props.world,
+      chemicalState: result.state,
+      ...(coreWorldState ? { coreWorldState } : {})
+    });
+    setMessage('Физическая конфигурация записана в основное ChemicalEvolutionState. Следующий шаг будет исполняться через Scheduler.');
+  };
+
+  return (
+    <details className="world-section">
+      <summary>Настроить физическую химическую кинетику (экспертный ввод)</summary>
+      <p className="model-note">
+        Только для column_inventory. Никакие T, толщины, концентрации, радикальные запасы или скорости не выводятся автоматически. Значения вводятся в физических единицах вместе с источниками.
+      </p>
+      {state.mode !== 'column_inventory' ? (
+        <p className="warning">Физический режим недоступен для нормированного игрового инвентаря.</p>
+      ) : (
+        <>
+          <fieldset>
+            <legend>Параметризованные реакции</legend>
+            <label>
+              <input type="checkbox" checked={reaction89} onChange={(event) => setReaction89(event.target.checked)} />
+              {' '}#89: O + NO + N₂ → NO₂ + N₂ (200–300 K)
+            </label>
+            <label>
+              <input type="checkbox" checked={reaction106} onChange={(event) => setReaction106(event.target.checked)} />
+              {' '}#106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)
+            </label>
+            <p className="model-note">Общая область применимости двух реакций — ровно 300 K. Вне диапазона выбранной записи Scheduler отклонит шаг.</p>
+          </fieldset>
+          <fieldset>
+            <legend>Условия реакционного слоя</legend>
+            <label>Локальная температура, K
+              <input type="number" min="0" step="any" value={temperatureK} onChange={(event) => setTemperatureK(event.target.value)} />
+            </label>
+            <label>Геометрическая толщина слоя, м
+              <input type="number" min="0" step="any" value={layerThicknessM} onChange={(event) => setLayerThicknessM(event.target.value)} />
+            </label>
+            <label>Максимальный macro dt, с (численное ограничение, не τ реакции)
+              <input type="number" min="0" step="any" value={maximumMacroStepS} onChange={(event) => setMaximumMacroStepS(event.target.value)} />
+            </label>
+          </fieldset>
+          {species.length > 0 && (
+            <fieldset>
+              <legend>Запасы видов, моль/м²</legend>
+              {species.map((item) => (
+                <div key={item.id}>
+                  <strong>{item.label}</strong>
+                  <label>Полный атмосферный столб (существующий запас prefilled, если известен)
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={globalValues[item.id] ?? (state.inventory[item.id] === undefined ? '' : String(state.inventory[item.id]))}
+                      onChange={(event) => setGlobalValues((current) => ({ ...current, [item.id]: event.target.value }))}
+                    />
+                  </label>
+                  <label>Запас в реакционном слое (неизвестно — оставьте пустым для ошибки)
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={layerValues[item.id] ?? ''}
+                      onChange={(event) => setLayerValues((current) => ({ ...current, [item.id]: event.target.value }))}
+                    />
+                  </label>
+                </div>
+              ))}
+            </fieldset>
+          )}
+          <fieldset>
+            <legend>Источники / provenance</legend>
+            <label>Источник температуры — название
+              <input value={temperatureSourceName} onChange={(event) => setTemperatureSourceName(event.target.value)} />
+            </label>
+            <label>Источник температуры — reference / ID
+              <input value={temperatureSourceReference} onChange={(event) => setTemperatureSourceReference(event.target.value)} />
+            </label>
+            <label>Источник толщины — название
+              <input value={thicknessSourceName} onChange={(event) => setThicknessSourceName(event.target.value)} />
+            </label>
+            <label>Источник толщины — reference / ID
+              <input value={thicknessSourceReference} onChange={(event) => setThicknessSourceReference(event.target.value)} />
+            </label>
+            <label>Источник подстолбовых запасов — название
+              <input value={layerInventorySourceName} onChange={(event) => setLayerInventorySourceName(event.target.value)} />
+            </label>
+            <label>Источник подстолбовых запасов — reference / ID
+              <input value={layerInventorySourceReference} onChange={(event) => setLayerInventorySourceReference(event.target.value)} />
+            </label>
+            <label>Источник полных атмосферных запасов — название
+              <input value={totalInventorySourceName} onChange={(event) => setTotalInventorySourceName(event.target.value)} />
+            </label>
+            <label>Источник полных атмосферных запасов — reference / ID
+              <input value={totalInventorySourceReference} onChange={(event) => setTotalInventorySourceReference(event.target.value)} />
+            </label>
+          </fieldset>
+          <button type="button" className="secondary" disabled={selectedReactionIds.length === 0} onClick={configure}>
+            Проверить и сохранить физическую конфигурацию
+          </button>
+        </>
+      )}
+      {message && <p className="model-note">{message}</p>}
+    </details>
+  );
+}
+
 function WorldDisplay(props: {
   world: GeneratedWorld | null;
   onSave: () => void;
@@ -992,6 +1293,12 @@ function WorldDisplay(props: {
             </div>
           </div>
           <p className="model-note">ℹ {world.chemicalState.unitsNote}</p>
+          {!world.chemicalState.physicalKinetics && (
+            <PrimaryPhysicalKineticsConfigurator
+              world={world}
+              onWorldReplace={props.onWorldReplace}
+            />
+          )}
           {world.chemicalState.physicalKinetics ? (
             <div className="model-note">
               Физический кинетический режим настроен явно: {world.chemicalState.physicalKinetics.layers.length} реакционных слоёв; реакции не используют extentFraction или gameSpeedCoefficient.
