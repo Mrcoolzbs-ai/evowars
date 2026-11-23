@@ -262,7 +262,7 @@ describe('vertical eddy diffusion', () => {
     expect(layers[0]!.columnInventoriesMolM2.no).toBe(0.5);
     expect(layers[0]!.inventoryProvenance).toEqual(originalProvenance);
     expect(result.layers[0]!.inventoryProvenance.modelVersion)
-      .toBe('stage-4.2-vertical-eddy-diffusion-1');
+      .toBe('stage-4.2-vertical-atmospheric-diffusion-2');
     expect(result.layers[0]!.inventoryProvenance.rawInput?.vertical_transport_duration_s).toBe(10);
     expect(result.layers[0]!.columnInventoriesMolM2.no).not.toBe(0.5);
   });
