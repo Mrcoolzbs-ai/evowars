@@ -1611,6 +1611,42 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           );
         }
       }
+
+      // Часть полного атмосферного столба, не распределённая по явно
+      // заданным реакционным компартментам, остаётся неизменной. Сохраняем
+      // её величину и provenance как отдельный физический остаток, а не
+      // выдаём все global inventory за охваченный кинетикой объём.
+      const configuredLayerTotals: Record<string, number> = {};
+      for (const layer of config.layers) {
+        for (const [speciesId, amount] of Object.entries(layer.columnInventoriesMolM2)) {
+          configuredLayerTotals[speciesId] = (configuredLayerTotals[speciesId] ?? 0) + amount;
+        }
+      }
+      const unmodeledColumnResiduals: ChemicalPhysicalKineticsStepAudit['unmodeledColumnResiduals'] = {};
+      for (const [speciesId, layerTotal] of Object.entries(configuredLayerTotals)) {
+        const globalAmount = initialInventory[speciesId];
+        if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) {
+          throw new Error('полный атмосферный столб вида «' + speciesId + '» непригоден при формировании аудита остатка');
+        }
+        const residual = Math.max(0, globalAmount - layerTotal);
+        const tolerance = 1e-12 * Math.max(Math.abs(globalAmount), Math.abs(layerTotal), Number.MIN_VALUE);
+        if (residual > tolerance) {
+          const provenance = config.totalInventoryProvenance[speciesId];
+          if (!hasIdentifiedPhysicalProvenance(provenance)) {
+            throw new Error('для немоделируемого остатка столба вида «' + speciesId + '» отсутствует global provenance');
+          }
+          unmodeledColumnResiduals[speciesId] = {
+            amountMolM2: residual,
+            provenance: { ...provenance }
+          };
+          assumptions.push(
+            'немоделируемый остаток полного атмосферного столба вида «' + speciesId + '»: ' +
+            residual + ' моль/м² не включён ни в один реакционный слой; он остаётся неизменным, ' +
+            'вертикальное распределение, химия и перенос этого остатка не заданы'
+          );
+        }
+      }
+
       let reactionLedger = coreWorld.reactionLedger ?? { records: [] };
       const time = {
         segmentIndex: coreWorld.clock.segmentIndex,
@@ -1777,6 +1813,7 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         characteristicTimeS: lastProposal?.characteristicTimeS ?? null,
         stepSelectionMethod: lastProposal?.method ?? 'state-dependent proposal',
         layers: layerAudits,
+        unmodeledColumnResiduals,
         warnings,
         assumptions
       };
