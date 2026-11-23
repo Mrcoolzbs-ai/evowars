@@ -28,6 +28,7 @@ import {
   CHEMICAL_EVOLUTION_STEP_PROCESS_ID,
   createChemicalEvolutionStepRegistry,
   createChemicalState,
+  createDefaultProcessRegistry,
   elementTotalsOf,
   runChemicalEvolutionSchedulerStep,
   runChemicalEvolutionStep
@@ -554,6 +555,26 @@ describe('Stage 4.2.3.3: explicit_only-процесс и запрет автом
     // Не autorunnable: числового τ нет и не появится.
     expect(isProcessAutoRunnable(descriptor)).toBe(false);
     expect(processAvailability(descriptor)).toBe('unknown');
+  });
+
+  it('реестр Scheduler включает весь легаси-каталог, не активируя процессы с неизвестной физикой', () => {
+    const legacyProcesses = createDefaultProcessRegistry();
+    const registry = createChemicalEvolutionStepRegistry();
+
+    expect(registry.list().map((entry) => entry.id)).toEqual([
+      ...legacyProcesses.map((process) => process.id),
+      CHEMICAL_EVOLUTION_STEP_PROCESS_ID
+    ]);
+
+    for (const process of legacyProcesses) {
+      const descriptor = registry.get(process.id);
+      expect(descriptor).not.toBeNull();
+      expect(descriptor!.enabled).toBe(false);
+      expect(descriptor!.solverAvailability).toBe('not_implemented');
+      expect(descriptor!.tau.status).toBe('unknown');
+      expect(tauSeconds(descriptor!.tau)).toBeNull();
+      expect(isProcessAutoRunnable(descriptor!)).toBe(false);
+    }
   });
 
   it('explicit_only не попадает в очередь автоматически готовых процессов', () => {
