@@ -24,7 +24,6 @@ const VERTICAL_DIFFUSION_MODEL_VERSION = 'stage-4.2-vertical-atmospheric-diffusi
 const TRACE_SPECIES_MAX_MOLE_FRACTION = 0.01;
 const STANDARD_ATMOSPHERE_PRESSURE_PA = 101325;
 const GRAMS_PER_KILOGRAM = 1000;
-const ANGSTROM_TO_METRE = 1e-10;
 const SQUARE_METRES_PER_SQUARE_CENTIMETRE = 1e-4;
 const MAX_INTERFACE_PRESSURE_RELATIVE_MISMATCH = 1e-6;
 const MAX_INVENTORY_RELATIVE_ERROR = 1e-10;
@@ -163,8 +162,7 @@ function hasIdentifiedProvenance(value: unknown): value is DataProvenance {
 }
 
 function validateLennardJonesTransportSpecies(
-  value: unknown,
-  label: string
+  value: unknown
 ): value is ChemicalPhysicalLennardJonesTransportSpecies {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -199,7 +197,7 @@ function computeChapmanEnskogBinaryDiffusivityM2S(args: {
     1.06036 / Math.pow(reducedTemperature, 0.15610) +
     0.19300 * Math.exp(-0.47635 * reducedTemperature) +
     1.03587 * Math.exp(-1.52996 * reducedTemperature) +
-    1.76487 * Math.exp(-3.89411 * reducedTemperature);
+    1.76474 * Math.exp(-3.89411 * reducedTemperature);
   const massA = args.speciesA.molarMassKgMol * GRAMS_PER_KILOGRAM;
   const massB = args.speciesB.molarMassKgMol * GRAMS_PER_KILOGRAM;
   const pressureAtm = args.pressurePa / STANDARD_ATMOSPHERE_PRESSURE_PA;
@@ -374,6 +372,49 @@ export function runVerticalEddyDiffusionStep(
     return rejected('eddyDiffusivityM2S должен содержать конечные неотрицательные значения ровно для каждого межслойного интерфейса');
   }
 
+  const molecularConfiguration = input.molecularDiffusion;
+  if (molecularConfiguration !== undefined) {
+    if (
+      molecularConfiguration === null ||
+      typeof molecularConfiguration !== 'object' ||
+      Array.isArray(molecularConfiguration) ||
+      molecularConfiguration.species === null ||
+      typeof molecularConfiguration.species !== 'object' ||
+      Array.isArray(molecularConfiguration.species) ||
+      molecularConfiguration.backgroundSpecies === null ||
+      typeof molecularConfiguration.backgroundSpecies !== 'object' ||
+      Array.isArray(molecularConfiguration.backgroundSpecies)
+    ) {
+      return rejected('molecularDiffusion должен содержать explicit species и backgroundSpecies records');
+    }
+    const configuredTraceSpecies = Object.keys(molecularConfiguration.species).sort();
+    if (configuredTraceSpecies.join('|') !== [...speciesIds].sort().join('|')) {
+      return rejected('molecularDiffusion.species должен задавать ровно свойства всех speciesIds переносимого вызова');
+    }
+    for (const speciesId of speciesIds) {
+      const parameters = molecularConfiguration.species[speciesId];
+      if (
+        !validateLennardJonesTransportSpecies(parameters) ||
+        !Number.isFinite(parameters.thermalDiffusionFactor) ||
+        !hasIdentifiedProvenance(parameters.thermalDiffusionProvenance)
+      ) {
+        return rejected('для молекулярной диффузии вида «' + speciesId + '» требуются конечные молярная масса, Lennard-Jones параметры и thermal-diffusion factor, каждый с provenance');
+      }
+    }
+    if (Object.keys(molecularConfiguration.backgroundSpecies).length === 0) {
+      return rejected('molecularDiffusion.backgroundSpecies не может быть пустым');
+    }
+    for (const [backgroundId, parameters] of Object.entries(molecularConfiguration.backgroundSpecies)) {
+      if (
+        backgroundId.trim() === '' ||
+        backgroundId !== backgroundId.trim() ||
+        !validateLennardJonesTransportSpecies(parameters)
+      ) {
+        return rejected('backgroundSpecies «' + backgroundId + '» требует конечные molar mass / Lennard-Jones параметры и provenance');
+      }
+    }
+  }
+
   const validatedLayers: ValidatedLayer[] = [];
   for (let index = 0; index < layerCount; index++) {
     const layer = input.layers[index]!;
@@ -422,6 +463,31 @@ export function runVerticalEddyDiffusionStep(
       return rejected('слой «' + layer.layerId + '» не содержит объект подстолбовых запасов');
     }
     const airColumnInventoryMolM2 = top.columnMolesPerM2 - bottom.columnMolesPerM2;
+    if (molecularConfiguration !== undefined) {
+      const fractions = hydrostatic.molarFractions;
+      if (
+        fractions === null ||
+        typeof fractions !== 'object' ||
+        Array.isArray(fractions) ||
+        Object.keys(fractions).length === 0
+      ) {
+        return rejected('молекулярная диффузия требует явный hydrostatic molarFractions в слое «' + layer.layerId + '»');
+      }
+      const fractionValues = Object.values(fractions);
+      const fractionSum = fractionValues.reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
+      if (
+        fractionValues.some((value) => !isFinitePositive(value)) ||
+        !Number.isFinite(fractionSum) ||
+        Math.abs(fractionSum - 1) > 1e-6
+      ) {
+        return rejected('молярные доли background состава слоя «' + layer.layerId + '» должны быть положительными, конечными и суммироваться в единицу');
+      }
+      for (const backgroundId of Object.keys(fractions)) {
+        if (!hasOwn(molecularConfiguration.backgroundSpecies, backgroundId)) {
+          return rejected('для bulk-компонента «' + backgroundId + '» слоя «' + layer.layerId + '» отсутствуют explicit Lennard-Jones данные');
+        }
+      }
+    }
     for (const speciesId of speciesIds) {
       if (!hasOwn(layer.columnInventoriesMolM2, speciesId)) {
         return rejected('в слое «' + layer.layerId + '» отсутствует явный inventory для вида «' + speciesId + '»; отсутствие не считается нулём');
