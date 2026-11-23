@@ -1262,6 +1262,45 @@ describe('Stage 4.2.1 Scheduler: расписания процессов', () =>
     })).toThrow(SchedulerError);
   });
 
+  it('успешный запуск потребляет one-shot дедлайн и требует явного нового расписания', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const operator = recorder('a', []);
+    const atStart = { segmentIndex: 0, localTimeS: 0 };
+    const worldForExact = {
+      ...testWorld(),
+      scheduling: scheduleProcessAt(createSchedulerBookkeeping(), 'a', atStart)
+    };
+    expect(readyProcessIdsAt(worldForExact.scheduling!, registry, [operator], atStart)).toEqual(['a']);
+
+    const exactRun = runMacroStep(worldForExact, registry, [operator], {
+      durationS: 2,
+      splitting: 'lie'
+    });
+    expect(exactRun.status).toBe('committed');
+    expect(exactRun.bookkeeping.processDynamics.a!.lastRunTime).toEqual({
+      segmentIndex: 0,
+      localTimeS: 2
+    });
+    expect(exactRun.bookkeeping.processDynamics.a!.nextDueTime).toBeNull();
+    expect(exactRun.bookkeeping.processDynamics.a!.nextDueElapsedS).toBeNull();
+    expect(readyProcessIdsAt(exactRun.bookkeeping, registry, [operator], {
+      segmentIndex: 0,
+      localTimeS: 2
+    })).toEqual([]);
+
+    const worldForLegacy = {
+      ...testWorld(),
+      scheduling: scheduleProcess(createSchedulerBookkeeping(), 'a', 0)
+    };
+    const legacyRun = runMacroStep(worldForLegacy, registry, [operator], {
+      durationS: 2,
+      splitting: 'lie'
+    });
+    expect(legacyRun.status).toBe('committed');
+    expect(legacyRun.bookkeeping.processDynamics.a!.nextDueElapsedS).toBeNull();
+    expect(readyProcessIds(legacyRun.bookkeeping, registry, [operator], Number.MAX_VALUE)).toEqual([]);
+  });
+
   it('готовность: срок, autorunnable и переданный оператор', () => {
     const registry = makeRegistry([
       descriptor('a'),
