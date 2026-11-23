@@ -12,6 +12,10 @@ import {
   chemicalReservoirConsistencyIssues
 } from './modules/Core/adapters';
 import { setMaterialInventory } from './modules/Core/reservoir';
+import {
+  temperatureValueOrNull,
+  validateAtmosphericTemperatureProfile
+} from './modules/Core/thermalState';
 import { getAllPresets } from './modules/Atmosphere';
 import {
   configurePrimaryPhysicalChemicalKinetics,
@@ -726,6 +730,7 @@ function KineticExperimentSection(props: {
  */
 interface PrimaryPhysicalKineticLayerDraft {
   key: number;
+  sourceLayerId?: string;
   reaction89: boolean;
   reaction106: boolean;
   temperatureK: string;
@@ -817,6 +822,104 @@ function PrimaryPhysicalKineticsConfigurator(props: {
   ) => {
     setLayerDrafts((current) =>
       current.map((layer) => layer.key === key ? { ...layer, ...patch } : layer)
+    );
+  };
+
+  const thermalProfile =
+    props.world.coreWorldState?.bodies.find((body) => body.id === 'planet')
+      ?.thermalState?.atmosphericTemperatureProfile ?? null;
+
+  const importExplicitThermalProfile = () => {
+    setMessage(null);
+    if (thermalProfile === null) {
+      setMessage('В CoreWorldState нет atmosphericTemperatureProfile. Генератор мира пока создаёт только одиночную оценку температуры поверхности.');
+      return;
+    }
+    if (thermalProfile.status !== 'partial_profile' && thermalProfile.status !== 'complete_profile') {
+      setMessage(
+        'Импорт отклонён: статус профиля «' + thermalProfile.status +
+        '» не является вертикальным профилем. single_layer_estimate нельзя превращать в несколько слоёв.'
+      );
+      return;
+    }
+    const profileIssues = validateAtmosphericTemperatureProfile(thermalProfile);
+    if (profileIssues.length > 0) {
+      setMessage('Профиль температур не прошёл валидацию: ' + profileIssues.join('; '));
+      return;
+    }
+    if (thermalProfile.provenance === undefined) {
+      setMessage('У вертикального профиля отсутствует общий provenance высотных данных; автоматический импорт заблокирован.');
+      return;
+    }
+    const profileSourceName = thermalProfile.provenance.sourceName;
+    const profileSourceReference =
+      thermalProfile.provenance.reference ??
+      thermalProfile.provenance.sourceId ??
+      thermalProfile.provenance.datasetId ??
+      thermalProfile.provenance.recordId;
+    if (!profileSourceName || !profileSourceReference) {
+      setMessage('Provenance вертикального профиля должен содержать название и reference/ID источника.');
+      return;
+    }
+
+    const drafts: PrimaryPhysicalKineticLayerDraft[] = [];
+    for (let index = 0; index < thermalProfile.layers.length; index++) {
+      const sourceLayer = thermalProfile.layers[index]!;
+      const range = sourceLayer.altitudeRangeM;
+      if (
+        range === undefined ||
+        typeof range.min !== 'number' ||
+        !Number.isFinite(range.min) ||
+        typeof range.max !== 'number' ||
+        !Number.isFinite(range.max) ||
+        range.min < 0 ||
+        range.max <= range.min
+      ) {
+        setMessage(
+          'Импорт отклонён: слой «' + sourceLayer.layerId +
+          '» не имеет конечных нижней и верхней высот. Неизвестная верхняя граница не заменяется масштабной высотой.'
+        );
+        return;
+      }
+      const temperature = temperatureValueOrNull(sourceLayer.temperature);
+      if (temperature === null || !Number.isFinite(temperature) || temperature <= 0) {
+        setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не является пригодным положительным значением в K.');
+        return;
+      }
+      const temperatureProvenance =
+        sourceLayer.temperature.provenance ?? thermalProfile.provenance;
+      const temperatureSourceName = temperatureProvenance.sourceName;
+      const temperatureSourceReference =
+        temperatureProvenance.reference ??
+        temperatureProvenance.sourceId ??
+        temperatureProvenance.datasetId ??
+        temperatureProvenance.recordId;
+      if (!temperatureSourceName || !temperatureSourceReference) {
+        setMessage('Для температуры слоя «' + sourceLayer.layerId + '» отсутствует идентифицируемый источник.');
+        return;
+      }
+      drafts.push({
+        ...createPrimaryPhysicalKineticLayerDraft(index + 1),
+        sourceLayerId: sourceLayer.layerId,
+        temperatureK: String(temperature),
+        bottomAltitudeM: String(range.min),
+        topAltitudeM: String(range.max),
+        temperatureSourceName,
+        temperatureSourceReference,
+        altitudeSourceName: profileSourceName,
+        altitudeSourceReference: profileSourceReference
+        // Reaction IDs and species inventories are intentionally NOT inferred.
+      });
+    }
+    if (drafts.length === 0) {
+      setMessage('Вертикальный профиль не содержит ни одного пригодного конечного слоя.');
+      return;
+    }
+    setLayerDrafts(drafts);
+    setNextLayerKey(drafts.length + 1);
+    setMessage(
+      'Температуры и высотные интервалы импортированы из проверенного ' +
+      thermalProfile.status + '. Реакции, подстолбовые/глобальные запасы и их provenance необходимо задать отдельно.'
     );
   };
 
@@ -951,7 +1054,7 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         prefix + ': абсолютные высотные границы'
       );
       configuredLayers.push({
-        layerId: 'user-configured-layer-' + draft.key,
+        layerId: draft.sourceLayerId ?? ('user-configured-layer-' + draft.key),
         altitudeRangeM: { min: bottomAltitudeM, max: topAltitudeM },
         altitudeProvenance,
         layerThicknessM: thickness,
@@ -1148,6 +1251,22 @@ function PrimaryPhysicalKineticsConfigurator(props: {
           <button type="button" className="secondary" disabled={layerDrafts.length >= 8} onClick={addLayerDraft}>
             Добавить ещё один реакционный слой ({layerDrafts.length}/8)
           </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={
+              thermalProfile === null ||
+              (thermalProfile.status !== 'partial_profile' && thermalProfile.status !== 'complete_profile')
+            }
+            onClick={importExplicitThermalProfile}
+          >
+            Импортировать валидированный вертикальный профиль T(z)
+          </button>
+          {thermalProfile?.status === 'single_layer_estimate' && (
+            <p className="model-note">
+              Доступна только single_layer_estimate: это не вертикальный профиль и он не будет размножен на несколько слоёв.
+            </p>
+          )}
           <p className="model-note">Слои — неперекрывающиеся части одного столба. Сумма запасов каждого вида по всем слоям не может превышать полный атмосферный запас; это проверяется перед сохранением.</p>
 
           <button type="button" className="secondary" disabled={selectedReactionIds.length === 0} onClick={configure}>
