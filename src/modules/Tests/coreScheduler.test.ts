@@ -133,6 +133,34 @@ describe('Stage 4.2.1 Scheduler: детерминированный порядо
     expect(calls.map((c) => c.intervalStartS)).toEqual([0, 0]);
   });
 
+  it('отклоняет in-place мутацию SchedulerBookkeeping обычным процессным оператором', () => {
+    const scheduling = createSchedulerBookkeeping();
+    const world = { ...testWorld(), scheduling };
+    const pristine = structuredClone(world);
+    const mutator: ProcessOperator = {
+      processId: 'a',
+      apply: (state) => {
+        state.scheduling!.stepCount += 1;
+        return state;
+      }
+    };
+
+    const result = runMacroStep(
+      world,
+      makeRegistry([descriptor('a')]),
+      [mutator],
+      { durationS: 1, splitting: 'lie' }
+    );
+
+    expect(result.status).toBe('rejected');
+    expect(result.world).toBe(world);
+    expect(result.bookkeeping).toEqual(scheduling);
+    expect(result.diagnostics.join(' ')).toContain('оператор изменил SchedulerBookkeeping напрямую');
+    expect(world).toEqual(pristine);
+    expect(world.clock.stepCount).toBe(0);
+    expect(world.scheduling!.stepCount).toBe(0);
+  });
+
   it('Lie: явный порядок processIds уважается', () => {
     const world = testWorld();
     const registry = makeRegistry([descriptor('a'), descriptor('b')]);
