@@ -1461,7 +1461,11 @@ function WorldDisplay(props: {
                     <div key={layer.layerId}>
                       <strong>Слой {layer.layerId}</strong>
                       <p>
-                        T={layer.temperatureK} K; толщина={layer.layerThicknessM} м;{' '}
+                        T={layer.temperatureK} K; высоты={
+                          layer.altitudeRangeM
+                            ? `${layer.altitudeRangeM.min}–${layer.altitudeRangeM.max} м`
+                            : 'не заданы'
+                        }; толщина={layer.layerThicknessM} м;{' '}
                         N₂={layer.thirdBody.inventoryMolM2.toExponential(3)} моль/м² (
                         {layer.thirdBody.concentrationMoleculeCm3.toExponential(3)} молекул/см³);{' '}
                         принято шагов ODE: {layer.integration.acceptedSteps}; отброшено: {layer.integration.rejectedSteps};{' '}
