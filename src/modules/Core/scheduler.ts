@@ -2546,12 +2546,102 @@ export function runScheduledWorldTurn(
     }
   }
 
-  const processRun = runReadyProcessesAt(
-    turnWorld,
-    registry,
-    operators,
-    options.process
-  );
+  const bookkeepingAtTurn = turnWorld.scheduling ?? createSchedulerBookkeeping();
+  const currentPoint: FluxTime = {
+    segmentIndex: turnWorld.clock.segmentIndex,
+    localTimeS: turnWorld.clock.localTimeS
+  };
+  let readyProcessIds: readonly string[];
+  try {
+    readyProcessIds = readyProcessIdsAt(
+      bookkeepingAtTurn,
+      registry,
+      operators,
+      currentPoint
+    );
+  } catch (error) {
+    return {
+      status: 'failed',
+      world: turnWorld,
+      eventDispatch,
+      diagnostics: [
+        ...eventDispatch.diagnostics,
+        'не удалось определить ready-процессы на точном TimePoint: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+
+  const continuousProcessIds = options.continuousProcessIds ?? [];
+  if (
+    !Array.isArray(continuousProcessIds) ||
+    continuousProcessIds.some((id) => typeof id !== 'string' || id.trim() === '') ||
+    new Set(continuousProcessIds).size !== continuousProcessIds.length
+  ) {
+    return {
+      status: 'failed',
+      world: turnWorld,
+      eventDispatch,
+      diagnostics: [
+        ...eventDispatch.diagnostics,
+        'continuousProcessIds должен быть массивом уникальных непустых processId'
+      ]
+    };
+  }
+  const invokedProcessIds = [...new Set([
+    ...continuousProcessIds,
+    ...readyProcessIds
+  ])].sort();
+
+  let processRun: ScheduledProcessRunResult;
+  if (invokedProcessIds.length === 0) {
+    // This also distinguishes a genuinely idle turn from a due exact
+    // deadline that is blocked by a disabled/unknown/non-runnable process.
+    processRun = runReadyProcessesAt(
+      turnWorld,
+      registry,
+      operators,
+      options.process
+    );
+  } else {
+    const selectedOperators = operators.filter((operator) =>
+      invokedProcessIds.includes(operator.processId)
+    );
+    try {
+      const macroStep = runMacroStep(turnWorld, registry, selectedOperators, {
+        durationS: options.process.durationS,
+        splitting: 'lie',
+        ...(options.process.subCycles === undefined ? {} : { subCycles: options.process.subCycles }),
+        processIds: invokedProcessIds,
+        respectSelectedProcessDeadlines: true,
+        ...(options.process.audit === undefined ? {} : { audit: options.process.audit })
+      });
+      processRun = {
+        status: macroStep.status,
+        world: macroStep.world,
+        bookkeeping: macroStep.bookkeeping,
+        readyProcessIds,
+        continuousProcessIds: [...continuousProcessIds],
+        invokedProcessIds,
+        macroStep,
+        diagnostics: macroStep.diagnostics
+      };
+    } catch (error) {
+      processRun = {
+        status: 'rejected',
+        world: turnWorld,
+        bookkeeping: bookkeepingAtTurn,
+        readyProcessIds,
+        continuousProcessIds: [...continuousProcessIds],
+        invokedProcessIds,
+        diagnostics: [
+          'macro-step scheduled world turn отклонён до commit: ' +
+            (error instanceof Error ? error.message : String(error))
+        ]
+      };
+    }
+  }
+
   if (processRun.status === 'rejected') {
     return {
       status: 'failed',
