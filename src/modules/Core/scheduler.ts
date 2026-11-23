@@ -2078,18 +2078,27 @@ export function runMacroStep(
       macroStepsCompleted: 0,
       operatorCallsCompleted: 0
     };
+    const exactNow: FluxTime = {
+      segmentIndex: newClock.segmentIndex,
+      localTimeS: newClock.localTimeS
+    };
+    const elapsedDeadlineReached =
+      dynamics.nextDueElapsedS !== null &&
+      dynamics.nextDueElapsedS !== undefined &&
+      dynamics.nextDueElapsedS <= lastRunElapsedS;
+    const exactDeadlineReached =
+      dynamics.nextDueTime !== null &&
+      dynamics.nextDueTime !== undefined &&
+      comparePoints(dynamics.nextDueTime, exactNow) <= 0;
     newDynamics[processId] = {
       ...dynamics,
       lastRunElapsedS,
-      lastRunTime: {
-        segmentIndex: newClock.segmentIndex,
-        localTimeS: newClock.localTimeS
-      },
-      // A due time is a one-shot trigger. After the process successfully
-      // runs, it is consumed; periodic scheduling must explicitly provide
-      // the next deadline from the updated state.
-      nextDueElapsedS: null,
-      nextDueTime: null,
+      lastRunTime: exactNow,
+      // A due time is a one-shot trigger. Consume only a deadline that
+      // this successful execution actually reached; an explicitly run
+      // process must not lose a future scheduled deadline.
+      nextDueElapsedS: elapsedDeadlineReached ? null : dynamics.nextDueElapsedS,
+      nextDueTime: exactDeadlineReached ? null : dynamics.nextDueTime,
       macroStepsCompleted: dynamics.macroStepsCompleted + 1,
       operatorCallsCompleted: dynamics.operatorCallsCompleted + calls
     };
