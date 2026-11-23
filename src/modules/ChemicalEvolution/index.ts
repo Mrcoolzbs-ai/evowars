@@ -1603,6 +1603,7 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
               equilibriumTemperature: world.energyBudget.equilibriumTemperature
             }
           : null,
+        atmosphericReferenceProfile: world.atmosphericReferenceProfile,
         chemicalState: chemical
       });
       log.push('научное ядро инициализировано из основного ChemicalEvolutionState; физические слои сохранены без преобразования оснований');
@@ -2142,6 +2143,7 @@ export function runChemicalEvolutionSchedulerStep(
             equilibriumTemperature: world.energyBudget.equilibriumTemperature
           }
         : null,
+      atmosphericReferenceProfile: world.atmosphericReferenceProfile,
       chemicalState: chemical
     });
     } catch (error) {
