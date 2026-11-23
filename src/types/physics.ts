@@ -412,6 +412,91 @@ export interface ChemicalStepRecord {
   confidence: ScientificConfidence;
 }
 
+/**
+ * Явно заданный реакционный слой основного ChemicalEvolutionState.
+ * Это НЕ экспериментальный GeneratedWorld.kineticExperiment:
+ * столбовые запасы являются частью основного атмосферного инвентаря,
+ * толщина и температура заданы отдельно и сопровождаются provenance.
+ *
+ * species keys используют канонические ID ChemicalEvolution (нижний
+ * регистр): o, no, no2, h, o2, ho2, n2. Отсутствующий ключ — неизвестный
+ * запас, а не ноль; нулевой запас должен быть передан явно.
+ */
+export interface ChemicalPhysicalKineticLayer {
+  layerId: string;
+  /** Геометрическая толщина однородного слоя, м; выводить из масштаба высоты запрещено. */
+  layerThicknessM: number;
+  thicknessProvenance: DataProvenance;
+  /** Локальная изотермическая температура слоя, K. */
+  temperatureK: number;
+  temperatureProvenance: DataProvenance;
+  /** Подстолбовые запасы слоя, моль/м², часть общего атмосферного инвентаря. */
+  columnInventoriesMolM2: Record<string, number>;
+  inventoryProvenance: DataProvenance;
+  /** Только реакции с параметризацией и диапазоном применимости в механизме. */
+  reactionIds: string[];
+}
+
+/** Конфигурация физической кинетики, подключённая к основному ChemicalEvolutionState. */
+export interface ChemicalPhysicalKineticsState {
+  /** Верхний численный предел macro dt, с; это ограничение исполнения, не характерное время реакции. */
+  maximumMacroStepS: number;
+  /** Явные однородные слои, каждый со своими температурой, толщиной и подстолбовым составом. */
+  layers: ChemicalPhysicalKineticLayer[];
+}
+
+/** Снимок трассируемости одной реально применённой кинетической параметризации. */
+export interface ChemicalKineticReactionAudit {
+  reactionId: string;
+  label: string;
+  dataStatus: 'known';
+  rateConstant: { value: number; unit: string };
+  appliedRangeK: { min: number; max: number };
+  provenance: DataProvenance;
+  parameterProvenance: {
+    lowPressureLimit: DataProvenance;
+    highPressureLimit: DataProvenance;
+    broadening: DataProvenance;
+  };
+  fallOff: {
+    lowPressureLimit: number;
+    highPressureLimit: number;
+    reducedPressure: number;
+    log10ReducedPressure: number;
+    broadeningFactor: number;
+  };
+}
+
+/** Аудит одного физического кинетического шага одного реакционного слоя. */
+export interface ChemicalKineticLayerStepAudit {
+  layerId: string;
+  integration: {
+    method: string;
+    attemptedSteps: number;
+    acceptedSteps: number;
+    rejectedSteps: number;
+    newtonFailures: number;
+    rhsEvaluations: number;
+    jacobianEvaluations: number;
+    minorNegativeCount: number;
+    invariantChecks: number;
+  };
+  reactions: ChemicalKineticReactionAudit[];
+}
+
+/** Append-only снимок фактически выполненной физической кинетической транзакции. */
+export interface ChemicalPhysicalKineticsStepAudit {
+  schedulerStep: number;
+  startSegmentIndex: number;
+  startLocalTimeS: number;
+  durationS: number;
+  characteristicTimeS: number | null;
+  stepSelectionMethod: string;
+  layers: ChemicalKineticLayerStepAudit[];
+  warnings: string[];
+  assumptions: string[];
+}
+
 export interface ChemicalEvolutionState {
   mode: InventoryMode;
   unitsNote: string;
@@ -432,6 +517,14 @@ export interface ChemicalEvolutionState {
   /** Длительность шага, лет (игровое допущение, задаётся явно) */
   stepDurationYears: number;
   history: ChemicalStepRecord[];
+  /**
+   * Физическая кинетическая конфигурация основного атмосферного состояния.
+   * Отсутствие поля сохраняет прежний игровой режим A; при наличии
+   * физический путь обязателен к выполнению через autonomous Scheduler.
+   */
+  physicalKinetics?: ChemicalPhysicalKineticsState;
+  /** Append-only аудит реально исполненных физических кинетических шагов. */
+  physicalKineticsHistory?: ChemicalPhysicalKineticsStepAudit[];
   /**
    * Изменение количества O₂ за последний ЗАВЕРШЁННЫЙ глобальный шаг
    * (записывается только runChemicalEvolutionStep; отдельные реакции
