@@ -55,6 +55,7 @@ export type DryConvectiveMixingResult =
   | { status: 'rejected'; diagnostics: string[] };
 
 interface LayerThermodynamicState {
+  dryPotentialTemperatureK: number;
   virtualPotentialTemperatureK: number;
   meanMolarMassKgMol: number;
 }
@@ -78,9 +79,11 @@ function relativeDifference(left: number, right: number): number {
   return Math.abs(left - right) / Math.max(Math.abs(left), Math.abs(right), Number.MIN_VALUE);
 }
 
+let cachedThermodynamicCatalog: ReturnType<typeof buildThermodynamicCatalog> | undefined;
+
 function deriveLayerThermodynamics(
   layer: ChemicalPhysicalKineticLayer
-): LayerThermodynamicState | string {
+): Omit<LayerThermodynamicState, 'virtualPotentialTemperatureK'> | string {
   const hydro = layer.hydrostaticState;
   if (hydro === undefined) return 'слой «' + layer.layerId + '» не содержит hydrostaticState';
   const point = hydro.representative;
@@ -101,7 +104,7 @@ function deriveLayerThermodynamics(
   let fractionSum = 0;
   let mixtureMolarMassKgMol = 0;
   let mixtureCpJMolK = 0;
-  const catalog = buildThermodynamicCatalog();
+  const catalog = cachedThermodynamicCatalog ?? (cachedThermodynamicCatalog = buildThermodynamicCatalog());
   for (const [speciesId, fraction] of entries) {
     if (!isFinitePositive(fraction)) {
       return 'молярная доля bulk-вида «' + speciesId + '» слоя «' + layer.layerId + '» должна быть конечной и положительной';
@@ -141,18 +144,14 @@ function deriveLayerThermodynamics(
   }
 
   const kappa = UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K / mixtureCpJMolK;
-  const referenceMolarMassKgMol = point.meanMolarMassKgPerMol;
-  // The reference molar mass is a constant scale; it cancels in N² but
-  // keeps the virtual-potential-temperature diagnostic dimensioned in K.
-  const virtualPotentialTemperatureK =
+  const dryPotentialTemperatureK =
     point.temperatureK *
-    Math.pow(DRY_CONVECTIVE_REFERENCE_PRESSURE_PA / point.pressurePa, kappa) *
-    (referenceMolarMassKgMol / mixtureMolarMassKgMol);
-  if (!isFinitePositive(virtualPotentialTemperatureK)) {
-    return 'виртуальная потенциальная температура слоя «' + layer.layerId + '» неконечна';
+    Math.pow(DRY_CONVECTIVE_REFERENCE_PRESSURE_PA / point.pressurePa, kappa);
+  if (!isFinitePositive(dryPotentialTemperatureK)) {
+    return 'сухая потенциальная температура слоя «' + layer.layerId + '» неконечна';
   }
   return {
-    virtualPotentialTemperatureK,
+    dryPotentialTemperatureK,
     meanMolarMassKgMol: mixtureMolarMassKgMol
   };
 }
@@ -222,7 +221,22 @@ export function diagnoseDryConvectiveMixing(
     }
     const derived = deriveLayerThermodynamics(layer);
     if (typeof derived === 'string') return rejected(derived);
-    layerStates.push(derived);
+    layerStates.push({
+      ...derived,
+      virtualPotentialTemperatureK: derived.dryPotentialTemperatureK
+    });
+  }
+
+  // Use one column-wide reference molecular mass so composition-induced
+  // buoyancy remains in virtual potential temperature between layers.
+  const referenceMolarMassKgMol = layerStates[0]!.meanMolarMassKgMol;
+  for (let index = 0; index < layerStates.length; index++) {
+    layerStates[index]!.virtualPotentialTemperatureK =
+      layerStates[index]!.dryPotentialTemperatureK *
+      referenceMolarMassKgMol / layerStates[index]!.meanMolarMassKgMol;
+    if (!isFinitePositive(layerStates[index]!.virtualPotentialTemperatureK)) {
+      return rejected('виртуальная потенциальная температура слоя ' + index + ' неконечна');
+    }
   }
 
   const interfaces: DryConvectiveInterfaceState[] = [];
