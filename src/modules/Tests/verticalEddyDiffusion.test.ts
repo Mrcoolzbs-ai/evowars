@@ -90,6 +90,51 @@ function twoLayerColumn(): ChemicalPhysicalKineticLayer[] {
   ];
 }
 
+function molecularTransportFixture(thermalDiffusionFactor = 0) {
+  const syntheticProvenance = (id: string) => ({
+    sourceName: 'synthetic-only molecular transport test fixture; not reference data',
+    sourceId: 'test:molecular-transport:' + id,
+    limitations: 'Used only to test the transport implementation; not measured Lennard-Jones or thermal-diffusion data'
+  });
+  const backgroundSpecies = {
+    n2: {
+      molarMassKgMol: 0.028,
+      molarMassProvenance: syntheticProvenance('mass:n2'),
+      collisionDiameterAngstrom: 3.8,
+      characteristicEnergyOverKBK: 70,
+      collisionParametersProvenance: syntheticProvenance('lj:n2')
+    },
+    o2: {
+      molarMassKgMol: 0.032,
+      molarMassProvenance: syntheticProvenance('mass:o2'),
+      collisionDiameterAngstrom: 3.5,
+      characteristicEnergyOverKBK: 100,
+      collisionParametersProvenance: syntheticProvenance('lj:o2')
+    },
+    ar: {
+      molarMassKgMol: 0.04,
+      molarMassProvenance: syntheticProvenance('mass:ar'),
+      collisionDiameterAngstrom: 3.4,
+      characteristicEnergyOverKBK: 120,
+      collisionParametersProvenance: syntheticProvenance('lj:ar')
+    }
+  };
+  return {
+    species: {
+      heavy: {
+        molarMassKgMol: 0.08,
+        molarMassProvenance: syntheticProvenance('mass:heavy'),
+        collisionDiameterAngstrom: 3.5,
+        characteristicEnergyOverKBK: 100,
+        collisionParametersProvenance: syntheticProvenance('lj:heavy'),
+        thermalDiffusionFactor,
+        thermalDiffusionProvenance: syntheticProvenance('thermal:heavy')
+      }
+    },
+    backgroundSpecies
+  };
+}
+
 describe('vertical eddy diffusion', () => {
   it('moves an explicit trace species down its mixing-ratio gradient and reports the interface flux', () => {
     const layers = twoLayerColumn();
@@ -220,6 +265,99 @@ describe('vertical eddy diffusion', () => {
       .toBe('stage-4.2-vertical-eddy-diffusion-1');
     expect(result.layers[0]!.inventoryProvenance.rawInput?.vertical_transport_duration_s).toBe(10);
     expect(result.layers[0]!.columnInventoriesMolM2.no).not.toBe(0.5);
+  });
+
+  it('computes Chapman-Enskog molecular diffusivity and gravitationally separates a heavy trace species', () => {
+    const baseline = twoLayerColumn();
+    const layers = [
+      {
+        ...baseline[0]!,
+        columnInventoriesMolM2: { heavy: 0.005 }
+      },
+      {
+        ...baseline[1]!,
+        columnInventoriesMolM2: { heavy: 0.00495 }
+      }
+    ];
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['heavy'],
+      durationS: 1e10,
+      eddyDiffusivityM2S: 0,
+      molecularDiffusion: molecularTransportFixture()
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    const interfaceAudit = result.audit.interfaces[0]!.species.heavy!;
+    expect(interfaceAudit.molecularDiffusivityM2S).toBeGreaterThan(0);
+    expect(Object.keys(interfaceAudit.binaryDiffusivitiesM2S ?? {}).sort()).toEqual(['ar', 'n2', 'o2']);
+    expect(interfaceAudit.barodiffusionVelocityMs).toBeLessThan(0);
+    expect(interfaceAudit.molecularDriftVelocityMs).toBeLessThan(0);
+    expect(interfaceAudit.fluxMolM2S).toBeLessThan(0);
+    expect(result.layers[0]!.columnInventoriesMolM2.heavy).toBeGreaterThan(0.005);
+    expect(result.layers[1]!.columnInventoriesMolM2.heavy).toBeLessThan(0.00495);
+    expect(result.audit.columnTotalsMolM2.heavy!.after).toBeCloseTo(
+      result.audit.columnTotalsMolM2.heavy!.before,
+      10
+    );
+    expect(result.audit.molecularDiffusion?.method)
+      .toBe('chapman_enskog_neufeld_effective_binary_trace_species');
+    expect(result.audit.molecularDiffusion?.species.heavy.thermalDiffusionProvenance.sourceId)
+      .toBe('test:molecular-transport:thermal:heavy');
+  });
+
+  it('includes the explicitly supplied thermal-diffusion factor in the molecular drift', () => {
+    const baseline = twoLayerColumn();
+    const lower = baseline[0]!;
+    const upper = {
+      ...baseline[1]!,
+      hydrostaticState: {
+        ...baseline[1]!.hydrostaticState!,
+        representative: {
+          ...baseline[1]!.hydrostaticState!.representative,
+          temperatureK: 310
+        }
+      }
+    };
+    const layers = [
+      { ...lower, columnInventoriesMolM2: { heavy: 0.005 } },
+      { ...upper, columnInventoriesMolM2: { heavy: 0.00495 } }
+    ];
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['heavy'],
+      durationS: 1e8,
+      eddyDiffusivityM2S: 0,
+      molecularDiffusion: molecularTransportFixture(1)
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    const speciesAudit = result.audit.interfaces[0]!.species.heavy!;
+    expect(speciesAudit.thermalDiffusionVelocityMs).toBeLessThan(0);
+    expect(speciesAudit.molecularDriftVelocityMs).toBeLessThan(speciesAudit.barodiffusionVelocityMs!);
+  });
+
+  it('rejects molecular transport when any present bulk component lacks Lennard-Jones data', () => {
+    const baseline = twoLayerColumn();
+    const layers = [
+      { ...baseline[0]!, columnInventoriesMolM2: { heavy: 0.005 } },
+      { ...baseline[1]!, columnInventoriesMolM2: { heavy: 0.00495 } }
+    ];
+    const molecularDiffusion = molecularTransportFixture();
+    delete (molecularDiffusion.backgroundSpecies as Record<string, unknown>).ar;
+    const result = runVerticalEddyDiffusionStep({
+      layers,
+      speciesIds: ['heavy'],
+      durationS: 1,
+      eddyDiffusivityM2S: 0,
+      molecularDiffusion
+    });
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') {
+      expect(result.diagnostics.join('; ')).toContain('Lennard-Jones');
+    }
   });
 
   it('fails closed for bulk species, missing inventories, vertical gaps, and pressure discontinuities', () => {
