@@ -1143,15 +1143,31 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
     }
   }
 
-  for (const [speciesId, subcolumnAmount] of Object.entries(subcolumnTotals)) {
-    const globalAmount = state.inventory[speciesId];
-    if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) continue;
+  // Проверяем все вещества полного атмосферного столба, а не только
+  // виды, уже включённые в реакционные слои. Это одновременно гарантирует,
+  // что остаток любого неохваченного вида можно сохранить в аудите.
+  for (const [speciesId, globalAmount] of Object.entries(state.inventory)) {
+    if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) {
+      problems.push('полный атмосферный запас вида «' + speciesId + '» должен быть конечным неотрицательным числом моль/м²');
+      continue;
+    }
+    const subcolumnAmount = subcolumnTotals[speciesId] ?? 0;
     const tolerance = 1e-12 * Math.max(Math.abs(globalAmount), Math.abs(subcolumnAmount), Number.MIN_VALUE);
     if (subcolumnAmount > globalAmount + tolerance) {
       problems.push(
         'сумма реакционных подстолбов вида «' + speciesId + '» (' + subcolumnAmount +
         ' моль/м²) превышает основной атмосферный инвентарь (' + globalAmount + ' моль/м²)'
       );
+      continue;
+    }
+    const residual = Math.max(0, globalAmount - subcolumnAmount);
+    if (residual > tolerance) {
+      const provenance = isPlainChemicalRecord(config.totalInventoryProvenance)
+        ? config.totalInventoryProvenance[speciesId]
+        : undefined;
+      if (!hasIdentifiedPhysicalProvenance(provenance)) {
+        problems.push('отсутствует provenance полного атмосферного запаса немоделируемого вида «' + speciesId + '»');
+      }
     }
   }
   return problems;
@@ -1674,11 +1690,14 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         }
       }
       const unmodeledColumnResiduals: ChemicalPhysicalKineticsStepAudit['unmodeledColumnResiduals'] = {};
-      for (const [speciesId, layerTotal] of Object.entries(configuredLayerTotals)) {
-        const globalAmount = initialInventory[speciesId];
+      // Полный остаток включает и виды, отсутствующие во ВСЕХ реакционных
+      // слоях: для них layerTotal=0, но вещество всё равно существует в
+      // основном атмосферном столбе и не должно исчезать из аудита.
+      for (const [speciesId, globalAmount] of Object.entries(initialInventory)) {
         if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) {
           throw new Error('полный атмосферный столб вида «' + speciesId + '» непригоден при формировании аудита остатка');
         }
+        const layerTotal = configuredLayerTotals[speciesId] ?? 0;
         const residual = Math.max(0, globalAmount - layerTotal);
         const tolerance = 1e-12 * Math.max(Math.abs(globalAmount), Math.abs(layerTotal), Number.MIN_VALUE);
         if (residual > tolerance) {
