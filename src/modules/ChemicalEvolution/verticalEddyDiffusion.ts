@@ -486,12 +486,15 @@ export function runVerticalEddyDiffusionStep(
         return rejected('молярные доли background состава слоя «' + layer.layerId + '» должны быть положительными, конечными и суммироваться в единицу');
       }
       let parameterizedMeanMolarMassKgMol = 0;
-      for (const [backgroundId, fraction] of Object.entries(fractions)) {
+      for (const [backgroundId, rawFraction] of Object.entries(fractions as Record<string, unknown>)) {
+        if (!isFinitePositive(rawFraction)) {
+          return rejected('молярная доля bulk-компонента «' + backgroundId + '» слоя «' + layer.layerId + '» должна быть строго положительной и конечной');
+        }
         if (!hasOwn(molecularConfiguration.backgroundSpecies, backgroundId)) {
           return rejected('для bulk-компонента «' + backgroundId + '» слоя «' + layer.layerId + '» отсутствуют explicit Lennard-Jones данные');
         }
         parameterizedMeanMolarMassKgMol +=
-          fraction * molecularConfiguration.backgroundSpecies[backgroundId]!.molarMassKgMol;
+          rawFraction * molecularConfiguration.backgroundSpecies[backgroundId]!.molarMassKgMol;
       }
       const hydrostaticMeanMolarMassKgMol = hydrostatic.representative.meanMolarMassKgPerMol;
       if (
