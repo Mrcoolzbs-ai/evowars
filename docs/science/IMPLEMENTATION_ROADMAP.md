@@ -746,6 +746,6 @@
 > режим A, предоставляет экспертную форму конфигурации и показывает
 > последний физический аудит.
 >
-> CI #533 на HEAD c744ae4553d0d1431a79952b9412983bd8be3f82 — success:
-> 86 файлов passed / 2 skipped; 3137 тестов passed / 53 skipped;
+> CI #544 на HEAD 0dd1cfd24c495ddbacf81fdfe7409f35f3c5c43b — success:
+> 86 файлов passed / 2 skipped; 3139 тестов passed / 53 skipped;
 > TypeScript, lint (62 предупреждения, 0 ошибок), production build.
