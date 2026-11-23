@@ -441,6 +441,19 @@ export interface ChemicalKineticHydrostaticLayerState {
   representative: ChemicalKineticHydrostaticPoint;
   top: ChemicalKineticHydrostaticPoint;
   molarFractions: Record<string, number>;
+  /** Согласование идеальногазового EOS: rho(P,T,Mbar) vs rho интегратора. */
+  equationOfStateMaxRelativeDeviation: number;
+  /** Локальный N2(P,T,x) против среднего N2 из интегрированного подстолбового запаса. */
+  thirdBodyConsistency: {
+    speciesId: 'n2';
+    hydrostaticMidpointConcentrationMoleculeCm3: number;
+    layerAverageConcentrationMoleculeCm3: number;
+    relativeDeviation: number;
+    maximumAllowedRelativeDeviation: number;
+    hydrostaticLayerInventoryMolM2: number;
+    suppliedLayerInventoryMolM2: number;
+    inventoryRelativeDeviation: number;
+  };
   provenance: {
     pressure: DataProvenance;
     composition: DataProvenance;
