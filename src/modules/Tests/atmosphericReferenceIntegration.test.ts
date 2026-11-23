@@ -473,6 +473,7 @@ describe('Stage 4.2: reference profile integration', () => {
     expect(audit.verticalTransport).toBeDefined();
     expect(audit.verticalTransport!.durationS).toBe(audit.durationS);
     expect(audit.verticalTransport!.speciesIds).toEqual(['no']);
+    expect(audit.verticalTransport!.diffusivityProvenance?.sourceId).toBe('test:synthetic:Kzz');
     expect(audit.verticalTransport!.layers).toHaveLength(column.layerBoundaries.length);
     expect(audit.verticalTransport!.columnTotalsMolM2.no!.after).toBeCloseTo(
       audit.verticalTransport!.columnTotalsMolM2.no!.before,
