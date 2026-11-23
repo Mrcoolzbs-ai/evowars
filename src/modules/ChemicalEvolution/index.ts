@@ -1589,6 +1589,28 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
       const historyRecords: ChemicalStepRecord[] = [];
       const warnings: string[] = [];
       const assumptions: string[] = [];
+      const altitudeOrderedLayers = config.layers
+        .filter((layer) => layer.altitudeRangeM !== undefined)
+        .slice()
+        .sort((a, b) =>
+          a.altitudeRangeM!.min - b.altitudeRangeM!.min ||
+          a.altitudeRangeM!.max - b.altitudeRangeM!.max ||
+          a.layerId.localeCompare(b.layerId)
+        );
+      for (let index = 1; index < altitudeOrderedLayers.length; index++) {
+        const previous = altitudeOrderedLayers[index - 1]!;
+        const current = altitudeOrderedLayers[index]!;
+        const previousTopM = previous.altitudeRangeM!.max;
+        const currentBottomM = current.altitudeRangeM!.min;
+        const gapToleranceM = 1e-8 * Math.max(1, Math.abs(previousTopM), Math.abs(currentBottomM));
+        if (currentBottomM > previousTopM + gapToleranceM) {
+          assumptions.push(
+            'вертикальный промежуток ' + previousTopM + '–' + currentBottomM +
+            ' м между слоями «' + previous.layerId + '» и «' + current.layerId +
+            '» не содержит реакционного компартмента: химия и перенос в этом интервале не моделируются и не интерполируются'
+          );
+        }
+      }
       let reactionLedger = coreWorld.reactionLedger ?? { records: [] };
       const time = {
         segmentIndex: coreWorld.clock.segmentIndex,
