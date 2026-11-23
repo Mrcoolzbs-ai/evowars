@@ -15,6 +15,7 @@ import type {
 } from './physics';
 
 import type { CoreWorldState } from '../modules/Core/worldState';
+import type { AtmosphericTemperatureProfile } from '../modules/Core/thermalState';
 
 // ============================================
 // 1. БАЗОВЫЕ ТИПЫ
@@ -456,6 +457,11 @@ export interface GeneratedWorld {
   bodyPhysics?: BodyPhysicalSample;
   /** Физическая модель атмосферы: молярные доли, парциальные давления (Па), столб */
   atmospherePhysics?: AtmospherePhysicalModel;
+  /**
+   * Явно выбранный внешний reference-профиль атмосферы (не измерение
+   * сгенерированного тела и не замена его atmospherePhysics).
+   */
+  atmosphericReferenceProfile?: AtmosphericTemperatureProfile;
   /** Фазовый скрининг атмосферных компонентов */
   phaseAnalysis?: AtmospherePhaseAnalysis;
   /** Анализ внутренних источников тепла (Geology) */
@@ -521,6 +527,8 @@ export interface GenerationSettings {
   weights: CategoryWeights;
   fixedCategories: FixedCategories;
   atmospherePreset?: ID;
+  /** Явно выбранная исходная вертикальная reference-модель атмосферы. */
+  atmosphericReferenceProfile?: 'ussa_1976_earth';
   customAtmosphere?: AtmosphereState;
   enableChemicalEvolution: boolean;
   chemicalEvolutionSteps: number;
