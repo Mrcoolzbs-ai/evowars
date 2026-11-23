@@ -892,7 +892,7 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(result.world.reservoirs[0]!.material!.entries.co2).toBe(100);
     expect(result.world.clock).toEqual(clock);
     expect(result.world.scheduling!.eventQueue[0]!.status).toBe('failed');
-    expect(result.world.scheduling!.eventQueue[0]!.failReason).toContain('Ретроактивное');
+    expect(result.world.scheduling!.eventQueue[0]!.failReason).toContain('ретроактивное');
   });
 
   it('глубоко изолирует payload события при enqueue и при чтении очереди', () => {
