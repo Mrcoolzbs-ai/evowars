@@ -669,6 +669,8 @@ export interface LegacyWorldInput {
     incidentFlux: PhysValue;
     equilibriumTemperature: PhysValue;
   } | null;
+  /** Explicit reference profile; remains distinct from profile inferred from the atmosphere preset. */
+  atmosphericReferenceProfile?: AtmosphericTemperatureProfile;
   /** Опциональное химическое состояние (инвентарь + время). */
   chemicalState?: ChemicalEvolutionState | null;
 }
@@ -837,7 +839,7 @@ export function planetThermalStateFromLegacy(input: LegacyWorldInput): BodyTherm
     input.energyBudget !== undefined && input.energyBudget !== null
       ? physValueToScientificValue(input.energyBudget.equilibriumTemperature)
       : unknownValue('равновесная температура не вычислена: энергетический бюджет отсутствует');
-  const profile = atmosphericProfileFromPreset(input.atmosphere);
+  const profile = input.atmosphericReferenceProfile ?? atmosphericProfileFromPreset(input.atmosphere);
   const provenance: DataProvenance = {
     note: 'собрано адаптером Stage 4.2.2 из легаси-полей GeneratedWorld; величины перенесены раздельно, без подстановок'
   };
