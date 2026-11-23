@@ -1484,17 +1484,21 @@ export function runMacroStep(
   // segment with advance(); pending events in the old segment are then
   // rebased by their exact local offset from the old current point.
   const targetLocalTimeS = current.clock.localTimeS + effectiveDurationS;
+  const exactSameSegmentAdvance =
+    Number.isFinite(targetLocalTimeS) &&
+    targetLocalTimeS > current.clock.localTimeS &&
+    targetLocalTimeS - current.clock.localTimeS === effectiveDurationS;
   const newClock =
     eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex
       ? advanceTo(current.clock, eventBoundary.time)
       : eventBoundary !== undefined
         ? advance(startNewSegment(current.clock), effectiveDurationS)
-        : Number.isFinite(targetLocalTimeS) && targetLocalTimeS > current.clock.localTimeS
+        : exactSameSegmentAdvance
           ? advanceTo(current.clock, {
               segmentIndex: current.clock.segmentIndex,
               localTimeS: targetLocalTimeS
             })
-          : advance(current.clock, effectiveDurationS);
+          : advance(startNewSegment(current.clock), effectiveDurationS);
 
   const eventQueue =
     newClock.segmentIndex === current.clock.segmentIndex
