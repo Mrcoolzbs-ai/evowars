@@ -112,26 +112,27 @@ export type ProcessStepPolicy =
   | { kind: 'tau_heuristic'; tauFraction: number; note?: string };
 
 /**
- * Политика запуска процесса (Stage 4.2.3.3 — интеграция химии):
- * - autonomous — обычный процесс: может запускаться планировщиком
- *   автоматически; для исполнения требуется пригодное числовое τ;
- * - explicit_only — дискретная операция БЕЗ физически установленного
- *   характерного времени: выполняется ТОЛЬКО по явному вызову
- *   (runMacroStep с opts.explicit.processId); τ процесса остаётся
- *   unknown и НЕ подменяется числом; длительность шага передаёт
- *   вызывающая сторона (opts.durationS); автоматический запуск и
- *   очередь автоматически готовых процессов для такого процесса
- *   закрыты (readyProcessIds его исключает, автозапуск — ошибка).
+ * Политика запуска процесса:
+ * - autonomous — обычный автономный процесс с установленным числовым τ;
+ * - explicit_only — дискретная операция без физически установленного τ,
+ *   выполняется только явным вызовом runMacroStep(opts.explicit);
+ * - state_dependent — автономный процесс, чьё характерное время и
+ *   допустимый macro-шаг зависят от текущего состояния мира. Числовое
+ *   τ в дескрипторе остаётся unknown; runtime ProcessOperator обязан
+ *   предоставить proposeStep(), возвращающий проверяемое ограничение
+ *   шага для текущего снимка состояния. Это не разрешает выдумывать τ:
+ *   неизвестные/непригодные данные должны отклонить предложение.
  *
- * Явно инициируемая операция — не утверждение о физической скорости
- * реакции: это выполнение заданного модельного шага с явно указанной
- * длительностью.
+ * state_dependent нужен для жёстких химических и других нелинейных
+ * систем, где одно постоянное τ не описывает весь диапазон состояний.
+ * Исполнитель остаётся runtime-only и не сериализуется в ProcessDescriptor.
  */
-export type ProcessExecutionMode = 'autonomous' | 'explicit_only';
+export type ProcessExecutionMode = 'autonomous' | 'explicit_only' | 'state_dependent';
 
 export const PROCESS_EXECUTION_MODES: readonly ProcessExecutionMode[] = [
   'autonomous',
-  'explicit_only'
+  'explicit_only',
+  'state_dependent'
 ];
 
 /** Дескриптор физического процесса (сериализуемое описание). */
@@ -255,10 +256,14 @@ export function processAvailability(d: ProcessDescriptor): ProcessAvailability {
     case 'unknown':
       return 'unknown';
     case 'available': {
-      // Решатель есть, но без пригодного числового τ (строго
-      // положительного конечного числа секунд) автоматический
-      // запуск невозможен: неизвестное и непригодное время
-      // не подменяются числом (Stage 4.2.1.2).
+      // Для state_dependent время рассчитывает runtime-решатель
+      // из текущего состояния через ProcessOperator.proposeStep().
+      // В дескрипторе постоянное τ остаётся unknown и не выдумывается.
+      if (d.executionMode === 'state_dependent') {
+        return 'available';
+      }
+      // Обычный autonomous-путь требует строго положительное
+      // конечное числовое τ (Stage 4.2.1.2).
       return tauSeconds(d.tau) !== null ? 'available' : 'unknown';
     }
     default: {
@@ -396,6 +401,15 @@ export function validateProcessDescriptor(d: unknown): string[] {
   ) {
     errors.push(
       'executionMode должен быть одним из: ' + PROCESS_EXECUTION_MODES.join(', ') + '; получено «' + String(d.executionMode) + '»'
+    );
+  }
+  if (
+    d.executionMode === 'state_dependent' &&
+    tauShapeIssues.length === 0 &&
+    hasUsableQuantity(d.tau as ScientificValue)
+  ) {
+    errors.push(
+      'tau: для executionMode = state_dependent постоянное числовое τ запрещено; характерное время вычисляется runtime-оператором из текущего состояния и не записывается как постоянная константа'
     );
   }
   if (d.dependencies !== undefined) {
