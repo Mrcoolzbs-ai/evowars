@@ -190,6 +190,8 @@ export function importSourcedAtmosphericTemperatureProfileForKinetics(
 
 import type { ChemicalPhysicalKineticsState } from '../../types';
 import type { HydrostaticColumnCompleted, HydrostaticProfilePoint } from '../Core/hydrostaticAtmosphere';
+import { AVOGADRO_NUMBER_PER_MOL } from '../Core/kinetics';
+import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 export interface SourcedKineticLayerInventoryInput {
   sourceLayerId: string;
@@ -203,8 +205,10 @@ export interface SourcedProfileSchedulerConfigurationInput {
   totalInventoryProvenance: Readonly<Record<string, DataProvenance>>;
   /** Exactly one explicit inventory/reaction selection for every profile layer. */
   layers: readonly SourcedKineticLayerInventoryInput[];
-  /** Optional completed 4.8.1 column aligned one-to-one with this temperature profile. */
+  /** Optional completed 4.8.1 column aligned to source layers or their refined child layers. */
   hydrostaticColumn?: HydrostaticColumnCompleted;
+  /** Maximum allowed midpoint-vs-layer-average N2 number-density mismatch (fraction). Default: 0.02. */
+  maximumHydrostaticThirdBodyRelativeDeviation?: number;
 }
 
 export type SourcedProfileSchedulerConfigurationResult =
@@ -261,42 +265,73 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
     return { status: 'rejected', diagnostics };
   }
 
-  const expectedIds = imported.layers.map((layer) => layer.sourceLayerId);
+  const toleranceM = 1e-5;
+  const maximumHydrostaticThirdBodyRelativeDeviation =
+    input.maximumHydrostaticThirdBodyRelativeDeviation ?? 0.02;
+  if (
+    !Number.isFinite(maximumHydrostaticThirdBodyRelativeDeviation) ||
+    maximumHydrostaticThirdBodyRelativeDeviation <= 0 ||
+    maximumHydrostaticThirdBodyRelativeDeviation >= 1
+  ) {
+    diagnostics.push('maximumHydrostaticThirdBodyRelativeDeviation должен быть в диапазоне (0, 1)');
+  }
+
+  let effectiveSeeds: ThermalProfileKineticLayerSeed[] = [...imported.layers];
   const hydrostaticStateById = new Map<
     string,
     NonNullable<ChemicalPhysicalKineticsState['layers'][number]['hydrostaticState']>
   >();
+  const pendingHydrostaticById = new Map<string, {
+    boundary: HydrostaticColumnCompleted['layerBoundaries'][number];
+    representative: HydrostaticProfilePoint;
+    fractions: Record<string, number>;
+    sourceProvenance: DataProvenance;
+    equationOfStateMaxRelativeDeviation: number;
+  }>();
 
   if (input.hydrostaticColumn !== undefined) {
     const column = input.hydrostaticColumn;
     if (
       !Array.isArray(column.layerBoundaries) ||
-      column.layerBoundaries.length !== imported.layers.length ||
+      column.layerBoundaries.length === 0 ||
       !Array.isArray(column.requestedHeightPoints)
     ) {
-      diagnostics.push('hydrostaticColumn должен содержать завершённые границы и по одной контрольной точке внутри каждого profile layer');
+      diagnostics.push('hydrostaticColumn должен содержать completed layerBoundaries и requestedHeightPoints');
     } else {
-      for (const seed of imported.layers) {
-        const boundary = column.layerBoundaries.find((candidate) => candidate.layerId === seed.sourceLayerId);
-        if (boundary === undefined) {
-          diagnostics.push('hydrostaticColumn: отсутствуют границы слоя «' + seed.sourceLayerId + '»');
+      const seedsById = new Map(imported.layers.map((seed) => [seed.sourceLayerId, seed]));
+      const effective: ThermalProfileKineticLayerSeed[] = [];
+      const childRangesByParent = new Map<string, Array<{ min: number; max: number; childId: string }>>();
+
+      for (const boundary of column.layerBoundaries) {
+        const parentId = boundary.parentLayerId ?? boundary.layerId;
+        const sourceSeed = seedsById.get(parentId);
+        if (sourceSeed === undefined) {
+          diagnostics.push('hydrostaticColumn: child layer «' + boundary.layerId + '» не сопоставлен с исходным profile layer «' + parentId + '»');
           continue;
         }
-        const toleranceM = 1e-5;
         if (
-          Math.abs(boundary.bottom.heightM - seed.bottomAltitudeM) > toleranceM ||
-          Math.abs(boundary.top.heightM - seed.topAltitudeM) > toleranceM
+          boundary.bottom.heightM < sourceSeed.bottomAltitudeM - toleranceM ||
+          boundary.top.heightM > sourceSeed.topAltitudeM + toleranceM ||
+          boundary.top.heightM <= boundary.bottom.heightM
         ) {
-          diagnostics.push('hydrostaticColumn: геометрические границы слоя «' + seed.sourceLayerId + '» не совпадают с температурным profile');
+          diagnostics.push('hydrostaticColumn: границы child layer «' + boundary.layerId + '» выходят за исходный profile layer');
           continue;
         }
+        const parentChildren = childRangesByParent.get(parentId) ?? [];
+        parentChildren.push({
+          min: boundary.bottom.heightM,
+          max: boundary.top.heightM,
+          childId: boundary.layerId
+        });
+        childRangesByParent.set(parentId, parentChildren);
+
         const interior = column.requestedHeightPoints.filter((point) =>
-          point.layerId === seed.sourceLayerId &&
-          point.heightM > seed.bottomAltitudeM + toleranceM &&
-          point.heightM < seed.topAltitudeM - toleranceM
+          point.layerId === boundary.layerId &&
+          point.heightM > boundary.bottom.heightM + toleranceM &&
+          point.heightM < boundary.top.heightM - toleranceM
         );
         if (interior.length !== 1) {
-          diagnostics.push('hydrostaticColumn: для слоя «' + seed.sourceLayerId + '» требуется ровно одна внутренняя representative-height точка; получено ' + interior.length);
+          diagnostics.push('hydrostaticColumn: для child layer «' + boundary.layerId + '» требуется ровно одна внутренняя representative-height точка; получено ' + interior.length);
           continue;
         }
         const representative = interior[0]!;
@@ -305,10 +340,11 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
           !Number.isFinite(point.pressurePa) || point.pressurePa <= 0 ||
           !Number.isFinite(point.temperatureK) || point.temperatureK <= 0 ||
           !Number.isFinite(point.densityKgPerM3) || point.densityKgPerM3 <= 0 ||
+          !Number.isFinite(point.meanMolarMassKgPerMol) || point.meanMolarMassKgPerMol <= 0 ||
           !Number.isFinite(point.columnMolesPerM2) ||
           !Number.isFinite(point.columnMassKgPerM2)
         )) {
-          diagnostics.push('hydrostaticColumn: слой «' + seed.sourceLayerId + '» содержит нечисловые или неположительные P/T/rho');
+          diagnostics.push('hydrostaticColumn: child layer «' + boundary.layerId + '» содержит нечисловые или неположительные P/T/rho');
           continue;
         }
         if (
@@ -316,9 +352,10 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
           representative.pressurePa < boundary.top.pressurePa ||
           boundary.top.columnMolesPerM2 <= boundary.bottom.columnMolesPerM2
         ) {
-          diagnostics.push('hydrostaticColumn: давление должно убывать, а молярный столб возрастать по слою «' + seed.sourceLayerId + '»');
+          diagnostics.push('hydrostaticColumn: давление должно убывать, а молярный столб возрастать в child layer «' + boundary.layerId + '»');
           continue;
         }
+
         const fractions = Object.fromEntries(
           representative.moleFractions.map((entry: HydrostaticProfilePoint['moleFractions'][number]) => [entry.gasId, entry.moleFraction])
         );
@@ -329,18 +366,36 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
           fractionValues.some((value) => !Number.isFinite(value) || value <= 0) ||
           Math.abs(fractionSum - 1) > 1e-6
         ) {
-          diagnostics.push('hydrostaticColumn: молярные доли слоя «' + seed.sourceLayerId + '» не образуют известный нормированный состав');
+          diagnostics.push('hydrostaticColumn: молярные доли child layer «' + boundary.layerId + '» не образуют нормированный bulk-состав');
           continue;
         }
-        const sourceLayer = column.provenance.layers.find((entry) => entry.layerId === seed.sourceLayerId);
+        const sourceLayer = column.provenance.layers.find((entry) => entry.layerId === boundary.layerId);
         if (
           sourceLayer === undefined ||
           !hasIdentifiedSource(sourceLayer.provenance) ||
           !hasIdentifiedSource(column.provenance.surfacePressure)
         ) {
-          diagnostics.push('hydrostaticColumn: отсутствует provenance давления или состава слоя «' + seed.sourceLayerId + '»');
+          diagnostics.push('hydrostaticColumn: отсутствует provenance давления или состава child layer «' + boundary.layerId + '»');
           continue;
         }
+
+        let equationOfStateMaxRelativeDeviation = 0;
+        for (const point of points) {
+          const eosDensity =
+            (point.pressurePa * point.meanMolarMassKgPerMol) /
+            (UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * point.temperatureK);
+          const eosDeviation =
+            Math.abs(eosDensity - point.densityKgPerM3) / Math.max(point.densityKgPerM3, Number.MIN_VALUE);
+          equationOfStateMaxRelativeDeviation = Math.max(
+            equationOfStateMaxRelativeDeviation,
+            eosDeviation
+          );
+        }
+        if (equationOfStateMaxRelativeDeviation > 1e-8) {
+          diagnostics.push('hydrostaticColumn: EOS mismatch P*Mbar/(R*T) vs rho in child layer «' + boundary.layerId + '» (' + equationOfStateMaxRelativeDeviation + ')');
+          continue;
+        }
+
         const snapshot = (point: HydrostaticProfilePoint) => ({
           heightM: point.heightM,
           pressurePa: point.pressurePa,
@@ -352,25 +407,51 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
           columnMassKgPerM2: point.columnMassKgPerM2,
           columnMolesPerM2: point.columnMolesPerM2
         });
-        hydrostaticStateById.set(seed.sourceLayerId, {
-          representativeHeightM: representative.heightM,
-          bottom: snapshot(boundary.bottom),
-          representative: snapshot(representative),
-          top: snapshot(boundary.top),
-          molarFractions: fractions,
-          provenance: {
-            pressure: { ...column.provenance.surfacePressure },
-            composition: { ...sourceLayer.provenance },
-            model: {
-              sourceName: 'Core hydrostatic atmosphere solver (Stage 4.8.1)',
-              method: 'spherical-gravity ideal-gas hydrostatic integration with Radau IIA',
-              limitations: column.assumptions.join('; ')
-            }
-          }
+        pendingHydrostaticById.set(boundary.layerId, {
+          boundary,
+          representative,
+          fractions,
+          sourceProvenance: { ...sourceLayer.provenance },
+          equationOfStateMaxRelativeDeviation
+        });
+        effective.push({
+          sourceLayerId: boundary.layerId,
+          temperatureK: representative.temperatureK,
+          bottomAltitudeM: boundary.bottom.heightM,
+          topAltitudeM: boundary.top.heightM,
+          temperatureProvenance: {
+            ...sourceSeed.temperatureProvenance,
+            method: 'representative temperature evaluated by hydrostatic solver at ' + representative.heightM + ' m',
+            note: 'T(z) preserved by the exact source temperature law; midpoint value used only as homogeneous kinetic-compartment representative'
+          },
+          altitudeProvenance: { ...sourceLayer.provenance }
         });
       }
+
+      for (const sourceSeed of imported.layers) {
+        const children = (childRangesByParent.get(sourceSeed.sourceLayerId) ?? [])
+          .sort((a, b) => a.min - b.min);
+        if (children.length === 0) {
+          diagnostics.push('hydrostaticColumn: исходный слой «' + sourceSeed.sourceLayerId + '» не имеет дочерних гидростатических слоёв');
+          continue;
+        }
+        if (Math.abs(children[0]!.min - sourceSeed.bottomAltitudeM) > toleranceM) {
+          diagnostics.push('hydrostaticColumn: child layers не покрывают нижнюю границу исходного слоя «' + sourceSeed.sourceLayerId + '»');
+        }
+        if (Math.abs(children[children.length - 1]!.max - sourceSeed.topAltitudeM) > toleranceM) {
+          diagnostics.push('hydrostaticColumn: child layers не покрывают верхнюю границу исходного слоя «' + sourceSeed.sourceLayerId + '»');
+        }
+        for (let index = 1; index < children.length; index++) {
+          if (Math.abs(children[index]!.min - children[index - 1]!.max) > toleranceM) {
+            diagnostics.push('hydrostaticColumn: child layers имеют разрыв или перекрытие внутри «' + sourceSeed.sourceLayerId + '»');
+          }
+        }
+      }
+      effectiveSeeds = effective;
     }
   }
+
+  const expectedIds = effectiveSeeds.map((layer) => layer.sourceLayerId);
 
   const suppliedById = new Map<string, SourcedKineticLayerInventoryInput>();
   for (const [index, layer] of input.layers.entries()) {
@@ -401,7 +482,7 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
   }
 
   const configurationLayers: ChemicalPhysicalKineticsState['layers'] = [];
-  for (const seed of imported.layers) {
+  for (const seed of effectiveSeeds) {
     const supplied = suppliedById.get(seed.sourceLayerId);
     if (supplied === undefined) continue;
     const prefix = 'profile layer «' + seed.sourceLayerId + '»';
@@ -450,6 +531,113 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
       }
     }
 
+    const pendingHydrostatic = pendingHydrostaticById.get(seed.sourceLayerId);
+    let hydrostaticState:
+      NonNullable<ChemicalPhysicalKineticsState['layers'][number]['hydrostaticState']> | undefined;
+    if (pendingHydrostatic !== undefined) {
+      const { boundary, representative, fractions, sourceProvenance, equationOfStateMaxRelativeDeviation } = pendingHydrostatic;
+      const n2MoleFraction = fractions.n2;
+      const suppliedN2 = inventories.n2;
+      if (typeof n2MoleFraction !== 'number' || n2MoleFraction <= 0) {
+        diagnostics.push(prefix + ': в гидростатическом bulk-составе отсутствует положительная доля N2');
+      } else if (typeof suppliedN2 !== 'number' || !Number.isFinite(suppliedN2) || suppliedN2 <= 0) {
+        diagnostics.push(prefix + ': для гидростатической проверки требуется явный положительный подстолбовой запас n2');
+      } else {
+        const deltaColumnMoles =
+          boundary.top.columnMolesPerM2 - boundary.bottom.columnMolesPerM2;
+        const hydrostaticLayerInventoryMolM2 = deltaColumnMoles * n2MoleFraction;
+        const layerThicknessM = seed.topAltitudeM - seed.bottomAltitudeM;
+        const layerAverageConcentrationMoleculeCm3 =
+          (suppliedN2 / layerThicknessM) * AVOGADRO_NUMBER_PER_MOL / 1e6;
+        const hydrostaticMidpointConcentrationMoleculeCm3 =
+          (n2MoleFraction * representative.pressurePa /
+            (UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * representative.temperatureK)) *
+          AVOGADRO_NUMBER_PER_MOL / 1e6;
+        const relativeDeviation =
+          Math.abs(layerAverageConcentrationMoleculeCm3 - hydrostaticMidpointConcentrationMoleculeCm3) /
+          hydrostaticMidpointConcentrationMoleculeCm3;
+        const inventoryRelativeDeviation =
+          Math.abs(suppliedN2 - hydrostaticLayerInventoryMolM2) /
+          Math.max(hydrostaticLayerInventoryMolM2, Number.MIN_VALUE);
+        if (
+          !Number.isFinite(relativeDeviation) ||
+          relativeDeviation > maximumHydrostaticThirdBodyRelativeDeviation
+        ) {
+          diagnostics.push(
+            prefix + ': средняя концентрация N2 из столба отличается от локальной xN2*P/(R*T) на ' +
+            (relativeDeviation * 100).toFixed(3) + '%; требуется дополнительное вертикальное разбиение (лимит ' +
+            (maximumHydrostaticThirdBodyRelativeDeviation * 100).toFixed(2) + '%)'
+          );
+        }
+        if (!Number.isFinite(inventoryRelativeDeviation) || inventoryRelativeDeviation > 1e-6) {
+          diagnostics.push(
+            prefix + ': подстолбовой запас n2 не согласован с гидростатическим ΔNmol*xN2; относительное расхождение ' +
+            inventoryRelativeDeviation
+          );
+        }
+        hydrostaticState = {
+          representativeHeightM: representative.heightM,
+          bottom: {
+            heightM: boundary.bottom.heightM,
+            pressurePa: boundary.bottom.pressurePa,
+            temperatureK: boundary.bottom.temperatureK,
+            densityKgPerM3: boundary.bottom.densityKgPerM3,
+            meanMolarMassKgPerMol: boundary.bottom.meanMolarMassKgPerMol,
+            gravityMs2: boundary.bottom.gravityMs2,
+            scaleHeightM: boundary.bottom.scaleHeightM,
+            columnMassKgPerM2: boundary.bottom.columnMassKgPerM2,
+            columnMolesPerM2: boundary.bottom.columnMolesPerM2
+          },
+          representative: {
+            heightM: representative.heightM,
+            pressurePa: representative.pressurePa,
+            temperatureK: representative.temperatureK,
+            densityKgPerM3: representative.densityKgPerM3,
+            meanMolarMassKgPerMol: representative.meanMolarMassKgPerMol,
+            gravityMs2: representative.gravityMs2,
+            scaleHeightM: representative.scaleHeightM,
+            columnMassKgPerM2: representative.columnMassKgPerM2,
+            columnMolesPerM2: representative.columnMolesPerM2
+          },
+          top: {
+            heightM: boundary.top.heightM,
+            pressurePa: boundary.top.pressurePa,
+            temperatureK: boundary.top.temperatureK,
+            densityKgPerM3: boundary.top.densityKgPerM3,
+            meanMolarMassKgPerMol: boundary.top.meanMolarMassKgPerMol,
+            gravityMs2: boundary.top.gravityMs2,
+            scaleHeightM: boundary.top.scaleHeightM,
+            columnMassKgPerM2: boundary.top.columnMassKgPerM2,
+            columnMolesPerM2: boundary.top.columnMolesPerM2
+          },
+          molarFractions: fractions,
+          equationOfStateMaxRelativeDeviation,
+          thirdBodyConsistency: {
+            speciesId: 'n2',
+            hydrostaticMidpointConcentrationMoleculeCm3,
+            layerAverageConcentrationMoleculeCm3,
+            relativeDeviation,
+            maximumAllowedRelativeDeviation: maximumHydrostaticThirdBodyRelativeDeviation,
+            hydrostaticLayerInventoryMolM2,
+            suppliedLayerInventoryMolM2: suppliedN2,
+            inventoryRelativeDeviation
+          },
+          provenance: {
+            pressure: { ...input.hydrostaticColumn.provenance.surfacePressure },
+            composition: { ...sourceProvenance },
+            model: {
+              sourceName: 'Core hydrostatic atmosphere solver (Stage 4.8.1)',
+              method: 'spherical-gravity ideal-gas hydrostatic integration with Radau IIA',
+              limitations: input.hydrostaticColumn.assumptions.join('; ')
+            }
+          }
+        };
+      }
+    }
+    if (hydrostaticState !== undefined) {
+      hydrostaticStateById.set(seed.sourceLayerId, hydrostaticState);
+    }
+
     configurationLayers.push({
       layerId: seed.sourceLayerId,
       altitudeRangeM: {
@@ -469,9 +657,7 @@ export function buildPhysicalKineticsConfigurationFromSourcedProfile(
       reactionIds: Array.isArray(supplied.reactionIds)
         ? [...supplied.reactionIds]
         : [],
-      ...(hydrostaticStateById.has(seed.sourceLayerId)
-        ? { hydrostaticState: hydrostaticStateById.get(seed.sourceLayerId)! }
-        : {})
+      ...(hydrostaticState === undefined ? {} : { hydrostaticState })
     });
   }
 
