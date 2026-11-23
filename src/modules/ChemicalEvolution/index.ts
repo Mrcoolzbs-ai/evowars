@@ -1264,6 +1264,18 @@ function toPrimaryKineticReactionAudit(summary: AppliedReactionSummary): Chemica
     dataStatus: 'known',
     rateConstant: { ...summary.rateConstant },
     appliedRangeK: { min: summary.appliedRangeK.min, max: summary.appliedRangeK.max },
+    // В текущих fall-off записях нет полного численного бюджета
+    // неопределённости k0/k∞, а Core RateConstantEvaluation намеренно
+    // не комбинирует её в эффективную неопределённость k. Не выдаём
+    // отсутствие оценки за нулевую неопределённость.
+    uncertainty: {
+      status: 'not_quantified',
+      effectiveRate: null,
+      lowPressureLimit: null,
+      highPressureLimit: null,
+      reason:
+        'Для применённой fall-off параметризации количественная неопределённость эффективного k и его пределов не объединена/не предоставлена; evaluator оставляет uncertainty undefined. Качественные ограничения источников сохранены в provenance и warnings.'
+    },
     provenance: { ...summary.provenance },
     parameterProvenance: {
       lowPressureLimit: { ...summary.parameterProvenance.lowPressureLimit },
