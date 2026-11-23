@@ -175,7 +175,9 @@ function makePhysicalKineticWorld(temperatureK = 350): GeneratedWorld {
   const inventory = {
     ...base.inventory,
     h: 8e-6,
-    ho2: 1e-8
+    ho2: 1e-8,
+    // A global species deliberately omitted from every reactive layer.
+    co2: 0.012
   };
   const provenance = (sourceId: string) => ({
     sourceName: 'synthetic integration test fixture',
@@ -193,7 +195,7 @@ function makePhysicalKineticWorld(temperatureK = 350): GeneratedWorld {
     physicalKinetics: {
       maximumMacroStepS: 1e10,
       totalInventoryProvenance: Object.fromEntries(
-        ['o', 'no', 'no2', 'h', 'o2', 'ho2', 'n2'].map((speciesId) => [
+        ['o', 'no', 'no2', 'h', 'o2', 'ho2', 'n2', 'co2'].map((speciesId) => [
           speciesId,
           provenance('fixture:global-inventory:' + speciesId)
         ])
@@ -489,6 +491,11 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(stepAudit.layers[0]!.thirdBody.concentrationMoleculeCm3).toBeGreaterThan(0);
     expect(stepAudit.unmodeledColumnResiduals.o2!.amountMolM2).toBeCloseTo(before.o2! - 4e-5, 12);
     expect(stepAudit.unmodeledColumnResiduals.o2!.provenance.sourceId).toBe('fixture:global-inventory:o2');
+    // CO2 is present in the total atmosphere but is absent from all
+    // reactive compartments: it must be explicitly audited as a residual.
+    expect(stepAudit.unmodeledColumnResiduals.co2!.amountMolM2).toBeCloseTo(0.012, 12);
+    expect(stepAudit.unmodeledColumnResiduals.co2!.provenance.sourceId).toBe('fixture:global-inventory:co2');
+    expect(updated.inventory.co2).toBe(before.co2);
     expect(stepAudit.assumptions.some((item) =>
       item.includes('немоделируемый остаток полного атмосферного столба вида «o2»')
     )).toBe(true);
