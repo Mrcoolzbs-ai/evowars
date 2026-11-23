@@ -110,27 +110,30 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
     throw new SimulationClockError('invalid_step', `шаг времени должен быть положительным, получено ${dtS}: нулевые и отрицательные шаги запрещены`);
   }
 
-  const representable = representableStep(clock);
-  // Потеря точности: шаг не изменяет локальное время — сегментируем.
-  if (clock.localTimeS > 0 && representable !== null && dtS < representable) {
-    return {
-      segmentIndex: clock.segmentIndex + 1,
-      localTimeS: dtS,
-      priorSegmentsS: clock.priorSegmentsS + clock.localTimeS,
-      stepCount: clock.stepCount + 1,
-      representableStepS: null
-    };
-  }
-
   const localTimeS = clock.localTimeS + dtS;
   if (!Number.isFinite(localTimeS)) {
     throw new SimulationClockError('invalid_step', 'переполнение времени при сложении шага');
   }
+
+  // Segment only when THIS addition actually loses the step. The
+  // representableStep estimate is intentionally conservative and must
+  // not force a rollover when the concrete sum is still distinguishable.
+  if (clock.localTimeS > 0 && localTimeS === clock.localTimeS) {
+    const nextSegment = startNewSegment(clock);
+    return {
+      ...nextSegment,
+      localTimeS: dtS,
+      stepCount: clock.stepCount + 1,
+      representableStepS: representableStep({ localTimeS: dtS })
+    };
+  }
+
   return {
     ...clock,
     localTimeS,
     stepCount: clock.stepCount + 1,
-    // представимость шага оценивается по новому локальному времени
+    // representability is diagnostic only; the actual sum above decides
+    // whether rollover is necessary.
     representableStepS: representableStep({ localTimeS })
   };
 }
@@ -147,7 +150,7 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
  */
 export function advanceTo(clock: SimulationClockState, target: TimePoint): SimulationClockState {
   if (
-    !Number.isInteger(target.segmentIndex) ||
+    !Number.isSafeInteger(target.segmentIndex) ||
     target.segmentIndex < 0 ||
     !Number.isFinite(target.localTimeS) ||
     target.localTimeS < 0
@@ -222,10 +225,18 @@ export function comparePoints(a: TimePoint, b: TimePoint): -1 | 0 | 1 {
  * будущими подчасами процессов для суб-циклирования.
  */
 export function startNewSegment(clock: SimulationClockState): SimulationClockState {
+  const segmentIndex = clock.segmentIndex + 1;
+  if (!Number.isSafeInteger(segmentIndex)) {
+    throw new SimulationClockError('invalid_step', 'исчерпан диапазон безопасных целых для segmentIndex');
+  }
+  const priorSegmentsS = clock.priorSegmentsS + clock.localTimeS;
+  if (!Number.isFinite(priorSegmentsS)) {
+    throw new SimulationClockError('invalid_step', 'накопленная оценка priorSegmentsS переполнилась при открытии сегмента');
+  }
   return {
-    segmentIndex: clock.segmentIndex + 1,
+    segmentIndex,
     localTimeS: 0,
-    priorSegmentsS: clock.priorSegmentsS + clock.localTimeS,
+    priorSegmentsS,
     stepCount: clock.stepCount,
     representableStepS: null
   };
@@ -270,8 +281,8 @@ function validateClockShape(v: unknown): string[] {
       issues.push(`поле «${key}» должно быть конечным числом`);
     }
   }
-  if (typeof c.segmentIndex === 'number' && (!Number.isInteger(c.segmentIndex) || c.segmentIndex < 0)) {
-    issues.push('segmentIndex должен быть неотрицательным целым');
+  if (typeof c.segmentIndex === 'number' && (!Number.isSafeInteger(c.segmentIndex) || c.segmentIndex < 0)) {
+    issues.push('segmentIndex должен быть неотрицательным безопасным целым');
   }
   if (typeof c.localTimeS === 'number' && c.localTimeS < 0) {
     issues.push('localTimeS не может быть отрицательным');
