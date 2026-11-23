@@ -496,6 +496,37 @@ export interface ChemicalPhysicalKineticLayer {
   reactionIds: string[];
 }
 
+/** Lennard-Jones transport data for a neutral gas species. Units are explicit. */
+export interface ChemicalPhysicalLennardJonesTransportSpecies {
+  molarMassKgMol: number;
+  molarMassProvenance: DataProvenance;
+  collisionDiameterAngstrom: number;
+  characteristicEnergyOverKBK: number;
+  collisionParametersProvenance: DataProvenance;
+}
+
+/** Molecular transport properties for one explicitly transported trace species. */
+export interface ChemicalPhysicalMolecularDiffusionSpecies extends ChemicalPhysicalLennardJonesTransportSpecies {
+  /** Dimensionless thermal-diffusion factor alpha_T; it is never silently set to zero. */
+  thermalDiffusionFactor: number;
+  thermalDiffusionProvenance: DataProvenance;
+}
+
+/** Explicit binary-collision parameter set for Chapman-Enskog mixture diffusivity. */
+export interface ChemicalPhysicalMolecularDiffusionConfiguration {
+  /** Properties of each explicitly transported trace species. */
+  species: Record<string, ChemicalPhysicalMolecularDiffusionSpecies>;
+  /** Lennard-Jones properties for every nonzero hydrostatic background component. */
+  backgroundSpecies: Record<string, ChemicalPhysicalLennardJonesTransportSpecies>;
+}
+
+/** Audited molecular diffusion parameters used in one Scheduler transport step. */
+export interface ChemicalPhysicalMolecularDiffusionAudit {
+  method: 'chapman_enskog_neufeld_effective_binary_trace_species';
+  species: Record<string, ChemicalPhysicalMolecularDiffusionSpecies>;
+  backgroundSpecies: Record<string, ChemicalPhysicalLennardJonesTransportSpecies>;
+}
+
 /** Явная конфигурация вертикального турбулентного переноса для Scheduler. */
 export interface ChemicalPhysicalVerticalTransportConfiguration {
   /** Следовые species ID, явно присутствующие в каждом переносимом слое; n2/o2 запрещены. */
@@ -504,6 +535,8 @@ export interface ChemicalPhysicalVerticalTransportConfiguration {
   eddyDiffusivityM2S: number | number[];
   /** Источник/обоснование Kzz; без provenance перенос не считается физически заданным. */
   diffusivityProvenance: DataProvenance;
+  /** Optional molecular diffusion; every LJ pair and thermal factor must be explicit and sourced. */
+  molecularDiffusion?: ChemicalPhysicalMolecularDiffusionConfiguration;
 }
 
 /** Аудит вертикального обмена вещества за тот же Scheduler dt, что и химия. */
@@ -514,6 +547,7 @@ export interface ChemicalPhysicalVerticalTransportAudit {
   speciesIds: string[];
   /** Provenance of the explicitly supplied Kzz profile, when captured by a caller. */
   diffusivityProvenance?: DataProvenance;
+  molecularDiffusion?: ChemicalPhysicalMolecularDiffusionAudit;
   layers: Array<{
     layerId: string;
     altitudeRangeM: { min: number; max: number };
@@ -540,6 +574,14 @@ export interface ChemicalPhysicalVerticalTransportAudit {
       constitutiveFluxMolM2S: number;
       fluxClosureRelativeDeviation: number;
       transferredMolM2: number;
+      eddyGradientFluxMolM2S?: number;
+      molecularGradientFluxMolM2S?: number;
+      molecularDriftFluxMolM2S?: number;
+      molecularDiffusivityM2S?: number;
+      binaryDiffusivitiesM2S?: Record<string, number>;
+      barodiffusionVelocityMs?: number;
+      thermalDiffusionVelocityMs?: number;
+      molecularDriftVelocityMs?: number;
     }>;
   }>;
   columnTotalsMolM2: Record<string, {
