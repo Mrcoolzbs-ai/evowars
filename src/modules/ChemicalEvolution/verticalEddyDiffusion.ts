@@ -410,32 +410,88 @@ export function runVerticalEddyDiffusionStep(
 
   for (const speciesId of speciesIds) {
     const initial = validatedLayers.map((entry) => entry.layer.columnInventoriesMolM2[speciesId]!);
-    const lowerDiagonal = new Array<number>(layerCount).fill(0);
-    const diagonal = new Array<number>(layerCount).fill(1);
-    const upperDiagonal = new Array<number>(layerCount).fill(0);
-
-    for (const [interfaceIndex, interfaceGeometry] of interfaces.entries()) {
-      const lowerAirColumn = validatedLayers[interfaceGeometry.lowerLayerIndex]!.airColumnInventoryMolM2;
-      const upperAirColumn = validatedLayers[interfaceGeometry.upperLayerIndex]!.airColumnInventoryMolM2;
-      const integratedConductance = input.durationS * interfaceGeometry.conductanceMolM2S;
-      const lowerCoupling = integratedConductance / lowerAirColumn;
-      const upperCoupling = integratedConductance / upperAirColumn;
-      if (!Number.isFinite(lowerCoupling) || !Number.isFinite(upperCoupling)) {
-        return rejected('коэффициенты диффузионной системы переполнены на интерфейсе ' + interfaceIndex);
-      }
-      diagonal[interfaceIndex] = diagonal[interfaceIndex]! + lowerCoupling;
-      upperDiagonal[interfaceIndex] = -upperCoupling;
-      lowerDiagonal[interfaceIndex + 1] = -lowerCoupling;
-      diagonal[interfaceIndex + 1] = diagonal[interfaceIndex + 1]! + upperCoupling;
+    const initialTotal = initial.reduce((sum, value) => sum + value, 0);
+    const totalAirColumnInventory = validatedLayers.reduce(
+      (sum, entry) => sum + entry.airColumnInventoryMolM2,
+      0
+    );
+    if (!Number.isFinite(initialTotal) || !isFinitePositive(totalAirColumnInventory)) {
+      return rejected('общий столб вида «' + speciesId + '» или общий воздушный столб не является конечным');
     }
 
-    let final: number[];
+    // Solve for adjacent mixing-ratio differences rather than absolute
+    // inventories. The diffusion operator has a conserved uniform-mixing
+    // mode; removing that mode avoids the near-singular cancellation that
+    // appears in (I - dt L) when dt*Kzz is very large.
+    const initialMixingRatios = initial.map((amount, index) =>
+      amount / validatedLayers[index]!.airColumnInventoryMolM2
+    );
+    const initialDifferences = interfaces.map((_entry, index) =>
+      initialMixingRatios[index]! - initialMixingRatios[index + 1]!
+    );
+    const differenceCount = layerCount - 1;
+    const lowerDiagonal = new Array<number>(differenceCount).fill(0);
+    const diagonal = new Array<number>(differenceCount).fill(1);
+    const upperDiagonal = new Array<number>(differenceCount).fill(0);
+
+    for (let index = 0; index < differenceCount; index++) {
+      const interfaceConductance = interfaces[index]!.conductanceMolM2S;
+      const lowerAirColumn = validatedLayers[index]!.airColumnInventoryMolM2;
+      const upperAirColumn = validatedLayers[index + 1]!.airColumnInventoryMolM2;
+      const integratedConductance = input.durationS * interfaceConductance;
+      const currentCoupling =
+        integratedConductance * (1 / lowerAirColumn + 1 / upperAirColumn);
+      diagonal[index] = 1 + currentCoupling;
+
+      if (index > 0) {
+        const lowerConductance = interfaces[index - 1]!.conductanceMolM2S;
+        lowerDiagonal[index] =
+          -input.durationS * lowerConductance / lowerAirColumn;
+      }
+      if (index < differenceCount - 1) {
+        const upperConductance = interfaces[index + 1]!.conductanceMolM2S;
+        upperDiagonal[index] =
+          -input.durationS * upperConductance / upperAirColumn;
+      }
+      if (
+        !Number.isFinite(diagonal[index]!) ||
+        !Number.isFinite(lowerDiagonal[index]!) ||
+        !Number.isFinite(upperDiagonal[index]!)
+      ) {
+        return rejected('коэффициенты системы разностей mixing ratio переполнены на интерфейсе ' + index);
+      }
+    }
+
+    let finalDifferences: number[];
     try {
-      final = solveTridiagonal(lowerDiagonal, diagonal, upperDiagonal, initial);
+      finalDifferences = solveTridiagonal(
+        lowerDiagonal,
+        diagonal,
+        upperDiagonal,
+        initialDifferences
+      );
     } catch (error) {
       return rejected(error instanceof Error ? error.message : String(error));
     }
-    const initialTotal = initial.reduce((sum, value) => sum + value, 0);
+
+    // Reconstruct mixing ratios from their differences and the exactly
+    // conserved column mean. This preserves the null-space (uniform mixing
+    // ratio) analytically instead of asking a floating-point solve to retain it.
+    const offsets = new Array<number>(layerCount).fill(0);
+    for (let index = differenceCount - 1; index >= 0; index--) {
+      offsets[index] = offsets[index + 1]! + finalDifferences[index]!;
+    }
+    const weightedOffsetMean = offsets.reduce(
+      (sum, offset, index) =>
+        sum + validatedLayers[index]!.airColumnInventoryMolM2 * offset,
+      0
+    ) / totalAirColumnInventory;
+    const conservedMeanMixingRatio = initialTotal / totalAirColumnInventory;
+    const final = offsets.map((offset, index) =>
+      validatedLayers[index]!.airColumnInventoryMolM2 *
+      (conservedMeanMixingRatio + offset - weightedOffsetMean)
+    );
+
     for (let index = 0; index < final.length; index++) {
       const value = final[index]!;
       const negativeTolerance = MINOR_NEGATIVE_RELATIVE_TOLERANCE *
@@ -460,24 +516,15 @@ export function runVerticalEddyDiffusionStep(
       return rejected('вертикальная диффузия не сохранила полный столб вида «' + speciesId + '» в пределах численного допуска');
     }
 
-    // Reconstruct the time-integrated interface transfers from the
-    // conservative finite-volume cell deltas. This avoids magnifying
-    // floating-point cancellation when adjacent mixing ratios become
-    // almost identical in a very stiff implicit step.
-    const transfers = new Array<number>(layerCount - 1).fill(0);
-    let cumulativeTransfer = 0;
-    for (let index = 0; index < layerCount - 1; index++) {
-      cumulativeTransfer += initial[index]! - final[index]!;
-      transfers[index] = cumulativeTransfer;
-    }
+    const transfers = interfaces.map((interfaceGeometry, index) =>
+      interfaceGeometry.conductanceMolM2S * finalDifferences[index]! * input.durationS
+    );
     const fluxes = transfers.map((transfer) => transfer / input.durationS);
-    const constitutiveFluxes = interfaces.map((interfaceGeometry) => {
-      const lowerIndex = interfaceGeometry.lowerLayerIndex;
-      const upperIndex = interfaceGeometry.upperLayerIndex;
-      const lowerMixingRatio = final[lowerIndex]! /
-        validatedLayers[lowerIndex]!.airColumnInventoryMolM2;
-      const upperMixingRatio = final[upperIndex]! /
-        validatedLayers[upperIndex]!.airColumnInventoryMolM2;
+    const constitutiveFluxes = interfaces.map((interfaceGeometry, index) => {
+      const lowerMixingRatio = final[index]! /
+        validatedLayers[index]!.airColumnInventoryMolM2;
+      const upperMixingRatio = final[index + 1]! /
+        validatedLayers[index + 1]!.airColumnInventoryMolM2;
       return interfaceGeometry.conductanceMolM2S * (lowerMixingRatio - upperMixingRatio);
     });
     const fluxClosureRelativeDeviations = fluxes.map((flux, index) =>
