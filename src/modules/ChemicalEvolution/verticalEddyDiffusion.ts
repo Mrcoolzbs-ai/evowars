@@ -585,7 +585,14 @@ export function runVerticalEddyDiffusionStep(
     dryConvectiveInterfaces = convective.interfaces.map((entry) => ({
       convectiveDiffusivityM2S: entry.convectiveDiffusivityM2S
     }));
-    dryConvectiveMixingAudit = convective.audit;
+    dryConvectiveMixingAudit = {
+      ...convective.audit,
+      interfaces: convective.audit.interfaces.map((entry, index) => ({
+        ...entry,
+        effectiveEddyDiffusivityM2S:
+          diffusivityValues[index]! + entry.convectiveDiffusivityM2S
+      }))
+    };
   }
 
   const interfaces: InterfaceGeometry[] = [];
