@@ -720,9 +720,42 @@ function KineticExperimentSection(props: {
 
 // Компонент для отображения мира
 /**
+ * Draft для одного вертикального реакционного слоя. Поля намеренно
+ * вводятся независимо: UI не реконструирует профиль из surface T/scale height.
+ */
+interface PrimaryPhysicalKineticLayerDraft {
+  key: number;
+  temperatureK: string;
+  layerThicknessM: string;
+  temperatureSourceName: string;
+  temperatureSourceReference: string;
+  thicknessSourceName: string;
+  thicknessSourceReference: string;
+  inventorySourceName: string;
+  inventorySourceReference: string;
+  inventories: Record<string, string>;
+}
+
+function createPrimaryPhysicalKineticLayerDraft(key: number): PrimaryPhysicalKineticLayerDraft {
+  return {
+    key,
+    temperatureK: '',
+    layerThicknessM: '',
+    temperatureSourceName: '',
+    temperatureSourceReference: '',
+    thicknessSourceName: '',
+    thicknessSourceReference: '',
+    inventorySourceName: '',
+    inventorySourceReference: '',
+    inventories: {}
+  };
+}
+
+/**
  * Экспертный ввод физической химической конфигурации.
- * Никакие температура, толщина, радикальные запасы или скорости здесь
- * не генерируются: пользователь вводит каждую величину и её источник.
+ * Ни температура, толщина, радикальные запасы, концентрации, ни скорости
+ * не генерируются: пользователь вводит каждый параметр и его источник.
+ * Слои трактуются как неперекрывающиеся части общего столбового инвентаря.
  */
 function PrimaryPhysicalKineticsConfigurator(props: {
   world: GeneratedWorld;
@@ -731,19 +764,14 @@ function PrimaryPhysicalKineticsConfigurator(props: {
   const state = props.world.chemicalState;
   const [reaction89, setReaction89] = useState(false);
   const [reaction106, setReaction106] = useState(false);
-  const [temperatureK, setTemperatureK] = useState('');
-  const [layerThicknessM, setLayerThicknessM] = useState('');
   const [maximumMacroStepS, setMaximumMacroStepS] = useState('');
-  const [temperatureSourceName, setTemperatureSourceName] = useState('');
-  const [temperatureSourceReference, setTemperatureSourceReference] = useState('');
-  const [thicknessSourceName, setThicknessSourceName] = useState('');
-  const [thicknessSourceReference, setThicknessSourceReference] = useState('');
-  const [layerInventorySourceName, setLayerInventorySourceName] = useState('');
-  const [layerInventorySourceReference, setLayerInventorySourceReference] = useState('');
   const [totalInventorySourceName, setTotalInventorySourceName] = useState('');
   const [totalInventorySourceReference, setTotalInventorySourceReference] = useState('');
   const [globalValues, setGlobalValues] = useState<Record<string, string>>({});
-  const [layerValues, setLayerValues] = useState<Record<string, string>>({});
+  const [layerDrafts, setLayerDrafts] = useState<PrimaryPhysicalKineticLayerDraft[]>([
+    createPrimaryPhysicalKineticLayerDraft(1)
+  ]);
+  const [nextLayerKey, setNextLayerKey] = useState(2);
   const [message, setMessage] = useState<string | null>(null);
 
   if (!state) return null;
@@ -773,6 +801,35 @@ function PrimaryPhysicalKineticsConfigurator(props: {
     note: 'Введено пользователем для ' + field
   });
 
+  const updateLayerDraft = (
+    key: number,
+    patch: Partial<PrimaryPhysicalKineticLayerDraft>
+  ) => {
+    setLayerDrafts((current) =>
+      current.map((layer) => layer.key === key ? { ...layer, ...patch } : layer)
+    );
+  };
+
+  const updateLayerInventory = (key: number, speciesId: string, value: string) => {
+    setLayerDrafts((current) =>
+      current.map((layer) =>
+        layer.key === key
+          ? { ...layer, inventories: { ...layer.inventories, [speciesId]: value } }
+          : layer
+      )
+    );
+  };
+
+  const addLayerDraft = () => {
+    if (layerDrafts.length >= 8) {
+      setMessage('В форме можно явно задать не более восьми слоёв; это ограничение интерфейса, а не физическое свойство модели.');
+      return;
+    }
+    setLayerDrafts((current) => [...current, createPrimaryPhysicalKineticLayerDraft(nextLayerKey)]);
+    setNextLayerKey((current) => current + 1);
+    setMessage(null);
+  };
+
   const configure = () => {
     setMessage(null);
     if (state.mode !== 'column_inventory') {
@@ -783,6 +840,11 @@ function PrimaryPhysicalKineticsConfigurator(props: {
       setMessage('Выберите хотя бы одну параметризованную реакцию.');
       return;
     }
+    if (layerDrafts.length === 0) {
+      setMessage('Добавьте хотя бы один физический реакционный слой.');
+      return;
+    }
+
     const numeric = (value: string, label: string): number | null => {
       if (value.trim() === '') {
         setMessage('Не задано поле «' + label + '». Отсутствующее значение не трактуется как ноль.');
@@ -804,41 +866,22 @@ function PrimaryPhysicalKineticsConfigurator(props: {
       }
       return parsed;
     };
-    const temperature = positive(temperatureK, 'температура, K');
-    if (temperature === null) return;
-    const thickness = positive(layerThicknessM, 'толщина слоя, м');
-    if (thickness === null) return;
+
     const maximumStep = positive(maximumMacroStepS, 'максимальный macro dt, с');
     if (maximumStep === null) return;
-
-    const sourceGroups = [
-      [temperatureSourceName, temperatureSourceReference, 'температуры'],
-      [thicknessSourceName, thicknessSourceReference, 'толщины'],
-      [layerInventorySourceName, layerInventorySourceReference, 'подстолбового инвентаря'],
-      [totalInventorySourceName, totalInventorySourceReference, 'полного атмосферного инвентаря']
-    ] as const;
-    for (const [name, reference, label] of sourceGroups) {
-      if (name.trim() === '' || reference.trim() === '') {
-        setMessage('Укажите название и ссылку/ID источника для ' + label + '.');
-        return;
-      }
+    if (totalInventorySourceName.trim() === '' || totalInventorySourceReference.trim() === '') {
+      setMessage('Укажите название и reference/ID источника полных атмосферных запасов.');
+      return;
     }
 
     const totalColumnInventoriesMolM2: Record<string, number> = {};
-    const columnInventoriesMolM2: Record<string, number> = {};
     for (const item of species) {
       const globalValue = numeric(
         globalValues[item.id] ?? (state.inventory[item.id] === undefined ? '' : String(state.inventory[item.id])),
         'полный атмосферный запас ' + item.id + ', моль/м²'
       );
       if (globalValue === null) return;
-      const layerValue = numeric(
-        layerValues[item.id] ?? '',
-        'подстолбовой запас ' + item.id + ', моль/м²'
-      );
-      if (layerValue === null) return;
       totalColumnInventoriesMolM2[item.id] = globalValue;
-      columnInventoriesMolM2[item.id] = layerValue;
     }
 
     const totalInventoryProvenance = Object.fromEntries(
@@ -847,21 +890,54 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         makeSource(totalInventorySourceName, totalInventorySourceReference, 'полного атмосферного запаса ' + item.id)
       ])
     );
+
+    const configuredLayers: ChemicalPhysicalKineticsState['layers'] = [];
+    for (let index = 0; index < layerDrafts.length; index++) {
+      const draft = layerDrafts[index]!;
+      const prefix = 'слой ' + (index + 1);
+      const temperature = positive(draft.temperatureK, prefix + ': температура, K');
+      if (temperature === null) return;
+      const thickness = positive(draft.layerThicknessM, prefix + ': толщина, м');
+      if (thickness === null) return;
+
+      const sourceGroups = [
+        [draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': источник температуры'],
+        [draft.thicknessSourceName, draft.thicknessSourceReference, prefix + ': источник толщины'],
+        [draft.inventorySourceName, draft.inventorySourceReference, prefix + ': источник подстолбового инвентаря']
+      ] as const;
+      for (const [name, reference, label] of sourceGroups) {
+        if (name.trim() === '' || reference.trim() === '') {
+          setMessage('Укажите название и ссылку/ID: ' + label + '.');
+          return;
+        }
+      }
+
+      const columnInventoriesMolM2: Record<string, number> = {};
+      for (const item of species) {
+        const layerValue = numeric(
+          draft.inventories[item.id] ?? '',
+          prefix + ': подстолбовой запас ' + item.id + ', моль/м²'
+        );
+        if (layerValue === null) return;
+        columnInventoriesMolM2[item.id] = layerValue;
+      }
+
+      configuredLayers.push({
+        layerId: 'user-configured-layer-' + draft.key,
+        layerThicknessM: thickness,
+        thicknessProvenance: makeSource(draft.thicknessSourceName, draft.thicknessSourceReference, prefix + ': геометрическая толщина'),
+        temperatureK: temperature,
+        temperatureProvenance: makeSource(draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': локальная температура'),
+        columnInventoriesMolM2,
+        inventoryProvenance: makeSource(draft.inventorySourceName, draft.inventorySourceReference, prefix + ': подстолбовой запас'),
+        reactionIds: [...selectedReactionIds]
+      });
+    }
+
     const config: ChemicalPhysicalKineticsState = {
       maximumMacroStepS: maximumStep,
       totalInventoryProvenance,
-      layers: [
-        {
-          layerId: 'user-configured-layer-1',
-          layerThicknessM: thickness,
-          thicknessProvenance: makeSource(thicknessSourceName, thicknessSourceReference, 'геометрической толщины'),
-          temperatureK: temperature,
-          temperatureProvenance: makeSource(temperatureSourceName, temperatureSourceReference, 'локальной температуры'),
-          columnInventoriesMolM2,
-          inventoryProvenance: makeSource(layerInventorySourceName, layerInventorySourceReference, 'подстолбового запаса'),
-          reactionIds: selectedReactionIds
-        }
-      ]
+      layers: configuredLayers
     };
     const result = configurePrimaryPhysicalChemicalKinetics(
       state,
@@ -903,7 +979,7 @@ function PrimaryPhysicalKineticsConfigurator(props: {
     <details className="world-section">
       <summary>Настроить физическую химическую кинетику (экспертный ввод)</summary>
       <p className="model-note">
-        Только для column_inventory. Никакие T, толщины, концентрации, радикальные запасы или скорости не выводятся автоматически. Значения вводятся в физических единицах вместе с источниками.
+        Только для column_inventory. Никакие T, толщины, концентрации, радикальные запасы или скорости не выводятся автоматически. Значения вводятся в физических единицах вместе с источниками. Каждый слой — отдельная неперекрывающаяся часть атмосферного столба.
       </p>
       {state.mode !== 'column_inventory' ? (
         <p className="warning">Физический режим недоступен для нормированного игрового инвентаря.</p>
@@ -921,25 +997,22 @@ function PrimaryPhysicalKineticsConfigurator(props: {
             </label>
             <p className="model-note">Общая область применимости двух реакций — ровно 300 K. Вне диапазона выбранной записи Scheduler отклонит шаг.</p>
           </fieldset>
+
           <fieldset>
-            <legend>Условия реакционного слоя</legend>
-            <label>Локальная температура, K
-              <input type="number" min="0" step="any" value={temperatureK} onChange={(event) => setTemperatureK(event.target.value)} />
-            </label>
-            <label>Геометрическая толщина слоя, м
-              <input type="number" min="0" step="any" value={layerThicknessM} onChange={(event) => setLayerThicknessM(event.target.value)} />
-            </label>
-            <label>Максимальный macro dt, с (численное ограничение, не τ реакции)
+            <legend>Максимальный физический шаг</legend>
+            <label>Maximum macro dt, с (численное ограничение, не τ реакции)
               <input type="number" min="0" step="any" value={maximumMacroStepS} onChange={(event) => setMaximumMacroStepS(event.target.value)} />
             </label>
           </fieldset>
+
           {species.length > 0 && (
             <fieldset>
-              <legend>Запасы видов, моль/м²</legend>
+              <legend>Полные атмосферные запасы, моль/м²</legend>
+              <p className="model-note">Это общий столб для всех слоёв. Уже известные значения показываются из ChemicalEvolutionState; отсутствующие радикальные запасы остаются пустыми.</p>
               {species.map((item) => (
                 <div key={item.id}>
                   <strong>{item.label}</strong>
-                  <label>Полный атмосферный столб (существующий запас prefilled, если известен)
+                  <label>Полный атмосферный столб
                     <input
                       type="number"
                       min="0"
@@ -948,46 +1021,86 @@ function PrimaryPhysicalKineticsConfigurator(props: {
                       onChange={(event) => setGlobalValues((current) => ({ ...current, [item.id]: event.target.value }))}
                     />
                   </label>
-                  <label>Запас в реакционном слое (неизвестно — оставьте пустым для ошибки)
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={layerValues[item.id] ?? ''}
-                      onChange={(event) => setLayerValues((current) => ({ ...current, [item.id]: event.target.value }))}
-                    />
-                  </label>
                 </div>
               ))}
+              <label>Источник полных атмосферных запасов — название
+                <input value={totalInventorySourceName} onChange={(event) => setTotalInventorySourceName(event.target.value)} />
+              </label>
+              <label>Источник полных атмосферных запасов — reference / ID
+                <input value={totalInventorySourceReference} onChange={(event) => setTotalInventorySourceReference(event.target.value)} />
+              </label>
             </fieldset>
           )}
-          <fieldset>
-            <legend>Источники / provenance</legend>
-            <label>Источник температуры — название
-              <input value={temperatureSourceName} onChange={(event) => setTemperatureSourceName(event.target.value)} />
-            </label>
-            <label>Источник температуры — reference / ID
-              <input value={temperatureSourceReference} onChange={(event) => setTemperatureSourceReference(event.target.value)} />
-            </label>
-            <label>Источник толщины — название
-              <input value={thicknessSourceName} onChange={(event) => setThicknessSourceName(event.target.value)} />
-            </label>
-            <label>Источник толщины — reference / ID
-              <input value={thicknessSourceReference} onChange={(event) => setThicknessSourceReference(event.target.value)} />
-            </label>
-            <label>Источник подстолбовых запасов — название
-              <input value={layerInventorySourceName} onChange={(event) => setLayerInventorySourceName(event.target.value)} />
-            </label>
-            <label>Источник подстолбовых запасов — reference / ID
-              <input value={layerInventorySourceReference} onChange={(event) => setLayerInventorySourceReference(event.target.value)} />
-            </label>
-            <label>Источник полных атмосферных запасов — название
-              <input value={totalInventorySourceName} onChange={(event) => setTotalInventorySourceName(event.target.value)} />
-            </label>
-            <label>Источник полных атмосферных запасов — reference / ID
-              <input value={totalInventorySourceReference} onChange={(event) => setTotalInventorySourceReference(event.target.value)} />
-            </label>
-          </fieldset>
+
+          <div className="physical-kinetic-layers">
+            {layerDrafts.map((layer, index) => (
+              <fieldset key={layer.key}>
+                <legend>Реакционный слой {index + 1}</legend>
+                {layerDrafts.length > 1 && (
+                  <button type="button" className="secondary" onClick={() => {
+                    setLayerDrafts((current) => current.filter((candidate) => candidate.key !== layer.key));
+                  }}>
+                    Удалить слой
+                  </button>
+                )}
+                <label>Локальная температура, K
+                  <input type="number" min="0" step="any" value={layer.temperatureK}
+                    onChange={(event) => updateLayerDraft(layer.key, { temperatureK: event.target.value })} />
+                </label>
+                <label>Геометрическая толщина слоя, м
+                  <input type="number" min="0" step="any" value={layer.layerThicknessM}
+                    onChange={(event) => updateLayerDraft(layer.key, { layerThicknessM: event.target.value })} />
+                </label>
+
+                {species.length > 0 && (
+                  <div>
+                    <strong>Подстолбовые запасы этого слоя, моль/м²</strong>
+                    {species.map((item) => (
+                      <label key={item.id}>{item.label}
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={layer.inventories[item.id] ?? ''}
+                          onChange={(event) => updateLayerInventory(layer.key, item.id, event.target.value)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <label>Источник температуры — название
+                  <input value={layer.temperatureSourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { temperatureSourceName: event.target.value })} />
+                </label>
+                <label>Источник температуры — reference / ID
+                  <input value={layer.temperatureSourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { temperatureSourceReference: event.target.value })} />
+                </label>
+                <label>Источник толщины — название
+                  <input value={layer.thicknessSourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { thicknessSourceName: event.target.value })} />
+                </label>
+                <label>Источник толщины — reference / ID
+                  <input value={layer.thicknessSourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { thicknessSourceReference: event.target.value })} />
+                </label>
+                <label>Источник подстолбовых запасов — название
+                  <input value={layer.inventorySourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { inventorySourceName: event.target.value })} />
+                </label>
+                <label>Источник подстолбовых запасов — reference / ID
+                  <input value={layer.inventorySourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { inventorySourceReference: event.target.value })} />
+                </label>
+              </fieldset>
+            ))}
+          </div>
+          <button type="button" className="secondary" disabled={layerDrafts.length >= 8} onClick={addLayerDraft}>
+            Добавить ещё один реакционный слой ({layerDrafts.length}/8)
+          </button>
+          <p className="model-note">Слои — неперекрывающиеся части одного столба. Сумма запасов каждого вида по всем слоям не может превышать полный атмосферный запас; это проверяется перед сохранением.</p>
+
           <button type="button" className="secondary" disabled={selectedReactionIds.length === 0} onClick={configure}>
             Проверить и сохранить физическую конфигурацию
           </button>
