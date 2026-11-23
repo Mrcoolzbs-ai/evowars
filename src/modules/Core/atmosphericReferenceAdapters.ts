@@ -25,11 +25,14 @@ import {
   USSA_1976_PROVENANCE
 } from '../Data/atmosphericReferenceProfiles';
 import {
+  computeAdaptivelyRefinedHydrostaticColumn,
   computeHydrostaticColumn
 } from './hydrostaticAtmosphere';
 import type {
+  AdaptiveHydrostaticColumnResult,
   HydrostaticColumnInput,
-  HydrostaticColumnResult
+  HydrostaticColumnResult,
+  HydrostaticRefinementPolicy
 } from './hydrostaticAtmosphere';
 
 export const USSA_1976_REFERENCE_PROFILE_ID = 'ussa_1976_earth' as const;
@@ -175,4 +178,20 @@ export function createUssa1976HydrostaticColumnInput(): HydrostaticColumnInput {
 /** Run the canonical USSA 1976 Earth reference through Core's hydrostatic solver. */
 export function computeUssa1976ReferenceHydrostaticColumn(): HydrostaticColumnResult {
   return computeHydrostaticColumn(createUssa1976HydrostaticColumnInput());
+}
+
+
+/**
+ * Canonical seven-layer USSA Earth reference with adaptive sublayers.
+ * The helper returns the refined input and the freshly re-integrated
+ * column; its child layer ids retain parentLayerId lineage to the 7 source
+ * layers so the Scheduler adapter can project provenance and inventories.
+ */
+export function computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn(
+  policy?: HydrostaticRefinementPolicy
+): AdaptiveHydrostaticColumnResult {
+  return computeAdaptivelyRefinedHydrostaticColumn(
+    createUssa1976HydrostaticColumnInput(),
+    policy
+  );
 }
