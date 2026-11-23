@@ -655,13 +655,18 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
       chemicalState: world.chemicalState!
     });
     const priorBookkeeping = core.scheduling;
+    if (!priorBookkeeping) throw new Error('test fixture must initialize scheduler bookkeeping');
     const result = runChemicalEvolutionSchedulerStep({ ...world, coreWorldState: core });
 
     expect(result.status).toBe('committed');
     expect(result.world.coreWorldState).not.toBe(core);
-    expect(result.world.coreWorldState!.scheduling.stepCount).toBe(priorBookkeeping.stepCount + 1);
-    expect(result.world.coreWorldState!.reservoirs.find((r) => r.id === CHEMICAL_RESERVOIR_IDS.atmospheric)!.material!.entries)
-      .toEqual(result.world.chemicalState!.inventory);
+    const updatedCore = result.world.coreWorldState;
+    if (!updatedCore?.scheduling) throw new Error('committed physical step must preserve scheduler bookkeeping');
+    expect(updatedCore.scheduling.stepCount).toBe(priorBookkeeping.stepCount + 1);
+    const updatedAtmosphere = updatedCore.reservoirs.find(
+      (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+    );
+    expect(updatedAtmosphere?.material?.entries).toEqual(result.world.chemicalState!.inventory);
     expect(core.scheduling).toEqual(priorBookkeeping);
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
   });
