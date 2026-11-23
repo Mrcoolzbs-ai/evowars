@@ -1997,10 +1997,18 @@ export function runMacroStep(
     );
   }
   if (processBoundary !== undefined) {
+    const reachedByCurrentStep = processBoundary.processIds.filter((id) => selectedProcessIds.has(id));
+    const deferredToNextTurn = processBoundary.processIds.filter((id) => !selectedProcessIds.has(id));
+    const details: string[] = [];
+    if (reachedByCurrentStep.length > 0) {
+      details.push('текущий macro-step дошёл до срока процесса: ' + reachedByCurrentStep.join(', '));
+    }
+    if (deferredToNextTurn.length > 0) {
+      details.push('процессы ожидают следующего Scheduler turn: ' + deferredToNextTurn.join(', '));
+    }
     stepSizeDiagnostics.push(
-      'macro-шаг остановлен на exact deadline процессов: ' +
-        processBoundary.processIds.join(', ') +
-        '; процессы запускаются следующим Scheduler turn'
+      'macro-шаг остановлен на exact deadline процессов (' +
+        processBoundary.processIds.join(', ') + '); ' + details.join('; ')
     );
   }
   const stepSize: MacroStepSizeReport = {
