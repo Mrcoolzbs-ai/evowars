@@ -12,7 +12,6 @@
 // diffusion time steps and conserves each selected column inventory.
 
 import type { ChemicalPhysicalKineticLayer } from '../../types';
-import type { DataProvenance } from '../Core/scientificValue';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 const VERTICAL_DIFFUSION_MODEL_VERSION = 'stage-4.2-vertical-eddy-diffusion-1';
@@ -163,44 +162,6 @@ function cloneLayer(layer: ChemicalPhysicalKineticLayer): ChemicalPhysicalKineti
       ? {}
       : { hydrostaticState: cloneHydrostaticState(layer.hydrostaticState) }),
     reactionIds: [...layer.reactionIds]
-  };
-}
-
-function deriveTransportProvenance(
-  parent: DataProvenance,
-  details: {
-    layerId: string;
-    speciesId: string;
-    durationS: number;
-    eddyDiffusivityM2S: readonly number[];
-    initialInventoryMolM2: number;
-    finalInventoryMolM2: number;
-    airColumnInventoryMolM2: number;
-  }
-): DataProvenance {
-  const diffusivityProfile = details.eddyDiffusivityM2S.join(',');
-  const note = [
-    parent.note,
-    'Подстолбовой запас получен после отдельного шага вертикальной турбулентной диффузии; исходная линия происхождения сохранена, параметры шага записаны в rawInput.'
-  ].filter((value): value is string => typeof value === 'string' && value.trim() !== '').join('; ');
-
-  return {
-    ...parent,
-    method: 'консервативная конечно-объёмная вертикальная турбулентная диффузия; неявный backward Euler',
-    modelVersion: VERTICAL_DIFFUSION_MODEL_VERSION,
-    applicability: 'Только явно выбранные следовые виды в заданной непрерывной гидростатической колонке',
-    limitations: 'Kzz задан вызывающей стороной; нулевой внешний поток сверху и снизу; гидростатический фон фиксирован; не включены молекулярная диффузия, конвекция, химия и фотохимия; N2 и O2 этим оператором не переносятся.',
-    rawInput: {
-      ...(parent.rawInput ?? {}),
-      vertical_transport_layer_id: details.layerId,
-      vertical_transport_species_id: details.speciesId,
-      vertical_transport_duration_s: details.durationS,
-      vertical_transport_eddy_diffusivity_profile_m2_s: diffusivityProfile,
-      vertical_transport_air_column_mol_m2: details.airColumnInventoryMolM2,
-      vertical_transport_initial_inventory_mol_m2: details.initialInventoryMolM2,
-      vertical_transport_final_inventory_mol_m2: details.finalInventoryMolM2
-    },
-    note
   };
 }
 
@@ -528,23 +489,8 @@ export function runVerticalEddyDiffusionStep(
   const updatedLayers = validatedLayers.map((entry, layerIndex) => {
     const source = entry.layer;
     const updatedInventories = { ...source.columnInventoriesMolM2 };
-    const updatedProvenance = { ...source.inventoryProvenance };
     for (const speciesId of speciesIds) {
-      const initial = initialInventoriesBySpecies[speciesId]![layerIndex]!;
-      const final = finalInventoriesBySpecies[speciesId]![layerIndex]!;
-      updatedInventories[speciesId] = final;
-      updatedProvenance[speciesId] = deriveTransportProvenance(
-        source.inventoryProvenance,
-        {
-          layerId: source.layerId,
-          speciesId,
-          durationS: input.durationS,
-          eddyDiffusivityM2S: diffusivityValues,
-          initialInventoryMolM2: initial,
-          finalInventoryMolM2: final,
-          airColumnInventoryMolM2: entry.airColumnInventoryMolM2
-        }
-      );
+      updatedInventories[speciesId] = finalInventoriesBySpecies[speciesId]![layerIndex]!;
     }
     const cloned = cloneLayer(source);
     return {
@@ -554,41 +500,26 @@ export function runVerticalEddyDiffusionStep(
         ...cloned.inventoryProvenance,
         method: 'консервативная конечно-объёмная вертикальная турбулентная диффузия; неявный backward Euler',
         modelVersion: VERTICAL_DIFFUSION_MODEL_VERSION,
+        applicability: 'Только явно выбранные следовые виды в заданной непрерывной гидростатической колонке',
+        limitations: 'Kzz задан вызывающей стороной; нулевой внешний поток сверху и снизу; гидростатический фон фиксирован; не включены молекулярная диффузия, конвекция, химия и фотохимия; N2 и O2 этим оператором не переносятся.',
         rawInput: {
           ...(cloned.inventoryProvenance.rawInput ?? {}),
+          vertical_transport_layer_id: source.layerId,
           vertical_transport_duration_s: input.durationS,
           vertical_transport_species_ids: speciesIds.join(','),
-          vertical_transport_eddy_diffusivity_profile_m2_s: diffusivityValues.join(',')
+          vertical_transport_eddy_diffusivity_profile_m2_s: diffusivityValues.join(','),
+          vertical_transport_air_column_mol_m2: entry.airColumnInventoryMolM2,
+          vertical_transport_species_inventories_before_after: speciesIds.map((speciesId) =>
+            speciesId + ':' +
+            initialInventoriesBySpecies[speciesId]![layerIndex]! + '>' +
+            finalInventoriesBySpecies[speciesId]![layerIndex]!
+          ).join(';')
         },
         note: [
           cloned.inventoryProvenance.note,
-          'Слои изменены вертикальным транспортом; подробные значения до/после хранятся в audit.layers.'
+          'Слои изменены вертикальным транспортом; значения до/после и межслойные потоки сохранены в VerticalEddyDiffusionAudit.'
         ].filter((value): value is string => typeof value === 'string' && value.trim() !== '').join('; ')
-      },
-      // Preserve a species-specific lineage snapshot for each transported value
-      // in the layer inventory provenance metadata rather than inventing a source.
-      ...({
-        inventoryProvenance: {
-          ...cloned.inventoryProvenance,
-          method: 'вертикальная турбулентная диффузия следовых видов; backward Euler',
-          modelVersion: VERTICAL_DIFFUSION_MODEL_VERSION,
-          rawInput: {
-            ...(cloned.inventoryProvenance.rawInput ?? {}),
-            vertical_transport_duration_s: input.durationS,
-            vertical_transport_species_ids: speciesIds.join(','),
-            vertical_transport_eddy_diffusivity_profile_m2_s: diffusivityValues.join(','),
-            vertical_transport_species_inventories_before_after: speciesIds.map((speciesId) =>
-              speciesId + ':' +
-              initialInventoriesBySpecies[speciesId]![layerIndex]! + '>' +
-              finalInventoriesBySpecies[speciesId]![layerIndex]!
-            ).join(';')
-          },
-          note: [
-            cloned.inventoryProvenance.note,
-            'Слои изменены вертикальным транспортом; подробные значения до/после хранятся в audit.layers.'
-          ].filter((value): value is string => typeof value === 'string' && value.trim() !== '').join('; ')
-        }
-      })
+      }
     };
   });
 
