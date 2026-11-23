@@ -718,6 +718,9 @@ export function processWorldEvent(
     );
   }
 
+  if (after.fluxLedger === undefined || !Array.isArray(after.fluxLedger.records)) {
+    return markFailed('обработчик события «' + eventId + '» вернул некорректный FluxLedger');
+  }
   const beforeFlux = world.fluxLedger.records;
   const afterFlux = after.fluxLedger.records;
   const fluxIssues: string[] = [];
@@ -748,9 +751,33 @@ export function processWorldEvent(
   }
 
   const beforeFluxById = new Map(beforeFlux.map((record) => [record.id, record]));
-  const stepFluxRecords = afterFlux.filter((record) =>
+  const stepFluxRecords: FluxRecord[] = afterFlux.filter((record) =>
     record.status === 'applied' && beforeFluxById.get(record.id)?.status !== 'applied'
   );
+  // Reverting a previously applied flux is the inverse physical transfer.
+  // The persisted record ends as status=reverted (and is therefore excluded
+  // by the ordinary auditor); provide its inverse only to this transition's
+  // audit so the restored reservoir delta is still explained exactly once.
+  for (const record of afterFlux) {
+    const previous = beforeFluxById.get(record.id);
+    if (previous?.status !== 'applied' || record.status !== 'reverted') continue;
+    const reverseKind =
+      previous.kind === 'internal_transfer'
+        ? 'internal_transfer'
+        : previous.kind === 'external_input'
+          ? 'external_output'
+          : 'external_input';
+    stepFluxRecords.push({
+      ...previous,
+      id: 'event-reversal:' + previous.id,
+      kind: reverseKind,
+      from: previous.to,
+      to: previous.from,
+      time: { ...event.time },
+      status: 'applied',
+      note: 'Audit-only inverse of reverted flux «' + previous.id + '» during world event «' + eventId + '»'
+    });
+  }
   const appendOnlyIssues = reactionLedgerAppendOnlyIssues(world.reactionLedger, after.reactionLedger);
   if (appendOnlyIssues.length > 0) {
     return markFailed(
