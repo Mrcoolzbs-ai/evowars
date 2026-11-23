@@ -572,3 +572,23 @@ Scheduler import теперь требует согласовать гидрос
 Тесты отдельно проверяют (1) отказ на coarse seven-layer column при превышении 2% N₂ concentration mismatch, (2) градиентные пределы на адаптивной полной USSA колонке, (3) сохранение суммарных N₂/O₂ между дочерними ячейками, (4) отсутствие автоматически выведенных радикалов и (5) транзакционный commit Scheduler для нижних USSA слоёв только в диапазоне применимости #89 (200–300 K). Синтетические O/NO/NO2 в этом последнем fixture остаются явно помеченными как test-only, а не как атмосферные данные.
 
 Эта интеграция не превращает существующие rate laws в pressure-dependent kinetics: давление P(z) хранится и валидируется, но отдельный P/partial-pressure аргумент в текущем rate expression пока отсутствует. Stage 4.2 остаётся ОТКРЫТ: ограниченная сеть #89/#106, неизвестные реальные радикальные профили, отсутствующие фотохимия/вертикальный перенос и неполный uncertainty budget.
+
+
+## Stage 4.2 — vertical eddy diffusion (explicit stateless operator)
+
+`src/modules/ChemicalEvolution/verticalEddyDiffusion.ts` provides `runVerticalEddyDiffusionStep()` as a conservative finite-volume transport primitive.
+
+The caller must supply a contiguous, altitude-ordered set of layers with hydrostatic boundary states, an explicit list of transported species, the physical duration in seconds, and either one eddy diffusivity `Kzz` (m²/s) for every interface or an explicit value per interface. No default or inferred `Kzz` is supplied.
+
+For each selected trace species, the operator uses its layer column inventory divided by the hydrostatic dry-air column inventory as the layer mixing ratio. At each interface the upward molar flux is
+
+\[
+\Phi_{i+1/2} = K_{zz,i+1/2}\,c_{\mathrm{air},i+1/2}\,
+\frac{\chi_i-\chi_{i+1}}{z_{i+1}-z_i},
+\]
+
+where the interface air molar density is calculated from the geometric means of the adjacent hydrostatic boundary pressure and temperature. A backward-Euler tridiagonal finite-volume solve is used; positive flux means transfer from the lower layer to the upper layer. The top and bottom boundaries are closed, with zero external flux. The implementation checks both global column conservation and each layer's discrete flux balance.
+
+This first slice deliberately rejects `n2` and `o2` as transported species: they define the supplied hydrostatic bulk background and the existing local-vs-average consistency evidence. Moving bulk gases requires a coupled bulk-composition and hydrostatic re-solve, not a passive update of trace inventories. Missing species inventories are rejected rather than interpreted as zero. Input state is not mutated; output inventory provenance is marked as derived and the audit records per-layer inventories, mixing ratios, interface fluxes, integrated transfers, and column conservation.
+
+**Scope boundary:** this operator is currently a standalone stateless primitive. It is not automatically run by `runChemicalEvolutionSchedulerStep`, and it does not implement molecular diffusion, convection, chemistry, photochemistry, or replenishment. The hydrostatic background and layer geometry are held fixed during a transport step. This is an explicit-Kzz numerical transport capability, not yet a calibrated Earth-atmosphere transport model.
