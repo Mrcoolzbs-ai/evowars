@@ -83,7 +83,8 @@ export function importSourcedAtmosphericTemperatureProfileForKinetics(
     return reject('Профиль температур не прошёл валидацию: ' + profileIssues.join('; '));
   }
 
-  if (profile.provenance === undefined || !hasIdentifiedSource(profile.provenance)) {
+  const profileProvenance = profile.provenance;
+  if (profileProvenance === undefined || !hasIdentifiedSource(profileProvenance)) {
     return reject(
       'У вертикального профиля отсутствует идентифицируемый provenance высотных данных (sourceName + reference/ID).'
     );
@@ -112,7 +113,17 @@ export function importSourcedAtmosphericTemperatureProfileForKinetics(
       );
     }
 
-    const temperature = temperatureValueOrNull(layer.temperature);
+    const temperatureScientificValue = layer.temperature;
+    if (
+      temperatureScientificValue.status !== 'known' &&
+      temperatureScientificValue.status !== 'estimated'
+    ) {
+      return reject(
+        'Импорт отклонён: температура ' + prefix +
+        ' не имеет числового статуса known/estimated.'
+      );
+    }
+    const temperature = temperatureValueOrNull(temperatureScientificValue);
     if (temperature === null || !Number.isFinite(temperature) || temperature <= 0) {
       return reject(
         'Импорт отклонён: температура ' + prefix +
@@ -123,8 +134,8 @@ export function importSourcedAtmosphericTemperatureProfileForKinetics(
     // Preserve the profile-level source while allowing a layer-specific
     // measurement/model record to override any supplied fields.
     const temperatureProvenance: DataProvenance = {
-      ...profile.provenance,
-      ...(layer.temperature.provenance ?? {})
+      ...profileProvenance,
+      ...(temperatureScientificValue.provenance ?? {})
     };
     if (!hasIdentifiedSource(temperatureProvenance)) {
       return reject(
@@ -140,7 +151,7 @@ export function importSourcedAtmosphericTemperatureProfileForKinetics(
       bottomAltitudeM: range.min,
       topAltitudeM: range.max,
       temperatureProvenance,
-      altitudeProvenance: { ...profile.provenance }
+      altitudeProvenance: { ...profileProvenance }
     });
   }
 
