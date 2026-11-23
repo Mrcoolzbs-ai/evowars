@@ -68,6 +68,8 @@ import type { CoreWorldState } from '../Core/worldState';
 import type { MaterialInventory, ReservoirRecord } from '../Core/reservoir';
 import { setMaterialInventory, validateMaterialInventory } from '../Core/reservoir';
 import type { ScientificSpecies } from '../Core/species';
+import { AVOGADRO_NUMBER_PER_MOL } from '../Core/kinetics';
+import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -947,6 +949,7 @@ function cloneKineticHydrostaticState(
     representative: { ...state.representative },
     top: { ...state.top },
     molarFractions: { ...state.molarFractions },
+    thirdBodyConsistency: { ...state.thirdBodyConsistency },
     provenance: {
       pressure: { ...state.provenance.pressure },
       composition: { ...state.provenance.composition },
@@ -1144,6 +1147,88 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
           !hasIdentifiedPhysicalProvenance(provenance.model)
         ) {
           problems.push(prefix + '.hydrostaticState provenance must identify pressure, composition and solver model');
+        }
+
+        const eosDeviation = hydro.equationOfStateMaxRelativeDeviation;
+        if (
+          typeof eosDeviation !== 'number' ||
+          !Number.isFinite(eosDeviation) ||
+          eosDeviation < 0 ||
+          eosDeviation > 1e-8
+        ) {
+          problems.push(prefix + '.hydrostaticState EOS consistency is absent or exceeds 1e-8 relative');
+        }
+
+        const thirdBodyConsistency = hydro.thirdBodyConsistency;
+        if (!isPlainChemicalRecord(thirdBodyConsistency)) {
+          problems.push(prefix + '.hydrostaticState.thirdBodyConsistency is required for an N2-bearing kinetic layer');
+        } else {
+          const requiredFields = [
+            'hydrostaticMidpointConcentrationMoleculeCm3',
+            'layerAverageConcentrationMoleculeCm3',
+            'relativeDeviation',
+            'maximumAllowedRelativeDeviation',
+            'hydrostaticLayerInventoryMolM2',
+            'suppliedLayerInventoryMolM2',
+            'inventoryRelativeDeviation'
+          ];
+          for (const field of requiredFields) {
+            const value = thirdBodyConsistency[field];
+            if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+              problems.push(prefix + '.hydrostaticState.thirdBodyConsistency.' + field + ' must be finite and non-negative');
+            }
+          }
+          const localConcentration = thirdBodyConsistency.hydrostaticMidpointConcentrationMoleculeCm3;
+          const maxDeviation = thirdBodyConsistency.maximumAllowedRelativeDeviation;
+          const storedRelativeDeviation = thirdBodyConsistency.relativeDeviation;
+          const inventoryDeviation = thirdBodyConsistency.inventoryRelativeDeviation;
+          if (
+            typeof localConcentration === 'number' &&
+            typeof maxDeviation === 'number' &&
+            typeof storedRelativeDeviation === 'number' &&
+            typeof inventoryDeviation === 'number'
+          ) {
+            if (localConcentration <= 0 || maxDeviation <= 0 || maxDeviation >= 1) {
+              problems.push(prefix + '.hydrostaticState third-body concentration/tolerance is not physically positive');
+            }
+            if (storedRelativeDeviation > maxDeviation) {
+              problems.push(prefix + '.hydrostaticState N2 local-vs-layer-average concentration mismatch exceeds tolerance; refine vertical layers');
+            }
+            if (inventoryDeviation > 1e-6) {
+              problems.push(prefix + '.hydrostaticState N2 subcolumn inventory does not match hydrostatic ΔNmol*xN2');
+            }
+          }
+
+          const n2MoleFraction = isPlainChemicalRecord(fractions) ? fractions.n2 : undefined;
+          const n2Inventory = isPlainChemicalRecord(layer.columnInventoriesMolM2)
+            ? layer.columnInventoriesMolM2.n2
+            : undefined;
+          if (
+            typeof n2MoleFraction === 'number' && n2MoleFraction > 0 &&
+            typeof n2Inventory === 'number' && Number.isFinite(n2Inventory) && n2Inventory > 0 &&
+            typeof representative.pressurePa === 'number' &&
+            typeof representative.temperatureK === 'number'
+          ) {
+            const expectedLocal = (
+              n2MoleFraction * representative.pressurePa /
+              (UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K * representative.temperatureK)
+            ) * AVOGADRO_NUMBER_PER_MOL / 1e6;
+            const recomputedMean =
+              (n2Inventory / layer.layerThicknessM) * AVOGADRO_NUMBER_PER_MOL / 1e6;
+            const recomputedDeviation =
+              Math.abs(recomputedMean - expectedLocal) / expectedLocal;
+            if (
+              !Number.isFinite(expectedLocal) ||
+              expectedLocal <= 0 ||
+              !Number.isFinite(recomputedMean) ||
+              recomputedMean <= 0 ||
+              recomputedDeviation > (typeof maxDeviation === 'number' ? maxDeviation : 0)
+            ) {
+              problems.push(prefix + '.N2 concentration recomputed from Scheduler inventory/thickness is inconsistent with local hydrostatic xN2*P/(R*T)');
+            }
+          } else {
+            problems.push(prefix + '.N2 hydrostatic consistency requires explicit positive n2 inventory and xN2');
+          }
         }
       }
     }
