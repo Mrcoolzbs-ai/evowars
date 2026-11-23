@@ -13,9 +13,11 @@ import type { GenerationSettings, GeneratedWorld } from '../../types';
 import { generateWorld } from '../Generator/generator';
 import {
   computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn,
+  computeUssa1976HydrostaticColumnInput,
   computeUssa1976ReferenceHydrostaticColumn,
   createUssa1976AtmosphericTemperatureProfile
 } from '../Core/atmosphericReferenceAdapters';
+import { computeAdaptivelyRefinedHydrostaticColumn } from '../Core/hydrostaticAtmosphere';
 import {
   buildPhysicalKineticsConfigurationFromSourcedProfile,
   deriveDryAirKineticInventoriesFromHydrostaticColumn,
@@ -359,12 +361,24 @@ describe('Stage 4.2: reference profile integration', () => {
     )).toHaveLength(7);
   });
 
-  it('retains refined hydrostatic P(z) and third-body consistency through a Scheduler commit', () => {
-    const adaptive = computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn();
+  it('retains refined hydrostatic P(z) and third-body consistency through a Scheduler commit in the #89 temperature range', () => {
+    // Keep the full seven-layer USSA reference for the gradient and N2
+    // consistency test above. A Scheduler transaction for #89 must only
+    // include strata where the published rate law is applicable (200–300 K).
+    const sourceInput = createUssa1976HydrostaticColumnInput();
+    const lowerAtmosphereInput = {
+      ...sourceInput,
+      layers: sourceInput.layers.slice(0, 2),
+      requestedHeightsM: undefined
+    };
+    const adaptive = computeAdaptivelyRefinedHydrostaticColumn(lowerAtmosphereInput);
     if (adaptive.status !== 'completed') {
       throw new Error(adaptive.reason + ': ' + adaptive.diagnostics.join('; '));
     }
     const column = adaptive.column;
+    expect(column.layerBoundaries.every((boundary) =>
+      boundary.bottom.temperatureK >= 200 && boundary.top.temperatureK <= 300
+    )).toBe(true);
 
     const derived = deriveDryAirKineticInventoriesFromHydrostaticColumn(column, [R89]);
     expect(derived.status).toBe('derived');
@@ -397,8 +411,12 @@ describe('Stage 4.2: reference profile integration', () => {
       no: syntheticProvenance,
       no2: syntheticProvenance
     };
+    const lowerAtmosphereProfile = {
+      ...createUssa1976AtmosphericTemperatureProfile(),
+      layers: createUssa1976AtmosphericTemperatureProfile().layers.slice(0, 2)
+    };
     const built = buildPhysicalKineticsConfigurationFromSourcedProfile(
-      createUssa1976AtmosphericTemperatureProfile(),
+      lowerAtmosphereProfile,
       {
         maximumMacroStepS: 0.1,
         totalInventoryProvenance: totalProvenance,
