@@ -41,6 +41,7 @@ import { createEmptyReservoirs, totalSubstanceAmount } from '../PhaseEquilibrium
 import {
   CHEMICAL_RESERVOIR_IDS,
   buildSpeciesCatalogFromLegacy,
+  chemicalProcessesToCoreDescriptors,
   chemicalReservoirConsistencyIssues,
   chemicalStateFromCoreReservoirs,
   coreWorldStateFromLegacyWorld,
@@ -799,7 +800,14 @@ export function createChemicalEvolutionStepRegistry(): ProcessRegistry {
       'степень превращения за шаг — игровое допущение (extentFraction), не кинетический расчёт; длительность шага (stepDurationYears) — тоже игровое допущение',
     timescaleNote: 'реакции каталога не имеют подтверждённых характерных времён'
   };
-  return createProcessRegistry().register(descriptor);
+  // Легаси-каталог также проходит через канонический Core ProcessRegistry.
+  // Все его процессы остаются отключёнными: их числовые τ и решатели
+  // неизвестны/не реализованы; регистрация не включает и не запускает их.
+  const registry = createProcessRegistry();
+  for (const legacyDescriptor of chemicalProcessesToCoreDescriptors(createDefaultProcessRegistry())) {
+    registry.register(legacyDescriptor);
+  }
+  return registry.register(descriptor);
 }
 
 /** Результат пользовательского шага химии через Scheduler. */
