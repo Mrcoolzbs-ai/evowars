@@ -22,6 +22,11 @@
 import type {
   AtmospherePhysicalModel,
   ChemicalEvolutionState,
+  ChemicalPhysicalKineticsState,
+  ChemicalPhysicalKineticLayer,
+  ChemicalPhysicalKineticsStepAudit,
+  ChemicalKineticLayerStepAudit,
+  ChemicalKineticReactionAudit,
   ChemicalReaction,
   ChemicalStepRecord,
   ChemicalProcess,
@@ -49,15 +54,16 @@ import {
 } from '../Core/adapters';
 import { createProcessRegistry } from '../Core/processRegistry';
 import type { ProcessDescriptor, ProcessRegistry } from '../Core/processRegistry';
-import type { MacroStepResult, ProcessOperator } from '../Core/scheduler';
+import type { MacroStepResult, ProcessOperator, ProcessStepProposal } from '../Core/scheduler';
 import { runMacroStep } from '../Core/scheduler';
-import type { ReactionExtentBasis } from '../Core/reactionLedger';
+import type { ReactionExtentBasis, ReactionRecord } from '../Core/reactionLedger';
 import { registerReaction } from '../Core/reactionLedger';
 import { convert, quantity } from '../Core/physicalQuantity';
 import { unknownValue } from '../Core/scientificValue';
 import type { CoreWorldState } from '../Core/worldState';
 import type { MaterialInventory, ReservoirRecord } from '../Core/reservoir';
 import { setMaterialInventory, validateMaterialInventory } from '../Core/reservoir';
+import type { ScientificSpecies } from '../Core/species';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -66,7 +72,12 @@ import { setMaterialInventory, validateMaterialInventory } from '../Core/reservo
 // заглушка runKineticStep НЕ меняются: механизм НЕ подключён к состоянию
 // мира (конверсия inventory в концентрации невозможна без физического
 // контракта атмосферного столба, которого в проекте нет).
-import { runConcentrationKineticStep } from './kineticMechanism';
+import {
+  buildConcentrationKineticProblem,
+  MECHANISM_REACTIONS,
+  runConcentrationKineticStep
+} from './kineticMechanism';
+import type { AppliedReactionSummary, MechanismReactionDef } from './kineticMechanism';
 
 export * from './kineticMechanism';
 
@@ -78,7 +89,10 @@ export * from './kineticMechanism';
 // К состоянию мира (GeneratedWorld/ChemicalEvolutionState/
 // runChemicalEvolutionStep) НЕ подключён; режим A и заглушка runKineticStep
 // НЕ меняются.
-import { runKineticCompartmentStep } from './kineticCompartment';
+import {
+  columnInventoryMolM2ToConcentrationMoleculeCm3,
+  runKineticCompartmentStep
+} from './kineticCompartment';
 
 export * from './kineticCompartment';
 
