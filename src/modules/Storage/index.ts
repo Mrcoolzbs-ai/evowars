@@ -24,6 +24,7 @@ import {
 } from '../Core/migrations';
 import { validateReactionLedger } from '../Core/reactionLedger';
 import { kineticExperimentStateProblems } from '../ChemicalEvolution/kineticWorldAdapter';
+import { validateSchedulerBookkeeping } from '../Core/scheduler';
 // Stage 4.9a.1: runtime-валидатор геохимического контекста атрибуции
 // записей потоков (fail-closed; отсутствие поля — легаси-запись, не ошибка).
 import { validateFluxGeochemicalContext } from '../Core/geochemicalFluxContext';
@@ -236,6 +237,26 @@ function geochemicalFluxContextProblemsOfWorld(world: SavedWorld): string[] {
 }
 
 /**
+ * Проверка сохранённого Scheduler (Stage 4.2): отсутствие scheduling
+ * означает «планировщик ещё не инициализирован» и допустимо. Если поле
+ * явно присутствует, проверяется весь сериализуемый контракт, включая
+ * очередь событий, уникальные sequence, one-shot process deadlines и
+ * точные TimePoint. Некорректная очередь не должна попадать в UI как
+ * будто она пригодна к дальнейшей симуляции.
+ */
+function schedulerProblemsOfWorld(world: SavedWorld): string[] {
+  const core: unknown = (world as { coreWorldState?: unknown }).coreWorldState;
+  if (core === undefined || typeof core !== 'object' || core === null || Array.isArray(core)) {
+    return [];
+  }
+  const scheduling = (core as Record<string, unknown>).scheduling;
+  if (scheduling === undefined) {
+    return [];
+  }
+  return validateSchedulerBookkeeping(scheduling).map((problem) => 'coreWorldState.scheduling: ' + problem);
+}
+
+/**
  * Миграция + проверка журнала реакций (Stage 4.2.3.3.1) и
  * кинетического эксперимента (Stage 4.5.5): некорректный
  * reactionLedger или kineticExperiment не может незаметно
@@ -250,6 +271,7 @@ function migrateAndCheckWorld(entry: Record<string, unknown>): SavedWorld {
   const migrated = migrateWorld(entry as unknown as SavedWorld);
   const problems = [
     ...reactionLedgerProblemsOfWorld(migrated),
+    ...schedulerProblemsOfWorld(migrated),
     ...kineticExperimentProblemsOfWorld(migrated),
     ...geochemicalFluxContextProblemsOfWorld(migrated)
   ];
