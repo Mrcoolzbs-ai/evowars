@@ -231,11 +231,11 @@ describe('Stage 4.2: reference profile integration', () => {
     expect(built.configuration.layers).toHaveLength(7);
     const first = built.configuration.layers[0]!;
     expect(first.hydrostaticState).toBeDefined();
-    expect(first.hydrostaticState!.pressurePa.bottom).toBeGreaterThan(
-      first.hydrostaticState!.pressurePa.representative
+    expect(first.hydrostaticState!.bottom.pressurePa).toBeGreaterThan(
+      first.hydrostaticState!.representative.pressurePa
     );
-    expect(first.hydrostaticState!.pressurePa.representative).toBeGreaterThan(
-      first.hydrostaticState!.pressurePa.top
+    expect(first.hydrostaticState!.representative.pressurePa).toBeGreaterThan(
+      first.hydrostaticState!.top.pressurePa
     );
     expect(first.hydrostaticState!.molarFractions.n2).toBeCloseTo(0.7808, 8);
     expect(first.hydrostaticState!.molarFractions.o2).toBeCloseTo(0.2095, 8);
