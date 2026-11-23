@@ -410,11 +410,25 @@ export function enqueueEvent(
       typeof event.id === 'string' ? event.id : null
     );
   }
+  let dataSnapshot: Record<string, unknown>;
+  try {
+    // Ownership of nested JSON data transfers to the queue as a deep
+    // snapshot. Keeping the caller's object would let later edits mutate
+    // an already-enqueued event without passing through Scheduler APIs.
+    dataSnapshot = structuredClone(event.data);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new SchedulerError(
+      'invalid_event',
+      'data события не удалось изолировать глубоким снимком: ' + reason,
+      event.id
+    );
+  }
   const worldEvent: WorldEvent = {
     id: event.id,
     time: { segmentIndex: event.time.segmentIndex, localTimeS: event.time.localTimeS },
     type: event.type,
-    data: event.data,
+    data: dataSnapshot,
     source: event.source,
     status: 'pending',
     sequence: bk.nextSequence
@@ -428,7 +442,9 @@ export function enqueueEvent(
 
 /** Все события очереди в детерминированном порядке (время, затем sequence). */
 export function sortedEvents(bk: SchedulerBookkeeping): readonly WorldEvent[] {
-  return [...bk.eventQueue].sort((a, b) => {
+  // Return detached values, not queue-owned references. A readonly
+  // type only protects TypeScript callers, not nested runtime data.
+  return bk.eventQueue.map((event) => structuredClone(event)).sort((a, b) => {
     const byTime = comparePoints(a.time, b.time);
     if (byTime !== 0) return byTime;
     return a.sequence < b.sequence ? -1 : a.sequence > b.sequence ? 1 : 0;
@@ -480,7 +496,9 @@ export function processEvent(
     );
   }
   try {
-    handler(event);
+    // A handler receives a detached event snapshot. It may inspect or
+    // annotate its local copy, but cannot mutate the persisted queue row.
+    handler(structuredClone(event));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const queue = [...bk.eventQueue];
