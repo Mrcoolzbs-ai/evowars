@@ -341,23 +341,9 @@ describe('Stage 4.2: reference profile integration', () => {
     if (built.status !== 'configured') return;
 
     const syntheticWorld = withSyntheticColumnState(world, totals);
-    const transportConfiguration = {
-      ...built.configuration,
-      verticalTransport: {
-        speciesIds: ['no'],
-        // Explicit synthetic scenario value used only to prove Scheduler wiring.
-        eddyDiffusivityM2S: 1e6,
-        diffusivityProvenance: {
-          sourceName: 'synthetic test Kzz; not a measured terrestrial profile',
-          sourceId: 'test:synthetic:Kzz',
-          method: 'explicit test fixture',
-          limitations: 'Not calibrated and not intended as an Earth-atmosphere Kzz estimate'
-        }
-      }
-    };
     const configured = configurePrimaryPhysicalChemicalKinetics(
       syntheticWorld.chemicalState!,
-      transportConfiguration,
+      built.configuration,
       totals
     );
     expect(configured.status).toBe('configured');
@@ -443,9 +429,23 @@ describe('Stage 4.2: reference profile integration', () => {
 
     const world = generateReferenceWorld();
     const syntheticWorld = withSyntheticColumnState(world, totals);
+    const transportConfiguration = {
+      ...built.configuration,
+      verticalTransport: {
+        speciesIds: ['no'],
+        // Explicit synthetic scenario value used only to prove Scheduler wiring.
+        eddyDiffusivityM2S: 1e6,
+        diffusivityProvenance: {
+          sourceName: 'synthetic test Kzz; not a measured terrestrial profile',
+          sourceId: 'test:synthetic:Kzz',
+          method: 'explicit test fixture',
+          limitations: 'Not calibrated and not intended as an Earth-atmosphere Kzz estimate'
+        }
+      }
+    };
     const configured = configurePrimaryPhysicalChemicalKinetics(
       syntheticWorld.chemicalState!,
-      built.configuration,
+      transportConfiguration,
       totals
     );
     expect(configured.status).toBe('configured');
