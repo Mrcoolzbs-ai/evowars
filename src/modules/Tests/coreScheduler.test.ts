@@ -732,6 +732,35 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
   });
 
+  it('отклоняет in-place мутацию SchedulerBookkeeping со стороны event handler', () => {
+    const scheduling = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'event-scheduler-mutator',
+      time: { segmentIndex: 0, localTimeS: 0 },
+      type: 'solver_detected',
+      data: {},
+      source: 'test'
+    });
+    const world = { ...testWorld(), scheduling };
+
+    const result = processWorldEvent(
+      world,
+      'event-scheduler-mutator',
+      (state) => {
+        state.scheduling!.stepCount += 1;
+        return state;
+      },
+      { audit: { speciesCatalog: co2Catalog(), boundary: 'complete' } }
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.event.failReason).toContain('изменил SchedulerBookkeeping напрямую');
+    expect(result.world.scheduling!.stepCount).toBe(0);
+    expect(result.world.scheduling!.eventQueue[0]!.status).toBe('failed');
+    expect(world.scheduling!.stepCount).toBe(0);
+    expect(world.scheduling!.eventQueue[0]!.status).toBe('pending');
+    expect(result.world.reservoirs[0]!.material!.entries.co2).toBe(100);
+  });
+
   it('ошибка обработчика и попытка изменить WorldClock не фиксируют физическое состояние', () => {
     const makeWorld = (id: string) => ({
       ...testWorld(),
@@ -1294,7 +1323,8 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
       ...validBookkeeping,
       stepLog: [{
         ...validBookkeeping.stepLog[0]!,
-        worldStartTime: { segmentIndex: 0, localTimeS: 0 }
+        worldStartTime: { segmentIndex: 0, localTimeS: 0 },
+        worldEndTime: undefined
       }]
     };
     expect(validateSchedulerBookkeeping(missingEnd).join(' '))
