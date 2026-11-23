@@ -88,6 +88,10 @@ import type { AppliedReactionSummary, MechanismReactionDef } from './kineticMech
 export * from './kineticMechanism';
 export * from './thermalProfileImport';
 
+// Stage 4.2: conservative, explicit-Kzz vertical eddy-diffusion operator.
+// This stateless primitive is not automatically coupled to Scheduler chemistry.
+export * from './verticalEddyDiffusion';
+
 // Stage 4.5.5 (второй реализационный срез, 2026-11-10): физически явный
 // реакционный слой (компартмент) поверх концентрационного механизма —
 // stateless-адаптер runKineticCompartmentStep между ЯВНЫМ столбовым
