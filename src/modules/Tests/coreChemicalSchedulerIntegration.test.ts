@@ -930,6 +930,19 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(secondHalf.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
   });
 
+  it('repeats an identical physical Scheduler input bit-for-bit, including audits and world clock', () => {
+    const first = runChemicalEvolutionSchedulerStep(makePhysicalKineticWorld(350));
+    const second = runChemicalEvolutionSchedulerStep(makePhysicalKineticWorld(350));
+
+    expect(first.status).toBe('committed');
+    expect(second.status).toBe('committed');
+    expect(first.stepSize).toEqual(second.stepSize);
+    expect(JSON.stringify(first.world.chemicalState)).toBe(JSON.stringify(second.world.chemicalState));
+    expect(JSON.stringify(first.world.coreWorldState)).toBe(JSON.stringify(second.world.coreWorldState));
+    expect(first.world.coreWorldState!.clock).toEqual(second.world.coreWorldState!.clock);
+    expect(first.world.coreWorldState!.reactionLedger).toEqual(second.world.coreWorldState!.reactionLedger);
+  });
+
   it('runs against an already existing synchronized CoreWorldState without rebuilding its scheduler history', () => {
     const world = makePhysicalKineticWorld();
     const core = coreWorldStateFromLegacyWorld({
