@@ -546,3 +546,18 @@ End-to-end regression пропускает семь USSA reference layers чер
 
 **Boundary:** Stage 4.2 is still open. A source-backed temperature/height reference can now seed Scheduler geometry, but a generated world's compatible pressure/composition/subcolumn inventories and measured radical abundances are still required. USSA dry-air composition does not provide O/NO/NO2/H/HO2 radical profiles; no such values are inferred. Full network coverage, quantitative rate uncertainties, vertical transport, molecular/turbulent diffusion, convection and photochemical radical sources remain incomplete.
 
+
+
+## 10.1. USSA 1976 гидростатика и передача условий в Scheduler (24.11.2026)
+
+`Core/hydrostaticAtmosphere.ts` расширен температурным законом `geopotentialLapseRate`. Для геометрической высоты z и радиуса преобразования R используется h=R·z/(R+z); signed lapse rate USSA применяется к h, а не к z. Это сохраняет первичную зависимость температуры USSA 1976 и не заменяет её линейной интерполяцией по геометрическим метрам. Существующие isothermal/lapseRate/measuredNodes контракты остаются доступными.
+
+`createUssa1976HydrostaticColumnInput()` и `computeUssa1976ReferenceHydrostaticColumn()` строят canonical Earth reference отдельно от GeneratedWorld: 7 USSA layers, сухой воздух (N2/O2/Ar/CO2), p0=101325 Pa, r0=6356766 m и эквивалентная сферическая масса, обеспечивающая g(r0)=g0. Существующий Radau IIA решатель интегрирует гидростатическое давление, плотность и массовый/молярный столбы; новая ODE-машина не добавлялась.
+
+При передаче completed колонки в `buildPhysicalKineticsConfigurationFromSourcedProfile()` backend сопоставляет все семь слоёв по ID и геометрическим границам, использует одну контрольную midpoint-точку на слой, валидирует P/T/rho, направление P(z), рост молярного столба, состав и provenance. На физическом слое и в Scheduler audit сохраняются нижняя, representative и верхняя точки с pressure, temperature, density, Mbar, gravity, scale height и столбами, плюс полный bulk composition и источники данных.
+
+Помощник `deriveDryAirKineticInventoriesFromHydrostaticColumn()` получает подстолбовые N2/O2 из ΔNmol на границах и xᵢ эталонного dry-air profile. Ar/CO2 остаются только в bulk composition, поскольку текущий механизм ChemicalEvolution принимает ограниченный список species. O/NO/NO2/H/HO2 не генерируются из стандартного сухого воздуха и остаются unknown, пока не будут переданы независимо. Поэтому тест с реальными USSA thermal / hydrostatic входами намеренно заканчивается отказом настройки #89 при отсутствии O/NO/NO2, а не успешной фиктивной химией.
+
+**Граница интеграции:** давление P(z) теперь доступно как layer metadata и в аудите. Оно не входит как отдельный параметр в нынешнее rate equation; концентрация третьего тела N2 остаётся вычисляемой из явного столбового инвентаря и толщины. Система не должна описываться как pressure-dependent chemistry, пока rate law явно не использует давление/парциальные давления.
+
+**Научные ограничения:** USSA profile применяется только как самостоятельный земной benchmark и не навязывается сгенерированному телу с произвольными массой/радиусом/давлением. Сухой состав условно постоянен по высоте; идеальный газ, отсутствие H2O, озонной стратификации, диффузии, вертикального перемешивания и фотохимии остаются ограничениями. Stage 4.2 по-прежнему ОТКРЫТ: две реакции (#89/#106) не составляют полную атмосферную сеть; независимые реальные radical profiles, kinetics uncertainty и transport/photo-chemistry отсутствуют.
