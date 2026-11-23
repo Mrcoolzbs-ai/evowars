@@ -47,7 +47,12 @@ export interface VerticalEddyDiffusionLayerAudit {
 
 export interface VerticalEddyDiffusionInterfaceSpeciesAudit {
   /** Positive values mean net transfer from the lower layer to the upper layer. */
+  /** Time-averaged flux reconstructed from the conservative cell inventory changes. */
   fluxMolM2S: number;
+  /** Constitutive Kzz × air-density × mixing-ratio-gradient flux (round-off diagnostic). */
+  constitutiveFluxMolM2S: number;
+  /** Relative mismatch between the balance-closed and constitutive flux. */
+  fluxClosureRelativeDeviation: number;
   transferredMolM2: number;
 }
 
@@ -400,6 +405,8 @@ export function runVerticalEddyDiffusionStep(
   const finalInventoriesBySpecies: Record<string, number[]> = {};
   const fluxesBySpecies: Record<string, number[]> = {};
   const transfersBySpecies: Record<string, number[]> = {};
+  const constitutiveFluxesBySpecies: Record<string, number[]> = {};
+  const fluxClosureBySpecies: Record<string, number[]> = {};
 
   for (const speciesId of speciesIds) {
     const initial = validatedLayers.map((entry) => entry.layer.columnInventoriesMolM2[speciesId]!);
@@ -453,7 +460,18 @@ export function runVerticalEddyDiffusionStep(
       return rejected('вертикальная диффузия не сохранила полный столб вида «' + speciesId + '» в пределах численного допуска');
     }
 
-    const fluxes = interfaces.map((interfaceGeometry) => {
+    // Reconstruct the time-integrated interface transfers from the
+    // conservative finite-volume cell deltas. This avoids magnifying
+    // floating-point cancellation when adjacent mixing ratios become
+    // almost identical in a very stiff implicit step.
+    const transfers = new Array<number>(layerCount - 1).fill(0);
+    let cumulativeTransfer = 0;
+    for (let index = 0; index < layerCount - 1; index++) {
+      cumulativeTransfer += initial[index]! - final[index]!;
+      transfers[index] = cumulativeTransfer;
+    }
+    const fluxes = transfers.map((transfer) => transfer / input.durationS);
+    const constitutiveFluxes = interfaces.map((interfaceGeometry) => {
       const lowerIndex = interfaceGeometry.lowerLayerIndex;
       const upperIndex = interfaceGeometry.upperLayerIndex;
       const lowerMixingRatio = final[lowerIndex]! /
@@ -462,9 +480,17 @@ export function runVerticalEddyDiffusionStep(
         validatedLayers[upperIndex]!.airColumnInventoryMolM2;
       return interfaceGeometry.conductanceMolM2S * (lowerMixingRatio - upperMixingRatio);
     });
-    const transfers = fluxes.map((flux) => flux * input.durationS);
-    if (fluxes.some((value) => !Number.isFinite(value)) || transfers.some((value) => !Number.isFinite(value))) {
-      return rejected('интерфейсный поток или интегральный перенос вида «' + speciesId + '» не является конечным');
+    const fluxClosureRelativeDeviations = fluxes.map((flux, index) =>
+      Math.abs(flux - constitutiveFluxes[index]!) /
+      Math.max(Math.abs(flux), Math.abs(constitutiveFluxes[index]!), Number.MIN_VALUE)
+    );
+    if (
+      fluxes.some((value) => !Number.isFinite(value)) ||
+      transfers.some((value) => !Number.isFinite(value)) ||
+      constitutiveFluxes.some((value) => !Number.isFinite(value)) ||
+      fluxClosureRelativeDeviations.some((value) => !Number.isFinite(value) || value > 1e-4)
+    ) {
+      return rejected('интерфейсный поток не согласован с консервативным обновлением запасов для вида «' + speciesId + '»; проверьте жёсткость шага и разрешение чисел');
     }
 
     for (let index = 0; index < layerCount; index++) {
@@ -484,6 +510,8 @@ export function runVerticalEddyDiffusionStep(
     finalInventoriesBySpecies[speciesId] = final;
     fluxesBySpecies[speciesId] = fluxes;
     transfersBySpecies[speciesId] = transfers;
+    constitutiveFluxesBySpecies[speciesId] = constitutiveFluxes;
+    fluxClosureBySpecies[speciesId] = fluxClosureRelativeDeviations;
   }
 
   const updatedLayers = validatedLayers.map((entry, layerIndex) => {
@@ -553,6 +581,8 @@ export function runVerticalEddyDiffusionStep(
       speciesId,
       {
         fluxMolM2S: fluxesBySpecies[speciesId]![interfaceIndex]!,
+        constitutiveFluxMolM2S: constitutiveFluxesBySpecies[speciesId]![interfaceIndex]!,
+        fluxClosureRelativeDeviation: fluxClosureBySpecies[speciesId]![interfaceIndex]!,
         transferredMolM2: transfersBySpecies[speciesId]![interfaceIndex]!
       }
     ]))
