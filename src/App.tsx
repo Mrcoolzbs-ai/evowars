@@ -970,7 +970,17 @@ function WorldDisplay(props: {
                 : 'нормированный игровой (абсолютное количество неизвестно)'}
             </div>
             <div><span>Модельное время:</span> {world.chemicalState.modelTimeYears.toExponential(2)} лет</div>
-            <div><span>Длительность шага:</span> {world.chemicalState.stepDurationYears.toExponential(2)} лет (игровое допущение)</div>
+            {world.chemicalState.physicalKinetics ? (
+              <div>
+                <span>Физический Scheduler:</span> активен; максимальный macro dt{' '}
+                {world.chemicalState.physicalKinetics.maximumMacroStepS.toExponential(3)} с
+              </div>
+            ) : (
+              <div>
+                <span>Длительность игрового шага:</span>{' '}
+                {world.chemicalState.stepDurationYears.toExponential(2)} лет (дискретное допущение режима A)
+              </div>
+            )}
             {world.chemicalState.surfacePressurePa !== null && (
               <div><span>Давление:</span> {world.chemicalState.surfacePressurePa.toExponential(4)} Па</div>
             )}
@@ -982,6 +992,56 @@ function WorldDisplay(props: {
             </div>
           </div>
           <p className="model-note">ℹ {world.chemicalState.unitsNote}</p>
+          {world.chemicalState.physicalKinetics ? (
+            <div className="model-note">
+              Физический кинетический режим настроен явно: {world.chemicalState.physicalKinetics.layers.length} реакционных слоёв; реакции не используют extentFraction или gameSpeedCoefficient.
+              {world.chemicalState.physicalKineticsHistory?.length
+                ? ` Зафиксировано физических транзакций: ${world.chemicalState.physicalKineticsHistory.length}.`
+                : ' Физическая транзакция ещё не выполнялась.'}
+            </div>
+          ) : (
+            <div className="model-note">
+              Физические кинетические слои не заданы; кнопка ниже использует прежний игровой режим A, а не физический расчёт скоростей.
+            </div>
+          )}
+          {world.chemicalState.physicalKineticsHistory?.length ? (
+            <details>
+              <summary>Последняя физическая кинетическая транзакция ({world.chemicalState.physicalKineticsHistory.length} всего)</summary>
+              {world.chemicalState.physicalKineticsHistory.slice(-1).map((audit) => (
+                <div key={audit.schedulerStep}>
+                  <p>
+                    Scheduler step #{audit.schedulerStep}; dt={audit.durationS.toExponential(4)} с;{' '}
+                    τlocal={audit.characteristicTimeS === null ? 'не определено' : audit.characteristicTimeS.toExponential(4) + ' с'};{' '}
+                    {audit.stepSelectionMethod}
+                  </p>
+                  {audit.layers.map((layer) => (
+                    <div key={layer.layerId}>
+                      <strong>Слой {layer.layerId}</strong>
+                      <p>
+                        T={world.chemicalState!.physicalKinetics!.layers.find((configured) => configured.layerId === layer.layerId)?.temperatureK ?? 'unknown'} K;{' '}
+                        принято шагов ODE: {layer.integration.acceptedSteps}; отброшено: {layer.integration.rejectedSteps};{' '}
+                        метод: {layer.integration.method}
+                      </p>
+                      <ul>
+                        {layer.reactions.map((reaction) => (
+                          <li key={reaction.reactionId}>
+                            {reaction.reactionId}: k={reaction.rateConstant.value.toExponential(4)} {reaction.rateConstant.unit};{' '}
+                            диапазон {reaction.appliedRangeK.min}–{reaction.appliedRangeK.max} K;{' '}
+                            неопределённость: {reaction.uncertainty.status}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  {audit.warnings.length > 0 && (
+                    <ul>
+                      {audit.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </details>
+          ) : null}
           {world.chemicalState.history.length > 0 && (
             <details>
               <summary>История шагов ({world.chemicalState.history.length})</summary>
@@ -996,7 +1056,9 @@ function WorldDisplay(props: {
           )}
           {props.onChemicalStep && (
             <button onClick={props.onChemicalStep} className="secondary">
-              Сделать шаг химической эволюции
+              {world.chemicalState.physicalKinetics
+                ? 'Выполнить физический кинетический шаг'
+                : 'Сделать шаг химической эволюции (режим A)'}
             </button>
           )}
           {props.chemicalStepNotice && (
