@@ -11,9 +11,13 @@
 import { describe, expect, it } from 'vitest';
 import type { GenerationSettings, GeneratedWorld } from '../../types';
 import { generateWorld } from '../Generator/generator';
-import { createUssa1976AtmosphericTemperatureProfile } from '../Core/atmosphericReferenceAdapters';
+import {
+  computeUssa1976ReferenceHydrostaticColumn,
+  createUssa1976AtmosphericTemperatureProfile
+} from '../Core/atmosphericReferenceAdapters';
 import {
   buildPhysicalKineticsConfigurationFromSourcedProfile,
+  deriveDryAirKineticInventoriesFromHydrostaticColumn,
   importSourcedAtmosphericTemperatureProfileForKinetics
 } from '../ChemicalEvolution/thermalProfileImport';
 import {
@@ -191,6 +195,70 @@ describe('Stage 4.2: reference profile integration', () => {
     expect(planet?.thermalState?.atmosphericTemperatureProfile.layers).toHaveLength(7);
     expect(planet?.thermalState?.atmosphericTemperatureProfile.provenance?.sourceId)
       .toBe('NASA TM-X-74335');
+  });
+
+  it('feeds hydrostatic pressure, bulk composition and derived N2/O2 columns into Scheduler layer state', () => {
+    const column = computeUssa1976ReferenceHydrostaticColumn();
+    expect(column.status).toBe('completed');
+    if (column.status !== 'completed') return;
+    expect(column.layerBoundaries).toHaveLength(7);
+    expect(column.requestedHeightPoints).toHaveLength(7);
+
+    const derived = deriveDryAirKineticInventoriesFromHydrostaticColumn(column, [R89]);
+    expect(derived.status).toBe('derived');
+    if (derived.status !== 'derived') return;
+    expect(derived.layers).toHaveLength(7);
+    expect(derived.totalColumnInventoriesMolM2.n2).toBeGreaterThan(0);
+    expect(derived.totalColumnInventoriesMolM2.o2).toBeGreaterThan(0);
+    expect(derived.layers.every((layer) =>
+      Object.keys(layer.columnInventoriesMolM2).sort().join(',') === 'n2,o2'
+    )).toBe(true);
+    expect(derived.layers.every((layer) =>
+      !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, 'o') &&
+      !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, 'no') &&
+      !Object.prototype.hasOwnProperty.call(layer.columnInventoriesMolM2, 'ho2')
+    )).toBe(true);
+
+    const profile = createUssa1976AtmosphericTemperatureProfile();
+    const built = buildPhysicalKineticsConfigurationFromSourcedProfile(profile, {
+      maximumMacroStepS: 0.1,
+      totalInventoryProvenance: derived.totalInventoryProvenance,
+      layers: derived.layers,
+      hydrostaticColumn: column
+    });
+    expect(built.status).toBe('configured');
+    if (built.status !== 'configured') return;
+    expect(built.configuration.layers).toHaveLength(7);
+    const first = built.configuration.layers[0]!;
+    expect(first.hydrostaticState).toBeDefined();
+    expect(first.hydrostaticState!.pressurePa.bottom).toBeGreaterThan(
+      first.hydrostaticState!.pressurePa.representative
+    );
+    expect(first.hydrostaticState!.pressurePa.representative).toBeGreaterThan(
+      first.hydrostaticState!.pressurePa.top
+    );
+    expect(first.hydrostaticState!.molarFractions.n2).toBeCloseTo(0.7808, 8);
+    expect(first.hydrostaticState!.molarFractions.o2).toBeCloseTo(0.2095, 8);
+    expect(first.columnInventoriesMolM2.n2).toBeCloseTo(
+      derived.layers[0]!.columnInventoriesMolM2.n2,
+      12
+    );
+
+    // The bridge deliberately does not create radicals required by #89.
+    const world = generateReferenceWorld();
+    const syntheticWorld = withSyntheticColumnState(world, derived.totalColumnInventoriesMolM2);
+    const configured = configurePrimaryPhysicalChemicalKinetics(
+      syntheticWorld.chemicalState!,
+      built.configuration,
+      derived.totalColumnInventoriesMolM2
+    );
+    expect(configured.status).toBe('rejected');
+    if (configured.status === 'rejected') {
+      const diagnostic = configured.diagnostics.join('; ');
+      expect(diagnostic).toContain('«o»');
+      expect(diagnostic).toContain('«no»');
+      expect(diagnostic).not.toContain('«o» — 0');
+    }
   });
 
   it('builds Scheduler geometry only when every layer inventory, source and reaction selection is explicit', () => {
