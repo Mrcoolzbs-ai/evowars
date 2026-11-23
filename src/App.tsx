@@ -881,20 +881,21 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         );
         return;
       }
+      const temperatureScientificValue = sourceLayer.temperature;
       if (
-        sourceLayer.temperature.status !== 'known' &&
-        sourceLayer.temperature.status !== 'estimated'
+        temperatureScientificValue.status !== 'known' &&
+        temperatureScientificValue.status !== 'estimated'
       ) {
         setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не имеет числового статуса known/estimated.');
         return;
       }
-      const temperature = temperatureValueOrNull(sourceLayer.temperature);
+      const temperature = temperatureValueOrNull(temperatureScientificValue);
       if (temperature === null || !Number.isFinite(temperature) || temperature <= 0) {
         setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не является пригодным положительным значением в K.');
         return;
       }
       const temperatureProvenance =
-        sourceLayer.temperature.provenance ?? thermalProfile.provenance;
+        temperatureScientificValue.provenance ?? thermalProfile.provenance;
       const temperatureSourceName = temperatureProvenance.sourceName;
       const temperatureSourceReference =
         temperatureProvenance.reference ??
