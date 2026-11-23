@@ -166,9 +166,12 @@ function distributionOfSolve(
 }
 
 /**
- * Baseline для очередного минерального цикла: решатель Stage 4.9c по
- * DIC/TA_C, вычисленным из ТЕКУЩЕГО инвентаря океана, при фиксированных
- * T/S/P фикстуры. Согласован с инвентарём по построению.
+ * Baseline для очередного минерального цикла: углеродные формы — из
+ * решения Stage 4.9c по DIC/TA_C, вычисленным из ТЕКУЩЕГО инвентаря
+ * океана; протонные концентрации (H+, OH-) — из ФАКТИЧЕСКОГО инвентаря
+ * (exchange 4.9e этого же/прошлых шагов сдвигает co2_aq без переспециации
+ * протонов, поэтому H из решения не согласуется с инвентарём, а
+ * baseline обязан быть согласован с фактическим инвентарём).
  */
 function baselineFromInventory(core: CoreWorldState, recordId: string): CarbonateSpeciationDistribution {
   const ocean = core.reservoirs.find((r) => r.id === 'ocean');
@@ -181,12 +184,33 @@ function baselineFromInventory(core: CoreWorldState, recordId: string): Carbonat
   const co3 = entries['co3_aq'] ?? 0;
   const dic = (co2Aq + hco3 + co3) / MASS;
   const alk = (hco3 + 2 * co3) / MASS;
-  return distributionOfSolve(solveFixture(dic, alk), recordId);
+  const solved = solveFixture(dic, alk);
+  return {
+    phScale: solved.phScale,
+    activityModel: solved.activityModel,
+    temperatureK: solved.temperatureK,
+    salinityPSU: solved.salinityPSU,
+    pressurePa: solved.pressurePa,
+    approximationKind: solved.approximation.kind,
+    concentrations: {
+      co2StarMolPerKgSw: solved.speciesMolPerKgSw.co2_aq,
+      hco3MolPerKgSw: solved.speciesMolPerKgSw.hco3_aq,
+      co3MolPerKgSw: solved.speciesMolPerKgSw.co3_aq,
+      hydrogenMolPerKgSw: (entries['hplus_aq'] ?? 0) / MASS,
+      ohMolPerKgSw: (entries['oh_aq'] ?? 0) / MASS
+    },
+    provenance: {
+      ...PROV,
+      recordId,
+      method: 'synthetic test fixture: baseline из производственного решателя Stage 4.9c по DIC/TA_C инвентаря; протонные концентрации — из фактического инвентаря (согласованность baseline)'
+    }
+  };
 }
 
 interface ChargeCompensation {
   readonly deltaStrongIonChargeMolPerKgSw: number;
   readonly hydrogenMolPerM2Drift: number;
+  readonly oxygenMolPerM2Drift: number;
   readonly provenance: DataProvenance;
 }
 
@@ -194,8 +218,13 @@ interface ChargeCompensation {
  * Компенсация фона сильных ионов для минерального цикла (семантика как
  * в 4.9f): закрывает изменение модельного заряда ПЕРЕспециации относительно
  * пост-реакционного baseline (сдвиг только co3). Заодно возвращает
- * ожидаемый дрейф H инвентаря (протонные дельты hplus_aq/oh_aq) —
- * это и есть та часть водородного баланса, которая НЕ сохраняется.
+ * ожидаемые дрейфы H и O инвентаря: H содержится в hco3_aq, hplus_aq и
+ * oh_aq; O — в co2_aq (×2), hco3_aq (×3), co3_aq (×3) и oh_aq (×1).
+ * Оба дрейфа НЕ сохраняются при переспециации в CO2* — при переходе
+ * hco3 -> co2_aq атомы H и O уходят в неявный растворитель H2O, количество
+ * которого в инвентаре не отслеживается (известное ограничение
+ * Stage 4.9d/4.9e); здесь дрейфы предсказываются ТОЧНО из решения
+ * Stage 4.9c, что исключает маскировку под balanced.
  */
 function chargeCompensationFor(
   direction: 'dissolve' | 'precipitate',
@@ -216,12 +245,24 @@ function chargeCompensationFor(
     -2 * (solved.speciesMolPerKgSw.co3_aq - postCo3) +
     1 * (solved.hydrogenMolPerKgSw - b.hydrogenMolPerKgSw) +
     -1 * (tOh - (b.ohMolPerKgSw ?? 0));
+  // Полный водородный дрейф: H в инвентаре несут hco3_aq, hplus_aq и oh_aq.
   const hydrogenDriftPerM2 =
     massKgPerM2 *
-    (solved.hydrogenMolPerKgSw - b.hydrogenMolPerKgSw + (tOh - (b.ohMolPerKgSw ?? 0)));
+    ((solved.speciesMolPerKgSw.hco3_aq - b.hco3MolPerKgSw) +
+      (solved.hydrogenMolPerKgSw - b.hydrogenMolPerKgSw) +
+      (tOh - (b.ohMolPerKgSw ?? 0)));
+  // Полный кислородный дрейф: O в инвентаре несут co2_aq (×2),
+  // hco3_aq (×3), co3_aq (×3) и oh_aq (×1).
+  const oxygenDriftPerM2 =
+    massKgPerM2 *
+    (2 * (solved.speciesMolPerKgSw.co2_aq - b.co2StarMolPerKgSw) +
+      3 * (solved.speciesMolPerKgSw.hco3_aq - b.hco3MolPerKgSw) +
+      3 * (solved.speciesMolPerKgSw.co3_aq - b.co3MolPerKgSw) +
+      (tOh - (b.ohMolPerKgSw ?? 0)));
   return {
     deltaStrongIonChargeMolPerKgSw: -modeledChargePerKg,
     hydrogenMolPerM2Drift: hydrogenDriftPerM2,
+    oxygenMolPerM2Drift: oxygenDriftPerM2,
     provenance: {
       ...PROV,
       recordId: 'fixture-strong-ion-compensation-macro',
@@ -394,6 +435,7 @@ interface ScenarioResult {
   readonly chargeExpected: number;
   readonly hydrogenActual: number;
   readonly hydrogenExpected: number;
+  readonly oxygenExpected: number;
   readonly appliedPhaseCount: number;
   readonly fluxRecords: number;
   readonly reactionRecords: number;
@@ -412,6 +454,7 @@ function runScenario(opts: ScenarioOptions): ScenarioResult {
   let appliedPhaseCount = 0;
   let chargeExpected = 0;
   let hydrogenExpected = 0;
+  let oxygenExpected = 0;
   let injection: ScenarioResult['injection'] = null;
 
   /**
@@ -435,6 +478,7 @@ function runScenario(opts: ScenarioOptions): ScenarioResult {
       // решения Stage 4.9c по целевой DIC/TA_C — НЕ заглушки.
       chargeExpected += -1 * compensation.deltaStrongIonChargeMolPerKgSw * MASS;
       hydrogenExpected += compensation.hydrogenMolPerM2Drift;
+      oxygenExpected += compensation.oxygenMolPerM2Drift;
       phases.push({
         kind: 'mineral_cycle',
         input: {
@@ -564,6 +608,7 @@ function runScenario(opts: ScenarioOptions): ScenarioResult {
     chargeExpected,
     hydrogenActual: after.totals['H'] - before.totals['H'],
     hydrogenExpected,
+    oxygenExpected,
     appliedPhaseCount,
     fluxRecords: core.fluxLedger.records.length,
     reactionRecords: core.reactionLedger !== undefined ? core.reactionLedger.records.length : -1,
@@ -768,9 +813,13 @@ describe('Stage 4.9g macro-шаг: фазы через production-исполни
     const residual = geochemicalElementResidual(before, result.elementAfter);
     expect(residual.absolute['C']).toBeCloseTo(0, 14);
     expect(residual.absolute['Ca']).toBeCloseTo(0, 14);
-    expect(residual.absolute['O']).toBeCloseTo(0, 14);
-    // Водород НЕ сохраняется: дрейф равен протонным дельтам переспециации,
-    // предсказанным независимо решателем Stage 4.9c.
+    // Кислород НЕ сохраняется в минеральном цикле: при переспециации в
+    // CO2* часть O уходит в неявный растворитель H2O (известное ограничение
+    // Stage 4.9d/4.9e). Дрейф предсказывается ТОЧНО из дельт решения
+    // Stage 4.9c — аудит согласован с известной химией, а не маскируется.
+    expect(Math.abs(residual.absolute['O'] - compensation.oxygenMolPerM2Drift)).toBeLessThanOrEqual(1e-12);
+    // Водород НЕ сохраняется: дрейф равен водородным дельтам переспециации
+    // (hco3_aq, hplus_aq, oh_aq), предсказанным независимо решателем Stage 4.9c.
     const hydrogenDrift = result.elementAfter.totals['H'] - before.totals['H'];
     expect(Math.abs(hydrogenDrift)).toBeGreaterThan(0);
     expect(hydrogenDrift).toBeCloseTo(compensation.hydrogenMolPerM2Drift, 12);
@@ -869,7 +918,7 @@ describe('Stage 4.9g macro-шаг: атомарность и rollback', () => {
 
 describe('Stage 4.9g: интеграция 1000 macro-шагов (замкнутая тестовая подсистема)', () => {
   it(
-    '1000 шагов: C, Ca, O сохраняются с относительной невязкой <= 1e-9; H честно НЕ сохраняется и предсказан протонными дельтами; отказ посередине откатывается; отрицательных запасов нет',
+    '1000 шагов: C и Ca сохраняются с относительной невязкой <= 1e-9; O и H честно НЕ сохраняются и их дрейфы предсказаны точными дельтами решения Stage 4.9c; отказ посередине откатывается; отрицательных запасов нет',
     () => {
       const result = runScenario({ seed: 13001, steps: 1000, dtYears: 1, includeMineral: true, rateFactor: 'random' });
 
@@ -882,11 +931,17 @@ describe('Stage 4.9g: интеграция 1000 macro-шагов (замкнут
         expect(result.injection.appliedPhases).toBe(0);
       }
 
-      // Консервация элементов на 1000 шагах (независимый оракул по инвентарям).
-      for (const element of ['C', 'Ca', 'O']) {
+      // Консервация C и Ca на 1000 шагах (независимый оракул по инвентарям).
+      for (const element of ['C', 'Ca']) {
         expect(result.residual.absolute[element]).toBeCloseTo(0, 9);
         expect(Math.abs(result.residual.relative[element] ?? 0)).toBeLessThanOrEqual(1e-9);
       }
+      // Кислород честно НЕ сохраняется: переспециация DIC в CO2* переносит
+      // O в неявный растворитель H2O (не в инвентаре, ограничение 4.9d/4.9e),
+      // обмен co2/co2_aq сохраняет O (состав идентичен). Дрейф O предсказан
+      // побитово точно суммой дельт решения Stage 4.9c минеральных циклов
+      // — аудит не маскируется под balanced.
+      expect(Math.abs(result.residual.absolute['O'] - result.oxygenExpected)).toBeLessThanOrEqual(1e-12);
       // Водород честно НЕ сохраняется (не маскируется под balanced),
       // при этом дрейф точно предсказан протонными дельтами
       // переспециации минеральных циклов.
