@@ -2111,11 +2111,6 @@ export function runMacroStep(
   // Only when addition rounds back to the current value do we open a new
   // segment with advance(); pending events in the old segment are then
   // rebased by their exact local offset from the old current point.
-  const targetLocalTimeS = current.clock.localTimeS + effectiveDurationS;
-  const exactSameSegmentAdvance =
-    Number.isFinite(targetLocalTimeS) &&
-    targetLocalTimeS > current.clock.localTimeS &&
-    targetLocalTimeS - current.clock.localTimeS === effectiveDurationS;
   const sameSegmentBoundary =
     eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex
       ? eventBoundary.time
@@ -2128,17 +2123,16 @@ export function runMacroStep(
       : processBoundary !== undefined && processBoundary.time.segmentIndex === current.clock.segmentIndex + 1
         ? processBoundary.time
         : null;
+  // Keep the clock's single rounding policy authoritative. advance()
+  // tolerates normal binary64 rounding (relative error <= 1e-9) and rolls
+  // over only when the represented increment materially changes dt or
+  // disappears. advanceTo() is reserved for an exact event/process point.
   const newClock =
     sameSegmentBoundary !== null
       ? advanceTo(current.clock, sameSegmentBoundary)
       : nextSegmentBoundary !== null
         ? advance(startNewSegment(current.clock), nextSegmentBoundary.localTimeS)
-        : exactSameSegmentAdvance
-          ? advanceTo(current.clock, {
-              segmentIndex: current.clock.segmentIndex,
-              localTimeS: targetLocalTimeS
-            })
-          : advance(startNewSegment(current.clock), effectiveDurationS);
+        : advance(current.clock, effectiveDurationS);
 
   const eventQueue =
     newClock.segmentIndex === current.clock.segmentIndex
