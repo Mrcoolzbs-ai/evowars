@@ -155,7 +155,39 @@ describe('Stage 4.2.1 Scheduler: детерминированный порядо
     expect(dynA.macroStepsCompleted).toBe(1);
     expect(dynA.operatorCallsCompleted).toBe(1);
     expect(dynA.lastRunElapsedS).toBe(10);
+    expect(dynA.lastRunTime).toEqual({ segmentIndex: 0, localTimeS: 10 });
     expect(result.log.every((entry) => entry.status === 'committed' && entry.phase === 'lie')).toBe(true);
+  });
+});
+
+describe('Stage 4.2.1 Scheduler: точное время последнего запуска', () => {
+  it('сохраняет последний запуск в точной сегментированной координате при большом elapsed-времени', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const largeClock = advance(createSimulationClock(), 1e16);
+    const world = { ...testWorld(), clock: largeClock };
+    const exact = runMacroStep(world, registry, [recorder('a', [])], {
+      durationS: 2,
+      splitting: 'lie'
+    });
+    expect(exact.status).toBe('committed');
+    expect(exact.world.clock.segmentIndex).toBe(0);
+    expect(exact.world.clock.localTimeS).toBe(1e16 + 2);
+    expect(exact.bookkeeping.processDynamics.a!.lastRunTime).toEqual({
+      segmentIndex: 0,
+      localTimeS: 1e16 + 2
+    });
+
+    const rounded = runMacroStep(world, registry, [recorder('a', [])], {
+      durationS: 3,
+      splitting: 'lie'
+    });
+    expect(rounded.status).toBe('committed');
+    expect(rounded.world.clock.segmentIndex).toBe(1);
+    expect(rounded.world.clock.localTimeS).toBe(3);
+    expect(rounded.bookkeeping.processDynamics.a!.lastRunTime).toEqual({
+      segmentIndex: 1,
+      localTimeS: 3
+    });
   });
 });
 
