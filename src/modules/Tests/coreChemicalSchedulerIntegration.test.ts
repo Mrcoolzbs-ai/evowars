@@ -395,6 +395,79 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     )).toBe(true);
   });
 
+  it('executes both supported mechanisms together at their shared 300 K applicability boundary', () => {
+    const world = makePhysicalKineticWorld(300);
+    const state = world.chemicalState!;
+    state.inventory = {
+      ...state.inventory,
+      o: 1e-5,
+      no: 5e-6,
+      no2: 2e-7
+    };
+    state.reservoirs = {
+      ...state.reservoirs,
+      atmospheric: { ...state.inventory }
+    };
+    const layer = state.physicalKinetics!.layers[0]!;
+    layer.temperatureK = 300;
+    layer.columnInventoriesMolM2 = {
+      ...layer.columnInventoriesMolM2,
+      o: 1e-5,
+      no: 5e-6,
+      no2: 2e-7
+    };
+    layer.reactionIds = [
+      'kida-tb-2015-03-19-89',
+      'kida-tb-2015-03-19-106'
+    ];
+
+    const result = runChemicalEvolutionSchedulerStep(world);
+    expect(result.status).toBe('committed');
+    const updated = result.world.chemicalState!;
+    expect(updated.inventory.o).toBeLessThan(1e-5);
+    expect(updated.inventory.no).toBeLessThan(5e-6);
+    expect(updated.inventory.no2).toBeGreaterThan(2e-7);
+    expect(updated.inventory.h).toBeLessThan(8e-6);
+    expect(updated.inventory.o2).toBeLessThan(4e-5);
+    expect(updated.inventory.ho2).toBeGreaterThan(1e-8);
+    expect(updated.physicalKineticsHistory![0]!.layers[0]!.reactions.map((r) => r.reactionId)).toEqual([
+      'kida-tb-2015-03-19-89',
+      'kida-tb-2015-03-19-106'
+    ]);
+    const records = result.world.coreWorldState!.reactionLedger!.records;
+    expect(records.filter((r) => r.processId === PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID))
+      .toHaveLength(2);
+  });
+
+  it('converges to the same 0.1 s trajectory when the macro step is halved', () => {
+    const coarse = makePhysicalKineticWorld();
+    coarse.chemicalState!.physicalKinetics!.maximumMacroStepS = 0.1;
+    const coarseResult = runChemicalEvolutionSchedulerStep(coarse);
+    expect(coarseResult.status).toBe('committed');
+    expect(coarseResult.stepSize!.effectiveDurationS).toBeCloseTo(0.1, 12);
+
+    const fine = makePhysicalKineticWorld();
+    fine.chemicalState!.physicalKinetics!.maximumMacroStepS = 0.05;
+    const firstHalf = runChemicalEvolutionSchedulerStep(fine);
+    expect(firstHalf.status).toBe('committed');
+    expect(firstHalf.stepSize!.effectiveDurationS).toBeCloseTo(0.05, 12);
+    const secondHalf = runChemicalEvolutionSchedulerStep(firstHalf.world);
+    expect(secondHalf.status).toBe('committed');
+    expect(secondHalf.stepSize!.effectiveDurationS).toBeCloseTo(0.05, 12);
+
+    const coarseState = coarseResult.world.chemicalState!;
+    const fineState = secondHalf.world.chemicalState!;
+    for (const speciesId of ['h', 'o2', 'ho2']) {
+      const coarseAmount = coarseState.inventory[speciesId]!;
+      const fineAmount = fineState.inventory[speciesId]!;
+      const relativeDifference =
+        Math.abs(coarseAmount - fineAmount) / Math.max(Math.abs(coarseAmount), Math.abs(fineAmount));
+      expect(relativeDifference, speciesId + ' coarse/fine relative difference').toBeLessThan(5e-6);
+    }
+    expect(coarseResult.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
+    expect(secondHalf.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
+  });
+
   it('rejects a missing provenance or missing species instead of silently using zero or game mode', () => {
     const noProvenance = makePhysicalKineticWorld();
     noProvenance.chemicalState!.physicalKinetics!.layers[0]!.thicknessProvenance = {};
