@@ -531,9 +531,10 @@ export function scheduleProcess(
 
 /**
  * Готовые к запуску процессы: срок наступил (nextDueElapsedS не
- * позже nowElapsedS), процесс auto-runnable (включён, решатель
- * доступен, τ известно) и runtime-оператор передан. Порядок
- * детерминирован (сортировка по id).
+ * позже nowElapsedS), процесс auto-runnable и runtime-оператор
+ * передан. Для autonomous требуется известное τ; для
+ * state_dependent — обязательный runtime proposeStep(); explicit_only
+ * исключён. Порядок детерминирован (сортировка по id).
  */
 export function readyProcessIds(
   bk: SchedulerBookkeeping,
@@ -541,19 +542,20 @@ export function readyProcessIds(
   operators: readonly ProcessOperator[],
   nowElapsedS: number
 ): readonly string[] {
-  const operatorIds = new Set(operators.map((o) => o.processId));
+  const operatorById = new Map(operators.map((operator) => [operator.processId, operator]));
   const ready: string[] = [];
   for (const [processId, dynamics] of Object.entries(bk.processDynamics)) {
     if (dynamics.nextDueElapsedS === null) continue;
     if (dynamics.nextDueElapsedS > nowElapsedS) continue;
     const descriptor = registry.get(processId);
     if (descriptor === null || !isProcessAutoRunnable(descriptor)) continue;
-    // Stage 4.2.3.3: явно инициируемые дискретные операции
-    // (executionMode = 'explicit_only') не попадают в очередь
-    // автоматически готовых процессов: их запуск — только явный
-    // пользовательский вызов с переданной длительностью шага.
+    // Explicit-only операции не попадают в автоматическую очередь.
     if (descriptor.executionMode === 'explicit_only') continue;
-    if (!operatorIds.has(processId)) continue;
+    const operator = operatorById.get(processId);
+    if (operator === undefined) continue;
+    // State-dependent процесс доступен, только если runtime solver
+    // умеет предложить ограничение шага для актуального состояния.
+    if (descriptor.executionMode === 'state_dependent' && typeof operator.proposeStep !== 'function') continue;
     ready.push(processId);
   }
   return ready.sort();
@@ -564,6 +566,31 @@ export function readyProcessIds(
 // ============================================
 
 /**
+ * Runtime-оценка допустимого macro-шага state-dependent процесса.
+ * durationS — верхняя граница длительности, безопасная для текущего
+ * состояния и не превышающая запрошенный вызывающей стороной максимум.
+ * characteristicTimeS, если известна решателю, — фактический
+ * state-dependent масштаб времени; неизвестное не заменяется числом.
+ * method и diagnostics сохраняют объяснение принятого решения.
+ */
+export interface ProcessStepProposal {
+  durationS: number;
+  method: string;
+  characteristicTimeS?: number;
+  diagnostics?: readonly string[];
+}
+
+/** Сводка выбора длительности macro-шага. */
+export interface MacroStepSizeReport {
+  requestedDurationS: number;
+  effectiveDurationS: number;
+  /** Процессы, задавшие минимальное ограничение, только когда шаг сокращён. */
+  limitingProcessIds: readonly string[];
+  proposals: readonly (ProcessStepProposal & { processId: string })[];
+  diagnostics: readonly string[];
+}
+
+/**
  * Runtime-исполнитель процесса. Оператор получает мир и ФИЗИЧЕСКИЙ
  * подынтервал macro-шага: интервал [intervalStartS,
  * intervalStartS + durationS), с, всегда лежит внутри [0, dt].
@@ -571,11 +598,22 @@ export function readyProcessIds(
  * интегрирует [0, dt] (sub-cycling — последовательные подшаги,
  * покрывающие [0, dt]); Strang — A(dt/2) интегрирует [0, dt/2],
  * B(dt) интегрирует [0, dt], второй A(dt/2) — [dt/2, dt].
- * Оператор возвращает НОВОЕ состояние мира, НЕ двигает часы
- * (проверяется; нарушение отклоняет шаг) и НЕ сериализуется.
+ *
+ * State-dependent оператор обязан реализовать proposeStep(). Перед
+ * применением Scheduler вызывает его на ИЗОЛИРОВАННОМ снимке мира;
+ * результат ограничивает запрошенный macro-шаг сверху. При нескольких
+ * таких процессах выбирается минимальное предложение. Некорректное
+ * предложение или ошибка callback отклоняют транзакцию до apply().
+ * Оператор apply возвращает НОВОЕ состояние мира, НЕ двигает часы
+ * (проверяется; нарушение отклоняет шаг); runtime-код не сериализуется.
  */
 export interface ProcessOperator {
   processId: string;
+  /** Предложить максимальный допустимый macro-шаг для текущего состояния. */
+  proposeStep?(
+    world: Readonly<CoreWorldState>,
+    requestedMaximumDurationS: number
+  ): ProcessStepProposal;
   apply(world: CoreWorldState, durationS: number, intervalStartS: number): CoreWorldState;
 }
 
@@ -590,7 +628,12 @@ export interface MacroStepAuditOptions {
 }
 
 export interface MacroStepOptions {
-  /** Длительность macro-шага, с (положительное конечное число). */
+  /**
+   * Запрошенная максимальная длительность macro-шага, с. Если среди
+   * процессов есть state_dependent-решатели, фактический шаг может
+   * быть строго меньше по их runtime-предложениям; Scheduler никогда
+   * не увеличивает запрошенную длительность.
+   */
   durationS: number;
   splitting: SplittingMode;
   /** Процессы шага; по умолчанию — операторы, отсортированные по id. */
@@ -624,6 +667,8 @@ export interface MacroStepResult {
   bookkeeping: SchedulerBookkeeping;
   log: readonly SchedulerStepLogEntry[];
   audit?: WorldTransitionAudit;
+  /** Фактический выбор длительности; присутствует после разрешения предложений. */
+  stepSize?: MacroStepSizeReport;
   diagnostics: readonly string[];
 }
 
@@ -831,10 +876,19 @@ export function runMacroStep(
           processId
         );
       }
+    } else if (descriptor.executionMode === 'state_dependent') {
+      // τ не требуется: выбранная state-dependent семантика требует
+      // обязательного runtime-предложения, привязанного к состоянию.
+      const operator = operatorByProcess.get(processId);
+      if (operator === undefined || typeof operator.proposeStep !== 'function') {
+        throw new SchedulerError(
+          'solver_unavailable',
+          'процесс «' + processId + '» объявлен state_dependent, но runtime-оператор не предоставляет proposeStep(): автоматический шаг не определён',
+          processId
+        );
+      }
     } else {
-      // Автономный (штатный) путь шага: explicit_only-процесс
-      // запустить НЕЛЬЗЯ — у него нет установленного τ, и обход
-      // τ-контроля через обычный список процессов запрещён.
+      // Обычный autonomous-путь по-прежнему требует числовое τ.
       if (descriptor.executionMode === 'explicit_only') {
         throw new SchedulerError(
           'explicit_only_process',
@@ -864,6 +918,129 @@ export function runMacroStep(
     }
   }
 
+  // --- Stage 4.2: изолированный снимок и state-dependent выбор dt ---
+  // Callback-предложения не должны мутировать ни исходный мир, ни
+  // рабочий снимок, на котором будут применены операторы. Каждый
+  // solver получает собственную глубокую копию исходного состояния.
+  let working: CoreWorldState;
+  try {
+    working = snapshotWorldState(world);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: [],
+      diagnostics: [
+        'не удалось создать рабочий снимок состояния мира: ' +
+          reason +
+          ' — шаг отклонён до вызова solver-предложений и операторов, состояние мира не изменено'
+      ]
+    };
+  }
+
+  const proposals: Array<ProcessStepProposal & { processId: string }> = [];
+  const proposalDiagnostics: string[] = [];
+  let effectiveDurationS = opts.durationS;
+  for (const processId of processIds) {
+    const descriptor = registry.get(processId);
+    const operator = operatorByProcess.get(processId);
+    if (descriptor?.executionMode !== 'state_dependent') continue;
+    if (operator === undefined || typeof operator.proposeStep !== 'function') {
+      throw new SchedulerError(
+        'solver_unavailable',
+        'процесс «' + processId + '» объявлен state_dependent, но runtime proposeStep() отсутствует',
+        processId
+      );
+    }
+    let proposal: ProcessStepProposal;
+    try {
+      proposal = operator.proposeStep(snapshotWorldState(working), opts.durationS);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'state-dependent solver-предложение процесса «' + processId + '» завершилось ошибкой: ' + reason +
+            ' — оператор apply не вызван, состояние мира не изменено'
+        ]
+      };
+    }
+    const raw = proposal as unknown as Record<string, unknown>;
+    const proposalProblems: string[] = [];
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      proposalProblems.push('ожидается объект ProcessStepProposal');
+    } else {
+      if (
+        typeof raw.durationS !== 'number' ||
+        !Number.isFinite(raw.durationS) ||
+        raw.durationS <= 0 ||
+        raw.durationS > opts.durationS
+      ) {
+        proposalProblems.push(
+          'durationS должен быть конечным положительным числом не больше запрошенного максимума ' +
+            opts.durationS + ' с'
+        );
+      }
+      if (typeof raw.method !== 'string' || raw.method.trim() === '') {
+        proposalProblems.push('method должен быть непустой строкой');
+      }
+      if (
+        raw.characteristicTimeS !== undefined &&
+        (typeof raw.characteristicTimeS !== 'number' ||
+          !Number.isFinite(raw.characteristicTimeS) ||
+          raw.characteristicTimeS <= 0)
+      ) {
+        proposalProblems.push('characteristicTimeS, если задано, должно быть конечным строго положительным временем в секундах');
+      }
+      if (
+        raw.diagnostics !== undefined &&
+        (!Array.isArray(raw.diagnostics) || raw.diagnostics.some((item) => typeof item !== 'string'))
+      ) {
+        proposalProblems.push('diagnostics, если заданы, должны быть массивом строк');
+      }
+    }
+    if (proposalProblems.length > 0) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'state-dependent solver-предложение процесса «' + processId + '» отклонено: ' +
+            proposalProblems.join('; ') + ' — оператор apply не вызван, состояние мира не изменено'
+        ]
+      };
+    }
+    const normalized: ProcessStepProposal & { processId: string } = {
+      processId,
+      durationS: raw.durationS as number,
+      method: raw.method as string,
+      ...(raw.characteristicTimeS === undefined ? {} : { characteristicTimeS: raw.characteristicTimeS as number }),
+      ...(raw.diagnostics === undefined ? {} : { diagnostics: [...(raw.diagnostics as string[])] })
+    };
+    proposals.push(normalized);
+    if (Array.isArray(normalized.diagnostics)) {
+      proposalDiagnostics.push(...normalized.diagnostics.map((message) => '[' + processId + '] ' + message));
+    }
+    effectiveDurationS = Math.min(effectiveDurationS, normalized.durationS);
+  }
+  const limitingProcessIds =
+    effectiveDurationS < opts.durationS
+      ? proposals.filter((proposal) => proposal.durationS === effectiveDurationS).map((proposal) => proposal.processId).sort()
+      : [];
+  const stepSize: MacroStepSizeReport = {
+    requestedDurationS: opts.durationS,
+    effectiveDurationS,
+    limitingProcessIds,
+    proposals: proposals.map((proposal) => ({ ...proposal })),
+    diagnostics: [...proposalDiagnostics]
+  };
+
   // --- детерминированный план вызовов операторов ---
   interface PlannedCall {
     processId: string;
@@ -878,15 +1055,15 @@ export function runMacroStep(
     if (a === undefined || b === undefined) {
       throw new SchedulerError('invalid_splitting', 'Strang splitting требует ровно два процесса', null);
     }
-    const half = opts.durationS / 2;
+    const half = effectiveDurationS / 2;
     // Физические подынтервалы (4.2.1.2): A интегрирует [0, dt/2],
     // B — [0, dt] (полный шаг B-динамики ВНУТРИ macro-шага), второй
     // A — [dt/2, dt]; ни один вызов не выходит за [0, dt].
     plan.push({ processId: a, phase: 'strang_a_half_first', durationS: half, intervalStartS: 0 });
-    plan.push({ processId: b, phase: 'strang_b_full', durationS: opts.durationS, intervalStartS: 0 });
+    plan.push({ processId: b, phase: 'strang_b_full', durationS: effectiveDurationS, intervalStartS: 0 });
     plan.push({ processId: a, phase: 'strang_a_half_second', durationS: half, intervalStartS: half });
   } else {
-    const subDurationS = opts.durationS / subCycles;
+    const subDurationS = effectiveDurationS / subCycles;
     for (const processId of processIds) {
       for (let i = 0; i < subCycles; i++) {
         plan.push({
@@ -908,31 +1085,6 @@ export function runMacroStep(
       intervalStartS: c.intervalStartS,
       status: 'rejected' as const
     }));
-
-  // --- Stage 4.2.3.1: snapshot-изоляция ---
-  // Рабочее состояние шага — ПОЛНАЯ изолированная копия мира:
-  // операторы физически не могут изменить объект вызывающей
-  // стороны (включая вложенные структуры); при ошибке или
-  // отклонении шага рабочий снимок отбрасывается. Если снимок
-  // создать невозможно, шаг завершается контролируемым отказом
-  // до вызова первого оператора; исходное состояние нетронуто.
-  let working: CoreWorldState;
-  try {
-    working = snapshotWorldState(world);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return {
-      status: 'rejected',
-      world,
-      bookkeeping: originalBk,
-      log: [],
-      diagnostics: [
-        'не удалось создать рабочий снимок состояния мира: ' +
-          reason +
-          ' — шаг отклонён до вызова операторов, состояние мира не изменено'
-      ]
-    };
-  }
 
   // --- выполнение с атомарностью ---
   let current: CoreWorldState = working;
@@ -1065,7 +1217,7 @@ export function runMacroStep(
   }
 
   // --- ЕДИНСТВЕННОЕ продвижение мирового времени ---
-  const newClock = advance(current.clock, opts.durationS);
+  const newClock = advance(current.clock, effectiveDurationS);
   const lastRunElapsedS = totalElapsedSeconds(newClock);
   const callsPerProcess = new Map<string, number>();
   for (const call of plan) {
@@ -1101,13 +1253,17 @@ export function runMacroStep(
     stepLog: [...originalBk.stepLog, ...committedLog],
     stepCount: originalBk.stepCount + 1
   };
-  const diagnostics: string[] = audit !== undefined ? [...audit.diagnostics] : [];
+  const diagnostics: string[] = [
+    ...stepSize.diagnostics,
+    ...(audit !== undefined ? [...audit.diagnostics] : [])
+  ];
   return {
     status: 'committed',
     world: { ...current, clock: newClock, scheduling: newBk },
     bookkeeping: newBk,
     log: committedLog,
     audit,
+    stepSize,
     diagnostics
   };
 }
