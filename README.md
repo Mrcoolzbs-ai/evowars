@@ -1,32 +1,36 @@
-# React + TypeScript + Vite
+# Evolution Wars
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+**Evolution Wars** — браузерное приложение для детерминированной генерации планетарных миров и исследования их физических, атмосферных и химических свойств.
 
-Currently, two official plugins are available:
+Проект строит миры из seed и настраиваемых категорий, показывает их паспорт и проверки совместимости, сохраняет историю локально и предоставляет ограниченные инструменты исследования химической эволюции.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Документация
 
-## React Compiler
+- [Восстановленная спецификация проекта](SPECIFICATION.md) — назначение, сценарии, архитектура, научные контракты, текущие ограничения и критерии приёмки.
+- [Научная документация](docs/science/SCIENTIFIC_FOUNDATION.md) — основы модели.
+- [Аудит текущей системы](docs/science/CURRENT_SYSTEM_AUDIT.md) — реализованные модули и известные ограничения.
+- [Дорожная карта](docs/science/IMPLEMENTATION_ROADMAP.md) — этапы, статусы и критерии готовности.
+- [План валидации](docs/science/VALIDATION_PLAN.md) — тестовые уровни и проверяемые сценарии.
+- [Пилот Rust/WASM](docs/rust/RUST_WASM_PILOT.md) — экспериментальная вычислительная ветка.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Запуск
 
-## Expanding the Oxlint configuration
+Требуется Node.js 22.
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm ci
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Проверки
+
+```bash
+npx tsc -b
+npx vitest run
+npm run lint
+npm run build
+```
+
+## Статус веток
+
+Расширенная реализация и восстановленная документация находятся в ветке `stage-3-planetary-physics` и открытом [PR #1](https://github.com/Mrcoolzbs-ai/evowars/pull/1). До слияния PR основная ветка `main` остаётся более ранним MVP-срезом.
