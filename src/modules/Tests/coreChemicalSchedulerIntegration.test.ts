@@ -526,8 +526,13 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     const secondAudit = nextStep.world.chemicalState!.physicalKineticsHistory![1]!;
     expect(secondAudit.layers[0]!.totalInventoryProvenance.o2!.method)
       .toContain('Derived by primary physical chemical kinetics Scheduler');
-    expect(secondAudit.layers[0]!.totalInventoryProvenance.o2!.rawInput!.before_o2_mol_m2)
+    expect(secondAudit.layers[0]!.totalInventoryProvenance.o2!.rawInput!.after_o2_mol_m2)
       .toBe(updated.inventory.o2);
+    const secondStepProvenance =
+      nextStep.world.chemicalState!.physicalKinetics!.totalInventoryProvenance.o2!;
+    expect(secondStepProvenance.rawInput!.before_o2_mol_m2).toBe(updated.inventory.o2);
+    expect(secondStepProvenance.rawInput!.after_o2_mol_m2)
+      .toBe(nextStep.world.chemicalState!.inventory.o2);
   });
 
   it('evolves two disjoint physical layers and adds their column deltas exactly once to the global inventory', () => {
