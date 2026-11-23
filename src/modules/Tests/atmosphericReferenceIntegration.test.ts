@@ -341,9 +341,23 @@ describe('Stage 4.2: reference profile integration', () => {
     if (built.status !== 'configured') return;
 
     const syntheticWorld = withSyntheticColumnState(world, totals);
+    const transportConfiguration = {
+      ...built.configuration,
+      verticalTransport: {
+        speciesIds: ['no'],
+        // Explicit synthetic scenario value used only to prove Scheduler wiring.
+        eddyDiffusivityM2S: 1e6,
+        diffusivityProvenance: {
+          sourceName: 'synthetic test Kzz; not a measured terrestrial profile',
+          sourceId: 'test:synthetic:Kzz',
+          method: 'explicit test fixture',
+          limitations: 'Not calibrated and not intended as an Earth-atmosphere Kzz estimate'
+        }
+      }
+    };
     const configured = configurePrimaryPhysicalChemicalKinetics(
       syntheticWorld.chemicalState!,
-      built.configuration,
+      transportConfiguration,
       totals
     );
     expect(configured.status).toBe('configured');
@@ -456,6 +470,54 @@ describe('Stage 4.2: reference profile integration', () => {
       firstLayer.thirdBodyConsistency.layerAverageConcentrationMoleculeCm3,
       8
     );
+    expect(audit.verticalTransport).toBeDefined();
+    expect(audit.verticalTransport!.durationS).toBe(audit.durationS);
+    expect(audit.verticalTransport!.speciesIds).toEqual(['no']);
+    expect(audit.verticalTransport!.layers).toHaveLength(column.layerBoundaries.length);
+    expect(audit.verticalTransport!.columnTotalsMolM2.no!.after).toBeCloseTo(
+      audit.verticalTransport!.columnTotalsMolM2.no!.before,
+      10
+    );
+    expect(audit.verticalTransport!.interfaces.every((entry) =>
+      entry.species.no!.fluxClosureRelativeDeviation <= 1e-4
+    )).toBe(true);
+    for (const transportLayer of audit.verticalTransport!.layers) {
+      const kineticLayer = audit.layers.find((entry) => entry.layerId === transportLayer.layerId)!;
+      expect(kineticLayer.finalColumnInventoriesMolM2.no).toBeCloseTo(
+        transportLayer.species.no!.finalColumnInventoryMolM2,
+        10
+      );
+    }
+
+    // A finite but physically unrepresentable Kzz is intentionally accepted
+    // as an explicit input value by the configuration schema, then rejected
+    // by the numerical operator during apply. Scheduler must roll back the
+    // preceding chemical changes as part of the same atomic transaction.
+    const overflowTransportConfiguration = {
+      ...configured.state.physicalKinetics!,
+      verticalTransport: {
+        ...configured.state.physicalKinetics!.verticalTransport!,
+        eddyDiffusivityM2S: Number.MAX_VALUE
+      }
+    };
+    const overflowConfigured = configurePrimaryPhysicalChemicalKinetics(
+      syntheticWorld.chemicalState!,
+      overflowTransportConfiguration,
+      totals
+    );
+    expect(overflowConfigured.status).toBe('configured');
+    if (overflowConfigured.status !== 'configured') return;
+    const rollbackWorld: GeneratedWorld = {
+      ...syntheticWorld,
+      chemicalState: overflowConfigured.state,
+      coreWorldState: undefined
+    };
+    const rollbackState = rollbackWorld.chemicalState;
+    const rejected = runChemicalEvolutionSchedulerStep(rollbackWorld);
+    expect(rejected.status).toBe('rejected');
+    expect(rejected.world).toBe(rollbackWorld);
+    expect(rejected.world.chemicalState).toBe(rollbackState);
+    expect(rejected.world.chemicalState!.physicalKineticsHistory).toHaveLength(0);
   });
 
   it('does not infer missing radicals from the sourced dry-air profile', () => {
