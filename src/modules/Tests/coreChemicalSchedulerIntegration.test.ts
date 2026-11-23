@@ -1035,6 +1035,75 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(world.chemicalState!.inventory.h).toBe(8e-6);
   });
 
+  it('clips a manual continuous physical-chemistry run at its own future exact deadline', () => {
+    const baseline = runChemicalEvolutionSchedulerStep(makePhysicalKineticWorld());
+    expect(baseline.status).toBe('committed');
+    const deadlineS = baseline.stepSize!.effectiveDurationS / 2;
+    expect(deadlineS).toBeGreaterThan(0);
+
+    const world = makePhysicalKineticWorld();
+    const core = coreWorldStateFromLegacyWorld({
+      id: world.id,
+      seed: world.seed,
+      generatorVersion: world.generatorVersion,
+      centralObjectSystem: world.centralObjectSystem ?? null,
+      orbit: world.orbit ? { frame: world.orbit.frame } : null,
+      bodyPhysics: world.bodyPhysics
+        ? {
+            massKg: world.bodyPhysics.massKg,
+            radiusM: world.bodyPhysics.radiusM,
+            densityKgM3: world.bodyPhysics.densityKgM3,
+            surfaceGravityMs2: world.bodyPhysics.surfaceGravityMs2
+          }
+        : null,
+      atmosphere: world.atmosphere
+        ? {
+            temperature: world.atmosphere.temperature,
+            presetKind: world.atmosphere.presetKind,
+            presetNotes: world.atmosphere.presetNotes,
+            presetSourceName: world.atmosphere.presetSourceName
+          }
+        : null,
+      energyBudget: world.energyBudget
+        ? {
+            incidentFlux: world.energyBudget.incidentFlux,
+            equilibriumTemperature: world.energyBudget.equilibriumTemperature
+          }
+        : null,
+      chemicalState: world.chemicalState!
+    });
+    const futureBookkeeping = scheduleProcessAt(
+      createSchedulerBookkeeping(),
+      PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID,
+      { segmentIndex: core.clock.segmentIndex, localTimeS: deadlineS }
+    );
+    const scheduledWorld = {
+      ...world,
+      coreWorldState: { ...core, scheduling: futureBookkeeping }
+    };
+
+    const result = runChemicalEvolutionSchedulerStep(scheduledWorld);
+    expect(result.status).toBe('committed');
+    expect(result.stepSize!.requestedDurationS).toBe(world.chemicalState!.physicalKinetics!.maximumMacroStepS);
+    expect(result.stepSize!.effectiveDurationS).toBe(deadlineS);
+    expect(result.stepSize!.processBoundary?.time).toEqual({
+      segmentIndex: core.clock.segmentIndex,
+      localTimeS: deadlineS
+    });
+    expect(result.world.coreWorldState!.clock.localTimeS).toBe(deadlineS);
+
+    const dynamics =
+      result.world.coreWorldState!.scheduling!.processDynamics[PHYSICAL_CHEMICAL_KINETICS_PROCESS_ID]!;
+    expect(dynamics.lastRunTime).toEqual({
+      segmentIndex: result.world.coreWorldState!.clock.segmentIndex,
+      localTimeS: deadlineS
+    });
+    expect(dynamics.nextDueTime).toBeNull();
+    expect(dynamics.macroStepsCompleted).toBe(1);
+    expect(world.coreWorldState).toBeUndefined();
+    expect(world.chemicalState!.physicalKineticsHistory).toHaveLength(0);
+  });
+
   it('runs different supported mechanisms in different layers at their separate valid temperature ranges', () => {
     const world = makePhysicalKineticWorld(350);
     const state = world.chemicalState!;
