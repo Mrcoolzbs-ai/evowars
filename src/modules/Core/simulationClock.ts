@@ -136,6 +136,46 @@ export function advance(clock: SimulationClockState, dtS: number): SimulationClo
 }
 
 /**
+ * Продвинуть часы к уже представимой абсолютной точке В ТЕКУЩЕМ сегменте.
+ *
+ * В отличие от advance(dt), эта операция не открывает новый сегмент из-за
+ * консервативной оценки representableStep: target.localTimeS уже является
+ * представимым значением времени (например, точной границей события).
+ * Используется планировщиком, когда решатель должен остановиться ровно на
+ * найденной временной точке. Межсегментное преобразование запрещено,
+ * поскольку priorSegmentsS является оценкой, а не точной координатой.
+ */
+export function advanceTo(clock: SimulationClockState, target: TimePoint): SimulationClockState {
+  if (
+    !Number.isInteger(target.segmentIndex) ||
+    target.segmentIndex < 0 ||
+    !Number.isFinite(target.localTimeS) ||
+    target.localTimeS < 0
+  ) {
+    throw new SimulationClockError('invalid_step', 'целевая точка должна иметь неотрицательный целый segmentIndex и конечное неотрицательное localTimeS');
+  }
+  if (target.segmentIndex !== clock.segmentIndex) {
+    throw new SimulationClockError(
+      'invalid_step',
+      'advanceTo поддерживает только текущий сегмент: target=' +
+        String(target.segmentIndex) + ', current=' + String(clock.segmentIndex)
+    );
+  }
+  if (target.localTimeS <= clock.localTimeS) {
+    throw new SimulationClockError(
+      'invalid_step',
+      'целевая локальная точка должна быть строго позже текущего времени'
+    );
+  }
+  return {
+    ...clock,
+    localTimeS: target.localTimeS,
+    stepCount: clock.stepCount + 1,
+    representableStepS: representableStep({ localTimeS: target.localTimeS })
+  };
+}
+
+/**
  * Минимальный шаг, который ещё изменяет локальное время сегмента.
  * null — не определено (локальное время 0: любой конечный шаг представим
  * при разумных величинах).
