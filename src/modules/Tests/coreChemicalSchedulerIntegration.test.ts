@@ -305,6 +305,15 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     const stepAudit = updated.physicalKineticsHistory![0]!;
     expect(stepAudit.durationS).toBe(result.stepSize!.effectiveDurationS);
     expect(stepAudit.characteristicTimeS).toBe(result.stepSize!.proposals[0]!.characteristicTimeS);
+    expect(stepAudit.layers[0]!.reactionId).toBeUndefined();
+    expect(stepAudit.layers[0]!.temperatureK).toBe(350);
+    expect(stepAudit.layers[0]!.layerThicknessM).toBe(100);
+    expect(stepAudit.layers[0]!.temperatureProvenance.sourceId).toBe('fixture:layer-temperature');
+    expect(stepAudit.layers[0]!.thicknessProvenance.sourceId).toBe('fixture:layer-thickness');
+    expect(stepAudit.layers[0]!.initialColumnInventoriesMolM2.h).toBe(8e-6);
+    expect(stepAudit.layers[0]!.finalColumnInventoriesMolM2.h).toBeLessThan(8e-6);
+    expect(stepAudit.layers[0]!.thirdBody).toMatchObject({ speciesId: 'N2', inventoryMolM2: 4.2e3 });
+    expect(stepAudit.layers[0]!.thirdBody.concentrationMoleculeCm3).toBeGreaterThan(0);
     expect(stepAudit.layers[0]!.reactions[0]!.reactionId).toBe('kida-tb-2015-03-19-106');
     expect(stepAudit.layers[0]!.reactions[0]!.dataStatus).toBe('known');
     expect(stepAudit.layers[0]!.reactions[0]!.provenance.sourceName).toBeTruthy();
