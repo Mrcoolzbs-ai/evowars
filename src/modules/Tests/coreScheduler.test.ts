@@ -592,6 +592,37 @@ describe('Stage 4.2.1 Scheduler: очередь событий мира', () => 
     expect(bk.eventQueue[0]!.data).toEqual({ details: { reason: 'original' } });
   });
 
+  it('связывает failReason со статусом failed и сохраняет диагностическую причину пустого исключения', () => {
+    const pending = enqueueEvent(createSchedulerBookkeeping(), {
+      id: 'failure-reason',
+      time: { segmentIndex: 0, localTimeS: 1 },
+      type: 'solver_detected',
+      data: {},
+      source: 'test'
+    });
+
+    const failedWithoutReason = {
+      ...pending,
+      eventQueue: [{ ...pending.eventQueue[0]!, status: 'failed' as const }]
+    };
+    expect(validateSchedulerBookkeeping(failedWithoutReason).join(' '))
+      .toContain('событие failed обязано содержать непустой failReason');
+
+    const processedWithReason = {
+      ...pending,
+      eventQueue: [{ ...pending.eventQueue[0]!, status: 'processed' as const, failReason: 'stale failure' }]
+    };
+    expect(validateSchedulerBookkeeping(processedWithReason).join(' '))
+      .toContain('failReason допустим только при status=failed');
+
+    const result = processEvent(pending, 'failure-reason', () => {
+      throw new Error('');
+    });
+    expect(result.status).toBe('failed');
+    expect(result.failReason).toBe('обработчик завершился ошибкой без диагностического сообщения');
+    expect(validateSchedulerBookkeeping(result.bookkeeping)).toEqual([]);
+  });
+
   it('некорректные события отклоняются: дубликат id, время, несериализуемые данные', () => {
     const bk = createSchedulerBookkeeping();
     const good = { id: 'ev', time: { segmentIndex: 0, localTimeS: 1 }, type: 'regime_change', data: {}, source: 'test' };
