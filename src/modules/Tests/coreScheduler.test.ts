@@ -1410,6 +1410,38 @@ describe('Stage 4.2.1 Scheduler: расписания процессов', () =>
     expect(readyProcessIds(legacyRun.bookkeeping, registry, [operator], Number.MAX_VALUE)).toEqual([]);
   });
 
+  it('ранний ручной запуск не уничтожает будущий exact или legacy deadline', () => {
+    const registry = makeRegistry([descriptor('a')]);
+    const operator = recorder('a', []);
+    const exactDue = { segmentIndex: 0, localTimeS: 10 };
+    const exactWorld = {
+      ...testWorld(),
+      scheduling: scheduleProcessAt(createSchedulerBookkeeping(), 'a', exactDue)
+    };
+    const exactRun = runMacroStep(exactWorld, registry, [operator], {
+      durationS: 2,
+      splitting: 'lie'
+    });
+    expect(exactRun.status).toBe('committed');
+    expect(exactRun.bookkeeping.processDynamics.a!.nextDueTime).toEqual(exactDue);
+    expect(readyProcessIdsAt(exactRun.bookkeeping, registry, [operator], {
+      segmentIndex: 0,
+      localTimeS: 2
+    })).toEqual([]);
+
+    const legacyWorld = {
+      ...testWorld(),
+      scheduling: scheduleProcess(createSchedulerBookkeeping(), 'a', 10)
+    };
+    const legacyRun = runMacroStep(legacyWorld, registry, [operator], {
+      durationS: 2,
+      splitting: 'lie'
+    });
+    expect(legacyRun.status).toBe('committed');
+    expect(legacyRun.bookkeeping.processDynamics.a!.nextDueElapsedS).toBe(10);
+    expect(readyProcessIds(legacyRun.bookkeeping, registry, [operator], 2)).toEqual([]);
+  });
+
   it('готовность: срок, autorunnable и переданный оператор', () => {
     const registry = makeRegistry([
       descriptor('a'),
