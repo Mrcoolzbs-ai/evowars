@@ -881,6 +881,13 @@ function PrimaryPhysicalKineticsConfigurator(props: {
         );
         return;
       }
+      if (
+        sourceLayer.temperature.status !== 'known' &&
+        sourceLayer.temperature.status !== 'estimated'
+      ) {
+        setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не имеет числового статуса known/estimated.');
+        return;
+      }
       const temperature = temperatureValueOrNull(sourceLayer.temperature);
       if (temperature === null || !Number.isFinite(temperature) || temperature <= 0) {
         setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не является пригодным положительным значением в K.');
