@@ -274,6 +274,12 @@ export function createChemicalState(input: CreateChemicalStateInput): ChemicalEv
       : {
           physicalKinetics: {
             maximumMacroStepS: input.physicalKinetics.maximumMacroStepS,
+            totalInventoryProvenance: Object.fromEntries(
+              Object.entries(input.physicalKinetics.totalInventoryProvenance).map(([speciesId, provenance]) => [
+                speciesId,
+                { ...provenance }
+              ])
+            ),
             layers: input.physicalKinetics.layers.map((layer) => ({
               ...layer,
               thicknessProvenance: { ...layer.thicknessProvenance },
@@ -948,6 +954,9 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
   ) {
     problems.push('physicalKinetics.maximumMacroStepS должен быть конечным положительным числом секунд');
   }
+  if (!isPlainChemicalRecord(config.totalInventoryProvenance)) {
+    problems.push('physicalKinetics.totalInventoryProvenance должен содержать provenance полных атмосферных запасов');
+  }
   if (!Array.isArray(config.layers) || config.layers.length === 0) {
     problems.push('physicalKinetics.layers должен содержать хотя бы один явно заданный реакционный слой');
     return problems;
@@ -1037,6 +1046,12 @@ function physicalChemicalKineticsConfigurationProblems(state: ChemicalEvolutionS
         if (typeof globalAmount !== 'number' || !Number.isFinite(globalAmount) || globalAmount < 0) {
           problems.push('основной атмосферный инвентарь вида «' + speciesId + '» повреждён');
         }
+      }
+      const totalProvenance = isPlainChemicalRecord(config.totalInventoryProvenance)
+        ? config.totalInventoryProvenance[speciesId]
+        : undefined;
+      if (!hasIdentifiedPhysicalProvenance(totalProvenance)) {
+        problems.push(prefix + ': отсутствует provenance полного атмосферного запаса вида «' + speciesId + '»');
       }
       subcolumnTotals[speciesId] = (subcolumnTotals[speciesId] ?? 0) + amount;
     }
@@ -1143,6 +1158,12 @@ export function configurePrimaryPhysicalChemicalKinetics(
     ...baseCandidate,
     physicalKinetics: {
       maximumMacroStepS: config.maximumMacroStepS,
+      totalInventoryProvenance: Object.fromEntries(
+        Object.entries(config.totalInventoryProvenance).map(([speciesId, provenance]) => [
+          speciesId,
+          { ...provenance }
+        ])
+      ),
       layers: config.layers.map((layer) => ({
         ...layer,
         thicknessProvenance: { ...layer.thicknessProvenance },
@@ -1612,6 +1633,12 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
           temperatureProvenance: { ...layer.temperatureProvenance },
           thicknessProvenance: { ...layer.thicknessProvenance },
           inventoryProvenance: { ...layer.inventoryProvenance },
+          totalInventoryProvenance: Object.fromEntries(
+            Object.keys(layer.columnInventoriesMolM2).map((speciesId) => [
+              speciesId,
+              { ...config.totalInventoryProvenance[speciesId] }
+            ])
+          ),
           initialColumnInventoriesMolM2: { ...layer.columnInventoriesMolM2 },
           finalColumnInventoriesMolM2: { ...nextLayerInventory },
           thirdBody: {
@@ -1688,6 +1715,12 @@ export function runPhysicalChemicalEvolutionSchedulerStep(
         oxygenBalance,
         physicalKinetics: {
           maximumMacroStepS: config.maximumMacroStepS,
+          totalInventoryProvenance: Object.fromEntries(
+            Object.entries(config.totalInventoryProvenance).map(([speciesId, provenance]) => [
+              speciesId,
+              { ...provenance }
+            ])
+          ),
           layers: updatedLayers
         },
         physicalKineticsHistory: [...(working.physicalKineticsHistory ?? []), audit]
