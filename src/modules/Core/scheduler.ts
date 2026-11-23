@@ -632,11 +632,22 @@ export function readyProcessIds(
  * state-dependent масштаб времени; неизвестное не заменяется числом.
  * method и diagnostics сохраняют объяснение принятого решения.
  */
+export interface ProcessEventProposal {
+  /** Globally unique event identity within this world's SchedulerBookkeeping. */
+  id: string;
+  /** Event time relative to the start of the current macro-step, seconds. */
+  offsetS: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
 export interface ProcessStepProposal {
   durationS: number;
   method: string;
   characteristicTimeS?: number;
   diagnostics?: readonly string[];
+  /** Root/event detections made by this solver within its proposed interval. */
+  events?: readonly ProcessEventProposal[];
 }
 
 /** Сводка выбора длительности macro-шага. */
