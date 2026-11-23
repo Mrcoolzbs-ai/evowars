@@ -608,10 +608,10 @@ export function runVerticalEddyDiffusionStep(
       amount / validatedLayers[index]!.airColumnInventoryMolM2
     );
 
-    const molecularStates: MolecularInterfaceState[] | undefined =
-      molecularConfiguration === undefined
-        ? undefined
-        : interfaces.map((interfaceGeometry, interfaceIndex) => {
+    let molecularStates: MolecularInterfaceState[] | undefined;
+    if (molecularConfiguration !== undefined) {
+      try {
+        molecularStates = interfaces.map((interfaceGeometry, interfaceIndex) => {
             const lower = validatedLayers[interfaceGeometry.lowerLayerIndex]!;
             const upper = validatedLayers[interfaceGeometry.upperLayerIndex]!;
             const lowerFractions = lower.layer.hydrostaticState!.molarFractions;
@@ -648,7 +648,11 @@ export function runVerticalEddyDiffusionStep(
                 pressurePa: interfaceGeometry.pressurePa,
                 speciesA: speciesParameters,
                 speciesB: backgroundParameters
-              });
+            });
+      } catch (error) {
+        return rejected(error instanceof Error ? error.message : String(error));
+      }
+    }
               if (!isFinitePositive(binaryDiffusivity)) {
                 throw new Error('Chapman-Enskog D_ij неконечен для пары «' + speciesId + '/' + backgroundId + '»');
               }
@@ -937,16 +941,27 @@ export function runVerticalEddyDiffusionStep(
       columnInventoriesMolM2: updatedInventories,
       inventoryProvenance: {
         ...cloned.inventoryProvenance,
-        method: 'консервативная конечно-объёмная вертикальная турбулентная диффузия; неявный backward Euler',
+        method: molecularConfiguration === undefined
+          ? 'консервативная конечно-объёмная вертикальная турбулентная диффузия; неявный backward Euler'
+          : 'консервативная конечно-объёмная вертикальная турбулентная + молекулярная диффузия; backward Euler; Chapman-Enskog/Neufeld',
         modelVersion: VERTICAL_DIFFUSION_MODEL_VERSION,
         applicability: 'Только явно выбранные следовые виды в заданной непрерывной гидростатической колонке',
-        limitations: 'Kzz задан вызывающей стороной; нулевой внешний поток сверху и снизу; гидростатический фон фиксирован; не включены молекулярная диффузия, конвекция, химия и фотохимия; N2 и O2 этим оператором не переносятся.',
+        limitations: molecularConfiguration === undefined
+          ? 'Kzz задан вызывающей стороной; нулевой внешний поток сверху и снизу; гидростатический фон фиксирован; молекулярная диффузия, конвекция, химия и фотохимия не включены; N2 и O2 этим оператором не переносятся.'
+          : 'Kzz и Lennard-Jones/thermal-diffusion параметры заданы вызывающей стороной с provenance; Chapman-Enskog effective-binary trace approximation действует только при mixing ratio ≤ 1%; закрытые границы; гидростатический фон фиксирован; нет многокомпонентной Stefan-Maxwell системы, конвекции, химии и фотохимии; N2 и O2 остаются неподвижным bulk-фоном.',
         rawInput: {
           ...(cloned.inventoryProvenance.rawInput ?? {}),
           vertical_transport_layer_id: source.layerId,
           vertical_transport_duration_s: input.durationS,
           vertical_transport_species_ids: speciesIds.join(','),
           vertical_transport_eddy_diffusivity_profile_m2_s: diffusivityValues.join(','),
+          vertical_transport_molecular_diffusivity_profile_m2_s: molecularConfiguration === undefined
+            ? 'not_configured'
+            : speciesIds.map((speciesId) =>
+                speciesId + ':' + interfaces.map((_interface, index) =>
+                  interfaceSpeciesAudits[speciesId]![index]!.molecularDiffusivityM2S
+                ).join(',')
+              ).join(';'),
           vertical_transport_air_column_mol_m2: entry.airColumnInventoryMolM2,
           vertical_transport_species_inventories_before_after: speciesIds.map((speciesId) =>
             speciesId + ':' +
@@ -1019,6 +1034,30 @@ export function runVerticalEddyDiffusionStep(
     ...(input.diffusivityProvenance === undefined
       ? {}
       : { diffusivityProvenance: { ...input.diffusivityProvenance } }),
+    ...(molecularConfiguration === undefined
+      ? {}
+      : {
+          molecularDiffusion: {
+            method: 'chapman_enskog_neufeld_effective_binary_trace_species' as const,
+            species: Object.fromEntries(Object.entries(molecularConfiguration.species).map(([speciesId, parameters]) => [
+              speciesId,
+              {
+                ...parameters,
+                molarMassProvenance: { ...parameters.molarMassProvenance },
+                collisionParametersProvenance: { ...parameters.collisionParametersProvenance },
+                thermalDiffusionProvenance: { ...parameters.thermalDiffusionProvenance }
+              }
+            ])),
+            backgroundSpecies: Object.fromEntries(Object.entries(molecularConfiguration.backgroundSpecies).map(([speciesId, parameters]) => [
+              speciesId,
+              {
+                ...parameters,
+                molarMassProvenance: { ...parameters.molarMassProvenance },
+                collisionParametersProvenance: { ...parameters.collisionParametersProvenance }
+              }
+            ]))
+          }
+        }),
     layers: layerAudits,
     interfaces: interfaceAudits,
     columnTotalsMolM2,
@@ -1028,7 +1067,14 @@ export function runVerticalEddyDiffusionStep(
       'Интерфейсные P и T рассчитаны как геометрические средние соседних гидростатических boundary значений.',
       'Гидростатический фон, общий молярный столб воздуха и геометрия слоёв фиксированы на протяжении шага.',
       'Переносятся только speciesIds; отсутствующий вид не считается нулевым, а N2/O2 остаются неподвижным bulk-фоном.',
-      'Оператор не включает молекулярную диффузию, конвекцию, химические реакции или фотохимию и пока не подключён к ChemicalEvolution Scheduler.'
+      ...(molecularConfiguration === undefined
+        ? ['Молекулярная диффузия не сконфигурирована; применяется только Kzz.']
+        : [
+            'Молекулярный D_i вычисляется из явных Lennard-Jones collision diameter/energy параметров по Chapman-Enskog с Neufeld collision integral и effective-binary trace approximation.',
+            'Молекулярный поток включает градиент mixing ratio, gravitational/barodiffusion separation по (M_i-Mbar)g/(R*T) и thermal diffusion alpha_T/T*dTdz; alpha_T задаётся явно, ноль не предполагается.',
+            'Молекулярная эффективная бинарная аппроксимация ограничена явно выбранными trace species с mixing ratio ≤ 1%; полная Stefan-Maxwell multicomponent система не реализована.'
+          ]),
+      'Оператор не включает конвекцию, химические реакции или фотохимию; включение в Scheduler требует явной verticalTransport конфигурации.'
     ]
   };
 
