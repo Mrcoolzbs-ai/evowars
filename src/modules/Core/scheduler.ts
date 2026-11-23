@@ -1507,6 +1507,35 @@ export function runMacroStep(
             }
           };
         });
+  let eventBookkeeping: SchedulerBookkeeping = {
+    ...originalBk,
+    eventQueue
+  };
+  for (const event of proposedEvents) {
+    if (event.offsetS > effectiveDurationS) continue;
+    try {
+      eventBookkeeping = enqueueEvent(eventBookkeeping, {
+        id: event.id,
+        time: event.time,
+        type: event.type,
+        data: event.data,
+        source: event.processId
+      });
+    } catch (error) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(plan),
+        diagnostics: [
+          'solver-событие «' + event.id + '» не удалось включить в транзакцию Scheduler: ' +
+            (error instanceof Error ? error.message : String(error)) +
+            ' — шаг отклонён, мировое состояние и очередь не изменены'
+        ]
+      };
+    }
+  }
+
   const lastRunElapsedS = totalElapsedSeconds(newClock);
   const callsPerProcess = new Map<string, number>();
   for (const call of plan) {
@@ -1539,7 +1568,8 @@ export function runMacroStep(
   const newBk: SchedulerBookkeeping = {
     ...originalBk,
     processDynamics: newDynamics,
-    eventQueue,
+    eventQueue: eventBookkeeping.eventQueue,
+    nextSequence: eventBookkeeping.nextSequence,
     stepLog: [...originalBk.stepLog, ...committedLog],
     stepCount: originalBk.stepCount + 1
   };
