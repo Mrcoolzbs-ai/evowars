@@ -825,6 +825,57 @@ describe('Stage 4.2: physical kinetics runs in the primary world Scheduler trans
     expect(secondHalf.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
   });
 
+  it('converges the #89 NOx mechanism when the physical macro step is halved', () => {
+    const makeNoxWorld = () => {
+      const world = makePhysicalKineticWorld(250);
+      const state = world.chemicalState!;
+      const initial = { o: 1e-5, no: 5e-6, no2: 2e-7 };
+      state.inventory = { ...state.inventory, ...initial };
+      state.reservoirs = {
+        ...state.reservoirs,
+        atmospheric: { ...state.inventory }
+      };
+      const layer = state.physicalKinetics!.layers[0]!;
+      layer.layerId = 'nox-convergence-layer';
+      layer.temperatureK = 250;
+      layer.reactionIds = ['kida-tb-2015-03-19-89'];
+      layer.columnInventoriesMolM2 = {
+        ...initial,
+        n2: 4.2e3
+      };
+      return world;
+    };
+
+    const coarse = makeNoxWorld();
+    coarse.chemicalState!.physicalKinetics!.maximumMacroStepS = 0.1;
+    const coarseResult = runChemicalEvolutionSchedulerStep(coarse);
+    expect(coarseResult.status).toBe('committed');
+    expect(coarseResult.stepSize!.effectiveDurationS).toBeCloseTo(0.1, 12);
+
+    const fine = makeNoxWorld();
+    fine.chemicalState!.physicalKinetics!.maximumMacroStepS = 0.05;
+    const firstHalf = runChemicalEvolutionSchedulerStep(fine);
+    expect(firstHalf.status).toBe('committed');
+    expect(firstHalf.stepSize!.effectiveDurationS).toBeCloseTo(0.05, 12);
+    const secondHalf = runChemicalEvolutionSchedulerStep(firstHalf.world);
+    expect(secondHalf.status).toBe('committed');
+    expect(secondHalf.stepSize!.effectiveDurationS).toBeCloseTo(0.05, 12);
+
+    const coarseState = coarseResult.world.chemicalState!;
+    const fineState = secondHalf.world.chemicalState!;
+    for (const speciesId of ['o', 'no', 'no2']) {
+      const coarseAmount = coarseState.inventory[speciesId]!;
+      const fineAmount = fineState.inventory[speciesId]!;
+      const relativeDifference =
+        Math.abs(coarseAmount - fineAmount) / Math.max(Math.abs(coarseAmount), Math.abs(fineAmount));
+      expect(relativeDifference, speciesId + ' NOx coarse/fine relative difference').toBeLessThan(5e-6);
+    }
+    expect(coarseResult.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
+    expect(secondHalf.world.coreWorldState!.clock.localTimeS).toBeCloseTo(0.1, 12);
+    expect(coarseState.physicalKineticsHistory).toHaveLength(1);
+    expect(fineState.physicalKineticsHistory).toHaveLength(2);
+  });
+
   it('runs against an already existing synchronized CoreWorldState without rebuilding its scheduler history', () => {
     const world = makePhysicalKineticWorld();
     const core = coreWorldStateFromLegacyWorld({
