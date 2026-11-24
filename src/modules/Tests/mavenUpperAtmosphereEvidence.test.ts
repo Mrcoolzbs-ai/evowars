@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error Node's built-in WebCrypto is used only to provide SubtleCrypto in jsdom tests.
-import { webcrypto } from 'node:crypto';
+// Node crypto supplies the same WebCrypto implementation used by the hash test
+// and an independent MD5 oracle for the optional PDS4 fixity field.
+import { createHash, webcrypto } from 'node:crypto';
 import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
@@ -562,7 +563,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       })
     ]);
     const byteLength = new TextEncoder().encode(csvText).length;
-    const label = (overrides: { productId?: string; fileName?: string; byteLength?: number } = {}): string => `
+    const label = (overrides: {
+      productId?: string; fileName?: string; byteLength?: number; md5Checksum?: string
+    } = {}): string => `
       <?xml version="1.0" encoding="UTF-8"?>
       <Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
         <Identification_Area>
@@ -573,6 +576,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
           <File>
             <file_name>${overrides.fileName ?? fileName}</file_name>
             <file_size unit="byte">${overrides.byteLength ?? byteLength}</file_size>
+            ${overrides.md5Checksum === undefined ? '' : '<md5_checksum>' + overrides.md5Checksum + '</md5_checksum>'}
           </File>
         </File_Area_Observational>
       </Product_Observational>`;
@@ -595,7 +599,45 @@ describe('MAVEN upper-atmosphere evidence', () => {
       detachedLabelAuthenticity: 'not_independently_authenticated'
     });
     expect(imported.provenance.csvSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(imported.provenance).toMatchObject({
+      csvMd5Checksum: null,
+      csvMd5ChecksumStatus: 'not_present_in_detached_label'
+    });
     expect(imported.imported.parsedRowCount).toBe(2);
+
+    const md5Checksum = createHash('md5').update(csvText, 'utf8').digest('hex');
+    const md5Verified = await importMavenNgimsL3ResampledDensityPds4Product({
+      csvText,
+      detachedLabelXml: label({ md5Checksum }),
+      expectedProductId: productId,
+      expectedCsvFileName: fileName
+    });
+    expect(md5Verified.status).toBe('imported');
+    if (md5Verified.status !== 'imported') throw new Error(md5Verified.errors.join('; '));
+    expect(md5Verified.provenance).toMatchObject({
+      csvMd5Checksum: md5Checksum,
+      csvMd5ChecksumStatus: 'verified_against_detached_label',
+      csvFixityStatus: 'md5_verified_against_detached_label'
+    });
+
+    const md5Mismatch = await importMavenNgimsL3ResampledDensityPds4Product({
+      csvText,
+      detachedLabelXml: label({ md5Checksum: '0'.repeat(32) }),
+      expectedProductId: productId,
+      expectedCsvFileName: fileName
+    });
+    expect(md5Mismatch.status).toBe('rejected');
+    if (md5Mismatch.status === 'rejected') {
+      expect(md5Mismatch.errors.join(' ')).toMatch(/MD5 does not match/);
+    }
+
+    const malformedMd5 = await importMavenNgimsL3ResampledDensityPds4Product({
+      csvText,
+      detachedLabelXml: label({ md5Checksum: 'not-a-checksum' }),
+      expectedProductId: productId,
+      expectedCsvFileName: fileName
+    });
+    expect(malformedMd5.status).toBe('rejected');
 
     const selected = selectMavenNgimsL3ResampledDensityPds4Profile(imported, {
       sourceProductId: productId,
