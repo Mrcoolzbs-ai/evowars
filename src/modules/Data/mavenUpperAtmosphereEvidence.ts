@@ -78,6 +78,15 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
       linkedFrom: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html'
     }
   ] as const,
+  temperatureSelectionIndex: {
+    product: 'NGIMS scale heights and temperatures product-selection index',
+    fileName: 'MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv',
+    revision: 'del1-42',
+    url: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.csv',
+    linkedFrom: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
+    role: 'Selection metadata for a separate derived NGIMS scale-height/temperature product; not a temperature measurement file itself.',
+    retrievalStatus: 'index_not_retrieved_and_no_TID_selected'
+  },
   dataProductArchiveFormat: 'ASCII tables with detached XML labels',
   orbitProductScope: {
     description: 'One or two science-product files span one MAVEN orbit',
