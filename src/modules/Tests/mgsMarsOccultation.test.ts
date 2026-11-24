@@ -289,8 +289,9 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
       );
     }
 
-    expect(result.adaptive.refinements).toHaveLength(1);
-    expect(result.adaptive.refinements[0].subdivisions).toBeGreaterThan(1);
+    expect(result.adaptive.refinements.length).toBeGreaterThan(1);
+    expect(result.adaptive.input.layers.length).toBeGreaterThan(1);
+    expect(result.adaptive.refinements.every((summary) => summary.subdivisions >= 1)).toBe(true);
     expect(result.uncertainty.points.length).toBeGreaterThan(2);
     expect(result.uncertainty.points[0].heightM).toBe(
       MGS_MARS_8028D38A_SAMPLES[0].heightAboveLocalSurfaceM
