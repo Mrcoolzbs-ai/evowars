@@ -1165,6 +1165,57 @@ export type MavenNgimsL3ResampledDensityCsvImportResult =
     }
   | { readonly status: 'invalid_csv'; readonly errors: readonly string[] };
 
+
+export interface MavenNgimsL3ResampledDensityPds4ImportInput {
+  readonly csvText: string;
+  readonly detachedLabelXml: string;
+  /** Expected PDS4 logical identifier taken from an independent archive index. */
+  readonly expectedProductId: string;
+  /** Expected CSV file name taken from an independent archive directory/index. */
+  readonly expectedCsvFileName: string;
+}
+
+export interface MavenNgimsL3ResampledDensityPds4ImportProvenance {
+  readonly sourceProductId: string;
+  readonly csvFileName: string;
+  readonly csvByteLength: number;
+  /** SHA-256 of the exact UTF-8 text supplied to this importer (BOM/newlines preserved). */
+  readonly csvSha256: string;
+  readonly hashAlgorithm: 'SHA-256';
+  readonly sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier';
+  readonly detachedLabelChecks: readonly [
+    'logical_identifier_matches_expected_product_id',
+    'file_name_matches_expected_csv_file_name',
+    'file_size_matches_csv_utf8_byte_length'
+  ];
+  /** The digest is recorded for fixity, but no signed PDS checksum was independently compared. */
+  readonly csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum';
+  /** The label is user-supplied input; this function does not authenticate its publisher/signature. */
+  readonly detachedLabelAuthenticity: 'not_independently_authenticated';
+}
+
+export type MavenNgimsL3ResampledDensityPds4ImportResult =
+  | {
+      readonly status: 'imported';
+      readonly imported: MavenNgimsL3ResampledDensityCsvImportResult;
+      readonly provenance: MavenNgimsL3ResampledDensityPds4ImportProvenance;
+    }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+export type MavenNgimsL3ResampledDensityPds4SelectionResult =
+  | {
+      readonly status: 'completed';
+      readonly selection: MavenNgimsL3ResampledDensitySelection;
+      readonly measurements: readonly MavenNgimsL3ResampledDensityRow[];
+      readonly excludedRows: MavenNgimsL3ResampledDensityExcludedRowCounts;
+      readonly sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier';
+      readonly sourceArtifactSha256: string;
+      readonly detachedLabelAuthenticity: 'not_independently_authenticated';
+      readonly eligibleAsMarsPhotochemicalInitialState: false;
+      readonly limitations: readonly string[];
+    }
+  | { readonly status: 'rejected'; readonly errors: readonly string[]; readonly excludedRows?: MavenNgimsL3ResampledDensityExcludedRowCounts };
+
 export interface MavenNgimsL3ResampledDensitySelection {
   readonly sourceProductId: string;
   readonly tid: number;
@@ -1417,6 +1468,153 @@ export function parseMavenNgimsL3ResampledDensityCsvText(
   };
 }
 
+
+interface Pds4DetachedLabelElement {
+  readonly count: number;
+  readonly value: string | null;
+  readonly attributes: string;
+}
+
+function readPds4DetachedLabelElement(
+  xmlText: string,
+  elementName: string
+): Pds4DetachedLabelElement {
+  const expression = new RegExp(
+    '<(?:(\\\\w+):)?' + elementName + '\\\\b([^>]*)>([^<]*)<\\\\/(?:\\\\1:)?' + elementName + '\\\\s*>',
+    'gi'
+  );
+  const matches: { value: string; attributes: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = expression.exec(xmlText)) !== null) {
+    matches.push({
+      value: match[3].trim()
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&'),
+      attributes: match[2] ?? ''
+    });
+  }
+  return {
+    count: matches.length,
+    value: matches.length === 1 ? matches[0].value : null,
+    attributes: matches.length === 1 ? matches[0].attributes : ''
+  };
+}
+
+async function computeMavenPdsCsvSha256(csvText: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('Web Crypto SHA-256 is unavailable in this runtime');
+  }
+  const bytes = new TextEncoder().encode(csvText);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Import an L3 res-den CSV only after checking its detached PDS4 label.
+ * The PDS label must identify the expected product, CSV file name and byte
+ * length. SHA-256 is computed over the exact UTF-8 text, without newline or
+ * BOM normalization. The label itself is not cryptographically authenticated.
+ */
+export async function importMavenNgimsL3ResampledDensityPds4Product(
+  input: MavenNgimsL3ResampledDensityPds4ImportInput
+): Promise<MavenNgimsL3ResampledDensityPds4ImportResult> {
+  if (!input || typeof input !== 'object') {
+    return { status: 'rejected', errors: ['a PDS4 CSV/label import input is required'] };
+  }
+  if (typeof input.csvText !== 'string' || input.csvText.length === 0) {
+    return { status: 'rejected', errors: ['the exact downloaded CSV text is required'] };
+  }
+  if (typeof input.detachedLabelXml !== 'string' || input.detachedLabelXml.trim() === '') {
+    return { status: 'rejected', errors: ['the detached PDS4 XML label is required'] };
+  }
+  if (typeof input.expectedProductId !== 'string' || input.expectedProductId.trim() === '') {
+    return { status: 'rejected', errors: ['expectedProductId from the archive index is required'] };
+  }
+  if (typeof input.expectedCsvFileName !== 'string' || input.expectedCsvFileName.trim() === '') {
+    return { status: 'rejected', errors: ['expectedCsvFileName from the archive index is required'] };
+  }
+
+  const xml = input.detachedLabelXml.replace(/<!--[\\s\\S]*?-->/g, '');
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
+    return { status: 'rejected', errors: ['PDS4 label must not contain a DTD or entity declaration'] };
+  }
+  if (!/<(?:[\\w.-]+:)?Product_Observational\\b/i.test(xml)) {
+    return { status: 'rejected', errors: ['detached label root must identify a PDS4 Product_Observational product'] };
+  }
+
+  const logicalIdentifier = readPds4DetachedLabelElement(xml, 'logical_identifier');
+  const fileName = readPds4DetachedLabelElement(xml, 'file_name');
+  const fileSize = readPds4DetachedLabelElement(xml, 'file_size');
+  const errors: string[] = [];
+  if (logicalIdentifier.count !== 1 || !logicalIdentifier.value) {
+    errors.push('detached label must contain exactly one non-empty logical_identifier');
+  } else if (logicalIdentifier.value !== input.expectedProductId.trim()) {
+    errors.push('detached label logical_identifier does not match expectedProductId');
+  }
+  if (fileName.count !== 1 || !fileName.value) {
+    errors.push('detached label must contain exactly one non-empty file_name');
+  } else if (fileName.value !== input.expectedCsvFileName.trim()) {
+    errors.push('detached label file_name does not match expectedCsvFileName');
+  }
+  if (fileSize.count !== 1 || !fileSize.value) {
+    errors.push('detached label must contain exactly one file_size value');
+  }
+  if (fileSize.count === 1 && !/\\bunit\\s*=\\s*["']byte["']/i.test(fileSize.attributes)) {
+    errors.push('detached label file_size must use unit="byte"');
+  }
+  const declaredFileSize = fileSize.value === null ? Number.NaN : Number(fileSize.value);
+  if (fileSize.count === 1 && (!Number.isSafeInteger(declaredFileSize) || declaredFileSize <= 0)) {
+    errors.push('detached label file_size must be a positive integer number of bytes');
+  }
+
+  const csvByteLength = new TextEncoder().encode(input.csvText).length;
+  if (Number.isSafeInteger(declaredFileSize) && declaredFileSize !== csvByteLength) {
+    errors.push('CSV UTF-8 byte length does not match detached label file_size');
+  }
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  const sourceProductId = logicalIdentifier.value!;
+  const imported = parseMavenNgimsL3ResampledDensityCsvText(input.csvText, sourceProductId);
+  if (imported.status !== 'parsed') {
+    return { status: 'rejected', errors: [...imported.errors] };
+  }
+
+  let csvSha256: string;
+  try {
+    csvSha256 = await computeMavenPdsCsvSha256(input.csvText);
+  } catch (error) {
+    return {
+      status: 'rejected',
+      errors: [error instanceof Error ? error.message : 'unable to compute CSV SHA-256']
+    };
+  }
+
+  return {
+    status: 'imported',
+    imported,
+    provenance: {
+      sourceProductId,
+      csvFileName: fileName.value!,
+      csvByteLength,
+      csvSha256,
+      hashAlgorithm: 'SHA-256',
+      sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
+      detachedLabelChecks: [
+        'logical_identifier_matches_expected_product_id',
+        'file_name_matches_expected_csv_file_name',
+        'file_size_matches_csv_utf8_byte_length'
+      ],
+      csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
+      detachedLabelAuthenticity: 'not_independently_authenticated'
+    }
+  };
+}
+
 /** Select one L3 res-den species profile from an exact TID/orbit/focus-mode and UTC event window. */
 export function selectMavenNgimsL3ResampledDensityProfile(
   imported: MavenNgimsL3ResampledDensityCsvImportResult,
@@ -1522,6 +1720,36 @@ export function selectMavenNgimsL3ResampledDensityProfile(
       'Each row contains altitude and event/species identifiers but not pointwise latitude, longitude, SZA or local solar time.',
       'The source product ID is supplied by the caller and is not cryptographically verified from the CSV payload; retain the detached XML label and downloaded-file hash.',
       'This resampled neutral-density profile is useful for upper-atmosphere analysis only and is not eligible for Mars photochemical or Scheduler initial-state construction.'
+    ]
+  };
+}
+
+
+/** Select from a PDS4 label-checked import while carrying its fixity provenance. */
+export function selectMavenNgimsL3ResampledDensityPds4Profile(
+  imported: MavenNgimsL3ResampledDensityPds4ImportResult,
+  selection: MavenNgimsL3ResampledDensitySelection
+): MavenNgimsL3ResampledDensityPds4SelectionResult {
+  if (!imported || imported.status !== 'imported') {
+    return {
+      status: 'rejected',
+      errors: imported?.status === 'rejected'
+        ? [...imported.errors]
+        : ['a PDS4 label-checked res-den import is required']
+    };
+  }
+  const selected = selectMavenNgimsL3ResampledDensityProfile(imported.imported, selection);
+  if (selected.status === 'rejected') return selected;
+  return {
+    ...selected,
+    sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
+    sourceArtifactSha256: imported.provenance.csvSha256,
+    detachedLabelAuthenticity: imported.provenance.detachedLabelAuthenticity,
+    limitations: [
+      ...selected.limitations,
+      'The detached PDS4 label logical_identifier, file_name and file_size were checked against the expected archive identity and exact CSV UTF-8 byte length.',
+      'SHA-256 is recorded for the exact supplied CSV text, but no signed/independently published archive checksum was compared and the detached label itself is not authenticated.',
+      'L3 res-den remains an altitude-resampled product; this provenance check does not make it a raw L2 measurement or a planetary initial state.'
     ]
   };
 }
