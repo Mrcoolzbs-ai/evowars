@@ -206,6 +206,22 @@ describe('MAVEN upper-atmosphere evidence', () => {
         schedulerInitialStateEligible: false
       }
     });
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.indexObservationGeometry).toMatchObject({
+      closestApproachUtc: '2014-12-11T17:15:29.000Z',
+      spacecraftAltitudeKm: 152.981,
+      phaseAngleDeg: 112.218,
+      orbitNumber: 391,
+      marsSolarLongitudeDeg: 250.49,
+      marsYear: 32,
+      isIndexGeometryNotSpeciesMeasurement: true
+    });
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct).toMatchObject({
+      directoryReportedSize: '526 KB',
+      focusMode: 'csn',
+      neutralSpecies: ['Ar', 'CO2', 'He', 'N2'],
+      productPayloadImported: false,
+      labelPayloadImported: false
+    });
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.fileName)
       .toBe('mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv');
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.productId)
