@@ -32,7 +32,7 @@
 
 import type { PhysicalQuantity } from './physicalQuantity';
 import { assertDimension, convert, dimension, QuantityError } from './physicalQuantity';
-import type { ScientificValue } from './scientificValue';
+import type { DataProvenance, ScientificValue } from './scientificValue';
 import { validateScientificValueShape } from './scientificValue';
 import { validateThermalScientificValue } from './thermalState';
 
@@ -324,6 +324,12 @@ export interface ReservoirRecord {
   /** Тело, к которому относится резервуар (если иерархия тел задана). */
   bodyId?: string;
   material?: MaterialInventory;
+  /**
+   * Происхождение текущего материального инвентаря. Необязательно для
+   * legacy-резервуаров; новые физические исполнители, которым важен
+   * source-backed стартовый состав, должны требовать его явно.
+   */
+  materialProvenance?: DataProvenance;
   energy?: EnergyInventory;
   properties: Record<string, ScientificValue>;
   /**
@@ -508,6 +514,28 @@ export function validateReservoirRecord(reservoir: unknown): ReservoirRecordVali
   }
   if (typeof rec.bodyId !== 'undefined' && typeof rec.bodyId !== 'string') {
     errors.push('bodyId резервуара должен быть строкой, если задан');
+  }
+  if (rec.materialProvenance !== undefined) {
+    if (!isPlainRecord(rec.materialProvenance)) {
+      errors.push('materialProvenance должен быть объектом-записью с идентификатором источника');
+    } else {
+      const provenance = rec.materialProvenance as Record<string, unknown>;
+      const identified = ['sourceName', 'sourceId', 'datasetId', 'reference'].some((key) =>
+        typeof provenance[key] === 'string' && (provenance[key] as string).trim() !== ''
+      );
+      if (!identified) {
+        errors.push('materialProvenance должен содержать sourceName, sourceId, datasetId или reference');
+      }
+      for (const [key, value] of Object.entries(provenance)) {
+        if (value !== undefined && typeof value !== 'string' &&
+            !(key === 'rawInput' && isPlainRecord(value))) {
+          errors.push('materialProvenance.' + key + ' имеет неподдерживаемый тип данных');
+        }
+      }
+    }
+    if (rec.material === undefined) {
+      errors.push('materialProvenance задан без material-инвентаря');
+    }
   }
   if (rec.material !== undefined) {
     if (!isPlainRecord(rec.material)) {
