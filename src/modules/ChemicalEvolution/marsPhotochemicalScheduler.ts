@@ -34,7 +34,7 @@ import type {
   MarsPhotochemicalNetworkResult
 } from './marsPhotochemicalNetwork';
 import type { MarsGasSpeciesId } from '../Data/marsGasPhaseKinetics';
-import type { DataProvenance, ScientificValue } from '../Core/scientificValue';
+import type { DataProvenance } from '../Core/scientificValue';
 import { hasUsableTemperature } from '../Core/thermalState';
 import { setMaterialInventory, validateMaterialInventory } from '../Core/reservoir';
 import type { ReservoirRecord } from '../Core/reservoir';
@@ -240,8 +240,16 @@ function applyMarsPhotochemicalInterval(
   }
   const reservoir = getPhotochemicalReservoir(world, config.reservoirId);
   const temperature = reservoir.reservoirTemperature;
-  if (temperature === undefined || !hasUsableTemperature(temperature)) {
+  if (
+    temperature === undefined ||
+    (temperature.status !== 'known' && temperature.status !== 'estimated') ||
+    !hasUsableTemperature(temperature)
+  ) {
     throw new Error('reservoirTemperature потеряна или стала непригодной к расчёту');
+  }
+  const materialProvenance = reservoir.materialProvenance;
+  if (!hasIdentifiedProvenance(materialProvenance)) {
+    throw new Error('materialProvenance потерян или не идентифицирует входной инвентарь');
   }
   const initial = inventoryToInitialConcentrations(reservoir.material!.entries);
   const networkInput: MarsPhotochemicalNetworkInput = {
@@ -252,7 +260,7 @@ function applyMarsPhotochemicalInterval(
     photolysisReactionIds: [...config.photolysisReactionIds],
     dtSeconds: durationS,
     initialConcentrationsPerCm3: initial,
-    initialStateProvenance: reservoir.materialProvenance as DataProvenance
+    initialStateProvenance: materialProvenance
   };
   const result = runMarsPhotochemicalConcentrationStep(networkInput);
   const nextEntries = concentrationsToInventory(result.finalConcentrationsPerCm3);
@@ -270,9 +278,9 @@ function applyMarsPhotochemicalInterval(
       photolysisReactionIds: config.photolysisReactionIds.join(','),
       solverMethod: result.method,
       initialStateSourceId:
-        reservoir.materialProvenance.sourceId ??
-        reservoir.materialProvenance.datasetId ??
-        reservoir.materialProvenance.sourceName ??
+        materialProvenance.sourceId ??
+        materialProvenance.datasetId ??
+        materialProvenance.sourceName ??
         'identified source (see input provenance)'
     },
     applicability: 'выходной локальный вектор концентраций в mol/m^3 одного изотермического компартмента',
