@@ -286,7 +286,53 @@ function applyMarsPhotochemicalInterval(
         materialProvenance.sourceId ??
         materialProvenance.datasetId ??
         materialProvenance.sourceName ??
-        'identified source (see input provenance)'
+        'identified source (see input provenance)',
+      initialStateSnapshotSourceId:
+        typeof materialProvenance.rawInput?.initialStateSnapshotSourceId === 'string'
+          ? materialProvenance.rawInput.initialStateSnapshotSourceId
+          : materialProvenance.sourceId ?? materialProvenance.datasetId ?? null,
+      initialStateEventId:
+        typeof materialProvenance.rawInput?.initialStateEventId === 'string'
+          ? materialProvenance.rawInput.initialStateEventId
+          : typeof materialProvenance.rawInput?.eventId === 'string'
+            ? materialProvenance.rawInput.eventId
+            : null,
+      initialStateSampleTimeUtc:
+        typeof materialProvenance.rawInput?.initialStateSampleTimeUtc === 'string'
+          ? materialProvenance.rawInput.initialStateSampleTimeUtc
+          : typeof materialProvenance.rawInput?.timeUtc === 'string'
+            ? materialProvenance.rawInput.timeUtc
+            : null,
+      initialStateMarsYear:
+        typeof materialProvenance.rawInput?.initialStateMarsYear === 'number'
+          ? materialProvenance.rawInput.initialStateMarsYear
+          : typeof materialProvenance.rawInput?.marsYear === 'number'
+            ? materialProvenance.rawInput.marsYear
+            : null,
+      initialStateSolarLongitudeDeg:
+        typeof materialProvenance.rawInput?.initialStateSolarLongitudeDeg === 'number'
+          ? materialProvenance.rawInput.initialStateSolarLongitudeDeg
+          : typeof materialProvenance.rawInput?.solarLongitudeDeg === 'number'
+            ? materialProvenance.rawInput.solarLongitudeDeg
+            : null,
+      initialStateAltitudeKm:
+        typeof materialProvenance.rawInput?.initialStateAltitudeKm === 'number'
+          ? materialProvenance.rawInput.initialStateAltitudeKm
+          : typeof materialProvenance.rawInput?.altitudeKm === 'number'
+            ? materialProvenance.rawInput.altitudeKm
+            : null,
+      initialStateSpeciesSourceIds:
+        typeof materialProvenance.rawInput?.initialStateSpeciesSourceIds === 'string'
+          ? materialProvenance.rawInput.initialStateSpeciesSourceIds
+          : typeof materialProvenance.rawInput?.sourceIds === 'string'
+            ? materialProvenance.rawInput.sourceIds
+            : null,
+      initialCoRegistrationPolicySource:
+        typeof materialProvenance.rawInput?.initialCoRegistrationPolicySource === 'string'
+          ? materialProvenance.rawInput.initialCoRegistrationPolicySource
+          : typeof materialProvenance.rawInput?.coRegistrationPolicySource === 'string'
+            ? materialProvenance.rawInput.coRegistrationPolicySource
+            : null
     },
     applicability: 'выходной локальный вектор концентраций в mol/m^3 одного изотермического компартмента',
     limitations: [
