@@ -138,11 +138,14 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
   if (!uncertainty || typeof uncertainty !== 'object') {
     return invalid('uncertainty: отсутствует входная неопределённость');
   }
-  if (input.layers.length !== 1) {
+  if (!Array.isArray(input.layers) || input.layers.length !== 1) {
     errors.push('поддерживается ровно один исходный measuredNodes слой; многослойная ковариация пока не реализована');
   }
-  const sourceLayer = input.layers[0];
-  if (sourceLayer?.temperature.kind !== 'measuredNodes') {
+  if (!Array.isArray(uncertainty.temperatureNodeSigmaK)) {
+    return invalid('temperatureNodeSigmaK: требуется массив стандартных отклонений');
+  }
+  const sourceLayer = Array.isArray(input.layers) ? input.layers[0] : undefined;
+  if (sourceLayer?.temperature?.kind !== 'measuredNodes') {
     errors.push('температурная модель должна быть measuredNodes с линейной интерполяцией');
   }
   const nodes = sourceLayer?.temperature.kind === 'measuredNodes'
