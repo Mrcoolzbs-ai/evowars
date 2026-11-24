@@ -26,7 +26,7 @@ describe('Mars Taysum 2020 photolysis evidence', () => {
       3.79e-12,
       1.02e-10
     ]);
-    expect(MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.conditions).toMatch(/solar zenith angle 0 degrees/);
+    expect(MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.conditions).toMatch(/SZA=0 degrees/);
     expect(MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.conditions).toMatch(/Ls=251 degrees/);
     expect(MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.limitations).toMatch(/not observations/);
     expect(MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.limitations).toMatch(/no interpolation/);
