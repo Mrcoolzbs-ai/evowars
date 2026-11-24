@@ -33,7 +33,8 @@ import {
 import {
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
-  MAVEN_NGIMS_PDS_ARCHIVE
+  MAVEN_NGIMS_PDS_ARCHIVE,
+  MAVEN_INSITU_KP_PDS_ARCHIVE
 } from '../Data/mavenUpperAtmosphereEvidence';
 import { MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE } from '../Data/marsPhotochemistryEvidence';
 import type { DataProvenance, ScientificValue } from '../Core/scientificValue';
@@ -191,6 +192,11 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         ' at ' + MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS.altitudeKm +
         ' km, not a direct number-density observation at 0.5 or 42.67 km.',
       'MAVEN NGIMS readers and selection contracts exist, but no selected L2 measurement rows/orbit snapshot are frozen in Data. NGIMS also has a 2–150 Da mass range; atomic H (1 Da) is outside its coverage.',
+      'The PDS MAVEN Insitu Key Parameters bundle v' + MAVEN_INSITU_KP_PDS_ARCHIVE.bundle.version +
+        ' covers ' + MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.start + ' through ' +
+        MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.stop + ', but its inspected NGIMS key-parameter table directly overlaps only ' +
+        MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount + '/16 network species (O, CO, CO2). The NO column is removed/all-NaN, the -1 precision sentinel means upper limit, and no full table rows are imported.',
+      'The inspected MAVEN key-parameter schema has LPW electron temperature rather than neutral-gas temperature; the separate NGIMS scale-height/temperature product needs its own independently sourced and co-registered selection. MAVEN/NGIMS is an upper-atmosphere orbital measurement and cannot supply the Taysum Table B2 nodes at 0.5 or 42.67 km.',
       'Taysum Table B2 requires SZA=0 deg, Ls=251 deg and exact altitude nodes 0.5/42.67 km. Its compact table does not publish all TUV inputs (temperature, O3 and total columns, Sun–Mars distance, opacity/dust), so the matching context alone does not close radiation-forcing uncertainty.',
       'The co-registration policy must be justified per imported dataset. Tolerances cannot be widened to disguise a mismatch between instruments, seasons, altitudes or retrieval methods.'
     ],
@@ -230,6 +236,12 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         sourceId: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
         classification: 'archive and CSV selection/parser contract',
         reasonNotEligibleAsInitialPointValue: 'No selected orbit/TID species rows are imported; a single-species profile is not a complete initial state and H is outside NGIMS mass coverage.'
+      },
+      {
+        sourceName: MAVEN_INSITU_KP_PDS_ARCHIVE.bundle.name,
+        sourceId: MAVEN_INSITU_KP_PDS_ARCHIVE.provenance.sourceId,
+        classification: 'PDS v41.0 uniformly sampled L2-derived key-parameter table with NGIMS densities and SPICE geometry',
+        reasonNotEligibleAsInitialPointValue: 'Only O, CO and CO2 overlap the 16-species network; NO is all-NaN, precision=-1 denotes upper limits, the inspected table has no neutral-gas temperature, no .tab rows are imported, and MAVEN samples the upper atmosphere rather than either Table B2 lower-atmosphere node.'
       },
       {
         sourceName: MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.sourceName ?? 'Taysum & Palmer (2020)',
