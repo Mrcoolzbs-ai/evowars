@@ -148,6 +148,9 @@ import {
 
 export * from './kineticWorldAdapter';
 
+// Stage 4.2: explicit source-backed Mars single-compartment photochemical ODE step.
+export * from './marsPhotochemicalNetwork';
+
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
 // ============================================
