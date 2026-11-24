@@ -3,6 +3,7 @@ import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
   MAVEN_NGIMS_PDS_ARCHIVE,
+  MAVEN_INSITU_KP_PDS_ARCHIVE,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
@@ -73,6 +74,29 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.orbitProductScope.maximumSpacecraftAltitudeKm).toBe(500);
     expect(MAVEN_NGIMS_PDS_ARCHIVE.l3AltitudeResamplingAvailability.generalAvailabilityEndsUtc).toBe('2020-07');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.l2AbundanceUnit).toBe('part/cm3');
+  });
+
+  it('records the newer PDS v41.0 Key Parameters coverage without promoting schema fields to observations', () => {
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.bundle.version).toBe('41.0');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.bundle.doi).toBe('10.17189/4sjk-t793');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.collection.doi).toBe('10.17189/1jfy-9a74');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.start).toBe('2014-03-18T12:00:00.000Z');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.stop).toBe('2025-12-05T11:59:52.000Z');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.observationDateUtc).toBe('2025-06-10');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.tableImportedIntoRepository).toBe(false);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralDensityFields.map((field) => field.species)).toEqual([
+      'He', 'O', 'CO', 'N2', 'NO', 'Ar', 'CO2'
+    ]);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralDensityFields.find((field) => field.species === 'NO')?.status)
+      .toBe('removed_all_values_nan');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.precision.upperLimitSentinel).toBe(-1);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directlyRepresentedSpecies)
+      .toEqual(['O', 'CO', 'CO2']);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount).toBe(3);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.totalNetworkSpeciesCount).toBe(16);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralTemperature.lpwTemperatureIsNeutralGasTemperature).toBe(false);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.sampling.geometryFromSpice).toBe(true);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/0\.5 or 42\.67 km/);
   });
 
   it('converts one verified L2 abundance and its 1-sigma relative precision to SI', () => {
