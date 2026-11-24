@@ -3,7 +3,7 @@
 > **Статус документа:** реконструкция требований и фактических контрактов по исходному коду, тестам, истории изменений и инженерным документам.
 >
 > **Срез:** 24 ноября 2026 года.  
-> **Кодовый срез:** ветка `stage-3-planetary-physics`, последний commit с функциональными изменениями `248564a5498351ff96bc6fec6d7389435bba72d4`; последующие коммиты синхронизируют документацию и статус CI.  
+> **Кодовый срез:** ветка `stage-3-planetary-physics`, последний commit с функциональными изменениями `a91ed76eba4da8efe15580aafb8f680a5d7472db`; последующие коммиты синхронизируют документацию и статус CI.  
 > **Интеграционный статус:** изменения этой ветки находятся в открытом PR [#1](https://github.com/Mrcoolzbs-ai/evowars/pull/1) в `main`; они не должны считаться уже выпущенной версией основной ветки.
 >
 > Документ различает **реализовано**, **частично реализовано** и **планируется**. Наличие типа, интерфейса или проектного документа само по себе не означает, что соответствующая физическая модель работает в пользовательском сценарии.
@@ -176,6 +176,16 @@ HO2 хранится двумя раздельными записями по Ald
 
 Контракты импортированных данных проверяют полноту SAM-суммы и сохраняют разницу между incomplete composition, observational upper limit и modelled range. Реализация и ограничения: `src/modules/Data/marsAtmosphericChemistry.ts`, `src/modules/Tests/marsAtmosphericChemistry.test.ts`, `docs/science/DATA_PROVENANCE.md` §2.31.
 
+
+
+### 6.8 Верхняя атмосфера Марса: MAVEN IUVS/NGIMS
+
+`Data/mavenUpperAtmosphereEvidence.ts` содержит публикационные reference-объекты IUVS и reader для NGIMS PDS L2 neutral single-species rows. NGIMS abundance [part/cm³] преобразуется в [part/m³]; опубликованная `precision` переносится как относительная 1σ. Quality flags сохраняются семантически: IV/OV — verified; IU/OU — uncertain и требуют явного opt-in; UR — unusable. Строитель одного профиля требует один вид, один orbit/TID, один inbound/outbound участок и уникальные высоты. Для NO выставляется предупреждение о возможном завышении из-за рекомбинации N+O внутри NGIMS; quality flag не устраняет интерференцию.
+
+IUVS NO reference описывает девять последовательных наблюдений 6–8 апреля 2016 (MY33) и retrieval 80–128 км с шагом 8 км. Численные плотности статьи не табулированы и намеренно не оцифрованы из рисунка; объект хранит геометрию, метод и смысл неопределённости, но не числовые точки. IUVS [O]/[CO2] ratios на 130 км для MY32/MY33 (3.1%/3.0%) — модельно-ограниченные значения после scaling, не прямые in-situ плотности.
+
+Эти данные не объединяются автоматически с MGS 1998, SAM Gale, ACS HO2 или OpenMARS в единый вертикальный профиль и не загружаются как стартовые запасы Scheduler. Фактические PDS NGIMS строки конкретных орбит ещё должны быть выбраны и импортированы, после проверки geometry/time/quality. Подробные источники и ограничения: `docs/science/DATA_PROVENANCE.md` §2.32.
+
 ## 7. Химия и эволюция
 
 ### 7.1 Инвентари и стехиометрия
@@ -257,6 +267,7 @@ UI отображает результат и объяснения, но не я
 | Физический этап генерации: тело, атмосфера, орбита, энергетика, геология, фазы | Реализовано частично по научной глубине | Орбитальные диапазоны модельные; геология преимущественно качественная; климатической модели нет |
 | MGS Mars `8028D38A.TPS` → гидростатический Core | Реализован reference-адаптер + first-order 1σ postprocessor P/rho/Σ/Nmol | Один retrieval-профиль, явный состав обязателен; диагональная covariance approximation; столбы оцениваются при фиксированной Mbar; uncertainty состава/гравитации/тела не рассчитана; не подключён к Scheduler-химии |
 | Mars SAM composition / ACS HO2 upper limits / OpenMARS HO2 estimates | Реализованы source-backed evidence records и coverage checks | SAM — неполный near-surface состав; ACS — upper limits, не detections; OpenMARS — модельный MY35 профиль; источники не образуют общий синхронный профиль и не инициализируют Scheduler |
+| MAVEN IUVS/NGIMS upper-atmosphere evidence | Реализован IUVS metadata/reference layer и NGIMS L2 quality-aware reader/profile builder | IUVS NO density values not digitized from figure; O/CO2 ratios model-constrained; NGIMS PDS orbit rows not yet frozen/imported; NO contamination caveat retained; no automatic Scheduler initialization |
 | Core: типизированные значения, provenance, резервуары, потоки, журналы, состояние мира | Реализовано как инфраструктура | Контракты/инварианты не означают наличие физического решателя для каждого процесса |
 | Часы, Scheduler, события, splitting, аудит | Инфраструктура реализована | Полная автоматизация всех физических процессов не завершена |
 | Химическая стехиометрия режима A | Реализовано | Это игровая степень превращения, не физическая кинетика |
@@ -306,6 +317,7 @@ npm run build
 | `src/modules/Atmosphere/` | Атмосферные пресеты, состав и физика столба |
 | `src/modules/Data/mgsMarsOccultation1998.ts` | 74 строки source-backed MGS Mars PDS-профиля с неопределённостями и событием наблюдения |
 | `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater annual means, ACS/TGO HO2 upper limits и OpenMARS HO2 model estimates с раздельным provenance |
+| `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS NO/O references, NGIMS L2 quality-aware CSV row parser and single-orbit profile builder |
 | `src/modules/Core/atmosphericReferenceAdapters.ts` | USSA reference adapters и MGS measured-node → hydrostatic-column адаптер |
 | `src/modules/Core/hydrostaticUncertainty.ts` | First-order uncertainty propagation PDS 1σ → P(z), rho(z), integrated mass/molar columns, including adaptive mesh results |
 | `src/modules/OrbitalMechanics/`, `EnergyBalance/`, `Geology/`, `PhaseEquilibrium/` | Физические предметные подсистемы |
