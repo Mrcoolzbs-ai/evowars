@@ -192,6 +192,12 @@ The data module `Data/marsPhotochemistryEvidence.ts` preserves the nine inorgani
 
 `evaluateMarsPhotolysisAtReferenceNode()` calculates J × n(parent) and tabulated net stoichiometric rates only at those exact two nodes, using an explicit caller-supplied local reactant density and its provenance. It rejects off-grid altitudes, unknown reactions, invalid densities and missing provenance; no interpolation or extrapolation is performed. Because the source table provides no 1σ for J, rate uncertainty remains not quantified. The result is a diagnostic/model-reference calculation only and is not Scheduler-eligible. It does not form a complete photochemical network or create radical inventories.
 
+### 6.10 Mars gas-phase reaction evidence and rate evaluation
+
+`Data/marsGasPhaseKinetics.ts` preserves the 32 gas-phase reaction records in Taysum & Palmer (2020), Appendix Table B1 (DOI 10.1029/2020JE006491). The records carry typed stoichiometry and per-reaction rate provenance. Twenty-nine direct expressions are executable with an explicit local concentration vector; the two `k_3rd` fall-off rows c11/c17 remain unevaluated until the CO2 efficiency convention is resolved, and e1 is evaluable only at its single published temperature of 298 K. All 32 stoichiometries are atom-balanced.
+
+Mars termolecular reactions use CO2 as the bath gas. The Table B1 efficiency multiplier (2.075 for a1, 2.5 for other direct termolecular rows) is included in the stored pre-exponential A; the caller must separately supply local CO2 number density. It is never inferred from pressure or a partial composition. The table gives no formal T validity intervals or numerical 1σ rate uncertainties; these remain unreported. This is a data/evaluation layer only, not a complete chemical network or Scheduler-connected atmospheric simulation.
+
 ## 7. Химия и эволюция
 
 ### 7.1 Инвентари и стехиометрия
@@ -325,6 +331,7 @@ npm run build
 | `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater annual means, ACS/TGO HO2 upper limits и OpenMARS HO2 model estimates с раздельным provenance |
 | `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS NO/O references, NGIMS L2 quality-aware CSV row parser and single-orbit profile builder |
 | `src/modules/Data/marsPhotochemistryEvidence.ts` | Taysum & Palmer (2020) Mars photolysis J values at two model-reference altitudes, with provenance-gated J×n evaluator |
+| `src/modules/Data/marsGasPhaseKinetics.ts` | Taysum & Palmer (2020) Mars gas-phase reactions, CO2-third-body Arrhenius evaluation and atom-balance audit |
 | `src/modules/Core/atmosphericReferenceAdapters.ts` | USSA reference adapters и MGS measured-node → hydrostatic-column адаптер |
 | `src/modules/Core/hydrostaticUncertainty.ts` | First-order uncertainty propagation PDS 1σ → P(z), rho(z), integrated mass/molar columns, including adaptive mesh results |
 | `src/modules/OrbitalMechanics/`, `EnergyBalance/`, `Geology/`, `PhaseEquilibrium/` | Физические предметные подсистемы |
