@@ -1,5 +1,5 @@
 name: CI
-# Keep the science-branch push check explicit and rerunnable from its latest HEAD.
+# Keep science branch verification rerunnable after source/test commits; latest-head CI.
 
 on:
   push:
