@@ -1,0 +1,120 @@
+{
+  "annualArchiveUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL3_2014.tar.gz",
+  "archive": "NASA PDS Planetary Atmospheres Node / MAVEN NGIMS PDS4",
+  "archiveDirectory": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l3/2014/12/",
+  "csv": {
+    "csvByteLength": 23658,
+    "csvFileName": "mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv",
+    "csvFixityStatus": "sha256_computed_not_compared_to_archive_checksum",
+    "csvSizeConsistencyStatus": "mismatch_quarantined_no_md5",
+    "detachedLabelAuthenticity": "not_independently_authenticated",
+    "detachedLabelSha256": "82d37b6106dc8be215fbc2641101743ba0ccb3d469d324ef39cf0d9640bc9ee7",
+    "downloadedHttpByteLength": 23658,
+    "downloadedResponseSha256": "e495cabe79d44967f76ed4baea857b24df5e92ffca8faf2c890b872f82091678",
+    "labelDeclaredFileSizeBytes": 23743,
+    "md5Checksum": null,
+    "md5ChecksumStatus": "not_present_in_detached_label",
+    "productId": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406",
+    "sha256": "e495cabe79d44967f76ed4baea857b24df5e92ffca8faf2c890b872f82091678",
+    "sourceArchive": {
+      "byteLength": 5395180,
+      "csvTarMember": "l3/2014/12/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv",
+      "fileName": "ngims_derivedL3_2014.tar.gz",
+      "httpResponse": {
+        "httpContentEncoding": null,
+        "httpContentLength": "5395180",
+        "httpContentType": "application/x-gzip",
+        "httpPayloadByteLength": 5395180
+      },
+      "sha256": "66300afebcd9e4470a3f749e8c763efb5782954d4338c25381d4c7e0cd4286da",
+      "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL3_2014.tar.gz",
+      "xmlTarMember": "l3/2014/12/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml"
+    },
+    "transportNormalization": "none"
+  },
+  "csvUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l3/2014/12/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv",
+  "interpretation": {
+    "csvFixityStatus": "sha256_computed_not_compared_to_archive_checksum",
+    "csvSizeConsistencyStatus": "mismatch_quarantined_no_md5",
+    "notRawL2Measurement": true,
+    "notes": [
+      "Rows are archived L3 resampled/interpolated densities, not raw L2 point measurements.",
+      "The PDS4 detached label is structurally checked but not independently authenticated.",
+      "The PDS4 file_size is inconsistent with the archived CSV bytes; the payload is quarantined for forensic analysis.",
+      "No md5_checksum is present in the detached label; only SHA-256 of the archived bytes is recorded.",
+      "The file alone does not provide a complete T(z), P(z), bulk composition, or all radical inventories."
+    ],
+    "perRowDensitySigma": "not supplied by Table A-9",
+    "productLevel": "L3 altitude-resampled density",
+    "schedulerEligibleAsCompleteMarsInitialState": false,
+    "transportNormalization": "none; original archive member preserved byte-for-byte"
+  },
+  "productId": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406",
+  "tableA9": {
+    "csvHeader": [
+      "t_utc",
+      "t_unix",
+      "t_sclk",
+      "t_tid",
+      "tid",
+      "orbit",
+      "focusmode",
+      "alt",
+      "mass",
+      "species",
+      "density_bins",
+      "quality"
+    ],
+    "duplicateUtcMismatchRows": 0,
+    "duplicatedUtcHeader": false,
+    "focusModeRowCounts": {
+      "csn": 208
+    },
+    "malformedWidthRows": 0,
+    "naiveUtcTimestampRowsInterpretedAsUtc": 208,
+    "orbitRowCounts": {
+      "391": 208
+    },
+    "positiveDensityRowsWithScienceQuality": 154,
+    "profileCandidates": [
+      {
+        "quality": "uncertain",
+        "species": "Ar",
+        "uniqueAltitudeBins": 41
+      },
+      {
+        "quality": "verified",
+        "species": "Ar",
+        "uniqueAltitudeBins": 44
+      },
+      {
+        "quality": "uncertain",
+        "species": "CO2",
+        "uniqueAltitudeBins": 69
+      }
+    ],
+    "qualityFlagRowCounts": {
+      "I0": 54,
+      "IU": 110,
+      "IV": 44
+    },
+    "rowCount": 208,
+    "speciesRowCounts": {
+      "Ar": 85,
+      "CO2": 69,
+      "N2": 54
+    },
+    "tidRowCounts": {
+      "14282": 208
+    },
+    "timeStartUtc": "2014-12-11T17:04:27Z",
+    "timeStopUtc": "2014-12-11T17:15:31Z",
+    "timezoneInterpretation": "PDS t_utc column interpreted as UTC; explicit offsets normalized to UTC"
+  },
+  "xml": {
+    "byteLength": 11062,
+    "fileName": "mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml",
+    "sha256": "82d37b6106dc8be215fbc2641101743ba0ccb3d469d324ef39cf0d9640bc9ee7"
+  },
+  "xmlUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l3/2014/12/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml"
+}
