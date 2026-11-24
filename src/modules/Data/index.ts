@@ -574,6 +574,8 @@ export {
   MAVEN_NGIMS_PDS_SIS_PROVENANCE,
   MAVEN_NGIMS_PDS_ARCHIVE,
   MAVEN_INSITU_KP_PDS_ARCHIVE,
+  MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT,
+  parseMavenInsituKeyParameterRecord,
   validateMavenNgimsL2NeutralRow,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromMeasurements,
@@ -584,6 +586,12 @@ export {
 } from './mavenUpperAtmosphereEvidence';
 export type {
   MavenUpperAtmosphereProvenance,
+  MavenInsituKeyParameterSpecies,
+  MavenInsituKeyParameterEvidenceStatus,
+  MavenInsituKeyParameterSpeciesValue,
+  MavenInsituKeyParameterGeometry,
+  MavenInsituKeyParameterRow,
+  MavenInsituKeyParameterParseResult,
   MavenNgimsNeutralQuality,
   MavenNgimsFocusMode,
   MavenNgimsL2NeutralAbundanceRow,
