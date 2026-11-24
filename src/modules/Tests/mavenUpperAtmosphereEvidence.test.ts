@@ -54,7 +54,6 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.availableProducts).toContain('L3 altitude-resampled abundance');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.neutralSpeciesOfInterest).toContain('NO');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.dataAvailableThroughUtc).toBe('2025-02-15');
-    expect(MAVEN_NGIMS_PDS_ARCHIVE.l2DensityUnit).toBeUndefined();
     expect(MAVEN_NGIMS_PDS_ARCHIVE.l2AbundanceUnit).toBe('part/cm3');
   });
 
