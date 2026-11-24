@@ -973,3 +973,10 @@
 
 
 > **CI verification for complete MAVEN NGIMS L2 CSV import:** GitHub Actions run #827 (run ID 45384826345) on functional HEAD `18c553c17bfd07ecdae6014c0d230d6e7185dc5b` — success. TypeScript, tests, lint and production build all passed. Vitest: 92 files passed / 2 skipped; 3257 tests passed / 53 skipped. The MAVEN upper-atmosphere test file now contains 14 passing tests. Lint: 62 warnings / 0 errors. Production build successful.
+
+
+> **Ревизия Stage 4.2 (24.11.2026): выбор одного профиля из полного NGIMS L2 CSV.** Добавлен `buildMavenNgimsNeutralProfileFromCsvImport()`: caller обязан передать точный набор фильтров `species + orbit + TID + direction + quality`; parser сохраняет отдельные row validations, а builder извлекает только принятые записи выбранного однородного набора и повторно проверяет идентичность/уникальность высот. Нельзя незаметно смешать O и NO, соседние орбиты, inbound/outbound, verified/uncertain. Экспорт helper и типа selection добавлен в Data barrel. Unit tests проверяют выбор O из синтетического полного CSV, в котором рядом есть NO, и отказ при отсутствии строк для выбранного вида. Synthetic fixture не является реальной орбитой.
+>
+> **CI #836 (run ID 45385716629) на test-fix HEAD `d67e8496f6eb7a7838de3cff73acdeb094a10d24`: success.** TypeScript, Vitest, lint, production build прошли; 92 test files passed / 2 skipped, 3259 tests passed / 53 skipped; MAVEN upper-atmosphere tests — 16 passed; lint 62 warnings / 0 errors.
+>
+> **Остаток:** официальная L2 index locator записана, но реальные строки конкретной MAVEN orbit/TID ещё не зафиксированы в Data. Поэтому полученный CSV parser/profile selector пока подтверждён тестовыми fixtures, а не импортированной научной орбитой; он не создаёт начальный химический запас и не подключён к Scheduler. Stage 4.2 остаётся **OPEN**.
