@@ -164,7 +164,7 @@ export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
     { species: 'O', networkSpeciesId: 'O', status: 'field_present' },
     { species: 'CO', networkSpeciesId: 'CO', status: 'field_present' },
     { species: 'N2', networkSpeciesId: null, status: 'field_present' },
-    { species: 'NO', networkSpeciesId: null, status: 'removed_all_values_nan' },
+    { species: 'NO', networkSpeciesId: null, status: 'field_present_values_not_verified' },
     { species: 'Ar', networkSpeciesId: null, status: 'field_present' },
     { species: 'CO2', networkSpeciesId: 'CO2', status: 'field_present' }
   ],
@@ -194,12 +194,12 @@ export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
       'O1D', 'O2', 'O3', 'H', 'H2', 'H2O', 'OH',
       'HO2', 'H2O2', 'CH4', 'CH3', 'CH3O', 'HCHO'
     ],
-    note: 'NO is not a species in the current 16-species gas-phase network; the KP NO column is nevertheless unavailable because the NGIMS team removed it and set all values to NaN.'
+    note: 'NO is not a species in the current 16-species gas-phase network. An older Key Parameter SIS revision described the NO values as removed/all-NaN, while the inspected 2025-06-10 product label retains the density/precision/quality fields with generic descriptions; without the .tab payload, actual NO row values are unverified.'
   },
   limitations: [
     'This is a schema and archive-coverage record, not an imported numerical observation set; no full .tab rows are checked into this repository.',
     'The key-parameter table offers only three named neutral-density species that overlap the current 16-species network (O, CO, CO2); no complete initial vector can be formed from it.',
-    'The NGIMS NO density field is explicitly removed from the key-parameter data set and populated with NaN because the counts cannot be reliably separated from noise.',
+    'The older Key Parameter SIS describes NO as removed/all-NaN, but the inspected 2025-06-10 product label retains generic NO density/precision/quality field definitions. Since the numerical .tab rows are not imported, the actual NO values in that product remain unverified and must not be credited as detections.',
     'The precision sentinel -1 denotes an upper limit and must not be promoted to a measured point concentration.',
     'The inspected table contains LPW electron temperature, not a co-registered neutral-gas temperature; the separate NGIMS scale-height/temperature product must be independently selected and validated.',
     'MAVEN/NGIMS samples the upper atmosphere along an orbital spacecraft track; it does not provide direct measurements at the Taysum Table B2 lower-atmosphere nodes 0.5 or 42.67 km.',
