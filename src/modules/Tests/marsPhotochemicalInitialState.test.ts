@@ -109,6 +109,10 @@ describe('Stage 4.2: strict Mars photochemical observation snapshot', () => {
     expect(report.blockers.join(' ')).toMatch(/exact event window/i);
     expect(report.blockers.join(' ')).toMatch(/152\.981 km/i);
     expect(report.blockers.join(' ')).toMatch(/orbit 391/i);
+    expect(report.blockers.join(' ')).toMatch(/l3 res-den file/i);
+    expect(report.sourceEvidence.some((source) =>
+      source.sourceId.includes('mvn_ngi_l3_res-den-14282_20141211t154406')
+    )).toBe(true);
     expect(report.sourceEvidence.some((source) =>
       source.sourceId.includes('res-sht-14282_20141211t154406') &&
       source.sourceId.includes('csn-abund-14282_20141211t154406')
