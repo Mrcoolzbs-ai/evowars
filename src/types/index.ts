@@ -528,7 +528,7 @@ export interface GenerationSettings {
   fixedCategories: FixedCategories;
   atmospherePreset?: ID;
   /** Явно выбранная исходная вертикальная reference-модель атмосферы. */
-  atmosphericReferenceProfile?: 'ussa_1976_earth';
+  atmosphericReferenceProfile?: 'ussa_1976_earth' | 'mgs_mars_1998_8028d38a';
   customAtmosphere?: AtmosphereState;
   enableChemicalEvolution: boolean;
   chemicalEvolutionSteps: number;
