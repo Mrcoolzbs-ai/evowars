@@ -423,7 +423,7 @@ export function createMarsPhotochemicalObservationSnapshot(
     ) {
       errors.push('temperatureObservation must be a measured temperature detection, not a modelled value or bound');
     }
-    const temperatureValue = temperature.temperature;
+    const temperatureValue = (temperature as unknown as MarsPhotochemicalTemperatureObservation).temperature;
     if (temperatureValue.status !== 'known' && temperatureValue.status !== 'estimated') {
       errors.push('temperatureObservation.temperature must have known/estimated status');
     } else if (!hasUsableTemperature(temperatureValue)) {
