@@ -240,8 +240,9 @@ export function evaluateMarsPhotolysisAtReferenceNode(
   if (node === undefined) return { status: 'rejected', reason: 'unsupported_altitude' };
 
   const eventRate = node.photolysisFrequencyPerS * input.reactantNumberDensityPerCm3;
+  const reactantNetRate = eventRate === 0 ? 0 : -eventRate;
   const netRates: Partial<Record<MarsPhotolysisSpeciesId, number>> = {
-    [channel.reactant]: -eventRate
+    [channel.reactant]: reactantNetRate
   };
   for (const product of channel.products) {
     netRates[product.speciesId] =
