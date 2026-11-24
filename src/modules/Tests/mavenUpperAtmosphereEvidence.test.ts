@@ -225,7 +225,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       ['H0', 'bad_or_negative_fit_do_not_use']
     ] as const;
     for (const [quality, fitQuality] of cases) {
-      const overrides = quality === 'H0'
+      const overrides: Record<string, string> = quality === 'H0'
         ? { quality, scale_height: '-10.5', temperature: '-210' }
         : { quality };
       const result = parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
