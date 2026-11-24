@@ -398,8 +398,11 @@ export function parseMavenInsituKeyParameterRecord(
     return { status: 'rejected', errors: ['TIME (UTC/SCET) must use YYYY-MM-DDTHH:mm:ss'] };
   }
   const timestamp = Date.parse(timeRaw + 'Z');
-  if (!Number.isFinite(timestamp)) {
-    return { status: 'rejected', errors: ['TIME (UTC/SCET) is not a valid UTC timestamp'] };
+  if (
+    !Number.isFinite(timestamp) ||
+    new Date(timestamp).toISOString().slice(0, 19) !== timeRaw
+  ) {
+    return { status: 'rejected', errors: ['TIME (UTC/SCET) is not a valid calendar UTC timestamp'] };
   }
 
   const readGeometry = (field: number): MavenInsituFieldValue =>
