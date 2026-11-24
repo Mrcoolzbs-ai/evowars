@@ -161,9 +161,10 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
   if (sourceLayer?.temperature?.kind !== 'measuredNodes') {
     errors.push('температурная модель должна быть measuredNodes с линейной интерполяцией');
   }
-  const nodes = sourceLayer?.temperature.kind === 'measuredNodes'
-    ? sourceLayer.temperature.nodes
-    : [];
+  const nodes: readonly { readonly heightM: number; readonly temperatureK: number }[] =
+    sourceLayer?.temperature.kind === 'measuredNodes'
+      ? sourceLayer.temperature.nodes
+      : [];
   if (nodes.length < 2) errors.push('measuredNodes: требуется не менее двух узлов');
   if (uncertainty.temperatureNodeSigmaK.length !== nodes.length) {
     errors.push(
