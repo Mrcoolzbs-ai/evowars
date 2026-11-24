@@ -1,0 +1,2773 @@
+// ============================================
+// SCHEDULER - Планировщик физических процессов
+// ============================================
+//
+// Stage 4.2.1. Детерминированный планировщик выполнения процессов
+// поверх WorldClock и ProcessRegistry. Планировщик управляет
+// ПОРЯДКОМ физических процессов; время продвигается только через
+// WorldClock (один раз на macro-шаг); научные значения не
+// выдумываются: процессы с неизвестным τ, отключённые процессы и
+// процессы без решателя не запускаются.
+//
+// Ключевые контракты:
+// - сериализуемое состояние планировщика (SchedulerBookkeeping)
+//   живёт в CoreWorldState.scheduling; runtime-исполнители
+//   (ProcessOperator) передаются ОТДЕЛЬНО и никогда не
+//   сериализуются; скрытого состояния нет;
+// - детерминизм: одинаковый вход → одинаковый выход; порядок
+//   событий — по сегментированному времени (comparePoints),
+//   при одинаковом времени — по sequence (стабильный tie-break);
+// - НЕТ универсального dt: длительность macro-шага задаёт
+//   вызывающий код; sub-cycling делит её на равные подшаги;
+//   эвристика dt ≤ τ/20 — только предварительная подсказка реестра,
+//   окончательный шаг выбирает конкретный solver;
+// - Lie splitting: последовательное выполнение операторов;
+// - Strang splitting: симметричная композиция ровно ДВУХ
+//   РАЗНЫХ операторов A(dt/2) → B(dt) → A(dt/2) — не произвольный
+//   порядок процессов и не два Lie-шага;
+// - идентификаторы процессов одного macro-шага уникальны
+//   (Stage 4.2.1.2): дублирующийся processId — и в списке
+//   процессов шага, и среди переданных runtime-операторов —
+//   отклоняется ДО вызова первого оператора (SchedulerError
+//   'duplicate_process_id'); молчаливая перезапись оператора
+//   через Map.set невозможна;
+// - временной аргумент оператора — ФИЗИЧЕСКИЙ подынтервал
+//   macro-шага (Stage 4.2.1.2): [intervalStartS, intervalStartS +
+//   durationS) всегда лежит внутри [0, dt]; Strang: A интегрирует
+//   [0, dt/2], B — [0, dt], второй A — [dt/2, dt];
+// - оператор НЕ двигает мировое время: проверяется после каждого
+//   вызова; нарушение → шаг отклонён (operator_moved_clock);
+// - атомарность транзакции шага (Stage 4.2.3.1 — snapshot-
+//   изоляция): macro-шаг выполняется на ПОЛНОЙ изолированной
+//   копии состояния мира, поэтому операторы физически не могут
+//   изменить объект вызывающей стороны — включая вложенные
+//   bodies, reservoirs, fluxLedger и scheduling; при ошибке
+//   оператора, самовольном движении часов или нарушении
+//   инвариантов шаг отклоняется: возвращается ИСХОДНОЕ состояние
+//   мира, мировое время не продвигается, частичное состояние не
+//   фиксируется;
+// - мировое время продвигается РОВНО ОДИН раз — после успеха
+//   всех операторов и аудита инвариантов;
+// - событие мира не теряется: ошибка обработки фиксируется
+//   статусом 'failed' с причиной; повторная обработка
+//   выполненного события запрещена.
+// - append-only история реакций (Stage 4.2.3.3.1): записи
+//   reactionLedger, существовавшие до macro-шага, неизменяемы —
+//   совпадающий id не доказывает неизменности записи; разрешено
+//   только добавление новых записей в конец журнала; правка,
+//   удаление, перестановка старых записей и удаление журнала
+//   отклоняют шаг; новые записи обязаны пройти стехиометрический
+//   аудит до фиксации — шаг с новыми реакциями требует
+//   запрошенного аудита инвариантов (speciesCatalog);
+//
+// Тесты композиции операторов доказывают правильность ПОРЯДКА
+// вызовов, а не точность физического решателя: готовых
+// физических solver в проекте пока нет.
+
+import type { CoreWorldState } from './worldState';
+import type { ProcessRegistry } from './processRegistry';
+import { isProcessAutoRunnable, tauSeconds } from './processRegistry';
+import type { FluxAuditScope, FluxRecord, FluxTime } from './fluxLedger';
+import type { SimulationClockState } from './simulationClock';
+import { advance, advanceTo, comparePoints, startNewSegment, totalElapsedSeconds } from './simulationClock';
+import { isPlainRecord } from './reservoir';
+import { auditWorldTransition } from './invariantAuditor';
+import { reactionLedgerAppendOnlyIssues } from './reactionLedger';
+import type { BoundaryCompleteness, WorldTransitionAudit } from './invariantAuditor';
+import type { SpeciesCatalog } from './species';
+
+// ============================================
+// 1. ОШИБКА
+// ============================================
+
+export class SchedulerError extends Error {
+  readonly code:
+    | 'invalid_step'
+    | 'unknown_process'
+    | 'process_disabled'
+    | 'process_tau_unknown'
+    | 'solver_unavailable'
+    | 'invalid_splitting'
+    | 'duplicate_process_id'
+    | 'invalid_event'
+    | 'already_processed'
+    | 'operator_error'
+    | 'operator_moved_clock'
+    | 'invalid_bookkeeping'
+    | 'explicit_only_process'
+    | 'not_explicit_only';
+  readonly component = 'Scheduler';
+  readonly processId: string | null;
+
+  constructor(code: SchedulerError['code'], message: string, processId: string | null) {
+    super('[Scheduler/' + code + '] ' + message);
+    this.name = 'SchedulerError';
+    this.code = code;
+    this.processId = processId;
+  }
+}
+
+// ============================================
+// 2. СОБЫТИЯ МИРА
+// ============================================
+
+export type WorldEventStatus = 'pending' | 'processed' | 'failed';
+export const WORLD_EVENT_STATUSES: readonly WorldEventStatus[] = ['pending', 'processed', 'failed'];
+
+/**
+ * Типизированная инфраструктура для будущих событий (решателей для
+ * них пока НЕТ — события не выдумываются): фазовый переход,
+ * исчерпание реагента, достижение границы диапазона, смена режима,
+ * событие, найденное solver.
+ */
+export const WORLD_EVENT_TYPES: readonly string[] = [
+  'phase_transition',
+  'reagent_exhausted',
+  'range_boundary_reached',
+  'regime_change',
+  'solver_detected'
+];
+
+/**
+ * Событие мира. Данные события — JSON-сериализуемый словарь
+ * (функции, Map/Set/Date и экземпляры классов запрещены);
+ * callback-функции НЕ хранятся в состоянии мира: обработчики
+ * передаются в processEvent отдельно.
+ */
+export interface WorldEvent {
+  id: string;
+  /** Момент события в сегментированном времени (порядок — comparePoints). */
+  time: FluxTime;
+  /** Тип события (см. WORLD_EVENT_TYPES). */
+  type: string;
+  /** Структурированные JSON-сериализуемые данные события. */
+  data: Record<string, unknown>;
+  /** Источник события (кто/что его породил). */
+  source: string;
+  status: WorldEventStatus;
+  /** Причина неудачной обработки, если status = 'failed'. */
+  failReason?: string;
+  /** Последовательность: детерминированный tie-break одинакового времени. */
+  sequence: number;
+}
+
+// ============================================
+// 3. ДИНАМИКА ПРОЦЕССОВ И ЖУРНАЛ
+// ============================================
+
+/** Динамическое состояние процесса (НЕ определение процесса). */
+export interface ProcessDynamics {
+  processId: string;
+  /** Последний запуск: оценка elapsed-времени, с; null — не запускался. */
+  lastRunElapsedS: number | null;
+  /** Следующий момент готовности в legacy elapsed-координате; для старых сохранений. */
+  nextDueElapsedS: number | null;
+  /** Точный момент последнего запуска в сегментированных часах (необязателен в старых сохранениях). */
+  lastRunTime?: FluxTime | null;
+  /** Точный момент следующей готовности; взаимоисключает nextDueElapsedS > null. */
+  nextDueTime?: FluxTime | null;
+  macroStepsCompleted: number;
+  operatorCallsCompleted: number;
+}
+
+export type StepLogPhase =
+  | 'lie'
+  | 'subcycle'
+  | 'strang_a_half_first'
+  | 'strang_b_full'
+  | 'strang_a_half_second';
+
+export const STEP_LOG_PHASES: readonly StepLogPhase[] = [
+  'lie',
+  'subcycle',
+  'strang_a_half_first',
+  'strang_b_full',
+  'strang_a_half_second'
+];
+
+/** Запись журнала о выполненном (или отклонённом) вызове оператора. */
+export interface SchedulerStepLogEntry {
+  stepIndex: number;
+  processId: string;
+  phase: StepLogPhase;
+  durationS: number;
+  /** Начало физического подынтервала [intervalStartS, intervalStartS + durationS) внутри macro-шага [0, dt], с. */
+  intervalStartS: number;
+  /** Абсолютное начало macro-step в сегментированных часах; отсутствует в старых сохранениях. */
+  worldStartTime?: FluxTime;
+  /** Абсолютный конец macro-step в сегментированных часах; отсутствует в старых сохранениях. */
+  worldEndTime?: FluxTime;
+  status: 'committed' | 'rejected';
+}
+
+/**
+ * Сериализуемое состояние планировщика (живёт в
+ * CoreWorldState.scheduling; опционально — отсутствие означает
+ * «планировщик не инициализирован»).
+ */
+export interface SchedulerBookkeeping {
+  processDynamics: Record<string, ProcessDynamics>;
+  eventQueue: WorldEvent[];
+  stepLog: SchedulerStepLogEntry[];
+  nextSequence: number;
+  stepCount: number;
+}
+
+/** Пустое состояние планировщика. */
+export function createSchedulerBookkeeping(): SchedulerBookkeeping {
+  return {
+    processDynamics: {},
+    eventQueue: [],
+    stepLog: [],
+    nextSequence: 0,
+    stepCount: 0
+  };
+}
+
+// ============================================
+// 4. ВАЛИДАЦИЯ СОСТОЯНИЯ ПЛАНИРОВЩИКА
+// ============================================
+
+function validateFluxTimeShape(t: unknown): string[] {
+  if (!isPlainRecord(t)) {
+    return ['time должен быть объектом-словарём {segmentIndex, localTimeS}'];
+  }
+  const issues: string[] = [];
+  if (typeof t.segmentIndex !== 'number' || !Number.isSafeInteger(t.segmentIndex) || t.segmentIndex < 0) {
+    issues.push('time.segmentIndex должен быть неотрицательным безопасным целым');
+  }
+  if (typeof t.localTimeS !== 'number' || !Number.isFinite(t.localTimeS) || t.localTimeS < 0) {
+    issues.push('time.localTimeS должен быть неотрицательным конечным числом');
+  }
+  return issues;
+}
+
+/** Рекурсивная проверка JSON-сериализуемости данных события. */
+function jsonSerializableIssues(value: unknown, label: string): string[] {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return [];
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? [] : [label + ': NaN/Infinity не сериализуемы'];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((v, i) => jsonSerializableIssues(v, label + '[' + String(i) + ']'));
+  }
+  if (typeof value === 'object') {
+    if (!isPlainRecord(value)) {
+      return [label + ': объекты с чужим прототипом (Map/Set/Date/классы) не сериализуемы'];
+    }
+    return Object.entries(value).flatMap(([k, v]) => jsonSerializableIssues(v, label + '.' + k));
+  }
+  return [label + ': значение типа ' + typeof value + ' не сериализуемо (функции/undefined запрещены)'];
+}
+
+/**
+ * Проверка формы состояния планировщика (данные могут приходить из
+ * JSON). Возвращает список проблем; пустой = форма корректна.
+ * Используется и валидацией CoreWorldState (код invalid_scheduling).
+ */
+export function validateSchedulerBookkeeping(bk: unknown): string[] {
+  if (!isPlainRecord(bk)) {
+    return ['состояние планировщика должно быть обычным объектом-словарём'];
+  }
+  const issues: string[] = [];
+
+  if (!isPlainRecord(bk.processDynamics)) {
+    issues.push('processDynamics должен быть объектом-словарём (processId → динамика)');
+  } else {
+    for (const [processId, dynamics] of Object.entries(bk.processDynamics)) {
+      if (!isPlainRecord(dynamics)) {
+        issues.push('processDynamics[' + processId + '] должен быть объектом-словарём');
+        continue;
+      }
+      if (typeof dynamics.processId !== 'string' || dynamics.processId !== processId) {
+        issues.push('processDynamics[' + processId + '].processId должен совпадать с ключом');
+      }
+      for (const key of ['lastRunElapsedS', 'nextDueElapsedS'] as const) {
+        const v = dynamics[key];
+        if (v !== null && (typeof v !== 'number' || !Number.isFinite(v))) {
+          issues.push('processDynamics[' + processId + '].' + key + ' должен быть конечным числом или null');
+        } else if (typeof v === 'number' && v < 0) {
+          issues.push('processDynamics[' + processId + '].' + key + ' не может быть отрицательным elapsed-временем');
+        }
+      }
+      for (const key of ['lastRunTime', 'nextDueTime'] as const) {
+        const point = dynamics[key];
+        if (point !== undefined && point !== null) {
+          for (const issue of validateFluxTimeShape(point)) {
+            issues.push('processDynamics[' + processId + '].' + key + ': ' + issue);
+          }
+        }
+      }
+      if (dynamics.nextDueTime !== undefined && dynamics.nextDueTime !== null && dynamics.nextDueElapsedS !== null) {
+        issues.push('processDynamics[' + processId + '] не может одновременно задавать nextDueTime и nextDueElapsedS');
+      }
+      for (const key of ['macroStepsCompleted', 'operatorCallsCompleted'] as const) {
+        const v = dynamics[key];
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+          issues.push('processDynamics[' + processId + '].' + key + ' должен быть неотрицательным целым');
+        }
+      }
+    }
+  }
+
+  let maxEventSequence = -1;
+  if (!Array.isArray(bk.eventQueue)) {
+    issues.push('eventQueue должен быть массивом событий');
+  } else {
+    const seenEventIds = new Set<string>();
+    const seenEventSequences = new Set<number>();
+    bk.eventQueue.forEach((event, index) => {
+      const label = 'eventQueue[' + String(index) + ']';
+      if (!isPlainRecord(event)) {
+        issues.push(label + ' должен быть объектом-словарём');
+        return;
+      }
+      if (typeof event.id !== 'string' || event.id.trim() === '') {
+        issues.push(label + ': id должен быть непустой строкой');
+      } else if (seenEventIds.has(event.id)) {
+        issues.push(label + ': дублирующийся id события «' + event.id + '»');
+      } else {
+        seenEventIds.add(event.id);
+      }
+      for (const issue of validateFluxTimeShape(event.time)) {
+        issues.push(label + ': ' + issue);
+      }
+      if (typeof event.type !== 'string' || event.type.trim() === '') {
+        issues.push(label + ': type должен быть непустой строкой');
+      }
+      if (!isPlainRecord(event.data)) {
+        issues.push(label + ': data должен быть объектом-словарём');
+      } else {
+        for (const issue of jsonSerializableIssues(event.data, label + '.data')) {
+          issues.push(issue);
+        }
+      }
+      if (typeof event.source !== 'string' || event.source.trim() === '') {
+        issues.push(label + ': source должен быть непустой строкой');
+      }
+      if (typeof event.status !== 'string' || !(WORLD_EVENT_STATUSES as readonly string[]).includes(event.status)) {
+        issues.push(label + ': status должен быть одним из: ' + WORLD_EVENT_STATUSES.join(', '));
+      }
+      if (event.failReason !== undefined && (typeof event.failReason !== 'string' || event.failReason.trim() === '')) {
+        issues.push(label + ': failReason должен быть непустой строкой, если задан');
+      }
+      if (event.status === 'failed' && (typeof event.failReason !== 'string' || event.failReason.trim() === '')) {
+        issues.push(label + ': событие failed обязано содержать непустой failReason');
+      }
+      if (event.status !== 'failed' && event.failReason !== undefined) {
+        issues.push(label + ': failReason допустим только при status=failed');
+      }
+      if (typeof event.sequence !== 'number' || !Number.isInteger(event.sequence) || event.sequence < 0) {
+        issues.push(label + ': sequence должен быть неотрицательным целым');
+      } else {
+        if (seenEventSequences.has(event.sequence)) {
+          issues.push(label + ': дублирующийся sequence события ' + String(event.sequence));
+        } else {
+          seenEventSequences.add(event.sequence);
+        }
+        maxEventSequence = Math.max(maxEventSequence, event.sequence);
+      }
+    });
+  }
+
+  if (!Array.isArray(bk.stepLog)) {
+    issues.push('stepLog должен быть массивом записей шагов');
+  } else {
+    bk.stepLog.forEach((entry, index) => {
+      const label = 'stepLog[' + String(index) + ']';
+      if (!isPlainRecord(entry)) {
+        issues.push(label + ' должен быть объектом-словарём');
+        return;
+      }
+      if (typeof entry.stepIndex !== 'number' || !Number.isInteger(entry.stepIndex) || entry.stepIndex < 0) {
+        issues.push(label + ': stepIndex должен быть неотрицательным целым');
+      }
+      if (typeof entry.processId !== 'string' || entry.processId.trim() === '') {
+        issues.push(label + ': processId должен быть непустой строкой');
+      }
+      if (typeof entry.phase !== 'string' || !(STEP_LOG_PHASES as readonly string[]).includes(entry.phase)) {
+        issues.push(label + ': phase должен быть одним из: ' + STEP_LOG_PHASES.join(', '));
+      }
+      if (typeof entry.durationS !== 'number' || !Number.isFinite(entry.durationS) || entry.durationS <= 0) {
+        issues.push(label + ': durationS должен быть положительным конечным числом');
+      }
+      if (typeof entry.intervalStartS !== 'number' || !Number.isFinite(entry.intervalStartS) || entry.intervalStartS < 0) {
+        issues.push(label + ': intervalStartS должен быть неотрицательным конечным числом');
+      }
+      if ((entry.worldStartTime === undefined) !== (entry.worldEndTime === undefined)) {
+        issues.push(label + ': worldStartTime и worldEndTime должны задаваться вместе');
+      }
+      if (entry.worldStartTime !== undefined) {
+        for (const issue of validateFluxTimeShape(entry.worldStartTime)) {
+          issues.push(label + ': worldStartTime: ' + issue);
+        }
+        for (const issue of validateFluxTimeShape(entry.worldEndTime)) {
+          issues.push(label + ': worldEndTime: ' + issue);
+        }
+        if (
+          isPlainRecord(entry.worldStartTime) &&
+          isPlainRecord(entry.worldEndTime) &&
+          typeof entry.worldStartTime.segmentIndex === 'number' &&
+          typeof entry.worldStartTime.localTimeS === 'number' &&
+          typeof entry.worldEndTime.segmentIndex === 'number' &&
+          typeof entry.worldEndTime.localTimeS === 'number' &&
+          comparePoints(entry.worldEndTime as unknown as FluxTime, entry.worldStartTime as unknown as FluxTime) <= 0
+        ) {
+          issues.push(label + ': worldEndTime должен быть строго позже worldStartTime');
+        }
+      }
+      if (entry.status !== 'committed' && entry.status !== 'rejected') {
+        issues.push(label + ': status должен быть committed или rejected');
+      }
+    });
+  }
+
+  if (typeof bk.nextSequence !== 'number' || !Number.isInteger(bk.nextSequence) || bk.nextSequence < 0) {
+    issues.push('nextSequence должен быть неотрицательным целым');
+  } else if (maxEventSequence >= bk.nextSequence) {
+    issues.push(
+      'nextSequence должен быть строго больше всех уже назначенных sequence (max=' +
+        String(maxEventSequence) + ', next=' + String(bk.nextSequence) + ')'
+    );
+  }
+  if (typeof bk.stepCount !== 'number' || !Number.isInteger(bk.stepCount) || bk.stepCount < 0) {
+    issues.push('stepCount должен быть неотрицательным целым');
+  }
+  return issues;
+}
+
+// ============================================
+// 5. ОЧЕРЕДЬ СОБЫТИЙ
+// ============================================
+
+/** Поставить событие в очередь (иммутабельно; sequence назначается автоматически). */
+export function enqueueEvent(
+  bk: SchedulerBookkeeping,
+  event: { id: string; time: FluxTime; type: string; data: Record<string, unknown>; source: string }
+): SchedulerBookkeeping {
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя поставить событие в некорректное состояние Scheduler: ' + bookkeepingIssues.join('; '),
+      null
+    );
+  }
+  const issues: string[] = [];
+  if (typeof event.id !== 'string' || event.id.trim() === '') {
+    issues.push('id события должен быть непустой строкой');
+  }
+  if (bk.eventQueue.some((e) => e.id === event.id)) {
+    issues.push('событие «' + String(event.id) + '» уже в очереди: повторная постановка запрещена');
+  }
+  issues.push(...validateFluxTimeShape(event.time));
+  if (typeof event.type !== 'string' || event.type.trim() === '') {
+    issues.push('type события должен быть непустой строкой');
+  }
+  if (!isPlainRecord(event.data)) {
+    issues.push('data события должен быть объектом-словарём');
+  } else {
+    issues.push(...jsonSerializableIssues(event.data, 'data'));
+  }
+  if (typeof event.source !== 'string' || event.source.trim() === '') {
+    issues.push('source события должен быть непустой строкой');
+  }
+  if (issues.length > 0) {
+    throw new SchedulerError(
+      'invalid_event',
+      'событие некорректно: ' + issues.join('; '),
+      typeof event.id === 'string' ? event.id : null
+    );
+  }
+  let dataSnapshot: Record<string, unknown>;
+  try {
+    // Ownership of nested JSON data transfers to the queue as a deep
+    // snapshot. Keeping the caller's object would let later edits mutate
+    // an already-enqueued event without passing through Scheduler APIs.
+    dataSnapshot = structuredClone(event.data);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new SchedulerError(
+      'invalid_event',
+      'data события не удалось изолировать глубоким снимком: ' + reason,
+      event.id
+    );
+  }
+  const worldEvent: WorldEvent = {
+    id: event.id,
+    time: { segmentIndex: event.time.segmentIndex, localTimeS: event.time.localTimeS },
+    type: event.type,
+    data: dataSnapshot,
+    source: event.source,
+    status: 'pending',
+    sequence: bk.nextSequence
+  };
+  return {
+    ...bk,
+    eventQueue: [...bk.eventQueue, worldEvent],
+    nextSequence: bk.nextSequence + 1
+  };
+}
+
+/** Все события очереди в детерминированном порядке (время, затем sequence). */
+export function sortedEvents(bk: SchedulerBookkeeping): readonly WorldEvent[] {
+  // Return detached values, not queue-owned references. A readonly
+  // type only protects TypeScript callers, not nested runtime data.
+  return bk.eventQueue.map((event) => structuredClone(event)).sort((a, b) => {
+    const byTime = comparePoints(a.time, b.time);
+    if (byTime !== 0) return byTime;
+    return a.sequence < b.sequence ? -1 : a.sequence > b.sequence ? 1 : 0;
+  });
+}
+
+/** Ожидающие события в детерминированном порядке. */
+export function pendingEvents(bk: SchedulerBookkeeping): readonly WorldEvent[] {
+  return sortedEvents(bk).filter((e) => e.status === 'pending');
+}
+
+/** Момент следующего события (null — очередь пуста или всё обработано). */
+export function nextEventTime(bk: SchedulerBookkeeping): FluxTime | null {
+  return pendingEvents(bk)[0]?.time ?? null;
+}
+
+/** События, срок которых наступил (момент события не позже now). */
+export function dueEvents(bk: SchedulerBookkeeping, nowPoint: FluxTime): readonly WorldEvent[] {
+  return pendingEvents(bk).filter((e) => comparePoints(e.time, nowPoint) <= 0);
+}
+
+/** Результат обработки события. */
+export interface EventProcessingResult {
+  bookkeeping: SchedulerBookkeeping;
+  status: 'processed' | 'failed';
+  failReason?: string;
+}
+
+/**
+ * Обработать событие ОДИН раз: повторная обработка выполненного
+ * события — ошибка already_processed. Ошибка обработчика НЕ теряет
+ * событие: оно помечается 'failed' с причиной (failReason).
+ */
+export function processEvent(
+  bk: SchedulerBookkeeping,
+  eventId: string,
+  handler: (event: WorldEvent) => void
+): EventProcessingResult {
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя обработать событие в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      eventId
+    );
+  }
+  const index = bk.eventQueue.findIndex((e) => e.id === eventId);
+  if (index === -1) {
+    throw new SchedulerError('invalid_event', 'событие «' + eventId + '» не найдено в очереди', eventId);
+  }
+  const event = bk.eventQueue[index];
+  if (event.status !== 'pending') {
+    throw new SchedulerError(
+      'already_processed',
+      'событие «' + eventId + '» уже обработано (status: ' + event.status + '): повторная обработка запрещена',
+      eventId
+    );
+  }
+  try {
+    // A handler receives a detached event snapshot. It may inspect or
+    // annotate its local copy, but cannot mutate the persisted queue row.
+    handler(structuredClone(event));
+  } catch (error) {
+    const rawReason = error instanceof Error ? error.message : String(error);
+    const reason = rawReason.trim() === ''
+      ? 'обработчик завершился ошибкой без диагностического сообщения'
+      : rawReason;
+    const queue = [...bk.eventQueue];
+    queue[index] = { ...event, status: 'failed', failReason: reason };
+    return { bookkeeping: { ...bk, eventQueue: queue }, status: 'failed', failReason: reason };
+  }
+  const queue = [...bk.eventQueue];
+  queue[index] = { ...event, status: 'processed' };
+  return { bookkeeping: { ...bk, eventQueue: queue }, status: 'processed' };
+}
+
+export interface WorldEventProcessingResult {
+  status: 'processed' | 'failed';
+  /** Updated world; failed events retain the pre-handler physical state. */
+  world: CoreWorldState;
+  event: WorldEvent;
+  audit?: WorldTransitionAudit;
+  diagnostics: readonly string[];
+}
+
+export interface ProcessWorldEventOptions {
+  /** Mandatory: every world event is checked against material/energy invariants. */
+  audit: MacroStepAuditOptions;
+}
+
+/** Stable JSON comparison for the serializable records owned by Scheduler. */
+function schedulerCanonicalJson(value: unknown, active = new Set<object>()): string {
+  const normalize = (item: unknown): unknown => {
+    if (item === null || typeof item !== 'object') return item;
+    if (active.has(item)) throw new Error('циклическая ссылка в сериализуемом состоянии Scheduler');
+    active.add(item);
+    try {
+      if (Array.isArray(item)) return item.map(normalize);
+      if (!isPlainRecord(item)) throw new Error('состояние Scheduler содержит не-plain объект');
+      const result: Record<string, unknown> = {};
+      for (const key of Object.keys(item).sort()) {
+        result[key] = normalize((item as Record<string, unknown>)[key]);
+      }
+      return result;
+    } finally {
+      active.delete(item);
+    }
+  };
+  return JSON.stringify(normalize(value));
+}
+
+function sameFluxRecordExceptStatus(a: FluxRecord, b: FluxRecord): boolean {
+  const withoutStatus = (record: FluxRecord): Record<string, unknown> => {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (key !== 'status') result[key] = value;
+    }
+    return result;
+  };
+  try {
+    return schedulerCanonicalJson(withoutStatus(a)) === schedulerCanonicalJson(withoutStatus(b));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Apply a due world event as a transaction over CoreWorldState.
+ *
+ * The handler receives detached snapshots and must return the complete
+ * next CoreWorldState. Time and Scheduler bookkeeping are owned by the
+ * scheduler and may not be changed by the handler. FluxLedger changes
+ * must use its public apply/revert APIs; ReactionLedger is append-only.
+ * The resulting physical transition is audited before the event is marked
+ * processed. Handler/audit failures leave physical state untouched and
+ * mark only the queue row as failed for diagnosis.
+ */
+export function processWorldEvent(
+  world: CoreWorldState,
+  eventId: string,
+  handler: (world: CoreWorldState, event: WorldEvent) => CoreWorldState,
+  options: ProcessWorldEventOptions
+): WorldEventProcessingResult {
+  const bookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const bookkeepingIssues = validateSchedulerBookkeeping(bookkeeping);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя обработать событие в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      eventId
+    );
+  }
+  const event = bookkeeping.eventQueue.find((entry) => entry.id === eventId);
+  if (event === undefined) {
+    throw new SchedulerError('invalid_event', 'событие «' + eventId + '» не найдено в очереди', eventId);
+  }
+  if (event.status !== 'pending') {
+    throw new SchedulerError(
+      'already_processed',
+      'событие «' + eventId + '» уже обработано (status: ' + event.status + '): повторная обработка запрещена',
+      eventId
+    );
+  }
+  if (comparePoints(event.time, {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  }) !== 0) {
+    throw new SchedulerError(
+      'invalid_event',
+      'событие «' + eventId + '» можно применять только в его точной временной точке; событие=' +
+        String(event.time.segmentIndex) + ':' + String(event.time.localTimeS) +
+        ', часы=' + String(world.clock.segmentIndex) + ':' + String(world.clock.localTimeS),
+      eventId
+    );
+  }
+
+  const markFailed = (
+    reason: string,
+    audit?: WorldTransitionAudit
+  ): WorldEventProcessingResult => {
+    const safeReason = reason.trim() === ''
+      ? 'обработка события завершилась ошибкой без диагностического сообщения'
+      : reason;
+    const failed = processEvent(bookkeeping, eventId, () => {
+      throw new Error(safeReason);
+    });
+    const failedEvent = failed.bookkeeping.eventQueue.find((entry) => entry.id === eventId)!;
+    return {
+      status: 'failed',
+      world: { ...world, scheduling: failed.bookkeeping },
+      event: structuredClone(failedEvent),
+      ...(audit === undefined ? {} : { audit }),
+      diagnostics: [safeReason]
+    };
+  };
+
+  let originalSchedulingSnapshot: string;
+  try {
+    originalSchedulingSnapshot = schedulerCanonicalJson(world.scheduling ?? null);
+  } catch (error) {
+    return markFailed(
+      'исходное SchedulerBookkeeping не сериализуемо до события: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  let working: CoreWorldState;
+  try {
+    working = snapshotWorldState(world);
+  } catch (error) {
+    return markFailed(
+      'не удалось создать изолированный снимок мира перед событием: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  let handled: CoreWorldState;
+  try {
+    handled = handler(working, structuredClone(event));
+  } catch (error) {
+    return markFailed(
+      'обработчик события «' + eventId + '» завершился ошибкой: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  if (handled === null || typeof handled !== 'object' || handled.clock === undefined) {
+    return markFailed('обработчик события «' + eventId + '» вернул некорректное CoreWorldState');
+  }
+  if (!clocksEqual(handled.clock, world.clock)) {
+    return markFailed('обработчик события «' + eventId + '» изменил WorldClock: время двигает только Scheduler');
+  }
+  try {
+    if (schedulerCanonicalJson(handled.scheduling ?? null) !== originalSchedulingSnapshot) {
+      return markFailed('обработчик события «' + eventId + '» изменил SchedulerBookkeeping напрямую; очередь и расписания принадлежат Scheduler');
+    }
+  } catch (error) {
+    return markFailed(
+      'SchedulerBookkeeping после обработчика события непредставим: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  let after: CoreWorldState;
+  try {
+    after = snapshotWorldState(handled);
+  } catch (error) {
+    return markFailed(
+      'не удалось изолировать состояние после события «' + eventId + '»: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  if (after.fluxLedger === undefined || !Array.isArray(after.fluxLedger.records)) {
+    return markFailed('обработчик события «' + eventId + '» вернул некорректный FluxLedger');
+  }
+  const beforeFlux = world.fluxLedger.records;
+  const afterFlux = after.fluxLedger.records;
+  const fluxIssues: string[] = [];
+  if (afterFlux.length < beforeFlux.length) {
+    fluxIssues.push('FluxLedger: обработчик удалил ранее существовавшие записи');
+  }
+  const commonLength = Math.min(beforeFlux.length, afterFlux.length);
+  for (let index = 0; index < commonLength; index++) {
+    const beforeRecord = beforeFlux[index]!;
+    const afterRecord = afterFlux[index]!;
+    if (beforeRecord.id !== afterRecord.id || !sameFluxRecordExceptStatus(beforeRecord, afterRecord)) {
+      fluxIssues.push('FluxLedger: существующая запись на позиции ' + String(index) + ' была удалена, переставлена или изменена');
+      continue;
+    }
+    const allowedStatusChange =
+      beforeRecord.status === afterRecord.status ||
+      (beforeRecord.status === 'pending' && afterRecord.status === 'applied') ||
+      (beforeRecord.status === 'applied' && afterRecord.status === 'reverted');
+    if (!allowedStatusChange) {
+      fluxIssues.push(
+        'FluxLedger: недопустимый переход статуса записи «' + beforeRecord.id +
+          '»: ' + beforeRecord.status + ' → ' + afterRecord.status
+      );
+    }
+  }
+  if (fluxIssues.length > 0) {
+    return markFailed(fluxIssues.join('; '));
+  }
+
+  const beforeFluxById = new Map(beforeFlux.map((record) => [record.id, record]));
+  const stepFluxRecords: FluxRecord[] = afterFlux.filter((record) =>
+    record.status === 'applied' && beforeFluxById.get(record.id)?.status !== 'applied'
+  );
+  // Reverting a previously applied flux is the inverse physical transfer.
+  // The persisted record ends as status=reverted (and is therefore excluded
+  // by the ordinary auditor); provide its inverse only to this transition's
+  // audit so the restored reservoir delta is still explained exactly once.
+  for (const record of afterFlux) {
+    const previous = beforeFluxById.get(record.id);
+    if (previous?.status !== 'applied' || record.status !== 'reverted') continue;
+    const reverseKind =
+      previous.kind === 'internal_transfer'
+        ? 'internal_transfer'
+        : previous.kind === 'external_input'
+          ? 'external_output'
+          : 'external_input';
+    stepFluxRecords.push({
+      ...previous,
+      id: 'event-reversal:' + previous.id,
+      kind: reverseKind,
+      from: previous.to,
+      to: previous.from,
+      time: { ...event.time },
+      status: 'applied',
+      note: 'Audit-only inverse of reverted flux «' + previous.id + '» during world event «' + eventId + '»'
+    });
+  }
+  const appendOnlyIssues = reactionLedgerAppendOnlyIssues(world.reactionLedger, after.reactionLedger);
+  if (appendOnlyIssues.length > 0) {
+    return markFailed(
+      appendOnlyIssues.join('; ') +
+        ' — ReactionLedger события должен сохранять старый префикс и добавлять новые записи только в конец'
+    );
+  }
+  const beforeReactionCount =
+    world.reactionLedger !== undefined && Array.isArray(world.reactionLedger.records)
+      ? world.reactionLedger.records.length
+      : 0;
+  const afterReactionRecords =
+    after.reactionLedger !== undefined && Array.isArray(after.reactionLedger.records)
+      ? after.reactionLedger.records
+      : [];
+  const stepReactionRecords = afterReactionRecords.slice(beforeReactionCount);
+
+  let audit: WorldTransitionAudit;
+  try {
+    audit = auditWorldTransition(world, after, { records: stepFluxRecords }, {
+      speciesCatalog: options.audit.speciesCatalog,
+      boundary: options.audit.boundary,
+      tolerance: options.audit.tolerance,
+      scope: options.audit.scope,
+      reactionLedger: { records: stepReactionRecords }
+    });
+  } catch (error) {
+    return markFailed(
+      'InvariantAuditor не смог проверить событие «' + eventId + '»: ' +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+  if (audit.status === 'imbalanced') {
+    return markFailed(
+      'событие «' + eventId + '» не прошло обязательный аудит: ' + audit.diagnostics.join('; '),
+      audit
+    );
+  }
+
+  const processed = processEvent(bookkeeping, eventId, () => undefined);
+  const processedEvent = processed.bookkeeping.eventQueue.find((entry) => entry.id === eventId)!;
+  return {
+    status: 'processed',
+    world: { ...after, scheduling: processed.bookkeeping },
+    event: structuredClone(processedEvent),
+    audit,
+    diagnostics: [
+      'событие «' + eventId + '» применено атомарно без продвижения времени',
+      ...audit.diagnostics
+    ]
+  };
+}
+
+export type WorldEventHandler = (
+  world: CoreWorldState,
+  event: WorldEvent
+) => CoreWorldState;
+
+export interface ProcessDueWorldEventsResult {
+  status: 'completed' | 'failed';
+  world: CoreWorldState;
+  results: readonly WorldEventProcessingResult[];
+  diagnostics: readonly string[];
+}
+
+/**
+ * Dispatch all events due at the world's current TimePoint.
+ *
+ * Events are processed in deterministic (segmentIndex, localTimeS,
+ * sequence) order. A failed event stops dispatch: later events remain
+ * pending and can be inspected/retried after the failure is resolved.
+ * A due event from an earlier time point is treated as a missed boundary
+ * and marked failed rather than being applied retroactively.
+ * Missing handlers also produce a durable failed event record.
+ */
+export function processDueWorldEvents(
+  world: CoreWorldState,
+  handlers: Readonly<Record<string, WorldEventHandler>>,
+  options: ProcessWorldEventOptions
+): ProcessDueWorldEventsResult {
+  let current = world;
+  const results: WorldEventProcessingResult[] = [];
+  const diagnostics: string[] = [];
+  const point: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const initialBookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const due = dueEvents(initialBookkeeping, point);
+
+  for (const event of due) {
+    const liveBookkeeping = current.scheduling ?? createSchedulerBookkeeping();
+    const ordering = comparePoints(event.time, point);
+    if (ordering < 0) {
+      const reason =
+        'событие «' + event.id +
+        '» пропущено: его временная точка раньше WorldClock; ретроактивное применение запрещено';
+      const failed = processEvent(liveBookkeeping, event.id, () => {
+        throw new Error(reason);
+      });
+      const failedEvent = failed.bookkeeping.eventQueue.find((entry) => entry.id === event.id)!;
+      current = { ...current, scheduling: failed.bookkeeping };
+      const result: WorldEventProcessingResult = {
+        status: 'failed',
+        world: current,
+        event: structuredClone(failedEvent),
+        diagnostics: [reason]
+      };
+      results.push(result);
+      diagnostics.push(reason);
+      return { status: 'failed', world: current, results, diagnostics };
+    }
+
+    const hasHandler = Object.prototype.hasOwnProperty.call(handlers, event.type);
+    const handler = hasHandler ? handlers[event.type] : undefined;
+    const result = processWorldEvent(
+      current,
+      event.id,
+      handler ?? (() => {
+        throw new Error('для типа события «' + event.type + '» не зарегистрирован обработчик');
+      }),
+      options
+    );
+    current = result.world;
+    results.push(result);
+    diagnostics.push(...result.diagnostics);
+    if (result.status === 'failed') {
+      return { status: 'failed', world: current, results, diagnostics };
+    }
+  }
+
+  return { status: 'completed', world: current, results, diagnostics };
+}
+
+// ============================================
+// 6. РАСПИСАНИЯ ПРОЦЕССОВ
+// ============================================
+
+/**
+ * Назначить следующий момент готовности процесса (расписание;
+ * иммутабельно). nextDueElapsedS — оценка elapsed-времени, с;
+ * null — снять расписание.
+ */
+export function scheduleProcess(
+  bk: SchedulerBookkeeping,
+  processId: string,
+  nextDueElapsedS: number | null
+): SchedulerBookkeeping {
+  if (typeof processId !== 'string' || processId.trim() === '') {
+    throw new SchedulerError('invalid_bookkeeping', 'processId должен быть непустой строкой', processId ?? null);
+  }
+  if (nextDueElapsedS !== null && (!Number.isFinite(nextDueElapsedS) || nextDueElapsedS < 0)) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'nextDueElapsedS должен быть неотрицательным конечным числом или null',
+      processId
+    );
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя изменить расписание в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      processId
+    );
+  }
+  const dynamics: ProcessDynamics = bk.processDynamics[processId] ?? {
+    processId,
+    lastRunElapsedS: null,
+    nextDueElapsedS: null,
+    lastRunTime: null,
+    nextDueTime: null,
+    macroStepsCompleted: 0,
+    operatorCallsCompleted: 0
+  };
+  return {
+    ...bk,
+    processDynamics: {
+      ...bk.processDynamics,
+      [processId]: { ...dynamics, nextDueElapsedS, nextDueTime: null }
+    }
+  };
+}
+
+/**
+ * Назначить следующий момент готовности по точной сегментированной
+ * временной координате. В отличие от scheduleProcess(), не использует
+ * priorSegmentsS и не сравнивает приближённые elapsed-суммы.
+ */
+export function scheduleProcessAt(
+  bk: SchedulerBookkeeping,
+  processId: string,
+  nextDueTime: FluxTime | null
+): SchedulerBookkeeping {
+  if (typeof processId !== 'string' || processId.trim() === '') {
+    throw new SchedulerError('invalid_bookkeeping', 'processId должен быть непустой строкой', processId ?? null);
+  }
+  if (nextDueTime !== null) {
+    const issues = validateFluxTimeShape(nextDueTime);
+    if (issues.length > 0) {
+      throw new SchedulerError('invalid_bookkeeping', 'nextDueTime некорректен: ' + issues.join('; '), processId);
+    }
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'нельзя изменить расписание в некорректном состоянии Scheduler: ' + bookkeepingIssues.join('; '),
+      processId
+    );
+  }
+  const dynamics: ProcessDynamics = bk.processDynamics[processId] ?? {
+    processId,
+    lastRunElapsedS: null,
+    nextDueElapsedS: null,
+    lastRunTime: null,
+    nextDueTime: null,
+    macroStepsCompleted: 0,
+    operatorCallsCompleted: 0
+  };
+  return {
+    ...bk,
+    processDynamics: {
+      ...bk.processDynamics,
+      [processId]: {
+        ...dynamics,
+        nextDueElapsedS: null,
+        nextDueTime: nextDueTime === null ? null : { ...nextDueTime }
+      }
+    }
+  };
+}
+
+/**
+ * Готовые к запуску процессы: срок наступил (nextDueElapsedS не
+ * позже nowElapsedS), процесс auto-runnable и runtime-оператор
+ * передан. Для autonomous требуется известное τ; для
+ * state_dependent — обязательный runtime proposeStep(); explicit_only
+ * исключён. Порядок детерминирован (сортировка по id).
+ */
+export function readyProcessIds(
+  bk: SchedulerBookkeeping,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  nowElapsedS: number
+): readonly string[] {
+  if (!Number.isFinite(nowElapsedS) || nowElapsedS < 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'nowElapsedS должен быть неотрицательным конечным elapsed-временем', null);
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'состояние Scheduler некорректно: ' + bookkeepingIssues.join('; '), null);
+  }
+  const operatorById = new Map(operators.map((operator) => [operator.processId, operator]));
+  const ready: string[] = [];
+  for (const [processId, dynamics] of Object.entries(bk.processDynamics)) {
+    if (dynamics.nextDueElapsedS === null) continue;
+    if (dynamics.nextDueElapsedS > nowElapsedS) continue;
+    const descriptor = registry.get(processId);
+    if (descriptor === null || !isProcessAutoRunnable(descriptor)) continue;
+    // Explicit-only операции не попадают в автоматическую очередь.
+    if (descriptor.executionMode === 'explicit_only') continue;
+    const operator = operatorById.get(processId);
+    if (operator === undefined) continue;
+    // State-dependent процесс доступен, только если runtime solver
+    // умеет предложить ограничение шага для актуального состояния.
+    if (descriptor.executionMode === 'state_dependent' && typeof operator.proposeStep !== 'function') continue;
+    ready.push(processId);
+  }
+  return ready.sort();
+}
+
+/** Точная версия readyProcessIds для сегментированных временных координат. */
+export function readyProcessIdsAt(
+  bk: SchedulerBookkeeping,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  nowPoint: FluxTime
+): readonly string[] {
+  const pointIssues = validateFluxTimeShape(nowPoint);
+  if (pointIssues.length > 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'nowPoint некорректен: ' + pointIssues.join('; '), null);
+  }
+  const bookkeepingIssues = validateSchedulerBookkeeping(bk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError('invalid_bookkeeping', 'состояние Scheduler некорректно: ' + bookkeepingIssues.join('; '), null);
+  }
+  const operatorById = new Map(operators.map((operator) => [operator.processId, operator]));
+  const ready: string[] = [];
+  for (const [processId, dynamics] of Object.entries(bk.processDynamics)) {
+    if (dynamics.nextDueTime === undefined || dynamics.nextDueTime === null) continue;
+    if (comparePoints(dynamics.nextDueTime, nowPoint) > 0) continue;
+    const descriptor = registry.get(processId);
+    if (descriptor === null || !isProcessAutoRunnable(descriptor)) continue;
+    if (descriptor.executionMode === 'explicit_only') continue;
+    const operator = operatorById.get(processId);
+    if (operator === undefined) continue;
+    if (descriptor.executionMode === 'state_dependent' && typeof operator.proposeStep !== 'function') continue;
+    ready.push(processId);
+  }
+  return ready.sort();
+}
+
+// ============================================
+// 7. MACRO-ШАГ ПЛАНИРОВЩИКА
+// ============================================
+
+/**
+ * Runtime-оценка допустимого macro-шага state-dependent процесса.
+ * durationS — верхняя граница длительности, безопасная для текущего
+ * состояния и не превышающая запрошенный вызывающей стороной максимум.
+ * characteristicTimeS, если известна решателю, — фактический
+ * state-dependent масштаб времени; неизвестное не заменяется числом.
+ * method и diagnostics сохраняют объяснение принятого решения.
+ */
+export interface ProcessEventProposal {
+  /** Globally unique event identity within this world's SchedulerBookkeeping. */
+  id: string;
+  /** Event time relative to the start of the current macro-step, seconds. */
+  offsetS: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export interface ProcessStepProposal {
+  durationS: number;
+  method: string;
+  characteristicTimeS?: number;
+  diagnostics?: readonly string[];
+  /** Root/event detections made by this solver within its proposed interval. */
+  events?: readonly ProcessEventProposal[];
+}
+
+/** Сводка выбора длительности macro-шага. */
+export interface MacroStepSizeReport {
+  requestedDurationS: number;
+  effectiveDurationS: number;
+  /** Процессы, задавшие минимальное ограничение, только когда шаг сокращён. */
+  limitingProcessIds: readonly string[];
+  /** Ближайшее событие текущего временного сегмента, на котором остановлен шаг. */
+  eventBoundary?: { eventId: string; time: FluxTime };
+  /** Точные deadline процессов, достигнутые на конце macro-step. */
+  processBoundary?: { processIds: readonly string[]; time: FluxTime };
+  proposals: readonly (ProcessStepProposal & { processId: string })[];
+  diagnostics: readonly string[];
+}
+
+/**
+ * Runtime-исполнитель процесса. Оператор получает мир и ФИЗИЧЕСКИЙ
+ * подынтервал macro-шага: интервал [intervalStartS,
+ * intervalStartS + durationS), с, всегда лежит внутри [0, dt].
+ * Семантика по splitting (Stage 4.2.1.2): Lie — каждый оператор
+ * интегрирует [0, dt] (sub-cycling — последовательные подшаги,
+ * покрывающие [0, dt]); Strang — A(dt/2) интегрирует [0, dt/2],
+ * B(dt) интегрирует [0, dt], второй A(dt/2) — [dt/2, dt].
+ *
+ * State-dependent оператор обязан реализовать proposeStep(). Перед
+ * применением Scheduler вызывает его на ИЗОЛИРОВАННОМ снимке мира;
+ * результат ограничивает запрошенный macro-шаг сверху. При нескольких
+ * таких процессах выбирается минимальное предложение. Некорректное
+ * предложение или ошибка callback отклоняют транзакцию до apply().
+ * Оператор apply возвращает НОВОЕ состояние мира, НЕ двигает часы
+ * (проверяется; нарушение отклоняет шаг); runtime-код не сериализуется.
+ */
+export interface ProcessOperator {
+  processId: string;
+  /** Предложить максимальный допустимый macro-шаг для текущего состояния. */
+  proposeStep?(
+    world: Readonly<CoreWorldState>,
+    requestedMaximumDurationS: number
+  ): ProcessStepProposal;
+  apply(world: CoreWorldState, durationS: number, intervalStartS: number): CoreWorldState;
+}
+
+export type SplittingMode = 'lie' | 'strang';
+
+/** Настройки аудита инвариантов macro-шага (аудит опционален). */
+export interface MacroStepAuditOptions {
+  speciesCatalog: SpeciesCatalog;
+  boundary: BoundaryCompleteness;
+  tolerance?: number;
+  scope?: FluxAuditScope;
+}
+
+export interface MacroStepOptions {
+  /**
+   * Запрошенная максимальная длительность macro-шага, с. Если среди
+   * процессов есть state_dependent-решатели, фактический шаг может
+   * быть строго меньше по их runtime-предложениям; Scheduler никогда
+   * не увеличивает запрошенную длительность.
+   */
+  durationS: number;
+  splitting: SplittingMode;
+  /** Процессы шага; по умолчанию — операторы, отсортированные по id. */
+  processIds?: readonly string[];
+  /** Число подшагов (sub-cycling) для Lie splitting; по умолчанию 1. */
+  subCycles?: number;
+  /** Аудит инвариантов до фиксации нового состояния. */
+  audit?: MacroStepAuditOptions;
+  /**
+   * Позволяет непрерывным операторам участвовать в выборе границ их
+   * собственных future nextDueTime. Обычный ручной runMacroStep по
+   * умолчанию может запускать процесс раньше его deadline.
+   */
+  respectSelectedProcessDeadlines?: boolean;
+  /**
+   * Stage 4.2.3.3: явный пользовательский запуск дискретного процесса
+   * (executionMode = 'explicit_only'). Требования к такому шагу:
+   * - processId обязан ссылаться на explicit_only-процесс реестра
+   *   (обычный автономный процесс так запустить нельзя: обход
+   *   τ-контроля запрещён — ошибка 'not_explicit_only');
+   * - splitting = 'lie', subCycles = 1, ровно один процесс шага
+   *   (сам explicit.processId): дискретная операция выполняется один
+   *   раз за macro-шаг;
+   * - τ процесса НЕ требуется и НЕ выдумывается: длительность шага
+   *   задаёт вызывающая сторона через durationS (фактическая
+   *   длительность модельного шага, а не характерное время реакции).
+   *
+   * Обратно совместимо: без поля поведение runMacroStep неизменно.
+   */
+  explicit?: { processId: string };
+}
+
+export interface MacroStepResult {
+  status: 'committed' | 'rejected';
+  /** Новое состояние при committed; ИСХОДНОЕ состояние при rejected. */
+  world: CoreWorldState;
+  bookkeeping: SchedulerBookkeeping;
+  log: readonly SchedulerStepLogEntry[];
+  audit?: WorldTransitionAudit;
+  /** Фактический выбор длительности; присутствует после разрешения предложений. */
+  stepSize?: MacroStepSizeReport;
+  diagnostics: readonly string[];
+}
+
+function clocksEqual(a: SimulationClockState, b: SimulationClockState): boolean {
+  return (
+    a.segmentIndex === b.segmentIndex &&
+    a.localTimeS === b.localTimeS &&
+    a.priorSegmentsS === b.priorSegmentsS &&
+    a.stepCount === b.stepCount &&
+    a.representableStepS === b.representableStepS
+  );
+}
+
+/**
+ * Рабочий снимок состояния мира для macro-шага (Stage 4.2.3.1 —
+ * snapshot-изоляция).
+ *
+ * CoreWorldState — JSON-сериализуемые данные: plain-объекты,
+ * массивы и примитивы (Map/Set/Date/классы/функции запрещены
+ * валидацией данных событий и Storage), поэтому structuredClone
+ * даёт полную изолированную копию всех вложенных объектов —
+ * bodies и bodies[].properties, reservoirs и
+ * reservoirs[].material.entries, reservoirs[].energy,
+ * fluxLedger.records и их subject, reactionLedger.records
+ * (Stage 4.2.3.3), scheduling (eventQueue, processDynamics,
+ * stepLog) и другие поля — без изменения или
+ * потери значений. JSON-раунд-трип (JSON.parse(JSON.stringify(
+ * ...))) для клонирования НЕ используется: он молча теряет и
+ * искажает значения (undefined-поля, -0, нестроковые ключи) и
+ * может скрыть некорректное состояние.
+ *
+ * Ошибка клонирования (например, несериализуемое значение в
+ * состоянии) пробрасывается вызывающему коду runMacroStep для
+ * контролируемого отказа шага ДО запуска первого оператора:
+ * исходное состояние остаётся нетронутым.
+ */
+function snapshotWorldState(world: CoreWorldState): CoreWorldState {
+  return structuredClone(world);
+}
+
+/**
+ * Выполнить macro-шаг планировщика.
+ *
+ * Lie: операторы выполняются последовательно (каждый с полной
+ * длительностью шага; при subCycles > 1 — подшагами равной длины).
+ *
+ * Strang: ровно два оператора в симметричном порядке
+ * A(dt/2) → B(dt) → A(dt/2); sub-cycling при Strang запрещён.
+ *
+ * Идентификаторы процессов одного macro-шага уникальны
+ * (Stage 4.2.1.2): дубликат processId — в opts.processIds или среди
+ * переданных операторов — SchedulerError 'duplicate_process_id'
+ * ДО выполнения первого оператора; перезапись оператора невозможна.
+ *
+ * Временные аргументы операторов — физические подынтервалы внутри
+ * [0, dt] (Stage 4.2.1.2): Lie без sub-cycling даёт каждому
+ * оператору [0, dt]; sub-cycling — последовательные подшаги
+ * [i·dt/n, (i+1)·dt/n); Strang — A: [0, dt/2], B: [0, dt],
+ * второй A: [dt/2, dt]. Выход за границы macro-шага невозможен.
+ *
+ * Snapshot-изоляция (Stage 4.2.3.1): macro-шаг выполняется на
+ * полной изолированной копии входного world. Первый оператор
+ * получает рабочую копию; результат успешного оператора
+ * становится состоянием для следующего. Объект вызывающей
+ * стороны остаётся неизменным на протяжении всего выполнения:
+ * мутации оператора (включая вложенные структуры) физически не
+ * могут достичь исходного состояния, а при ошибке или отклонении
+ * шага рабочий снимок просто отбрасывается. Если снимок создать
+ * невозможно (неклонируемое значение), шаг завершается
+ * контролируемым отказом ДО вызова первого оператора.
+ *
+ * Append-only журнал реакций (Stage 4.2.3.3.1): записи, существовавшие
+ * до шага, остаются неизменными — содержимое, порядок и количество;
+ * разрешено только добавление новых записей в конец. Нарушение
+ * (правка при сохранённом id, удаление, перестановка, удаление
+ * журнала) отклоняет шаг ещё до аудита. Новые реакционные записи
+ * требуют запрошенного аудита инвариантов (speciesCatalog): без
+ * него шаг с новыми реакциями отклоняется — стехиометрический
+ * аудит новых транзакций обязателен до фиксации.
+ *
+ * Мировое время продвигается РОВНО один раз — после успеха всех
+ * операторов и (если запрошен) аудита. Любая ошибка оператора,
+ * самовольное продвижение часов оператором или нарушение
+ * обязательных инвариантов отклоняют шаг: возвращается исходное
+ * состояние, время не движется, частичное состояние не фиксируется.
+ *
+ * Явный запуск дискретного процесса (Stage 4.2.3.3,
+ * opts.explicit.processId): выполняется ровно один оператор
+ * explicit_only-процесса один раз за шаг (Lie, subCycles = 1,
+ * единственный processId). τ процесса НЕ проверяется и НЕ
+ * выдумывается: у дискретной операции нет физически установленного
+ * характерного времени; длительность шага — фактическая
+ * opts.durationS, переданная вызывающей стороной. Автономные
+ * процессы сохраняют прежнюю семантику: числовое τ обязательно.
+ */
+export function runMacroStep(
+  world: CoreWorldState,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  opts: MacroStepOptions
+): MacroStepResult {
+  const originalBk: SchedulerBookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const stepIndex = originalBk.stepCount;
+  const bookkeepingIssues = validateSchedulerBookkeeping(originalBk);
+  if (bookkeepingIssues.length > 0) {
+    throw new SchedulerError(
+      'invalid_bookkeeping',
+      'состояние Scheduler отклонено до macro-step: ' + bookkeepingIssues.join('; '),
+      null
+    );
+  }
+
+  if (!Number.isFinite(opts.durationS) || opts.durationS <= 0) {
+    throw new SchedulerError('invalid_step', 'durationS должен быть положительным конечным числом, получено ' + String(opts.durationS), null);
+  }
+  const subCycles = opts.subCycles ?? 1;
+  if (!Number.isInteger(subCycles) || subCycles < 1) {
+    throw new SchedulerError('invalid_step', 'subCycles должен быть целым числом не меньше 1, получено ' + String(opts.subCycles), null);
+  }
+  if (opts.splitting === 'strang' && subCycles > 1) {
+    throw new SchedulerError(
+      'invalid_splitting',
+      'sub-cycling несовместим со Strang splitting: симметричная композиция A(dt/2) → B(dt) → A(dt/2) не делится на подшаги',
+      null
+    );
+  }
+  const processIds: string[] =
+    opts.processIds !== undefined ? [...opts.processIds] : operators.map((o) => o.processId).sort();
+  if (processIds.length === 0) {
+    throw new SchedulerError('invalid_step', 'macro-шаг требует хотя бы один процесс: не заданы ни processIds, ни операторы', null);
+  }
+  // --- runtime-операторы: дубликаты processId отклоняются явно,
+  // молчаливая перезапись через Map.set невозможна (4.2.1.2) ---
+  const operatorByProcess = new Map<string, ProcessOperator>();
+  for (const operator of operators) {
+    if (operatorByProcess.has(operator.processId)) {
+      throw new SchedulerError(
+        'duplicate_process_id',
+        'runtime-оператор с processId «' + operator.processId + '» передан планировщику более одного раза: молчаливая перезапись оператора запрещена',
+        operator.processId
+      );
+    }
+    operatorByProcess.set(operator.processId, operator);
+  }
+  // --- идентификаторы процессов шага уникальны (4.2.1.2):
+  // дубликат processId — не второй оператор; отклоняется до
+  // выполнения первого оператора ---
+  const seenStepProcessIds = new Set<string>();
+  for (const processId of processIds) {
+    if (seenStepProcessIds.has(processId)) {
+      throw new SchedulerError(
+        'duplicate_process_id',
+        'processId «' + processId + '» повторяется в списке процессов macro-шага: идентификаторы одного macro-шага уникальны, дубликат — не второй оператор',
+        processId
+      );
+    }
+    seenStepProcessIds.add(processId);
+  }
+  if (opts.splitting === 'strang' && processIds.length !== 2) {
+    throw new SchedulerError(
+      'invalid_splitting',
+      'Strang splitting определён ровно для двух операторов A(dt/2) → B(dt) → A(dt/2); получено процессов: ' +
+        String(processIds.length) + '. Для одного процесса используйте Lie splitting',
+      null
+    );
+  }
+  // --- Stage 4.2.3.3: явный запуск дискретного процесса ---
+  // Явно инициируемая операция выполняется ОДНИМ оператором один раз
+  // за macro-шаг: Lie splitting, без sub-cycling, ровно один процесс
+  // шага — тот, что назван в opts.explicit.processId.
+  const explicitProcessId = opts.explicit?.processId ?? null;
+  if (explicitProcessId !== null) {
+    if (opts.splitting === 'strang') {
+      throw new SchedulerError(
+        'invalid_splitting',
+        'явный запуск дискретного процесса «' + explicitProcessId + '» выполняется одним оператором (Lie splitting): Strang-композиция к дискретной операции неприменима',
+        explicitProcessId
+      );
+    }
+    if (subCycles > 1) {
+      throw new SchedulerError(
+        'invalid_step',
+        'явный запуск дискретного процесса «' + explicitProcessId + '» выполняется ровно один раз за macro-шаг: sub-cycling запрещён',
+        explicitProcessId
+      );
+    }
+    if (processIds.length !== 1 || processIds[0] !== explicitProcessId) {
+      throw new SchedulerError(
+        'invalid_step',
+        'явный запуск требует ровно один процесс шага — «' + explicitProcessId + '»; получено: ' + processIds.join(', '),
+        explicitProcessId
+      );
+    }
+  }
+  for (const processId of processIds) {
+    const descriptor = registry.get(processId);
+    if (descriptor === null) {
+      throw new SchedulerError('unknown_process', 'процесс «' + processId + '» не зарегистрирован', processId);
+    }
+    if (!descriptor.enabled) {
+      throw new SchedulerError('process_disabled', 'процесс «' + processId + '» отключён (enabled = false): автоматический запуск запрещён', processId);
+    }
+    if (explicitProcessId === processId) {
+      // Явно инициируемая дискретная операция (Stage 4.2.3.3): τ
+      // процесса НЕ требуется и НЕ выдумывается — длительность шага
+      // задаёт вызывающая сторона (opts.durationS). Такой запуск
+      // доступен ТОЛЬКО explicit_only-процессам: обычный автономный
+      // процесс нельзя запустить в обход обязательного числового τ.
+      if (descriptor.executionMode !== 'explicit_only') {
+        throw new SchedulerError(
+          'not_explicit_only',
+          'процесс «' + processId + '» не является явно инициируемой дискретной операцией (executionMode ≠ explicit_only): явный запуск без числового τ доступен только explicit_only-процессам',
+          processId
+        );
+      }
+    } else if (descriptor.executionMode === 'state_dependent') {
+      // τ не требуется: выбранная state-dependent семантика требует
+      // обязательного runtime-предложения, привязанного к состоянию.
+      const operator = operatorByProcess.get(processId);
+      if (operator === undefined || typeof operator.proposeStep !== 'function') {
+        throw new SchedulerError(
+          'solver_unavailable',
+          'процесс «' + processId + '» объявлен state_dependent, но runtime-оператор не предоставляет proposeStep(): автоматический шаг не определён',
+          processId
+        );
+      }
+    } else {
+      // Обычный autonomous-путь по-прежнему требует числовое τ.
+      if (descriptor.executionMode === 'explicit_only') {
+        throw new SchedulerError(
+          'explicit_only_process',
+          'процесс «' + processId + '» — явно инициируемая дискретная операция (executionMode = explicit_only) без установленного числового τ: автоматический запуск запрещён; используйте opts.explicit с processId',
+          processId
+        );
+      }
+      if (tauSeconds(descriptor.tau) === null) {
+        throw new SchedulerError(
+          'process_tau_unknown',
+          'процесс «' + processId + '» не имеет пригодного числового характерного времени τ (требуется строго положительное конечное число секунд): шаг процесса не определяется',
+          processId
+        );
+      }
+    }
+    if (descriptor.solverAvailability !== 'available') {
+      throw new SchedulerError(
+        'solver_unavailable',
+        'процесс «' + processId + '»: численный решатель недоступен (статус: ' + descriptor.solverAvailability + ')',
+        processId
+      );
+    }
+  }
+  for (const processId of processIds) {
+    if (!operatorByProcess.has(processId)) {
+      throw new SchedulerError('solver_unavailable', 'процесс «' + processId + '»: runtime-оператор не передан планировщику', processId);
+    }
+  }
+
+  // --- Stage 4.2: изолированный снимок и state-dependent выбор dt ---
+  // Callback-предложения не должны мутировать ни исходный мир, ни
+  // рабочий снимок, на котором будут применены операторы. Каждый
+  // solver получает собственную глубокую копию исходного состояния.
+  let working: CoreWorldState;
+  try {
+    working = snapshotWorldState(world);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: [],
+      diagnostics: [
+        'не удалось создать рабочий снимок состояния мира: ' +
+          reason +
+          ' — шаг отклонён до вызова solver-предложений и операторов, состояние мира не изменено'
+      ]
+    };
+  }
+
+  // SchedulerBookkeeping is scheduler-owned state. Operators may change
+  // physical reservoirs/ledgers, but they must never create, mutate or
+  // consume event/process scheduling records directly.
+  let originalSchedulingCanonical: string;
+  try {
+    originalSchedulingCanonical = schedulerCanonicalJson(world.scheduling ?? null);
+  } catch (error) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: [],
+      diagnostics: [
+        'исходное SchedulerBookkeeping нельзя канонически проверить до macro-step: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+
+  const proposals: Array<ProcessStepProposal & { processId: string }> = [];
+  const proposalDiagnostics: string[] = [];
+  const currentPoint: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const proposedEventIds = new Set(originalBk.eventQueue.map((event) => event.id));
+  const proposedEvents: Array<ProcessEventProposal & { processId: string; time: FluxTime }> = [];
+  let effectiveDurationS = opts.durationS;
+  for (const processId of processIds) {
+    const descriptor = registry.get(processId);
+    const operator = operatorByProcess.get(processId);
+    if (descriptor?.executionMode !== 'state_dependent') continue;
+    if (operator === undefined || typeof operator.proposeStep !== 'function') {
+      throw new SchedulerError(
+        'solver_unavailable',
+        'процесс «' + processId + '» объявлен state_dependent, но runtime proposeStep() отсутствует',
+        processId
+      );
+    }
+    let proposal: ProcessStepProposal;
+    try {
+      proposal = operator.proposeStep(snapshotWorldState(working), opts.durationS);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'state-dependent solver-предложение процесса «' + processId + '» завершилось ошибкой: ' + reason +
+            ' — оператор apply не вызван, состояние мира не изменено'
+        ]
+      };
+    }
+    const raw = proposal as unknown as Record<string, unknown>;
+    const proposalProblems: string[] = [];
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      proposalProblems.push('ожидается объект ProcessStepProposal');
+    } else {
+      if (
+        typeof raw.durationS !== 'number' ||
+        !Number.isFinite(raw.durationS) ||
+        raw.durationS <= 0 ||
+        raw.durationS > opts.durationS
+      ) {
+        proposalProblems.push(
+          'durationS должен быть конечным положительным числом не больше запрошенного максимума ' +
+            opts.durationS + ' с'
+        );
+      }
+      if (typeof raw.method !== 'string' || raw.method.trim() === '') {
+        proposalProblems.push('method должен быть непустой строкой');
+      }
+      if (
+        raw.characteristicTimeS !== undefined &&
+        (typeof raw.characteristicTimeS !== 'number' ||
+          !Number.isFinite(raw.characteristicTimeS) ||
+          raw.characteristicTimeS <= 0)
+      ) {
+        proposalProblems.push('characteristicTimeS, если задано, должно быть конечным строго положительным временем в секундах');
+      }
+      if (
+        raw.diagnostics !== undefined &&
+        (!Array.isArray(raw.diagnostics) || raw.diagnostics.some((item) => typeof item !== 'string'))
+      ) {
+        proposalProblems.push('diagnostics, если заданы, должны быть массивом строк');
+      }
+    }
+
+    const normalizedEvents: Array<ProcessEventProposal & { time: FluxTime }> = [];
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && raw.events !== undefined) {
+      if (!Array.isArray(raw.events)) {
+        proposalProblems.push('events, если заданы, должны быть массивом ProcessEventProposal');
+      } else {
+        raw.events.forEach((candidate, index) => {
+          const eventLabel = 'events[' + String(index) + ']';
+          if (!isPlainRecord(candidate)) {
+            proposalProblems.push(eventLabel + ' должен быть объектом-словарём');
+            return;
+          }
+          if (typeof candidate.id !== 'string' || candidate.id.trim() === '') {
+            proposalProblems.push(eventLabel + '.id должен быть непустой строкой');
+          } else if (proposedEventIds.has(candidate.id)) {
+            proposalProblems.push(eventLabel + ': дублирующийся id события «' + candidate.id + '»');
+          }
+          if (
+            typeof candidate.offsetS !== 'number' ||
+            !Number.isFinite(candidate.offsetS) ||
+            candidate.offsetS <= 0
+          ) {
+            proposalProblems.push(eventLabel + '.offsetS должен быть конечным строго положительным временем в секундах');
+          } else if (
+            typeof raw.durationS === 'number' &&
+            Number.isFinite(raw.durationS) &&
+            raw.durationS > 0 &&
+            candidate.offsetS > raw.durationS
+          ) {
+            proposalProblems.push(eventLabel + '.offsetS выходит за предложенный интервал процесса');
+          }
+          if (typeof candidate.type !== 'string' || candidate.type.trim() === '') {
+            proposalProblems.push(eventLabel + '.type должен быть непустой строкой');
+          }
+          if (!isPlainRecord(candidate.data)) {
+            proposalProblems.push(eventLabel + '.data должен быть JSON-словарём');
+          } else {
+            const dataIssues = jsonSerializableIssues(candidate.data, eventLabel + '.data');
+            if (dataIssues.length > 0) {
+              proposalProblems.push(...dataIssues);
+            }
+          }
+
+          if (
+            typeof candidate.id !== 'string' || candidate.id.trim() === '' ||
+            proposedEventIds.has(candidate.id) ||
+            typeof candidate.offsetS !== 'number' || !Number.isFinite(candidate.offsetS) || candidate.offsetS <= 0 ||
+            typeof raw.durationS !== 'number' || !Number.isFinite(raw.durationS) || raw.durationS <= 0 ||
+            candidate.offsetS > raw.durationS ||
+            typeof candidate.type !== 'string' || candidate.type.trim() === '' ||
+            !isPlainRecord(candidate.data) ||
+            jsonSerializableIssues(candidate.data, eventLabel + '.data').length > 0
+          ) {
+            return;
+          }
+
+          const eventLocalTimeS = currentPoint.localTimeS + candidate.offsetS;
+          const eventFitsCurrentSegment =
+            Number.isFinite(eventLocalTimeS) &&
+            eventLocalTimeS > currentPoint.localTimeS &&
+            eventLocalTimeS - currentPoint.localTimeS === candidate.offsetS;
+          if (!eventFitsCurrentSegment && !Number.isSafeInteger(currentPoint.segmentIndex + 1)) {
+            proposalProblems.push(eventLabel + ': segmentIndex исчерпал диапазон безопасных целых для переноса root-события');
+            return;
+          }
+          const eventTime: FluxTime = eventFitsCurrentSegment
+            ? {
+                segmentIndex: currentPoint.segmentIndex,
+                localTimeS: eventLocalTimeS
+              }
+            : {
+                // The offset is positive but smaller than the next
+                // representable increment at this large local time.
+                // The matching exact coordinate is in the next segment.
+                segmentIndex: currentPoint.segmentIndex + 1,
+                localTimeS: candidate.offsetS
+              };
+
+          let dataSnapshot: Record<string, unknown>;
+          try {
+            dataSnapshot = structuredClone(candidate.data);
+          } catch (error) {
+            proposalProblems.push(
+              eventLabel + '.data не удалось изолировать: ' +
+                (error instanceof Error ? error.message : String(error))
+            );
+            return;
+          }
+
+          proposedEventIds.add(candidate.id);
+          normalizedEvents.push({
+            id: candidate.id,
+            offsetS: candidate.offsetS,
+            type: candidate.type,
+            data: dataSnapshot,
+            time: eventTime
+          });
+        });
+      }
+    }
+
+    if (proposalProblems.length > 0) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'state-dependent solver-предложение процесса «' + processId + '» отклонено: ' +
+            proposalProblems.join('; ') + ' — оператор apply не вызван, состояние мира не изменено'
+        ]
+      };
+    }
+    const normalized: ProcessStepProposal & { processId: string } = {
+      processId,
+      durationS: raw.durationS as number,
+      method: raw.method as string,
+      ...(raw.characteristicTimeS === undefined ? {} : { characteristicTimeS: raw.characteristicTimeS as number }),
+      ...(raw.diagnostics === undefined ? {} : { diagnostics: [...(raw.diagnostics as string[])] }),
+      ...(normalizedEvents.length === 0 ? {} : { events: normalizedEvents })
+    };
+    proposals.push(normalized);
+    for (const event of normalizedEvents) {
+      proposedEvents.push({
+        ...event,
+        processId
+      });
+    }
+    if (Array.isArray(normalized.diagnostics)) {
+      proposalDiagnostics.push(...normalized.diagnostics.map((message) => '[' + processId + '] ' + message));
+    }
+    effectiveDurationS = Math.min(effectiveDurationS, normalized.durationS);
+  }
+  // A macro-step must not pass a pending event in the current clock
+  // segment. Segment indices are ordered exactly, but priorSegmentsS is
+  // only an elapsed-time estimate; therefore we never translate a future
+  // segment's event into a delta using that approximate sum.
+  const pendingEventTime = nextEventTime(originalBk);
+  let eventBoundary: MacroStepSizeReport['eventBoundary'];
+  if (pendingEventTime !== null) {
+    const comparison = comparePoints(pendingEventTime, currentPoint);
+    if (comparison <= 0) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          'событие «' + (pendingEvents(originalBk)[0]?.id ?? 'unknown') +
+            '» уже наступило и остаётся pending: обработайте событие до следующего macro-шага; время и состояние не изменены'
+        ]
+      };
+    }
+    if (pendingEventTime.segmentIndex === world.clock.segmentIndex) {
+      const secondsUntilEvent = pendingEventTime.localTimeS - world.clock.localTimeS;
+      if (secondsUntilEvent <= effectiveDurationS) {
+        effectiveDurationS = secondsUntilEvent;
+        const event = pendingEvents(originalBk)[0];
+        if (event !== undefined) {
+          eventBoundary = {
+            eventId: event.id,
+            time: { ...pendingEventTime }
+          };
+        }
+      }
+    }
+  }
+
+  // Solver roots, pending world events and exact process deadlines are
+  // competing stop boundaries. The macro-step ends at the earliest one;
+  // all other processes/events remain due and are dispatched on the next
+  // scheduler turn, without being advanced past their exact TimePoint.
+  const solverEventCandidates = proposedEvents
+    .filter((event) => event.offsetS <= effectiveDurationS)
+    .slice()
+    .sort((a, b) =>
+      a.offsetS - b.offsetS ||
+      a.processId.localeCompare(b.processId) ||
+      a.id.localeCompare(b.id)
+    );
+  const firstSolverEvent = solverEventCandidates[0];
+  if (
+    firstSolverEvent !== undefined &&
+    (eventBoundary === undefined || firstSolverEvent.offsetS < effectiveDurationS)
+  ) {
+    effectiveDurationS = firstSolverEvent.offsetS;
+    eventBoundary = {
+      eventId: firstSolverEvent.id,
+      time: { ...firstSolverEvent.time }
+    };
+  }
+
+  const selectedProcessIds = new Set(processIds);
+  const exactProcessDeadlines = Object.entries(originalBk.processDynamics)
+    .filter((entry): entry is [string, ProcessDynamics & { nextDueTime: FluxTime }] =>
+      entry[1].nextDueTime !== undefined && entry[1].nextDueTime !== null
+    )
+    .sort((a, b) =>
+      comparePoints(a[1].nextDueTime, b[1].nextDueTime) ||
+      a[0].localeCompare(b[0])
+    );
+
+  // A process whose deadline is already due must participate in this
+  // macro-step. Otherwise the caller must dispatch/execute it before any
+  // unrelated process advances the world.
+  const overdueUnselected = exactProcessDeadlines.find(([processId, dynamics]) =>
+    !selectedProcessIds.has(processId) &&
+    comparePoints(dynamics.nextDueTime, currentPoint) <= 0
+  );
+  if (overdueUnselected !== undefined) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: [],
+      diagnostics: [
+        'процесс «' + overdueUnselected[0] +
+          '» имеет наступивший exact deadline ' +
+          String(overdueUnselected[1].nextDueTime.segmentIndex) + ':' +
+          String(overdueUnselected[1].nextDueTime.localTimeS) +
+          ' и не включён в macro-шаг; сначала выполните все готовые процессы Scheduler'
+      ]
+    };
+  }
+
+  let processBoundary: MacroStepSizeReport['processBoundary'];
+  const nextUnselectedProcessDeadline = exactProcessDeadlines.find(([processId, dynamics]) =>
+    (!selectedProcessIds.has(processId) || opts.respectSelectedProcessDeadlines === true) &&
+    dynamics.nextDueTime.segmentIndex === currentPoint.segmentIndex &&
+    comparePoints(dynamics.nextDueTime, currentPoint) > 0
+  );
+  if (nextUnselectedProcessDeadline !== undefined) {
+    const secondsUntilDeadline =
+      nextUnselectedProcessDeadline[1].nextDueTime.localTimeS - currentPoint.localTimeS;
+    if (secondsUntilDeadline <= effectiveDurationS) {
+      const deadlinePoint = nextUnselectedProcessDeadline[1].nextDueTime;
+      const existingEventIsSamePoint =
+        eventBoundary !== undefined &&
+        comparePoints(eventBoundary.time, deadlinePoint) === 0;
+      effectiveDurationS = secondsUntilDeadline;
+      const sameTimeProcessIds = exactProcessDeadlines
+        .filter(([processId, dynamics]) =>
+          (!selectedProcessIds.has(processId) || opts.respectSelectedProcessDeadlines === true) &&
+          comparePoints(dynamics.nextDueTime, deadlinePoint) === 0
+        )
+        .map(([processId]) => processId)
+        .sort();
+      processBoundary = {
+        processIds: sameTimeProcessIds,
+        time: { ...deadlinePoint }
+      };
+      if (eventBoundary !== undefined && !existingEventIsSamePoint) {
+        eventBoundary = undefined;
+      }
+    }
+  }
+
+  const sameSegmentTarget = currentPoint.localTimeS + effectiveDurationS;
+  const representedIncrement = sameSegmentTarget - currentPoint.localTimeS;
+  const incrementRelativeError = Math.abs(representedIncrement - effectiveDurationS) / effectiveDurationS;
+  const sameSegmentAdvanceIsExact =
+    Number.isFinite(sameSegmentTarget) &&
+    sameSegmentTarget > currentPoint.localTimeS &&
+    representedIncrement !== 0 &&
+    incrementRelativeError <= 1e-9;
+  const rollsIntoNextSegment =
+    (eventBoundary !== undefined && eventBoundary.time.segmentIndex === currentPoint.segmentIndex + 1) ||
+    (processBoundary !== undefined && processBoundary.time.segmentIndex === currentPoint.segmentIndex + 1) ||
+    (!sameSegmentAdvanceIsExact && eventBoundary === undefined && processBoundary === undefined);
+  if (rollsIntoNextSegment) {
+    const nextSegmentIndex = currentPoint.segmentIndex + 1;
+    const nextSegmentEvent = pendingEvents(originalBk).find(
+      (event) => event.time.segmentIndex === nextSegmentIndex
+    );
+    const nextSegmentSolverEvent = proposedEvents
+      .filter((event) =>
+        event.time.segmentIndex === nextSegmentIndex &&
+        event.offsetS <= effectiveDurationS
+      )
+      .slice()
+      .sort((a, b) =>
+        comparePoints(a.time, b.time) ||
+        a.processId.localeCompare(b.processId) ||
+        a.id.localeCompare(b.id)
+      )[0];
+    const nextSegmentProcesses = exactProcessDeadlines.filter(([processId, dynamics]) =>
+      (!selectedProcessIds.has(processId) || opts.respectSelectedProcessDeadlines === true) &&
+      dynamics.nextDueTime.segmentIndex === nextSegmentIndex
+    );
+    const originEvent = nextSegmentEvent?.time.localTimeS === 0 ? nextSegmentEvent : undefined;
+    const originProcesses = nextSegmentProcesses.filter(([, dynamics]) => dynamics.nextDueTime.localTimeS === 0);
+    if (originEvent !== undefined || originProcesses.length > 0) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: [],
+        diagnostics: [
+          originEvent !== undefined
+            ? 'событие «' + originEvent.id +
+              '» назначено на начало следующего численного сегмента; эта точка совпадает с текущим физическим моментом. Обработайте событие до перехода сегмента; шаг не выполнен'
+            : 'процесс «' + originProcesses[0]![0] +
+              '» назначен на начало следующего численного сегмента; выполните смену представления времени и Scheduler turn до продвижения физического времени'
+        ]
+      };
+    }
+
+    const nextBoundaryPoints: FluxTime[] = [];
+    if (nextSegmentEvent !== undefined && nextSegmentEvent.time.localTimeS <= effectiveDurationS) {
+      nextBoundaryPoints.push({ ...nextSegmentEvent.time });
+    }
+    if (nextSegmentSolverEvent !== undefined) {
+      nextBoundaryPoints.push({ ...nextSegmentSolverEvent.time });
+    }
+    if (nextSegmentProcesses.length > 0) {
+      const nextProcessDeadline = nextSegmentProcesses
+        .map(([processId, dynamics]) => ({ processId, point: dynamics.nextDueTime }))
+        .filter((entry) => entry.point.localTimeS > 0 && entry.point.localTimeS <= effectiveDurationS)
+        .sort((a, b) => a.point.localTimeS - b.point.localTimeS || a.processId.localeCompare(b.processId))[0];
+      if (nextProcessDeadline !== undefined) {
+        nextBoundaryPoints.push({ ...nextProcessDeadline.point });
+      }
+    }
+    nextBoundaryPoints.sort(comparePoints);
+    const nextBoundaryPoint = nextBoundaryPoints[0];
+    if (nextBoundaryPoint !== undefined) {
+      effectiveDurationS = nextBoundaryPoint.localTimeS;
+      const queuedEventAtBoundary =
+        nextSegmentEvent !== undefined &&
+        comparePoints(nextSegmentEvent.time, nextBoundaryPoint) === 0
+          ? nextSegmentEvent
+          : undefined;
+      const solverEventAtBoundary =
+        nextSegmentSolverEvent !== undefined &&
+        comparePoints(nextSegmentSolverEvent.time, nextBoundaryPoint) === 0
+          ? nextSegmentSolverEvent
+          : undefined;
+      const anyEventAtBoundary = queuedEventAtBoundary !== undefined || solverEventAtBoundary !== undefined;
+      if (anyEventAtBoundary) {
+        eventBoundary = {
+          eventId: queuedEventAtBoundary?.id ?? solverEventAtBoundary!.id,
+          time: { ...nextBoundaryPoint }
+        };
+      } else {
+        eventBoundary = undefined;
+      }
+      const processesAtBoundary = nextSegmentProcesses
+        .filter(([, dynamics]) => comparePoints(dynamics.nextDueTime, nextBoundaryPoint) === 0)
+        .map(([processId]) => processId)
+        .sort();
+      processBoundary = processesAtBoundary.length > 0
+        ? { processIds: processesAtBoundary, time: { ...nextBoundaryPoint } }
+        : undefined;
+    }
+  }
+
+  const limitingProcessIds =
+    effectiveDurationS < opts.durationS
+      ? proposals.filter((proposal) => proposal.durationS === effectiveDurationS).map((proposal) => proposal.processId).sort()
+      : [];
+  const stepSizeDiagnostics = [...proposalDiagnostics];
+  if (eventBoundary !== undefined) {
+    stepSizeDiagnostics.push(
+      'macro-шаг остановлен на событии «' + eventBoundary.eventId +
+        '»; событие остаётся pending и должно быть обработано до следующего шага'
+    );
+  }
+  if (processBoundary !== undefined) {
+    const reachedByCurrentStep = processBoundary.processIds.filter((id) => selectedProcessIds.has(id));
+    const deferredToNextTurn = processBoundary.processIds.filter((id) => !selectedProcessIds.has(id));
+    const details: string[] = [];
+    if (reachedByCurrentStep.length > 0) {
+      details.push('текущий macro-step дошёл до срока процесса: ' + reachedByCurrentStep.join(', '));
+    }
+    if (deferredToNextTurn.length > 0) {
+      details.push('процессы ожидают следующего Scheduler turn: ' + deferredToNextTurn.join(', '));
+    }
+    stepSizeDiagnostics.push(
+      'macro-шаг остановлен на exact deadline процессов (' +
+        processBoundary.processIds.join(', ') + '); ' + details.join('; ')
+    );
+  }
+  const stepSize: MacroStepSizeReport = {
+    requestedDurationS: opts.durationS,
+    effectiveDurationS,
+    limitingProcessIds,
+    ...(eventBoundary === undefined ? {} : { eventBoundary }),
+    ...(processBoundary === undefined ? {} : { processBoundary }),
+    proposals: proposals.map((proposal) => ({ ...proposal })),
+    diagnostics: stepSizeDiagnostics
+  };
+
+  // --- детерминированный план вызовов операторов ---
+  interface PlannedCall {
+    processId: string;
+    phase: StepLogPhase;
+    durationS: number;
+    intervalStartS: number;
+  }
+  const plan: PlannedCall[] = [];
+  if (opts.splitting === 'strang') {
+    const a = processIds[0];
+    const b = processIds[1];
+    if (a === undefined || b === undefined) {
+      throw new SchedulerError('invalid_splitting', 'Strang splitting требует ровно два процесса', null);
+    }
+    const half = effectiveDurationS / 2;
+    // Физические подынтервалы (4.2.1.2): A интегрирует [0, dt/2],
+    // B — [0, dt] (полный шаг B-динамики ВНУТРИ macro-шага), второй
+    // A — [dt/2, dt]; ни один вызов не выходит за [0, dt].
+    plan.push({ processId: a, phase: 'strang_a_half_first', durationS: half, intervalStartS: 0 });
+    plan.push({ processId: b, phase: 'strang_b_full', durationS: effectiveDurationS, intervalStartS: 0 });
+    plan.push({ processId: a, phase: 'strang_a_half_second', durationS: half, intervalStartS: half });
+  } else {
+    const subDurationS = effectiveDurationS / subCycles;
+    for (const processId of processIds) {
+      for (let i = 0; i < subCycles; i++) {
+        plan.push({
+          processId,
+          phase: subCycles > 1 ? 'subcycle' : 'lie',
+          durationS: subDurationS,
+          intervalStartS: subDurationS * i
+        });
+      }
+    }
+  }
+
+  const rejectedLog = (attempted: PlannedCall[]): SchedulerStepLogEntry[] =>
+    attempted.map((c) => ({
+      stepIndex,
+      processId: c.processId,
+      phase: c.phase,
+      durationS: c.durationS,
+      intervalStartS: c.intervalStartS,
+      status: 'rejected' as const
+    }));
+
+  // --- выполнение с атомарностью ---
+  let current: CoreWorldState = working;
+  const attempted: PlannedCall[] = [];
+  for (const call of plan) {
+    attempted.push(call);
+    const operator = operatorByProcess.get(call.processId);
+    if (!operator) {
+      throw new SchedulerError('solver_unavailable', 'процесс «' + call.processId + '»: оператор не передан', call.processId);
+    }
+    const clockBefore = { ...current.clock };
+    let next: CoreWorldState;
+    try {
+      next = operator.apply(current, call.durationS, call.intervalStartS);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(attempted),
+        diagnostics: [
+          'оператор «' + call.processId + '» вызвал ошибку (фаза ' + call.phase + '): ' + reason +
+            ' — шаг отклонён, состояние мира не изменено'
+        ]
+      };
+    }
+    if (next === null || typeof next !== 'object' || next.clock === undefined) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(attempted),
+        diagnostics: ['оператор «' + call.processId + '» вернул некорректное состояние мира — шаг отклонён']
+      };
+    }
+    if (!clocksEqual(next.clock, clockBefore)) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(attempted),
+        diagnostics: [
+          'оператор «' + call.processId + '» продвинул мировое время: часы принадлежат WorldClock, операторы их не двигают — шаг отклонён'
+        ]
+      };
+    }
+    current = next;
+  }
+
+  try {
+    if (schedulerCanonicalJson(current.scheduling ?? null) !== originalSchedulingCanonical) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(plan),
+        diagnostics: [
+          'оператор изменил SchedulerBookkeeping напрямую (включая in-place мутацию); очередь событий, sequence, stepLog и process deadlines принадлежат Scheduler — шаг отклонён'
+        ]
+      };
+    }
+  } catch (error) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: rejectedLog(plan),
+      diagnostics: [
+        'SchedulerBookkeeping после операторов нельзя канонически проверить: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+
+  // --- Stage 4.2.3.3.1: append-only контракт журнала реакций ---
+  // Записи, существовавшие до macro-шага, остаются неизменными (по
+  // всему содержимому — участники, коэффициенты, extent, extentBasis,
+  // time, processId, note), в том же порядке и количестве; разрешено
+  // только добавление новых записей в конец журнала. Совпадающий id
+  // не является доказательством неизменности: подмена содержимого
+  // при сохранённом id, удаление и перестановка старых записей,
+  // удаление журнала — нарушение контракта. Проверка выполняется на
+  // КАЖДОМ шаге, независимо от того, запрошен аудит инвариантов.
+  const reactionAppendOnlyIssues = reactionLedgerAppendOnlyIssues(world.reactionLedger, current.reactionLedger);
+  if (reactionAppendOnlyIssues.length > 0) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: rejectedLog(plan),
+      diagnostics: [
+        ...reactionAppendOnlyIssues,
+        'нарушение append-only контракта журнала реакций: шаг отклонён, состояние мира и его журнал не изменены'
+      ]
+    };
+  }
+  // Реакционные транзакции шага — ТОЛЬКО записи, добавленные в конец
+  // журнала поверх неизменной истории (префикс проверен выше). Мир
+  // без журнала до шага: все записи «после» — новые.
+  const beforeReactionCount =
+    world.reactionLedger !== undefined && Array.isArray(world.reactionLedger.records)
+      ? world.reactionLedger.records.length
+      : 0;
+  const afterReactionRecords =
+    current.reactionLedger !== undefined && Array.isArray(current.reactionLedger.records)
+      ? current.reactionLedger.records
+      : [];
+  const stepReactions = afterReactionRecords.slice(beforeReactionCount);
+  // Новые записи обязаны пройти стехиометрический аудит ДО фиксации
+  // шага: аудит требует каталог видов (speciesCatalog). Шаг, который
+  // добавил реакционные транзакции, но не запросил аудит инвариантов,
+  // отклоняется — незаверенные реакции не фиксируются молча.
+  if (stepReactions.length > 0 && opts.audit === undefined) {
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping: originalBk,
+      log: rejectedLog(plan),
+      diagnostics: [
+        'шаг добавил ' + String(stepReactions.length) + ' реакционных транзакций, но аудит инвариантов не запрошен: новые записи обязаны пройти стехиометрический аудит (speciesCatalog) до фиксации шага — шаг отклонён, состояние мира не изменено'
+      ]
+    };
+  }
+
+  // --- аудит инвариантов до фиксации ---
+  let audit: WorldTransitionAudit | undefined;
+  if (opts.audit !== undefined) {
+    const beforeIds = new Set(world.fluxLedger.records.map((r) => r.id));
+    const stepRecords = current.fluxLedger.records.filter((r) => !beforeIds.has(r.id));
+    // Stage 4.2.3.3/4.2.3.3.1: реакционные транзакции шага — записи,
+    // добавленные В КОНЕЦ журнала поверх неизменной истории (фильтр
+    // по id из 4.2.3.3 не замечал правку/удаление/перестановку
+    // старых записей и заменён префиксной append-only проверкой).
+    // Операторы, не работающие с реакциями, не добавляют записей:
+    // аудит получает пустой журнал (не ошибка). Журнал проверяется
+    // аудитом ОТДЕЛЬНО от потоков; автоматически записи не создаются.
+    audit = auditWorldTransition(world, current, { records: stepRecords }, {
+      speciesCatalog: opts.audit.speciesCatalog,
+      boundary: opts.audit.boundary,
+      tolerance: opts.audit.tolerance,
+      scope: opts.audit.scope,
+      reactionLedger: { records: stepReactions }
+    });
+    if (audit.status === 'imbalanced') {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(plan),
+        audit,
+        diagnostics: [...audit.diagnostics, 'обязательные инварианты нарушены: шаг не фиксируется, мировое время не продвигается']
+      };
+    }
+  }
+
+  // --- ЕДИНСТВЕННОЕ продвижение мирового времени ---
+  // Prefer an exact point in the current segment whenever adding dt
+  // changes the double value. The conservative representableStep estimate
+  // is not itself proof that a particular target point is unrepresentable.
+  // Only when addition rounds back to the current value do we open a new
+  // segment with advance(); pending events in the old segment are then
+  // rebased by their exact local offset from the old current point.
+  const sameSegmentBoundary =
+    eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex
+      ? eventBoundary.time
+      : processBoundary !== undefined && processBoundary.time.segmentIndex === current.clock.segmentIndex
+        ? processBoundary.time
+        : null;
+  const nextSegmentBoundary =
+    eventBoundary !== undefined && eventBoundary.time.segmentIndex === current.clock.segmentIndex + 1
+      ? eventBoundary.time
+      : processBoundary !== undefined && processBoundary.time.segmentIndex === current.clock.segmentIndex + 1
+        ? processBoundary.time
+        : null;
+  // Keep the clock's single rounding policy authoritative. advance()
+  // tolerates normal binary64 rounding (relative error <= 1e-9) and rolls
+  // over only when the represented increment materially changes dt or
+  // disappears. advanceTo() is reserved for an exact event/process point.
+  const newClock =
+    sameSegmentBoundary !== null
+      ? advanceTo(current.clock, sameSegmentBoundary)
+      : nextSegmentBoundary !== null
+        ? advance(startNewSegment(current.clock), nextSegmentBoundary.localTimeS)
+        : advance(current.clock, effectiveDurationS);
+
+  const eventQueue =
+    newClock.segmentIndex === current.clock.segmentIndex
+      ? originalBk.eventQueue
+      : originalBk.eventQueue.map((event) => {
+          if (
+            event.status !== 'pending' ||
+            event.time.segmentIndex !== current.clock.segmentIndex ||
+            event.time.localTimeS <= current.clock.localTimeS
+          ) {
+            return event;
+          }
+          return {
+            ...event,
+            time: {
+              segmentIndex: newClock.segmentIndex,
+              localTimeS: event.time.localTimeS - current.clock.localTimeS
+            }
+          };
+        });
+  let eventBookkeeping: SchedulerBookkeeping = {
+    ...originalBk,
+    eventQueue
+  };
+  for (const event of proposedEvents) {
+    if (event.offsetS > effectiveDurationS) continue;
+    try {
+      eventBookkeeping = enqueueEvent(eventBookkeeping, {
+        id: event.id,
+        time: event.time,
+        type: event.type,
+        data: event.data,
+        source: event.processId
+      });
+    } catch (error) {
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping: originalBk,
+        log: rejectedLog(plan),
+        diagnostics: [
+          'solver-событие «' + event.id + '» не удалось включить в транзакцию Scheduler: ' +
+            (error instanceof Error ? error.message : String(error)) +
+            ' — шаг отклонён, мировое состояние и очередь не изменены'
+        ]
+      };
+    }
+  }
+
+  const lastRunElapsedS = totalElapsedSeconds(newClock);
+  const callsPerProcess = new Map<string, number>();
+  for (const call of plan) {
+    callsPerProcess.set(call.processId, (callsPerProcess.get(call.processId) ?? 0) + 1);
+  }
+  const newDynamics: Record<string, ProcessDynamics> = { ...originalBk.processDynamics };
+  for (const [processId, calls] of callsPerProcess) {
+    const dynamics: ProcessDynamics = newDynamics[processId] ?? {
+      processId,
+      lastRunElapsedS: null,
+      nextDueElapsedS: null,
+      lastRunTime: null,
+      nextDueTime: null,
+      macroStepsCompleted: 0,
+      operatorCallsCompleted: 0
+    };
+    const exactNow: FluxTime = {
+      segmentIndex: newClock.segmentIndex,
+      localTimeS: newClock.localTimeS
+    };
+    const elapsedDeadlineReached =
+      dynamics.nextDueElapsedS !== null &&
+      dynamics.nextDueElapsedS !== undefined &&
+      dynamics.nextDueElapsedS <= lastRunElapsedS;
+    const exactDeadlineReached =
+      dynamics.nextDueTime !== null &&
+      dynamics.nextDueTime !== undefined &&
+      comparePoints(dynamics.nextDueTime, exactNow) <= 0;
+    newDynamics[processId] = {
+      ...dynamics,
+      lastRunElapsedS,
+      lastRunTime: exactNow,
+      // A due time is a one-shot trigger. Consume only a deadline that
+      // this successful execution actually reached; an explicitly run
+      // process must not lose a future scheduled deadline.
+      nextDueElapsedS: elapsedDeadlineReached ? null : dynamics.nextDueElapsedS,
+      nextDueTime: exactDeadlineReached ? null : dynamics.nextDueTime,
+      macroStepsCompleted: dynamics.macroStepsCompleted + 1,
+      operatorCallsCompleted: dynamics.operatorCallsCompleted + calls
+    };
+  }
+  const macroStepStartTime: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  const macroStepEndTime: FluxTime = {
+    segmentIndex: newClock.segmentIndex,
+    localTimeS: newClock.localTimeS
+  };
+  const committedLog: SchedulerStepLogEntry[] = plan.map((c) => ({
+    stepIndex,
+    processId: c.processId,
+    phase: c.phase,
+    durationS: c.durationS,
+    intervalStartS: c.intervalStartS,
+    worldStartTime: { ...macroStepStartTime },
+    worldEndTime: { ...macroStepEndTime },
+    status: 'committed' as const
+  }));
+  const newBk: SchedulerBookkeeping = {
+    ...originalBk,
+    processDynamics: newDynamics,
+    eventQueue: eventBookkeeping.eventQueue,
+    nextSequence: eventBookkeeping.nextSequence,
+    stepLog: [...originalBk.stepLog, ...committedLog],
+    stepCount: originalBk.stepCount + 1
+  };
+  const diagnostics: string[] = [
+    ...stepSize.diagnostics,
+    ...(audit !== undefined ? [...audit.diagnostics] : [])
+  ];
+  return {
+    status: 'committed',
+    world: { ...current, clock: newClock, scheduling: newBk },
+    bookkeeping: newBk,
+    log: committedLog,
+    audit,
+    stepSize,
+    diagnostics
+  };
+}
+
+export interface ScheduledProcessRunOptions {
+  /** Maximum allowed duration for this automatically scheduled Lie macro-step. */
+  durationS: number;
+  /** Number of equal Lie sub-cycles; defaults to one. */
+  subCycles?: number;
+  /** Mandatory when a process appends reaction transactions. */
+  audit?: MacroStepAuditOptions;
+}
+
+export interface ScheduledProcessRunResult {
+  status: 'idle' | 'committed' | 'rejected';
+  world: CoreWorldState;
+  bookkeeping: SchedulerBookkeeping;
+  /** One-shot processes whose exact deadlines are due at the start of the run. */
+  readyProcessIds: readonly string[];
+  /** Continuous operators integrated in this run, even without a one-shot deadline. */
+  continuousProcessIds?: readonly string[];
+  /** Complete set of operators invoked by the committed/rejected macro-step. */
+  invokedProcessIds?: readonly string[];
+  macroStep?: MacroStepResult;
+  diagnostics: readonly string[];
+}
+
+/**
+ * Run the exact-time process deadlines that are due at the world's current
+ * segmented TimePoint. Readiness and execution are one operation, so
+ * callers cannot accidentally use an elapsed-time estimate for an exact
+ * deadline or run a process whose exact deadline is still in the future.
+ *
+ * Automatically scheduled runs use deterministic Lie ordering. Strang
+ * splitting remains an explicit caller decision because it requires
+ * exactly two compatible operators and a declared symmetric order.
+ */
+export function runReadyProcessesAt(
+  world: CoreWorldState,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  options: ScheduledProcessRunOptions
+): ScheduledProcessRunResult {
+  const bookkeeping = world.scheduling ?? createSchedulerBookkeeping();
+  const point: FluxTime = {
+    segmentIndex: world.clock.segmentIndex,
+    localTimeS: world.clock.localTimeS
+  };
+  let ready: readonly string[];
+  try {
+    ready = readyProcessIdsAt(bookkeeping, registry, operators, point);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping,
+      readyProcessIds: [],
+      diagnostics: ['невозможно определить готовые процессы Scheduler: ' + reason]
+    };
+  }
+
+  if (ready.length === 0) {
+    const dueEventsNow = dueEvents(bookkeeping, point);
+    const dueProcessEntries = Object.entries(bookkeeping.processDynamics).filter(([, dynamics]) =>
+      dynamics.nextDueTime !== undefined &&
+      dynamics.nextDueTime !== null &&
+      comparePoints(dynamics.nextDueTime, point) <= 0
+    );
+    if (dueProcessEntries.length > 0) {
+      const operatorIds = new Set(operators.map((operator) => operator.processId));
+      const blockedDiagnostics = dueProcessEntries.map(([processId]) => {
+        const descriptor = registry.get(processId);
+        if (descriptor === null) return 'процесс «' + processId + '» отсутствует в ProcessRegistry';
+        if (!descriptor.enabled) return 'процесс «' + processId + '» отключён (enabled=false)';
+        if (descriptor.executionMode === 'explicit_only') return 'процесс «' + processId + '» требует explicit-вызова и не может запускаться автоматически';
+        if (!operatorIds.has(processId)) return 'для процесса «' + processId + '» не передан runtime-оператор';
+        const operator = operators.find((candidate) => candidate.processId === processId);
+        if (descriptor.executionMode === 'state_dependent' && typeof operator?.proposeStep !== 'function') {
+          return 'для state_dependent процесса «' + processId + '» отсутствует runtime proposeStep()';
+        }
+        if (descriptor.executionMode !== 'state_dependent' && tauSeconds(descriptor.tau) === null) {
+          return 'у автономного процесса «' + processId + '» неизвестно числовое τ';
+        }
+        return 'процесс «' + processId + '» не прошёл проверку auto-runnable';
+      });
+      return {
+        status: 'rejected',
+        world,
+        bookkeeping,
+        readyProcessIds: [],
+        diagnostics: [
+          'наступившие точные deadline не могут быть исполнены; Scheduler остановлен без продвижения времени',
+          ...blockedDiagnostics
+        ]
+      };
+    }
+    return {
+      status: 'idle',
+      world,
+      bookkeeping,
+      readyProcessIds: [],
+      diagnostics: dueEventsNow.length > 0
+        ? ['нет готовых процессов; перед следующим шагом необходимо обработать ' + String(dueEventsNow.length) + ' наступивших событий']
+        : ['нет процессов с наступившим точным deadline; время и состояние не изменены']
+    };
+  }
+
+  const selected = operators.filter((operator) => ready.includes(operator.processId));
+  try {
+    const macroStep = runMacroStep(world, registry, selected, {
+      durationS: options.durationS,
+      splitting: 'lie',
+      ...(options.subCycles === undefined ? {} : { subCycles: options.subCycles }),
+      processIds: ready,
+      ...(options.audit === undefined ? {} : { audit: options.audit })
+    });
+    return {
+      status: macroStep.status,
+      world: macroStep.world,
+      bookkeeping: macroStep.bookkeeping,
+      readyProcessIds: ready,
+      macroStep,
+      diagnostics: macroStep.diagnostics
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'rejected',
+      world,
+      bookkeeping,
+      readyProcessIds: ready,
+      diagnostics: ['запуск готовых процессов Scheduler отклонён до commit: ' + reason]
+    };
+  }
+}
+
+export interface ScheduledWorldTurnOptions {
+  /** Mandatory audit for every world event dispatched before process execution. */
+  eventAudit: ProcessWorldEventOptions;
+  /** Maximum duration and optional invariant audit for process execution. */
+  process: ScheduledProcessRunOptions;
+  /**
+   * Continuously integrated processes. They run on every world turn; their
+   * exact future nextDueTime still clips the macro-step so the next turn
+   * can re-evaluate the state at that boundary. One-shot scheduled processes
+   * are added automatically when their deadline is due.
+   */
+  continuousProcessIds?: readonly string[];
+}
+
+export interface ScheduledWorldTurnResult {
+  status: 'completed' | 'idle' | 'failed';
+  world: CoreWorldState;
+  eventDispatch?: ProcessDueWorldEventsResult;
+  processRun?: ScheduledProcessRunResult;
+  diagnostics: readonly string[];
+}
+
+/**
+ * Execute one deterministic scheduler turn at the current WorldClock point:
+ * 1) dispatch every due world event in (TimePoint, sequence) order;
+ * 2) if and only if all events succeeded, run processes whose exact
+ *    nextDueTime has arrived at that same TimePoint.
+ *
+ * No time is advanced when there is no due work. A failed/missing event
+ * handler stops the turn before any process operator can observe a
+ * partially transitioned world.
+ */
+export function runScheduledWorldTurn(
+  world: CoreWorldState,
+  registry: ProcessRegistry,
+  operators: readonly ProcessOperator[],
+  eventHandlers: Readonly<Record<string, WorldEventHandler>>,
+  options: ScheduledWorldTurnOptions
+): ScheduledWorldTurnResult {
+  let eventDispatch: ProcessDueWorldEventsResult;
+  try {
+    // First dispatch at the currently represented point. This ensures
+    // events from the old segment are never skipped when a segment
+    // boundary at the same physical instant is normalized below.
+    eventDispatch = processDueWorldEvents(world, eventHandlers, options.eventAudit);
+  } catch (error) {
+    return {
+      status: 'failed',
+      world,
+      diagnostics: [
+        'ход Scheduler остановлен до обработки событий: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+  if (eventDispatch.status === 'failed') {
+    return {
+      status: 'failed',
+      world: eventDispatch.world,
+      eventDispatch,
+      diagnostics: [...eventDispatch.diagnostics, 'процессы текущего хода не запускались из-за ошибки события']
+    };
+  }
+
+  let turnWorld = eventDispatch.world;
+  const bookkeeping = turnWorld.scheduling ?? createSchedulerBookkeeping();
+  const nextSegmentIndex = turnWorld.clock.segmentIndex + 1;
+  const hasNextSegmentOriginEvent = pendingEvents(bookkeeping).some(
+    (event) => event.time.segmentIndex === nextSegmentIndex && event.time.localTimeS === 0
+  );
+  const hasNextSegmentOriginProcess = Object.values(bookkeeping.processDynamics).some(
+    (dynamics) =>
+      dynamics.nextDueTime !== undefined &&
+      dynamics.nextDueTime !== null &&
+      dynamics.nextDueTime.segmentIndex === nextSegmentIndex &&
+      dynamics.nextDueTime.localTimeS === 0
+  );
+
+  // A segment origin is a representation-only boundary at the current
+  // physical instant. Normalize the clock before dispatching events or
+  // waking processes scheduled at (segmentIndex + 1, 0); no physical dt is
+  // consumed and WorldClock.stepCount is unchanged.
+  if (hasNextSegmentOriginEvent || hasNextSegmentOriginProcess) {
+    try {
+      turnWorld = { ...turnWorld, clock: startNewSegment(turnWorld.clock) };
+    } catch (error) {
+      return {
+        status: 'failed',
+        world: turnWorld,
+        eventDispatch,
+        diagnostics: [
+          ...eventDispatch.diagnostics,
+          'невозможно открыть следующий сегмент для событий/deadline на его начале: ' +
+            (error instanceof Error ? error.message : String(error))
+        ]
+      };
+    }
+
+    let originDispatch: ProcessDueWorldEventsResult;
+    try {
+      originDispatch = processDueWorldEvents(turnWorld, eventHandlers, options.eventAudit);
+    } catch (error) {
+      return {
+        status: 'failed',
+        world: turnWorld,
+        eventDispatch,
+        diagnostics: [
+          ...eventDispatch.diagnostics,
+          'ошибка dispatch после нормализации начала сегмента: ' +
+            (error instanceof Error ? error.message : String(error))
+        ]
+      };
+    }
+    eventDispatch = {
+      status: originDispatch.status,
+      world: originDispatch.world,
+      results: [...eventDispatch.results, ...originDispatch.results],
+      diagnostics: [...eventDispatch.diagnostics, ...originDispatch.diagnostics]
+    };
+    turnWorld = originDispatch.world;
+    if (originDispatch.status === 'failed') {
+      return {
+        status: 'failed',
+        world: turnWorld,
+        eventDispatch,
+        diagnostics: [...eventDispatch.diagnostics, 'процессы текущего хода не запускались из-за ошибки события']
+      };
+    }
+  }
+
+  const bookkeepingAtTurn = turnWorld.scheduling ?? createSchedulerBookkeeping();
+  const currentPoint: FluxTime = {
+    segmentIndex: turnWorld.clock.segmentIndex,
+    localTimeS: turnWorld.clock.localTimeS
+  };
+  let readyProcessIds: readonly string[];
+  try {
+    readyProcessIds = readyProcessIdsAt(
+      bookkeepingAtTurn,
+      registry,
+      operators,
+      currentPoint
+    );
+  } catch (error) {
+    return {
+      status: 'failed',
+      world: turnWorld,
+      eventDispatch,
+      diagnostics: [
+        ...eventDispatch.diagnostics,
+        'не удалось определить ready-процессы на точном TimePoint: ' +
+          (error instanceof Error ? error.message : String(error))
+      ]
+    };
+  }
+
+  const continuousProcessIds = options.continuousProcessIds ?? [];
+  if (
+    !Array.isArray(continuousProcessIds) ||
+    continuousProcessIds.some((id) => typeof id !== 'string' || id.trim() === '') ||
+    new Set(continuousProcessIds).size !== continuousProcessIds.length
+  ) {
+    return {
+      status: 'failed',
+      world: turnWorld,
+      eventDispatch,
+      diagnostics: [
+        ...eventDispatch.diagnostics,
+        'continuousProcessIds должен быть массивом уникальных непустых processId'
+      ]
+    };
+  }
+  const invokedProcessIds = [...new Set([
+    ...continuousProcessIds,
+    ...readyProcessIds
+  ])].sort();
+
+  let processRun: ScheduledProcessRunResult;
+  if (invokedProcessIds.length === 0) {
+    // This also distinguishes a genuinely idle turn from a due exact
+    // deadline that is blocked by a disabled/unknown/non-runnable process.
+    processRun = runReadyProcessesAt(
+      turnWorld,
+      registry,
+      operators,
+      options.process
+    );
+  } else {
+    const selectedOperators = operators.filter((operator) =>
+      invokedProcessIds.includes(operator.processId)
+    );
+    try {
+      const macroStep = runMacroStep(turnWorld, registry, selectedOperators, {
+        durationS: options.process.durationS,
+        splitting: 'lie',
+        ...(options.process.subCycles === undefined ? {} : { subCycles: options.process.subCycles }),
+        processIds: invokedProcessIds,
+        respectSelectedProcessDeadlines: true,
+        ...(options.process.audit === undefined ? {} : { audit: options.process.audit })
+      });
+      processRun = {
+        status: macroStep.status,
+        world: macroStep.world,
+        bookkeeping: macroStep.bookkeeping,
+        readyProcessIds,
+        continuousProcessIds: [...continuousProcessIds],
+        invokedProcessIds,
+        macroStep,
+        diagnostics: macroStep.diagnostics
+      };
+    } catch (error) {
+      processRun = {
+        status: 'rejected',
+        world: turnWorld,
+        bookkeeping: bookkeepingAtTurn,
+        readyProcessIds,
+        continuousProcessIds: [...continuousProcessIds],
+        invokedProcessIds,
+        diagnostics: [
+          'macro-step scheduled world turn отклонён до commit: ' +
+            (error instanceof Error ? error.message : String(error))
+        ]
+      };
+    }
+  }
+
+  if (processRun.status === 'rejected') {
+    return {
+      status: 'failed',
+      world: processRun.world,
+      eventDispatch,
+      processRun,
+      diagnostics: [...eventDispatch.diagnostics, ...processRun.diagnostics]
+    };
+  }
+
+  const didEventWork = eventDispatch.results.length > 0;
+  if (processRun.status === 'idle' && !didEventWork) {
+    return {
+      status: 'idle',
+      world: processRun.world,
+      eventDispatch,
+      processRun,
+      diagnostics: [...eventDispatch.diagnostics, ...processRun.diagnostics]
+    };
+  }
+
+  return {
+    status: 'completed',
+    world: processRun.world,
+    eventDispatch,
+    processRun,
+    diagnostics: [...eventDispatch.diagnostics, ...processRun.diagnostics]
+  };
+}
+
+

@@ -6,10 +6,38 @@ import { useState, useEffect } from 'react';
 import { generateWorld, generateRandomSeed, generateMultipleWorlds } from './modules/Generator';
 import { getAllWorlds, saveWorld, deleteWorld, clearAllWorlds, saveSettings, getSettings, saveLastSeed, getLastSeed } from './modules/Storage';
 import { createShortDescription } from './modules/WorldModel';
-import type { GenerationSettings, GeneratedWorld, SavedWorld, GenerationMode, FixedCategories, ID } from './types';
+import {
+  CHEMICAL_RESERVOIR_IDS,
+  bodyCharacteristicsDisplayRows,
+  chemicalReservoirConsistencyIssues
+} from './modules/Core/adapters';
+import { setMaterialInventory } from './modules/Core/reservoir';
+import {
+  temperatureValueOrNull,
+  validateAtmosphericTemperatureProfile
+} from './modules/Core/thermalState';
+import { getAllPresets } from './modules/Atmosphere';
+import {
+  configurePrimaryPhysicalChemicalKinetics,
+  runChemicalEvolutionSchedulerStep,
+  runWorldKineticTrajectory,
+  resetWorldKineticExperiment,
+  kineticRunHistoryViewModel
+} from './modules/ChemicalEvolution';
+import type {
+  GenerationSettings,
+  GeneratedWorld,
+  SavedWorld,
+  GenerationMode,
+  FixedCategories,
+  ID,
+  PhysValue,
+  ScientificConfidence,
+  KineticExperimentSegmentAudit,
+  KineticExperimentRunRecord,
+  ChemicalPhysicalKineticsState
+} from './types';
 import { cosmologies, epochs, centralObjects, celestialBodies, cradles, gases } from './modules/Data';
-
-import './App.css';
 
 import './App.css';
 
@@ -143,6 +171,95 @@ function GeneratorPanel(props: {
         </div>
       </div>
 
+      <div className="atmosphere-preset">
+        <h3>Атмосферный пресет</h3>
+        <div className="category-selector">
+          <label>Пресет:</label>
+          <select
+            value={localSettings.atmospherePreset || ''}
+            onChange={(e) => {
+              const atmospherePreset = e.target.value || undefined;
+              const atmosphericReferenceProfile: GenerationSettings['atmosphericReferenceProfile'] =
+                atmospherePreset === 'earth' &&
+                localSettings.atmosphericReferenceProfile === 'ussa_1976_earth'
+                  ? 'ussa_1976_earth'
+                  : atmospherePreset === 'mars' &&
+                    localSettings.atmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+                    ? 'mgs_mars_1998_8028d38a'
+                    : undefined;
+              const newSettings = {
+                ...localSettings,
+                atmospherePreset,
+                atmosphericReferenceProfile
+              };
+              setLocalSettings(newSettings);
+              props.onSettingsChange(newSettings);
+            }}
+          >
+            <option value="">По умолчанию (метаново-этановая)</option>
+            {Object.entries(getAllPresets()).map(([presetId]) => (
+              <option key={presetId} value={presetId}>
+                {presetId === 'methane_ethane'
+                  ? 'Метаново-этановая (историческая игровая)'
+                  : presetId === 'titan_reference'
+                    ? 'Титан — наблюдательный ориентир'
+                    : presetId}
+              </option>
+            ))}
+          </select>
+          {localSettings.atmospherePreset && (
+            <p className="preset-note">
+              {(() => {
+                const preset = getAllPresets()[localSettings.atmospherePreset];
+                if (!preset) return null;
+                if (preset.presetKind === 'historical_game') {
+                  return 'Исторический игровой сценарий. Исходные 1.5 atm и 95 K — неподтверждённые игровые допущения, не данные наблюдений.';
+                }
+                if (preset.presetKind === 'observational_reference') {
+                  return 'Справочный ориентир на основе наблюдений реального небесного тела. Не является универсальным шаблоном для всех планет этого класса.';
+                }
+                return 'Пресет сгенерирует атмосферу с допустимыми вариациями состава.';
+              })()}
+            </p>
+          )}
+          {(localSettings.atmospherePreset === 'earth' || localSettings.atmospherePreset === 'mars') && (
+            <div className="category-selector">
+              <label>Вертикальный reference-профиль:</label>
+              <select
+                value={localSettings.atmosphericReferenceProfile || ''}
+                onChange={(e) => {
+                  const selectedProfile: GenerationSettings['atmosphericReferenceProfile'] =
+                    localSettings.atmospherePreset === 'earth' && e.target.value === 'ussa_1976_earth'
+                      ? 'ussa_1976_earth'
+                      : localSettings.atmospherePreset === 'mars' && e.target.value === 'mgs_mars_1998_8028d38a'
+                        ? 'mgs_mars_1998_8028d38a'
+                        : undefined;
+                  const newSettings = {
+                    ...localSettings,
+                    atmosphericReferenceProfile: selectedProfile
+                  };
+                  setLocalSettings(newSettings);
+                  props.onSettingsChange(newSettings);
+                }}
+              >
+                <option value="">Не подключать</option>
+                {localSettings.atmospherePreset === 'earth' && (
+                  <option value="ussa_1976_earth">US Standard Atmosphere 1976 — 7 слоёв до 86 км</option>
+                )}
+                {localSettings.atmospherePreset === 'mars' && (
+                  <option value="mgs_mars_1998_8028d38a">MGS 1998 PDS 8028D38A — одна радиоколонка, 74 температурных узла</option>
+                )}
+              </select>
+              <p className="preset-note">
+                {localSettings.atmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+                  ? 'Одна историческая MGS-радиоколонка (28.01.1998; 29.213° N, 56.774° E), только 0.25–35.26 км. 74 measured T-узла задают 73 линейно интерполированных слоя; неопределённости слоёв не выводятся без covariance. Профиль не задаёт полный состав, давление, радикалы или климатологию Марса.'
+                  : 'Профиль подключается как внешний reference и не заменяет параметры сгенерированной планеты. Температуры слоёв — представительные значения в серединах интервалов; химические запасы и радикалы не задаются.'}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="generator-actions">
         <button onClick={handleGenerate} className="primary">
           Сгенерировать мир
@@ -180,11 +297,1070 @@ function CategorySelector<T extends { id: ID; name: string }>(props: {
   );
 }
 
+// ============================================
+// Stage 4.5.5: кинетический эксперимент №89/№106
+// ============================================
+// Отдельный пользовательский расчётный сценарий в паспорте мира:
+// пользователь явно настраивает толщину слоя и начальные запасы
+// (они НЕ извлекаются из атмосферного состава), строит расписание
+// сегментов и выполняет последовательную траекторию. Это НЕ шаг
+// режима A и НЕ рассчитанная эволюция атмосферы планеты.
+
+type KineticSpeciesKey = 'O' | 'NO' | 'NO2' | 'H' | 'O2' | 'HO2' | 'N2';
+
+const KINETIC_EXPERIMENT_SPECIES_FIELDS: Array<{ key: KineticSpeciesKey; formula: string }> = [
+  { key: 'O', formula: 'O' },
+  { key: 'NO', formula: 'NO' },
+  { key: 'NO2', formula: 'NO₂' },
+  { key: 'H', formula: 'H' },
+  { key: 'O2', formula: 'O₂' },
+  { key: 'HO2', formula: 'HO₂' },
+  { key: 'N2', formula: 'N₂' }
+];
+
+const KINETIC_EXPERIMENT_REACTIONS: Array<{ id: string; label: string }> = [
+  { id: 'kida-tb-2015-03-19-89', label: '№89: O + NO + N₂ → NO₂ + N₂ (200–300 K)' },
+  { id: 'kida-tb-2015-03-19-106', label: '№106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)' }
+];
+
+/** Черновик сегмента расписания в редакторе UI (строки, не числа). */
+interface KineticSegmentDraft {
+  temperatureK: string;
+  dtSeconds: string;
+  reactionIds: string[];
+}
+
+function emptyKineticInventoryDraft(): Record<KineticSpeciesKey, string> {
+  return { O: '', NO: '', NO2: '', H: '', O2: '', HO2: '', N2: '' };
+}
+
+function formatKineticAmount(value: number): string {
+  if (value === 0) {
+    return '0';
+  }
+  return value.toExponential(4);
+}
+
+/**
+ * Источник provenance для блока аудита (срез трассируемости 4.5.5):
+ * первый непустой идентификатор, без подстановки фиктивных значений.
+ */
+function kineticProvenanceSource(p: {
+  sourceName?: string;
+  sourceId?: string;
+  datasetId?: string;
+  reference?: string;
+  datasetVersion?: string;
+}): string {
+  const source = p.sourceName ?? p.sourceId ?? p.datasetId ?? p.reference ?? 'источник не идентифицирован';
+  return p.datasetVersion ? `${source} (версия данных: ${p.datasetVersion})` : source;
+}
+
+/**
+ * Аудит фактического расчёта одного сегмента (срез кинетической
+ * трассируемости 4.5.5). recorded показывает фактическую константу,
+ * единицу, диапазон, fall-off-диагностику, provenance и концентрацию
+ * N₂ из результата вычислителя; unavailable_legacy честно обозначает
+ * отсутствие исторического снимка; сегмент старой схемы 1.0.0 без
+ * audit обозначается явно. Реконструкция старых значений не
+ * выполняется.
+ */
+function KineticSegmentAuditView({ audit }: { audit: KineticExperimentSegmentAudit | undefined }) {
+  if (audit === undefined) {
+    return (
+      <p className="kinetic-audit-note">
+        Исторический снимок аудита отсутствует: сегмент выполнен до введения снимков аудита
+        (схема состояния 1.0.0); фактические параметры старого расчёта не записывались и задним
+        числом не восстанавливаются.
+      </p>
+    );
+  }
+  if (audit.kind === 'unavailable_legacy') {
+    return <p className="kinetic-audit-note">Исторический снимок аудита отсутствует: {audit.reason}</p>;
+  }
+  return (
+    <div>
+      <p className="kinetic-audit-note">
+        Модель концентраций: {audit.concentrationModel}; концентрация третьего тела N₂:{' '}
+        {formatKineticAmount(audit.thirdBodyN2MoleculeCm3)} molecule/cm³
+        {audit.integration &&
+          `; интегратор: ${audit.integration.method} (малых отрицательных компонент: ${audit.integration.minorNegativeCount}, проверок инвариантов: ${audit.integration.invariantChecks})`}
+      </p>
+      <table className="atmosphere-table kinetic-audit-table">
+        <thead>
+          <tr>
+            <th>Реакция</th>
+            <th>k (фактически)</th>
+            <th>Диапазон, K</th>
+            <th>fall-off</th>
+            <th>Источник и provenance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {audit.reactions.map((reaction) => (
+            <tr key={reaction.reactionId}>
+              <td>{reaction.label}</td>
+              <td>
+                {formatKineticAmount(reaction.rateConstant.value)} {reaction.rateConstant.unit} (статус
+                данных: {reaction.dataStatus})
+              </td>
+              <td>
+                [{reaction.appliedRangeK.min}, {reaction.appliedRangeK.max}]
+              </td>
+              <td>
+                k₀ = {formatKineticAmount(reaction.fallOff.lowPressureLimit)}; k∞ ={' '}
+                {formatKineticAmount(reaction.fallOff.highPressureLimit)}; Pr ={' '}
+                {formatKineticAmount(reaction.fallOff.reducedPressure)}; log10(Pr) ={' '}
+                {formatKineticAmount(reaction.fallOff.log10ReducedPressure)}; F ={' '}
+                {formatKineticAmount(reaction.fallOff.broadeningFactor)}
+              </td>
+              <td>
+                {kineticProvenanceSource(reaction.provenance)}; k₀ —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.lowPressureLimit)}; k∞ —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.highPressureLimit)}; уширение —{' '}
+                {kineticProvenanceSource(reaction.parameterProvenance.broadening)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Полная история запусков эксперимента (корректирующий пакет
+ * трассируемости): ВСЕ запуски в хронологическом порядке, последний
+ * раскрыт по умолчанию, предыдущие свёрнуты. При раскрытии доступны
+ * расписание и аудит каждого сегмента; unavailable_legacy
+ * показывается с исходной причиной. Раскрытие — только
+ * переключение видимости уже сохранённых данных: повторные расчёты,
+ * реконструкции и обращения к каталогу не выполняются.
+ */
+function KineticRunHistoryView({ history }: { history: KineticExperimentRunRecord[] }) {
+  const entries = kineticRunHistoryViewModel(history);
+  const [expandedOverrides, setExpandedOverrides] = useState<Record<number, boolean>>({});
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="kinetic-run-history">
+      {entries.map((entry) => {
+        const run = history[entry.runIndex];
+        if (run === undefined) {
+          return null;
+        }
+        const expanded =
+          entry.runIndex in expandedOverrides ? expandedOverrides[entry.runIndex] === true : entry.defaultExpanded;
+        return (
+          <details key={entry.runIndex} className="kinetic-run-details" open={expanded}>
+            <summary
+              onClick={(event) => {
+                event.preventDefault();
+                setExpandedOverrides((prev) => ({ ...prev, [entry.runIndex]: !expanded }));
+              }}
+            >
+              Запуск №{run.runIndex + 1}
+              {entry.defaultExpanded ? ' (последний)' : ''}
+            </summary>
+            <p>
+              Физическое время:{' '}
+              {formatKineticAmount(run.startElapsedSeconds)} с → {formatKineticAmount(run.endElapsedSeconds)} с
+            </p>
+            <table className="atmosphere-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>T, K</th>
+                  <th>dt, с</th>
+                  <th>Реакции</th>
+                  <th>Начало, с</th>
+                  <th>Конец, с</th>
+                </tr>
+              </thead>
+              <tbody>
+                {run.segments.map((segment) => (
+                  <tr key={segment.index}>
+                    <td>{segment.index + 1}</td>
+                    <td>{segment.temperatureK}</td>
+                    <td>{formatKineticAmount(segment.dtSeconds)}</td>
+                    <td>
+                      {segment.reactionIds
+                        .map(
+                          (id) =>
+                            KINETIC_EXPERIMENT_REACTIONS.find((r) => r.id === id)?.label ?? id
+                        )
+                        .join(', ')}
+                    </td>
+                    <td>{formatKineticAmount(segment.startTimeSeconds)}</td>
+                    <td>{formatKineticAmount(segment.endTimeSeconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {run.segments.map((segment) => (
+              <div className="kinetic-audit" key={'audit-' + segment.index}>
+                <h5>Аудит сегмента №{segment.index + 1}: фактический расчёт</h5>
+                <KineticSegmentAuditView audit={segment.audit} />
+              </div>
+            ))}
+            {run.warnings.length > 0 && (
+              <p className="kinetic-warnings">Предупреждения: {run.warnings.join('; ')}</p>
+            )}
+            {run.assumptions.length > 0 && (
+              <p className="model-note">Предпосылки результата: {run.assumptions.join('; ')}</p>
+            )}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function KineticExperimentSection(props: {
+  world: GeneratedWorld;
+  onWorldReplace: (world: GeneratedWorld) => void;
+}) {
+  const world = props.world;
+  const experiment = world.kineticExperiment;
+
+  const [layerThicknessDraft, setLayerThicknessDraft] = useState('');
+  const [inventoryDraft, setInventoryDraft] = useState<Record<KineticSpeciesKey, string>>(
+    emptyKineticInventoryDraft()
+  );
+  const [scheduleDraft, setScheduleDraft] = useState<KineticSegmentDraft[]>([
+    { temperatureK: '', dtSeconds: '', reactionIds: [] }
+  ]);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const setSegmentField = (index: number, field: 'temperatureK' | 'dtSeconds', value: string) => {
+    setScheduleDraft((drafts) =>
+      drafts.map((draft, i) => (i === index ? { ...draft, [field]: value } : draft))
+    );
+  };
+
+  const toggleSegmentReaction = (index: number, reactionId: string) => {
+    setScheduleDraft((drafts) =>
+      drafts.map((draft, i) =>
+        i === index
+          ? {
+              ...draft,
+              reactionIds: draft.reactionIds.includes(reactionId)
+                ? draft.reactionIds.filter((id) => id !== reactionId)
+                : [...draft.reactionIds, reactionId]
+            }
+          : draft
+      )
+    );
+  };
+
+  const addSegment = () => {
+    setScheduleDraft((drafts) => [...drafts, { temperatureK: '', dtSeconds: '', reactionIds: [] }]);
+  };
+
+  const removeSegment = (index: number) => {
+    setScheduleDraft((drafts) =>
+      drafts.length <= 1 ? drafts : drafts.filter((_, i) => i !== index)
+    );
+  };
+
+  // Явный сброс эксперимента: только по действию пользователя,
+  // форма первичной настройки возвращается в пустое состояние.
+  const handleReset = () => {
+    props.onWorldReplace(resetWorldKineticExperiment(world));
+    setLayerThicknessDraft('');
+    setInventoryDraft(emptyKineticInventoryDraft());
+    setScheduleDraft([{ temperatureK: '', dtSeconds: '', reactionIds: [] }]);
+    setRunError(null);
+  };
+
+  const handleRun = () => {
+    setRunError(null);
+    const segments: Array<{ temperatureK: number; dtSeconds: number; reactionIds: string[] }> = [];
+    for (let i = 0; i < scheduleDraft.length; i++) {
+      const draft = scheduleDraft[i];
+      const temperatureRaw = draft.temperatureK.trim();
+      const dtRaw = draft.dtSeconds.trim();
+      if (temperatureRaw === '' || dtRaw === '') {
+        setRunError(`сегмент ${i + 1}: заполните температуру (K) и длительность (с)`);
+        return;
+      }
+      if (draft.reactionIds.length === 0) {
+        setRunError(`сегмент ${i + 1}: выберите хотя бы одну реакцию (№89 и/или №106)`);
+        return;
+      }
+      segments.push({
+        temperatureK: Number(temperatureRaw),
+        dtSeconds: Number(dtRaw),
+        reactionIds: [...draft.reactionIds]
+      });
+    }
+
+    // Первичная настройка передаётся ТОЛЬКО пока эксперимент не настроен:
+    // пустое поле не превращается в ноль (ключ просто не передаётся,
+    // адаптер назовёт отсутствующий вид), толщина пустая → NaN → явный
+    // отказ адаптера, а не молчаливый ноль.
+    let setup: { layerThicknessM: number; initialInventoriesMolM2: Partial<Record<KineticSpeciesKey, number>> } | undefined;
+    if (!experiment) {
+      const thicknessRaw = layerThicknessDraft.trim();
+      const initialInventoriesMolM2: Partial<Record<KineticSpeciesKey, number>> = {};
+      for (const field of KINETIC_EXPERIMENT_SPECIES_FIELDS) {
+        const raw = inventoryDraft[field.key].trim();
+        if (raw !== '') {
+          initialInventoriesMolM2[field.key] = Number(raw);
+        }
+      }
+      setup = {
+        layerThicknessM: thicknessRaw === '' ? NaN : Number(thicknessRaw),
+        initialInventoriesMolM2
+      };
+    }
+
+    try {
+      const nextWorld = runWorldKineticTrajectory(
+        world,
+        experiment ? { segments } : { segments, setup }
+      );
+      // Ошибка запуска не изменяет отображаемый мир: мир заменяется
+      // только при полном успешном завершении траектории.
+      props.onWorldReplace(nextWorld);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  return (
+    <div className="kinetic-experiment">
+      <h3>Кинетический эксперимент — ограниченный механизм №89/№106</h3>
+      <p className="kinetic-experiment-note">
+        ⚠ Отдельный пользовательский расчётный сценарий в паспорте мира. Он не изменяет
+        основной атмосферный ChemicalEvolutionState, не подключён к игровым часам и не
+        моделирует перенос, диффузию, конвекцию или пополнение вещества. Начальные
+        запасы вводятся пользователем явно и не извлекаются автоматически из
+        атмосферного состава: радикалов O, NO, NO₂, H и HO₂ в атмосферном каталоге нет.
+      </p>
+
+      {!experiment && (
+        <div className="kinetic-setup">
+          <h4>Первичная настройка</h4>
+          <p className="model-note">
+            Все поля пустые по умолчанию: пустое поле не превращается в ноль. Для
+            реакционных видов (O, NO, NO₂, H, O₂, HO₂) допустим явный 0; N₂ обязан быть
+            конечным и строго положительным (третье тело механизма).
+          </p>
+          <div className="kinetic-setup-grid">
+            <label>
+              Толщина слоя, м
+              <input
+                type="text"
+                value={layerThicknessDraft}
+                onChange={(e) => setLayerThicknessDraft(e.target.value)}
+                placeholder="например, 1000"
+              />
+            </label>
+            {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+              <label key={field.key}>
+                Начальный запас {field.formula}, моль/м²
+                <input
+                  type="text"
+                  value={inventoryDraft[field.key]}
+                  onChange={(e) =>
+                    setInventoryDraft((draft) => ({ ...draft, [field.key]: e.target.value }))
+                  }
+                  placeholder="число или 0"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {experiment && (
+        <div className="kinetic-status">
+          <h4>Состояние эксперимента</h4>
+          <div className="physics-grid">
+            <div><span>Толщина слоя:</span> {formatKineticAmount(experiment.layerThicknessM)} м</div>
+            <div><span>Накопленное физическое время:</span> {formatKineticAmount(experiment.elapsedSeconds)} с</div>
+            <div><span>Успешных запусков:</span> {experiment.completedRuns}</div>
+          </div>
+          <table className="atmosphere-table">
+            <thead>
+              <tr>
+                {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+                  <th key={field.key}>{field.formula}, моль/м²</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {KINETIC_EXPERIMENT_SPECIES_FIELDS.map((field) => (
+                  <td key={field.key}>{formatKineticAmount(experiment.currentInventoriesMolM2[field.key])}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+          {experiment.history.length > 0 && <KineticRunHistoryView history={experiment.history} />}
+        </div>
+      )}
+
+      <div className="kinetic-schedule">
+        <h4>Расписание сегментов</h4>
+        <p className="model-note">
+          Температурные диапазоны: №89: 200–300 K; №106: 300–400 K; совместный выбор
+          №89+№106 допустим только при 300 K. Ничего не исправляется и не отключается
+          автоматически: ошибка запуска будет показана с причиной из механизма.
+        </p>
+        {scheduleDraft.map((draft, i) => (
+          <div className="kinetic-segment" key={i}>
+            <span className="kinetic-segment-title">Сегмент {i + 1}</span>
+            <label>
+              T, K
+              <input
+                type="text"
+                value={draft.temperatureK}
+                onChange={(e) => setSegmentField(i, 'temperatureK', e.target.value)}
+                placeholder="например, 250"
+              />
+            </label>
+            <label>
+              dt, с
+              <input
+                type="text"
+                value={draft.dtSeconds}
+                onChange={(e) => setSegmentField(i, 'dtSeconds', e.target.value)}
+                placeholder="например, 100"
+              />
+            </label>
+            {KINETIC_EXPERIMENT_REACTIONS.map((reaction) => (
+              <label className="kinetic-reaction-option" key={reaction.id}>
+                <input
+                  type="checkbox"
+                  checked={draft.reactionIds.includes(reaction.id)}
+                  onChange={() => toggleSegmentReaction(i, reaction.id)}
+                />
+                {reaction.label}
+              </label>
+            ))}
+            <button
+              className="secondary"
+              onClick={() => removeSegment(i)}
+              disabled={scheduleDraft.length <= 1}
+            >
+              Удалить сегмент
+            </button>
+          </div>
+        ))}
+        <button className="secondary" onClick={addSegment}>
+          Добавить сегмент
+        </button>
+      </div>
+
+      {runError && <div className="kinetic-error">✖ {runError}</div>}
+
+      <div className="kinetic-actions">
+        <button className="primary" onClick={handleRun}>
+          {experiment ? 'Выполнить запуск' : 'Настроить и выполнить запуск'}
+        </button>
+        {experiment && (
+          <button className="danger" onClick={handleReset}>
+            Сбросить эксперимент
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Компонент для отображения мира
+/**
+ * Draft для одного вертикального реакционного слоя. Поля намеренно
+ * вводятся независимо: UI не реконструирует профиль из surface T/scale height.
+ */
+interface PrimaryPhysicalKineticLayerDraft {
+  key: number;
+  sourceLayerId?: string;
+  reaction89: boolean;
+  reaction106: boolean;
+  temperatureK: string;
+  bottomAltitudeM: string;
+  topAltitudeM: string;
+  temperatureSourceName: string;
+  temperatureSourceReference: string;
+  altitudeSourceName: string;
+  altitudeSourceReference: string;
+  inventorySourceName: string;
+  inventorySourceReference: string;
+  inventories: Record<string, string>;
+}
+
+function createPrimaryPhysicalKineticLayerDraft(key: number): PrimaryPhysicalKineticLayerDraft {
+  return {
+    key,
+    reaction89: false,
+    reaction106: false,
+    temperatureK: '',
+    bottomAltitudeM: '',
+    topAltitudeM: '',
+    temperatureSourceName: '',
+    temperatureSourceReference: '',
+    altitudeSourceName: '',
+    altitudeSourceReference: '',
+    inventorySourceName: '',
+    inventorySourceReference: '',
+    inventories: {}
+  };
+}
+
+/**
+ * Экспертный ввод физической химической конфигурации.
+ * Ни температура, толщина, радикальные запасы, концентрации, ни скорости
+ * не генерируются: пользователь вводит каждый параметр и его источник.
+ * Слои трактуются как неперекрывающиеся части общего столбового инвентаря.
+ */
+function PrimaryPhysicalKineticsConfigurator(props: {
+  world: GeneratedWorld;
+  onWorldReplace: (world: GeneratedWorld) => void;
+}) {
+  const state = props.world.chemicalState;
+  const [maximumMacroStepS, setMaximumMacroStepS] = useState('');
+  const [totalInventorySourceName, setTotalInventorySourceName] = useState('');
+  const [totalInventorySourceReference, setTotalInventorySourceReference] = useState('');
+  const [globalValues, setGlobalValues] = useState<Record<string, string>>({});
+  const [layerDrafts, setLayerDrafts] = useState<PrimaryPhysicalKineticLayerDraft[]>([
+    createPrimaryPhysicalKineticLayerDraft(1)
+  ]);
+  const [nextLayerKey, setNextLayerKey] = useState(2);
+  const [message, setMessage] = useState<string | null>(null);
+
+  if (!state) return null;
+
+  const reactionIdsForLayer = (layer: PrimaryPhysicalKineticLayerDraft): string[] => [
+    ...(layer.reaction89 ? ['kida-tb-2015-03-19-89'] : []),
+    ...(layer.reaction106 ? ['kida-tb-2015-03-19-106'] : [])
+  ];
+  const speciesForLayer = (layer: PrimaryPhysicalKineticLayerDraft) => [
+    ...(layer.reaction89 ? [
+      { id: 'o', label: 'O — атомарный кислород' },
+      { id: 'no', label: 'NO — оксид азота' },
+      { id: 'no2', label: 'NO₂ — диоксид азота' }
+    ] : []),
+    ...(layer.reaction106 ? [
+      { id: 'h', label: 'H — атомарный водород' },
+      { id: 'o2', label: 'O₂ — молекулярный кислород' },
+      { id: 'ho2', label: 'HO₂ — гидропероксильный радикал' }
+    ] : []),
+    ...(layer.reaction89 || layer.reaction106 ? [{ id: 'n2', label: 'N₂ — третье тело' }] : [])
+  ];
+  const speciesById = new Map(
+    layerDrafts.flatMap((layer) => speciesForLayer(layer)).map((item) => [item.id, item])
+  );
+  const species = [...speciesById.values()];
+  const selectedReactionIds = [...new Set(layerDrafts.flatMap(reactionIdsForLayer))];
+
+  const makeSource = (sourceName: string, reference: string, field: string) => ({
+    sourceName: sourceName.trim(),
+    sourceId: reference.trim(),
+    reference: reference.trim(),
+    note: 'Введено пользователем для ' + field
+  });
+
+  const updateLayerDraft = (
+    key: number,
+    patch: Partial<PrimaryPhysicalKineticLayerDraft>
+  ) => {
+    setLayerDrafts((current) =>
+      current.map((layer) => layer.key === key ? { ...layer, ...patch } : layer)
+    );
+  };
+
+  const thermalProfile =
+    props.world.coreWorldState?.bodies.find((body) => body.id === 'planet')
+      ?.thermalState?.atmosphericTemperatureProfile ?? null;
+
+  const importExplicitThermalProfile = () => {
+    setMessage(null);
+    if (thermalProfile === null) {
+      setMessage('В CoreWorldState нет atmosphericTemperatureProfile. Генератор мира пока создаёт только одиночную оценку температуры поверхности.');
+      return;
+    }
+    if (thermalProfile.status !== 'partial_profile' && thermalProfile.status !== 'complete_profile') {
+      setMessage(
+        'Импорт отклонён: статус профиля «' + thermalProfile.status +
+        '» не является вертикальным профилем. single_layer_estimate нельзя превращать в несколько слоёв.'
+      );
+      return;
+    }
+    const profileIssues = validateAtmosphericTemperatureProfile(thermalProfile);
+    if (profileIssues.length > 0) {
+      setMessage('Профиль температур не прошёл валидацию: ' + profileIssues.join('; '));
+      return;
+    }
+    if (thermalProfile.provenance === undefined) {
+      setMessage('У вертикального профиля отсутствует общий provenance высотных данных; автоматический импорт заблокирован.');
+      return;
+    }
+    const profileSourceName = thermalProfile.provenance.sourceName;
+    const profileSourceReference =
+      thermalProfile.provenance.reference ??
+      thermalProfile.provenance.sourceId ??
+      thermalProfile.provenance.datasetId ??
+      thermalProfile.provenance.recordId;
+    if (!profileSourceName || !profileSourceReference) {
+      setMessage('Provenance вертикального профиля должен содержать название и reference/ID источника.');
+      return;
+    }
+
+    const drafts: PrimaryPhysicalKineticLayerDraft[] = [];
+    for (let index = 0; index < thermalProfile.layers.length; index++) {
+      const sourceLayer = thermalProfile.layers[index]!;
+      const range = sourceLayer.altitudeRangeM;
+      if (
+        range === undefined ||
+        typeof range.min !== 'number' ||
+        !Number.isFinite(range.min) ||
+        typeof range.max !== 'number' ||
+        !Number.isFinite(range.max) ||
+        range.min < 0 ||
+        range.max <= range.min
+      ) {
+        setMessage(
+          'Импорт отклонён: слой «' + sourceLayer.layerId +
+          '» не имеет конечных нижней и верхней высот. Неизвестная верхняя граница не заменяется масштабной высотой.'
+        );
+        return;
+      }
+      const temperatureScientificValue = sourceLayer.temperature;
+      if (
+        temperatureScientificValue.status !== 'known' &&
+        temperatureScientificValue.status !== 'estimated'
+      ) {
+        setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не имеет числового статуса known/estimated.');
+        return;
+      }
+      const temperature = temperatureValueOrNull(temperatureScientificValue);
+      if (temperature === null || !Number.isFinite(temperature) || temperature <= 0) {
+        setMessage('Импорт отклонён: температура слоя «' + sourceLayer.layerId + '» не является пригодным положительным значением в K.');
+        return;
+      }
+      const temperatureProvenance =
+        temperatureScientificValue.provenance ?? thermalProfile.provenance;
+      const temperatureSourceName = temperatureProvenance.sourceName;
+      const temperatureSourceReference =
+        temperatureProvenance.reference ??
+        temperatureProvenance.sourceId ??
+        temperatureProvenance.datasetId ??
+        temperatureProvenance.recordId;
+      if (!temperatureSourceName || !temperatureSourceReference) {
+        setMessage('Для температуры слоя «' + sourceLayer.layerId + '» отсутствует идентифицируемый источник.');
+        return;
+      }
+      drafts.push({
+        ...createPrimaryPhysicalKineticLayerDraft(index + 1),
+        sourceLayerId: sourceLayer.layerId,
+        temperatureK: String(temperature),
+        bottomAltitudeM: String(range.min),
+        topAltitudeM: String(range.max),
+        temperatureSourceName,
+        temperatureSourceReference,
+        altitudeSourceName: profileSourceName,
+        altitudeSourceReference: profileSourceReference
+        // Reaction IDs and species inventories are intentionally NOT inferred.
+      });
+    }
+    if (drafts.length === 0) {
+      setMessage('Вертикальный профиль не содержит ни одного пригодного конечного слоя.');
+      return;
+    }
+    setLayerDrafts(drafts);
+    setNextLayerKey(drafts.length + 1);
+    setMessage(
+      'Температуры и высотные интервалы импортированы из проверенного ' +
+      thermalProfile.status + '. Реакции, подстолбовые/глобальные запасы и их provenance необходимо задать отдельно.'
+    );
+  };
+
+  const updateLayerInventory = (key: number, speciesId: string, value: string) => {
+    setLayerDrafts((current) =>
+      current.map((layer) =>
+        layer.key === key
+          ? { ...layer, inventories: { ...layer.inventories, [speciesId]: value } }
+          : layer
+      )
+    );
+  };
+
+  const addLayerDraft = () => {
+    if (layerDrafts.length >= 8) {
+      setMessage('В форме можно явно задать не более восьми слоёв; это ограничение интерфейса, а не физическое свойство модели.');
+      return;
+    }
+    setLayerDrafts((current) => [...current, createPrimaryPhysicalKineticLayerDraft(nextLayerKey)]);
+    setNextLayerKey((current) => current + 1);
+    setMessage(null);
+  };
+
+  const configure = () => {
+    setMessage(null);
+    if (state.mode !== 'column_inventory') {
+      setMessage('Физическая кинетика требует абсолютных запасов в моль/м² (column_inventory); нормированный игровой инвентарь не подходит.');
+      return;
+    }
+    if (selectedReactionIds.length === 0) {
+      setMessage('Выберите хотя бы одну параметризованную реакцию хотя бы в одном слое.');
+      return;
+    }
+    if (layerDrafts.length === 0) {
+      setMessage('Добавьте хотя бы один физический реакционный слой.');
+      return;
+    }
+
+    const numeric = (value: string, label: string): number | null => {
+      if (value.trim() === '') {
+        setMessage('Не задано поле «' + label + '». Отсутствующее значение не трактуется как ноль.');
+        return null;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setMessage('Поле «' + label + '» должно быть конечным неотрицательным числом.');
+        return null;
+      }
+      return parsed;
+    };
+    const positive = (value: string, label: string): number | null => {
+      const parsed = numeric(value, label);
+      if (parsed === null) return null;
+      if (parsed <= 0) {
+        setMessage('Поле «' + label + '» должно быть строго больше нуля.');
+        return null;
+      }
+      return parsed;
+    };
+
+    const maximumStep = positive(maximumMacroStepS, 'максимальный macro dt, с');
+    if (maximumStep === null) return;
+    if (totalInventorySourceName.trim() === '' || totalInventorySourceReference.trim() === '') {
+      setMessage('Укажите название и reference/ID источника полных атмосферных запасов.');
+      return;
+    }
+
+    const totalColumnInventoriesMolM2: Record<string, number> = {};
+    for (const item of species) {
+      const globalValue = numeric(
+        globalValues[item.id] ?? (state.inventory[item.id] === undefined ? '' : String(state.inventory[item.id])),
+        'полный атмосферный запас ' + item.id + ', моль/м²'
+      );
+      if (globalValue === null) return;
+      totalColumnInventoriesMolM2[item.id] = globalValue;
+    }
+
+    const globalSpeciesIds = [...new Set([
+      ...Object.keys(state.inventory),
+      ...species.map((item) => item.id)
+    ])].sort();
+    const totalInventoryProvenance = Object.fromEntries(
+      globalSpeciesIds.map((speciesId) => [
+        speciesId,
+        makeSource(
+          totalInventorySourceName,
+          totalInventorySourceReference,
+          'полного атмосферного запаса ' + speciesId
+        )
+      ])
+    );
+
+    const configuredLayers: ChemicalPhysicalKineticsState['layers'] = [];
+    for (let index = 0; index < layerDrafts.length; index++) {
+      const draft = layerDrafts[index]!;
+      const prefix = 'слой ' + (index + 1);
+      const temperature = positive(draft.temperatureK, prefix + ': температура, K');
+      if (temperature === null) return;
+      const bottomAltitudeM = numeric(draft.bottomAltitudeM, prefix + ': нижняя высота, м');
+      if (bottomAltitudeM === null) return;
+      const topAltitudeM = positive(draft.topAltitudeM, prefix + ': верхняя высота, м');
+      if (topAltitudeM === null) return;
+      if (topAltitudeM <= bottomAltitudeM) {
+        setMessage(prefix + ': верхняя высота должна быть строго выше нижней.');
+        return;
+      }
+      const thickness = topAltitudeM - bottomAltitudeM;
+
+      const sourceGroups = [
+        [draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': источник температуры'],
+        [draft.altitudeSourceName, draft.altitudeSourceReference, prefix + ': источник высотных границ'],
+        [draft.inventorySourceName, draft.inventorySourceReference, prefix + ': источник подстолбового инвентаря']
+      ] as const;
+      for (const [name, reference, label] of sourceGroups) {
+        if (name.trim() === '' || reference.trim() === '') {
+          setMessage('Укажите название и ссылку/ID: ' + label + '.');
+          return;
+        }
+      }
+
+      const draftReactionIds = reactionIdsForLayer(draft);
+      if (draftReactionIds.length === 0) {
+        setMessage(prefix + ': выберите хотя бы одну параметризованную реакцию для этого слоя.');
+        return;
+      }
+      const layerSpecies = speciesForLayer(draft);
+      const columnInventoriesMolM2: Record<string, number> = {};
+      for (const item of layerSpecies) {
+        const layerValue = numeric(
+          draft.inventories[item.id] ?? '',
+          prefix + ': подстолбовой запас ' + item.id + ', моль/м²'
+        );
+        if (layerValue === null) return;
+        columnInventoriesMolM2[item.id] = layerValue;
+      }
+
+      const altitudeProvenance = makeSource(
+        draft.altitudeSourceName,
+        draft.altitudeSourceReference,
+        prefix + ': абсолютные высотные границы'
+      );
+      configuredLayers.push({
+        layerId: draft.sourceLayerId ?? ('user-configured-layer-' + draft.key),
+        altitudeRangeM: { min: bottomAltitudeM, max: topAltitudeM },
+        altitudeProvenance,
+        layerThicknessM: thickness,
+        thicknessProvenance: altitudeProvenance,
+        temperatureK: temperature,
+        temperatureProvenance: makeSource(draft.temperatureSourceName, draft.temperatureSourceReference, prefix + ': локальная температура'),
+        columnInventoriesMolM2,
+        inventoryProvenance: makeSource(draft.inventorySourceName, draft.inventorySourceReference, prefix + ': подстолбовой запас'),
+        reactionIds: draftReactionIds
+      });
+    }
+
+    const config: ChemicalPhysicalKineticsState = {
+      maximumMacroStepS: maximumStep,
+      totalInventoryProvenance,
+      layers: configuredLayers
+    };
+    const result = configurePrimaryPhysicalChemicalKinetics(
+      state,
+      config,
+      totalColumnInventoriesMolM2
+    );
+    if (result.status !== 'configured') {
+      setMessage(result.diagnostics.join('; '));
+      return;
+    }
+
+    let coreWorldState = props.world.coreWorldState;
+    if (coreWorldState) {
+      const consistencyIssues = chemicalReservoirConsistencyIssues(coreWorldState, state);
+      if (consistencyIssues.length > 0) {
+        setMessage(
+          'Существующий CoreWorldState не согласован с основным ChemicalEvolutionState; ' +
+          'конфигурация не будет молча перезаписывать научные резервуары: ' +
+          consistencyIssues.join('; ')
+        );
+        return;
+      }
+      const hasAtmosphere = coreWorldState.reservoirs.some(
+        (reservoir) => reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+      );
+      if (!hasAtmosphere) {
+        setMessage('Существующее CoreWorldState не содержит атмосферный резервуар; конфигурация не применена.');
+        return;
+      }
+      coreWorldState = {
+        ...coreWorldState,
+        reservoirs: coreWorldState.reservoirs.map((reservoir) =>
+          reservoir.id === CHEMICAL_RESERVOIR_IDS.atmospheric
+            ? setMaterialInventory(reservoir, 'column_amount', result.state.inventory)
+            : reservoir
+        )
+      };
+    }
+    props.onWorldReplace({
+      ...props.world,
+      chemicalState: result.state,
+      ...(coreWorldState ? { coreWorldState } : {})
+    });
+    setMessage('Физическая конфигурация записана в основное ChemicalEvolutionState. Следующий шаг будет исполняться через Scheduler.');
+  };
+
+  return (
+    <details className="world-section">
+      <summary>Настроить физическую химическую кинетику (экспертный ввод)</summary>
+      <p className="model-note">
+        Только для column_inventory. Никакие T, толщины, концентрации, радикальные запасы или скорости не выводятся автоматически. Значения вводятся в физических единицах вместе с источниками. Каждый слой — отдельная неперекрывающаяся часть атмосферного столба.
+      </p>
+      {state.mode !== 'column_inventory' ? (
+        <p className="warning">Физический режим недоступен для нормированного игрового инвентаря.</p>
+      ) : (
+        <>
+          <fieldset>
+            <legend>Максимальный физический шаг</legend>
+            <label>Maximum macro dt, с (численное ограничение, не τ реакции)
+              <input type="number" min="0" step="any" value={maximumMacroStepS} onChange={(event) => setMaximumMacroStepS(event.target.value)} />
+            </label>
+          </fieldset>
+
+          {species.length > 0 && (
+            <fieldset>
+              <legend>Полные атмосферные запасы, моль/м²</legend>
+              <p className="model-note">Это общий столб для всех слоёв. Уже известные значения показываются из ChemicalEvolutionState; отсутствующие радикальные запасы остаются пустыми. Источник, указанный ниже, относится также к остальным видам полного атмосферного инвентаря, которые не включены в реакционные слои и будут отражены как немоделируемый остаток.</p>
+              {species.map((item) => (
+                <div key={item.id}>
+                  <strong>{item.label}</strong>
+                  <label>Полный атмосферный столб
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={globalValues[item.id] ?? (state.inventory[item.id] === undefined ? '' : String(state.inventory[item.id]))}
+                      onChange={(event) => setGlobalValues((current) => ({ ...current, [item.id]: event.target.value }))}
+                    />
+                  </label>
+                </div>
+              ))}
+              <label>Источник полных атмосферных запасов — название
+                <input value={totalInventorySourceName} onChange={(event) => setTotalInventorySourceName(event.target.value)} />
+              </label>
+              <label>Источник полных атмосферных запасов — reference / ID
+                <input value={totalInventorySourceReference} onChange={(event) => setTotalInventorySourceReference(event.target.value)} />
+              </label>
+            </fieldset>
+          )}
+
+          <div className="physical-kinetic-layers">
+            {layerDrafts.map((layer, index) => (
+              <fieldset key={layer.key}>
+                <legend>Реакционный слой {index + 1}</legend>
+                <fieldset>
+                  <legend>Реакции этого слоя</legend>
+                  <label>
+                    <input type="checkbox" checked={layer.reaction89}
+                      onChange={(event) => updateLayerDraft(layer.key, { reaction89: event.target.checked })} />
+                    {' '}#89: O + NO + N₂ → NO₂ + N₂ (200–300 K)
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={layer.reaction106}
+                      onChange={(event) => updateLayerDraft(layer.key, { reaction106: event.target.checked })} />
+                    {' '}#106: H + O₂ + N₂ → HO₂ + N₂ (300–400 K)
+                  </label>
+                  <p className="model-note">
+                    Выбранные реакции применяются только к этому слою. Температура слоя обязана находиться в диапазоне каждой выбранной записи.
+                  </p>
+                </fieldset>
+                {layerDrafts.length > 1 && (
+                  <button type="button" className="secondary" onClick={() => {
+                    setLayerDrafts((current) => current.filter((candidate) => candidate.key !== layer.key));
+                  }}>
+                    Удалить слой
+                  </button>
+                )}
+                <label>Локальная температура, K
+                  <input type="number" min="0" step="any" value={layer.temperatureK}
+                    onChange={(event) => updateLayerDraft(layer.key, { temperatureK: event.target.value })} />
+                </label>
+                <label>Нижняя высота слоя над поверхностью, м
+                  <input type="number" min="0" step="any" value={layer.bottomAltitudeM}
+                    onChange={(event) => updateLayerDraft(layer.key, { bottomAltitudeM: event.target.value })} />
+                </label>
+                <label>Верхняя высота слоя над поверхностью, м
+                  <input type="number" min="0" step="any" value={layer.topAltitudeM}
+                    onChange={(event) => updateLayerDraft(layer.key, { topAltitudeM: event.target.value })} />
+                </label>
+                <p className="model-note">
+                  Толщина вычисляется строго как верхняя минус нижняя высота; диапазоны соседних слоёв должны не перекрываться.
+                </p>
+
+                {speciesForLayer(layer).length > 0 && (
+                  <div>
+                    <strong>Подстолбовые запасы этого слоя, моль/м²</strong>
+                    {speciesForLayer(layer).map((item) => (
+                      <label key={item.id}>{item.label}
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={layer.inventories[item.id] ?? ''}
+                          onChange={(event) => updateLayerInventory(layer.key, item.id, event.target.value)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <label>Источник температуры — название
+                  <input value={layer.temperatureSourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { temperatureSourceName: event.target.value })} />
+                </label>
+                <label>Источник температуры — reference / ID
+                  <input value={layer.temperatureSourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { temperatureSourceReference: event.target.value })} />
+                </label>
+                <label>Источник высотных границ / геометрии — название
+                  <input value={layer.altitudeSourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { altitudeSourceName: event.target.value })} />
+                </label>
+                <label>Источник высотных границ / геометрии — reference / ID
+                  <input value={layer.altitudeSourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { altitudeSourceReference: event.target.value })} />
+                </label>
+                <label>Источник подстолбовых запасов — название
+                  <input value={layer.inventorySourceName}
+                    onChange={(event) => updateLayerDraft(layer.key, { inventorySourceName: event.target.value })} />
+                </label>
+                <label>Источник подстолбовых запасов — reference / ID
+                  <input value={layer.inventorySourceReference}
+                    onChange={(event) => updateLayerDraft(layer.key, { inventorySourceReference: event.target.value })} />
+                </label>
+              </fieldset>
+            ))}
+          </div>
+          <button type="button" className="secondary" disabled={layerDrafts.length >= 8} onClick={addLayerDraft}>
+            Добавить ещё один реакционный слой ({layerDrafts.length}/8)
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={
+              thermalProfile === null ||
+              (thermalProfile.status !== 'partial_profile' && thermalProfile.status !== 'complete_profile')
+            }
+            onClick={importExplicitThermalProfile}
+          >
+            Импортировать валидированный вертикальный профиль T(z)
+          </button>
+          {thermalProfile?.status === 'single_layer_estimate' && (
+            <p className="model-note">
+              Доступна только single_layer_estimate: это не вертикальный профиль и он не будет размножен на несколько слоёв.
+            </p>
+          )}
+          {thermalProfile === null && (
+            <p className="model-note">
+              В текущем CoreWorldState нет отдельного вертикального профиля T(z). Генератор не создаёт его автоматически; используйте ручной ввод только при наличии реальных высотных/температурных данных.
+            </p>
+          )}
+          {thermalProfile?.status === 'unknown' && (
+            <p className="model-note">
+              Вертикальный профиль имеет статус unknown; импорт недоступен до появления слоя с конечными высотами, пригодной температурой и provenance.
+            </p>
+          )}
+          <p className="model-note">Слои — неперекрывающиеся части одного столба. Сумма запасов каждого вида по всем слоям не может превышать полный атмосферный запас; это проверяется перед сохранением.</p>
+
+          <button type="button" className="secondary" disabled={selectedReactionIds.length === 0} onClick={configure}>
+            Проверить и сохранить физическую конфигурацию
+          </button>
+        </>
+      )}
+      {message && <p className="model-note">{message}</p>}
+    </details>
+  );
+}
+
 function WorldDisplay(props: {
   world: GeneratedWorld | null;
   onSave: () => void;
   onClose: () => void;
+  onChemicalStep?: () => void;
+  /** Причина отклонённого шага химии (Stage 4.2.3.3); null/undefined — шаг успешен. */
+  chemicalStepNotice?: string | null;
+  onWorldReplace: (world: GeneratedWorld) => void;
 }) {
   if (!props.world) return null;
 
@@ -258,17 +1434,23 @@ function WorldDisplay(props: {
       </div>
 
       <div className="world-physics">
-        <h3>Физические характеристики</h3>
+        {/* Stage 4.2.4: единый канонический путь характеристик тела.
+            Один блок вместо двух: значения берутся из bodyPhysics через
+            ScientificValue (число показывается только для known/estimated,
+            неизвестные — текстом статуса, никогда нулём); для старых
+            сохранений без физической модели показываются легаси-оценки
+            с явной пометкой. */}
+        <h3>Физические характеристики тела</h3>
         <div className="physics-grid">
-          {world.physicalCharacteristics.mass && (
-            <div><span>Масса:</span> {world.physicalCharacteristics.mass} масс Земли</div>
-          )}
-          {world.physicalCharacteristics.radius && (
-            <div><span>Радиус:</span> {world.physicalCharacteristics.radius} радиусов Земли</div>
-          )}
-          {world.physicalCharacteristics.surfaceGravity && (
-            <div><span>Гравитация:</span> {world.physicalCharacteristics.surfaceGravity}g</div>
-          )}
+          {bodyCharacteristicsDisplayRows({
+            bodyPhysics: world.bodyPhysics ?? null,
+            physicalCharacteristics: world.physicalCharacteristics
+          }).map((row) => (
+            <div key={row.key}>
+              <span>{row.label}:</span> {row.display}
+              {row.note !== '' && <small> ({row.note})</small>}
+            </div>
+          ))}
           {world.physicalCharacteristics.surfaceTemperature && (
             <div><span>Температура:</span> {world.physicalCharacteristics.surfaceTemperature} K</div>
           )}
@@ -280,6 +1462,337 @@ function WorldDisplay(props: {
           )}
         </div>
       </div>
+
+      {/* --- Этап 3: физическая модель планетарной системы --- */}
+
+      {world.bodyPhysics && (
+        <div className="world-physics">
+          <h3>Согласованность физической модели тела</h3>
+          <div className="physics-grid">
+            <div>
+              <span>Согласованность:</span>{' '}
+              {world.bodyPhysics.consistencyCheck.plausible
+                ? `правдоподобная плотность (${world.bodyPhysics.consistencyCheck.note})`
+                : `⚠ ${world.bodyPhysics.consistencyCheck.note}`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(world.centralObjectSystem || world.orbit || world.energyBudget) && (
+        <div className="world-physics">
+          <h3>Астрономическая система</h3>
+          <div className="physics-grid">
+            {world.centralObjectSystem && (
+              <div><span>Структура системы:</span> {describeCentralObjectSystem(world.centralObjectSystem)}</div>
+            )}
+            {world.orbit && (
+              <>
+                <div><span>Орбита:</span> {world.orbit.orbitalBasis}</div>
+                <div>
+                  <span>Большая полуось:</span>{' '}
+                  {world.orbit.semiMajorAxis.value !== null
+                    ? `${(world.orbit.semiMajorAxis.value / 1.495978707e11).toFixed(3)} а.е. (${world.orbit.semiMajorAxis.value.toExponential(2)} м)`
+                    : `неизвестно — ${world.orbit.semiMajorAxis.note ?? ''}`}
+                </div>
+                {world.orbit.eccentricity.value !== null && (
+                  <div><span>Эксцентриситет:</span> {world.orbit.eccentricity.value.toFixed(3)}</div>
+                )}
+                {world.orbit.orbitalPeriod.value !== null && (
+                  <div>
+                    <span>Орбитальный период:</span>{' '}
+                    {(world.orbit.orbitalPeriod.value / 3.15576e7).toFixed(2)} лет
+                  </div>
+                )}
+                <div>
+                  <span>Приливный захват:</span> {world.orbit.tidalLocking.value === 'possible' ? 'возможен' : world.orbit.tidalLocking.value === 'unknown' ? 'неизвестно' : 'маловероятен'}
+                </div>
+                <div><span>Устойчивость:</span> {world.orbit.stabilityCheck === 'not_performed' ? 'динамически не проверялась' : world.orbit.stabilityCheck}</div>
+              </>
+            )}
+            {world.energyBudget && (
+              <>
+                <div><span>Падающий поток:</span> {formatPhysValue(world.energyBudget.incidentFlux)}</div>
+                <div><span>Равновесная температура:</span> {formatPhysValue(world.energyBudget.equilibriumTemperature)}</div>
+                <div><span>Внутреннее тепло:</span> {formatHeatLevel(world.energyBudget.internalHeatLevel)}</div>
+              </>
+            )}
+          </div>
+          {world.energyBudget && (
+            <p className="model-note">ℹ {world.energyBudget.greenhouseNote}</p>
+          )}
+        </div>
+      )}
+
+      {world.atmospherePhysics && (
+        <div className="world-atmosphere">
+          <h3>Физическая модель атмосферы</h3>
+          <table className="atmosphere-table">
+            <thead>
+              <tr>
+                <th>Газ</th>
+                <th>Молярная доля</th>
+                <th>Парциальное давление, Па</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(world.atmospherePhysics.molarFractions).map(([gasId, fraction]) => {
+                const gas = gases.find(g => g.id === gasId);
+                const partial = world.atmospherePhysics?.partialPressuresPa[gasId]?.value;
+                return (
+                  <tr key={gasId}>
+                    <td>{gas?.name || gasId}</td>
+                    <td>{(fraction * 100).toFixed(4)}%</td>
+                    <td>{partial !== null && partial !== undefined ? partial.toExponential(3) : 'неизвестно'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="physics-grid">
+            {world.atmospherePhysics.surfacePressurePa && (
+              <div><span>Общее давление:</span> {formatPhysValue(world.atmospherePhysics.surfacePressurePa)}</div>
+            )}
+            {world.atmospherePhysics.meanMolarMassKgMol && (
+              <div><span>Средняя молярная масса:</span> {(world.atmospherePhysics.meanMolarMassKgMol.value ?? 0).toFixed(4)} кг/моль</div>
+            )}
+            {world.atmospherePhysics.columnMassKgM2 && (
+              <div><span>Масса столба:</span> {formatPhysValue(world.atmospherePhysics.columnMassKgM2)}</div>
+            )}
+            {world.atmospherePhysics.columnMolM2 && (
+              <div><span>Вещество столба:</span> {formatPhysValue(world.atmospherePhysics.columnMolM2)}</div>
+            )}
+          </div>
+          <p className="model-note">ℹ {world.atmospherePhysics.idealGasNote}</p>
+          <p className="model-note">⚠ {world.atmospherePhysics.fugacityNote}</p>
+        </div>
+      )}
+
+      {world.phaseAnalysis && (
+        <div className="world-phases">
+          <h3>Фазовые состояния компонентов</h3>
+          <ul>
+            {world.phaseAnalysis.components.map(component => {
+              const gas = gases.find(g => g.id === component.gasId);
+              return (
+                <li key={component.gasId}>
+                  <strong>{gas?.name || component.gasId}:</strong>{' '}
+                  {formatPhaseState(component.state)}
+                  {component.screeningRatio !== null && component.screeningRatio !== undefined && ` (S = ${component.screeningRatio.toFixed(2)})`}
+                  {component.extrapolated && ' — вне экспериментального диапазона корреляции'}
+                  {` — ${component.message}`}
+                </li>
+              );
+            })}
+          </ul>
+          {world.phaseAnalysis.warnings.map((warning, i) => (
+            <p key={i} className="warning">⚠ {warning}</p>
+          ))}
+        </div>
+      )}
+
+      {world.geologyAnalysis && (
+        <div className="world-physics">
+          <h3>Внутреннее тепло и геология</h3>
+          <div className="physics-grid">
+            <div><span>Суммарный уровень:</span> {formatHeatLevel(world.geologyAnalysis.totalInternalHeat)}</div>
+            <div>
+              <span>Геотермальная энергия:</span>{' '}
+              {world.geologyAnalysis.geothermalEnergyAvailable ? 'доступна' : 'недоступна (автоматически не добавляется)'}
+            </div>
+            <div><span>Остаточное тепло:</span> {formatHeatSource(world.geologyAnalysis.primordialHeat)}</div>
+            <div><span>Радиогенный нагрев:</span> {formatHeatSource(world.geologyAnalysis.radiogenicHeat)}</div>
+            <div><span>Приливный нагрев:</span> {formatHeatSource(world.geologyAnalysis.tidalHeat)}</div>
+            <div>
+              <span>Вулканизм:</span>{' '}
+              {world.geologyAnalysis.volcanism === true ? 'возможен' : world.geologyAnalysis.volcanism === null ? 'неизвестно' : 'маловероятен'}
+            </div>
+            <div>
+              <span>Гидротермальные системы:</span>{' '}
+              {world.geologyAnalysis.hydrothermalSystems === true ? 'возможны' : world.geologyAnalysis.hydrothermalSystems === null ? 'неизвестно' : 'маловероятны'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {world.chemicalState && (
+        <div className="world-chemistry">
+          <h3>Химическая эволюция</h3>
+          <div className="physics-grid">
+            <div>
+              <span>Режим инвентаря:</span>{' '}
+              {world.chemicalState.mode === 'column_inventory'
+                ? 'моль/м² атмосферного столба'
+                : 'нормированный игровой (абсолютное количество неизвестно)'}
+            </div>
+            <div><span>Модельное время:</span> {world.chemicalState.modelTimeYears.toExponential(2)} лет</div>
+            {world.chemicalState.physicalKinetics ? (
+              <div>
+                <span>Физический Scheduler:</span> активен; максимальный macro dt{' '}
+                {world.chemicalState.physicalKinetics.maximumMacroStepS.toExponential(3)} с
+              </div>
+            ) : (
+              <div>
+                <span>Длительность игрового шага:</span>{' '}
+                {world.chemicalState.stepDurationYears.toExponential(2)} лет (дискретное допущение режима A)
+              </div>
+            )}
+            {world.chemicalState.surfacePressurePa !== null && (
+              <div><span>Давление:</span> {world.chemicalState.surfacePressurePa.toExponential(4)} Па</div>
+            )}
+            <div>
+              <span>Баланс O₂ (за последний шаг):</span> производство {world.chemicalState.oxygenBalance.production.toExponential(2)},
+              потребление {world.chemicalState.oxygenBalance.consumption.toExponential(2)},
+              итог {world.chemicalState.oxygenBalance.net.toExponential(2)}{' '}
+              {world.chemicalState.mode === 'column_inventory' ? 'моль/м²' : 'нормированные игровые единицы'}
+            </div>
+          </div>
+          <p className="model-note">ℹ {world.chemicalState.unitsNote}</p>
+          {!world.chemicalState.physicalKinetics && (
+            <PrimaryPhysicalKineticsConfigurator
+              world={world}
+              onWorldReplace={props.onWorldReplace}
+            />
+          )}
+          {world.chemicalState.physicalKinetics ? (
+            <div className="model-note">
+              Физический кинетический режим настроен явно: {world.chemicalState.physicalKinetics.layers.length} реакционных слоёв; реакции не используют extentFraction или gameSpeedCoefficient.
+              {world.chemicalState.physicalKineticsHistory?.length
+                ? ` Зафиксировано физических транзакций: ${world.chemicalState.physicalKineticsHistory.length}.`
+                : ' Физическая транзакция ещё не выполнялась.'}
+            </div>
+          ) : (
+            <div className="model-note">
+              Физические кинетические слои не заданы; кнопка ниже использует прежний игровой режим A, а не физический расчёт скоростей.
+            </div>
+          )}
+          {world.chemicalState.physicalKineticsHistory?.length ? (
+            <details>
+              <summary>Последняя физическая кинетическая транзакция ({world.chemicalState.physicalKineticsHistory.length} всего)</summary>
+              {world.chemicalState.physicalKineticsHistory.slice(-1).map((audit) => (
+                <div key={audit.schedulerStep}>
+                  <p>
+                    Scheduler step #{audit.schedulerStep}; dt={audit.durationS.toExponential(4)} с;{' '}
+                    τlocal={audit.characteristicTimeS === null ? 'не определено' : audit.characteristicTimeS.toExponential(4) + ' с'};{' '}
+                    {audit.stepSelectionMethod}
+                  </p>
+                  {audit.layers.map((layer) => (
+                    <div key={layer.layerId}>
+                      <strong>Слой {layer.layerId}</strong>
+                      <p>
+                        T={layer.temperatureK} K; высоты={
+                          layer.altitudeRangeM
+                            ? `${layer.altitudeRangeM.min}–${layer.altitudeRangeM.max} м`
+                            : 'не заданы'
+                        }; толщина={layer.layerThicknessM} м;{' '}
+                        N₂={layer.thirdBody.inventoryMolM2.toExponential(3)} моль/м² (
+                        {layer.thirdBody.concentrationMoleculeCm3.toExponential(3)} молекул/см³);{' '}
+                        принято шагов ODE: {layer.integration.acceptedSteps}; отброшено: {layer.integration.rejectedSteps};{' '}
+                        метод: {layer.integration.method}
+                      </p>
+                      <ul>
+                        {layer.reactions.map((reaction) => (
+                          <li key={reaction.reactionId}>
+                            {reaction.reactionId}: k={reaction.rateConstant.value.toExponential(4)} {reaction.rateConstant.unit};{' '}
+                            диапазон {reaction.appliedRangeK.min}–{reaction.appliedRangeK.max} K;{' '}
+                            источник: {reaction.provenance.sourceName ?? reaction.provenance.reference ?? 'не указан'};{' '}
+                            неопределённость: {reaction.uncertainty.status}
+                          </li>
+                        ))}
+                      </ul>
+                      <details>
+                        <summary>Проверяемое происхождение входных данных</summary>
+                        <p>
+                          Температура: {layer.temperatureProvenance.sourceName ?? '—'};{' '}
+                          {layer.temperatureProvenance.reference ?? layer.temperatureProvenance.sourceId ?? 'reference не указан'}
+                        </p>
+                        <p>
+                          Толщина: {layer.thicknessProvenance.sourceName ?? '—'};{' '}
+                          {layer.thicknessProvenance.reference ?? layer.thicknessProvenance.sourceId ?? 'reference не указан'}
+                        </p>
+                        <p>
+                          Подстолбовые запасы: {layer.inventoryProvenance.sourceName ?? '—'};{' '}
+                          {layer.inventoryProvenance.reference ?? layer.inventoryProvenance.sourceId ?? 'reference не указан'};{' '}
+                          метод: {layer.inventoryProvenance.method ?? 'первичный вход'}
+                        </p>
+                        <ul>
+                          {Object.entries(layer.totalInventoryProvenance).map(([speciesId, provenance]) => (
+                            <li key={speciesId}>
+                              {speciesId}: {provenance.sourceName ?? '—'};{' '}
+                              {provenance.reference ?? provenance.sourceId ?? 'reference не указан'};{' '}
+                              метод: {provenance.method ?? 'первичный вход'}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </div>
+                  ))}
+                  {Object.keys(audit.unmodeledColumnResiduals).length > 0 && (
+                    <details>
+                      <summary>Часть атмосферного столба вне реакционных слоёв</summary>
+                      <p className="model-note">
+                        Эти запасы не участвовали в кинетическом RHS, остаются неизменными и не перераспределяются между слоями.
+                      </p>
+                      <ul>
+                        {Object.entries(audit.unmodeledColumnResiduals).map(([speciesId, residual]) => (
+                          <li key={speciesId}>
+                            {speciesId}: {residual.amountMolM2.toExponential(5)} моль/м²;{' '}
+                            источник: {residual.provenance.sourceName ?? '—'};{' '}
+                            {residual.provenance.reference ?? residual.provenance.sourceId ?? 'reference не указан'};{' '}
+                            метод: {residual.provenance.method ?? 'первичный вход'}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {audit.warnings.length > 0 && (
+                    <>
+                      <strong>Предупреждения источников/вычисления</strong>
+                      <ul>
+                        {audit.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+                      </ul>
+                    </>
+                  )}
+                  {audit.assumptions.length > 0 && (
+                    <details>
+                      <summary>Допущения текущего кинетического шага</summary>
+                      <ul>
+                        {audit.assumptions.map((assumption, index) => <li key={index}>{assumption}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </details>
+          ) : null}
+          {world.chemicalState.history.length > 0 && (
+            <details>
+              <summary>История шагов ({world.chemicalState.history.length})</summary>
+              <ul>
+                {world.chemicalState.history.map((record, i) => (
+                  <li key={i}>
+                    {record.reactionId}: {record.applied ? 'выполнена' : `не выполнена (${record.reason})`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {props.onChemicalStep && (
+            <button onClick={props.onChemicalStep} className="secondary">
+              {world.chemicalState.physicalKinetics
+                ? 'Выполнить физический кинетический шаг'
+                : 'Сделать шаг химической эволюции (режим A)'}
+            </button>
+          )}
+          {props.chemicalStepNotice && (
+            <p className="model-note">
+              ⚠ Шаг химической эволюции НЕ выполнен: {props.chemicalStepNotice}
+            </p>
+          )}
+        </div>
+      )}
+
+      <KineticExperimentSection world={world} onWorldReplace={props.onWorldReplace} />
 
       {world.warnings.length > 0 && (
         <div className="world-warnings">
@@ -463,6 +1976,78 @@ function formatScientificStatus(status: string): string {
   return map[status] || status;
 }
 
+// ===== Помощники отображения физической модели (этап 3) =====
+
+// Русская метка степени научной достоверности значения
+function formatConfidence(confidence: ScientificConfidence): string {
+  const map: Record<ScientificConfidence, string> = {
+    'established': 'установлено',
+    'derived': 'рассчитано',
+    'estimated': 'оценка',
+    'hypothetical': 'гипотеза',
+    'game_assumption': 'игровое допущение',
+    'unknown': 'неизвестно'
+  };
+  return map[confidence] ?? confidence;
+}
+
+// Форматирование физического значения с указанием достоверности:
+// пользователь видит, где известная физика, а где модельное предположение.
+function formatPhysValue(value: PhysValue): string {
+  if (value.value === null) {
+    return `неизвестно — ${value.note ?? 'данных недостаточно'}`;
+  }
+  return `${value.value.toExponential(3)} ${value.unit} [${formatConfidence(value.confidence)}]`;
+}
+
+// Русская метка фазового состояния компонента
+function formatPhaseState(state: string): string {
+  const map: Record<string, string> = {
+    'gas': 'газ',
+    'potentially_condensing': 'потенциальная конденсация',
+    'potential_solid_deposition': 'возможно выпадение твёрдой фазы',
+    'no_condensation_above_critical': 'выше критической температуры',
+    'unknown': 'неизвестно'
+  };
+  return map[state] ?? state;
+}
+
+// Русская метка уровня внутреннего тепла
+function formatHeatLevel(level: string): string {
+  const map: Record<string, string> = {
+    'high': 'высокий',
+    'moderate': 'умеренный',
+    'low': 'низкий',
+    'none': 'отсутствует',
+    'unknown': 'неизвестно'
+  };
+  return map[level] ?? level;
+}
+
+// Описание отдельного источника внутреннего тепла
+function formatHeatSource(source: { level: string | null; status: string; note: string }): string {
+  if (source.level === null) {
+    return `${source.status === 'potential' ? 'возможен, не оценён' : 'не оценён'} — ${source.note}`;
+  }
+  return `${formatHeatLevel(source.level)} — ${source.note}`;
+}
+
+// Краткое описание структурированной системы центрального объекта
+function describeCentralObjectSystem(system: NonNullable<GeneratedWorld['centralObjectSystem']>): string {
+  switch (system.kind) {
+    case 'star':
+      return `звезда спектрального класса ${system.spectralClass} (масса ${(system.massKg.range?.min ?? 0).toExponential(1)}–${(system.massKg.range?.max ?? 0).toExponential(1)} кг; время жизни класса ${system.typicalLifetimeGyr.min}–${system.typicalLifetimeGyr.max} млрд лет)`;
+    case 'compact_remnant':
+      return `компактный остаток (${system.remnantType === 'white_dwarf' ? 'белый карлик' : system.remnantType === 'neutron_star' ? 'нейтронная звезда' : 'чёрная дыра'})${system.accretionDependent ? '; мощное излучение зависит от аккреции и не гарантировано' : ''}`;
+    case 'substellar':
+      return `субзвёздный объект (коричневый карлик)${system.hasInternalHeat ? ' с внутренним тепловыделением' : ''}`;
+    case 'gas_giant_system':
+      return `одинокий газовый гигант${system.moonSystem.possible ? ' с возможной системой спутников' : ''}; внутреннее тепловыделение неизвестно`;
+    case 'jet_system':
+      return 'релятивистский джет — направленный высокоэнергетический поток, связанный с компактным объектом активного ядра; это НЕ обычный гравитационный центр системы';
+  }
+}
+
 // ============================================
 // ОСНОВНОЙ КОМПОНЕНТ
 // ============================================
@@ -486,6 +2071,9 @@ function App() {
   });
   const [activeTab, setActiveTab] = useState<'generator' | 'history' | 'export'>('generator');
   const [multipleWorlds, setMultipleWorlds] = useState<GeneratedWorld[]>([]);
+  // Причина последнего отклонённого шага химической эволюции
+  // (Stage 4.2.3.3): null — последний шаг зафиксирован.
+  const [chemicalStepNotice, setChemicalStepNotice] = useState<string | null>(null);
 
   // Загрузка сохраненных миров и настроек
   useEffect(() => {
@@ -514,6 +2102,7 @@ function App() {
   // Загрузка мира из истории
   const handleLoadWorld = (world: SavedWorld) => {
     setCurrentWorld(world);
+    setChemicalStepNotice(null);
     setActiveTab('generator');
   };
 
@@ -534,6 +2123,7 @@ function App() {
   // Генерация мира
   const handleGenerate = (world: GeneratedWorld) => {
     setCurrentWorld(world);
+    setChemicalStepNotice(null);
     setMultipleWorlds([]);
   };
 
@@ -541,6 +2131,21 @@ function App() {
   const handleGenerateMultiple = (worlds: GeneratedWorld[]) => {
     setMultipleWorlds(worlds);
     setCurrentWorld(null);
+  };
+
+  // Шаг химической эволюции (Stage 4.2.3.3): выполняется через
+  // атомарный macro-шаг Scheduler научного ядра (runMacroStep), а не
+  // напрямую через легаси-функцию. При отказе Scheduler мир остаётся
+  // неизменным, пользователю показывается причина.
+  const handleChemicalStep = () => {
+    if (!currentWorld) return;
+    const result = runChemicalEvolutionSchedulerStep(currentWorld);
+    if (result.status === 'committed') {
+      setChemicalStepNotice(null);
+      setCurrentWorld(result.world);
+    } else {
+      setChemicalStepNotice(result.reason ?? 'шаг химической эволюции отклонён планировщиком');
+    }
   };
 
   return (
@@ -609,6 +2214,9 @@ function App() {
                 world={currentWorld}
                 onSave={handleSaveWorld}
                 onClose={() => setCurrentWorld(null)}
+                onChemicalStep={handleChemicalStep}
+                chemicalStepNotice={chemicalStepNotice}
+                onWorldReplace={setCurrentWorld}
               />
             )}
           </>
@@ -629,10 +2237,11 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Эволюционные Войны - Генератор условий мира v0.1.0</p>
+        <p>Эволюционные Войны - Генератор условий мира v0.3.0 (этап 3: физическая модель)</p>
       </footer>
     </div>
   );
 }
 
 export default App;
+

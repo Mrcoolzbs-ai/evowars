@@ -1,0 +1,584 @@
+// ============================================
+// ATMOSPHERIC REFERENCE ADAPTERS — Stage 4.2
+// ============================================
+//
+// Explicit bridge from audited atmospheric reference datasets to the
+// Core temperature-profile contract. This is reference data, not an
+// assertion that an arbitrary generated terrestrial world has Earth's
+// atmosphere or gravity.
+//
+// USSA 1976 provides layer bounds and lapse rates in geopotential height.
+// Kinetic layers are isothermal, so each USSA layer is represented by its
+// temperature at the geopotential midpoint. The source model, midpoint
+// approximation, and finite coverage limit remain explicit in provenance.
+
+import type { AtmosphericTemperatureProfile } from './thermalState';
+import { estimatedValue } from './scientificValue';
+import type { DataProvenance } from './scientificValue';
+import { quantity } from './physicalQuantity';
+import {
+  geopotentialToGeometricM,
+  USSA_1976_CONSTANTS,
+  USSA_1976_DRY_AIR_COMPOSITION,
+  USSA_1976_EQUIVALENT_BODY_MASS_KG,
+  USSA_1976_LAYERS,
+  USSA_1976_PROVENANCE
+} from '../Data/atmosphericReferenceProfiles';
+import {
+  computeAdaptivelyRefinedHydrostaticColumn,
+  computeHydrostaticColumn
+} from './hydrostaticAtmosphere';
+import type {
+  AdaptiveHydrostaticColumnResult,
+  GasMoleFraction,
+  HydrostaticColumnCompleted,
+  HydrostaticColumnInput,
+  HydrostaticColumnResult,
+  HydrostaticRefinementPolicy
+} from './hydrostaticAtmosphere';
+import { propagateMeasuredNodeHydrostaticUncertainty } from './hydrostaticUncertainty';
+import type {
+  HydrostaticUncertaintyEstimate,
+  HydrostaticUncertaintyResult,
+  MeasuredNodeUncertaintyInput
+} from './hydrostaticUncertainty';
+import {
+  MGS_MARS_8028D38A_METADATA,
+  MGS_MARS_8028D38A_PROVENANCE,
+  MGS_MARS_8028D38A_SAMPLES
+} from '../Data/mgsMarsOccultation1998';
+
+export const USSA_1976_REFERENCE_PROFILE_ID = 'ussa_1976_earth' as const;
+
+export const USSA_1976_THERMAL_PROFILE_PROVENANCE: DataProvenance = {
+  ...USSA_1976_PROVENANCE,
+  datasetId: 'ussa-1976-main-layers',
+  datasetVersion: '1976',
+  reference: 'NASA TM-X-74335',
+  method: 'USSA 1976 published lapse-rate layers; representative temperature evaluated at each geopotential midpoint',
+  limitations:
+    'Earth standard-atmosphere reference only; seven layers cover 0–86 km geometric altitude. Each kinetic-layer temperature is an isothermal midpoint approximation; gradients within a layer, ozone detail, water vapour variability, thermosphere, exosphere and atmospheric chemistry are not represented.'
+};
+
+/**
+ * Build the audited seven-layer USSA 1976 reference temperature profile.
+ *
+ * Temperatures are not copied from the bottom boundary: each one is
+ * evaluated at the midpoint of its source geopotential interval using
+ * the published signed lapse rate. Altitude bounds are the source's
+ * geometric-height equivalents. The output is partial_profile because
+ * USSA 1976 does not cover the full atmosphere.
+ */
+export function createUssa1976AtmosphericTemperatureProfile(): AtmosphericTemperatureProfile {
+  const layers = USSA_1976_LAYERS.map((sourceLayer) => {
+    const geopotentialMidpointM =
+      (sourceLayer.geopotentialBottomM + sourceLayer.geopotentialTopM) / 2;
+    const temperatureK =
+      sourceLayer.baseTemperatureK +
+      (sourceLayer.lapseRateKPerKm *
+        (geopotentialMidpointM - sourceLayer.geopotentialBottomM)) /
+        1000;
+    const layerProvenance: DataProvenance = {
+      ...USSA_1976_THERMAL_PROFILE_PROVENANCE,
+      recordId: 'layer-' + sourceLayer.layerIndex,
+      rawInput: {
+        geopotentialBottomM: sourceLayer.geopotentialBottomM,
+        geopotentialTopM: sourceLayer.geopotentialTopM,
+        geometricBottomM: sourceLayer.geometricBottomM,
+        geometricTopM: sourceLayer.geometricTopM,
+        baseTemperatureK: sourceLayer.baseTemperatureK,
+        lapseRateKPerKm: sourceLayer.lapseRateKPerKm,
+        representativeGeopotentialMidpointM: geopotentialMidpointM,
+        representativeTemperatureK: temperatureK
+      }
+    };
+    return {
+      layerId: 'ussa-1976-layer-' + sourceLayer.layerIndex,
+      altitudeRangeM: {
+        min: sourceLayer.geometricBottomM,
+        max: sourceLayer.geometricTopM
+      },
+      temperature: estimatedValue(
+        quantity(temperatureK, 'K'),
+        'USSA 1976 lapse-rate law evaluated at the geopotential midpoint; used as an isothermal kinetic-layer representative value',
+        { provenance: layerProvenance }
+      ),
+      note:
+        'USSA 1976 reference layer ' + sourceLayer.layerIndex +
+        '; midpoint temperature is an isothermal approximation, not a layer-mean observation'
+    };
+  });
+
+  return {
+    status: 'partial_profile',
+    layers,
+    provenance: { ...USSA_1976_THERMAL_PROFILE_PROVENANCE },
+    limitations: USSA_1976_THERMAL_PROFILE_PROVENANCE.limitations,
+    note:
+      'Явно выбранный reference-профиль USSA 1976. Он не подменяет атмосферу случайно сгенерированного мира; переносит только исходные высоты/температуры и требует отдельной проверки совместимости с телом.'
+  };
+}
+
+
+// ============================================
+// USSA 1976 → HYDROSTATIC COLUMN (Stage 4.8.1)
+// ============================================
+
+/**
+ * Build the canonical Earth-reference input for the existing Radau IIA
+ * hydrostatic solver. This is deliberately NOT populated from a random
+ * GeneratedWorld: USSA 1976 is paired with its own reference radius,
+ * equivalent mass (g(r0)=g0), sea-level pressure and dry-air composition.
+ *
+ * Unlike the kinetic midpoint profile above, this path preserves the
+ * original USSA temperature law exactly: T is linear in geopotential
+ * height h, while the solver integrates in geometric z using h=R*z/(R+z).
+ * Mid-layer geometric heights are requested so pressure and composition
+ * can be attached to the corresponding Scheduler layer.
+ */
+export function createUssa1976HydrostaticColumnInput(): HydrostaticColumnInput {
+  const referenceRadiusM = USSA_1976_CONSTANTS.r0M;
+  const layers = USSA_1976_LAYERS.map((sourceLayer) => ({
+    layerId: 'ussa-1976-layer-' + sourceLayer.layerIndex,
+    bottomHeightM: sourceLayer.geometricBottomM,
+    topHeightM: sourceLayer.geometricTopM,
+    temperature: {
+      kind: 'geopotentialLapseRate' as const,
+      referenceRadiusM,
+      bottomGeopotentialHeightM: sourceLayer.geopotentialBottomM,
+      bottomTemperatureK: sourceLayer.baseTemperatureK,
+      lapseRateKPerM: sourceLayer.lapseRateKPerKm / 1000
+    },
+    composition: {
+      gases: USSA_1976_DRY_AIR_COMPOSITION.gases.map((gas) => ({ ...gas })),
+      provenance: { ...USSA_1976_DRY_AIR_COMPOSITION.provenance }
+    },
+    provenance: { ...USSA_1976_PROVENANCE },
+    applicability:
+      'USSA 1976 dry-air reference composition; no water vapour, ozone stratification, diffusion or chemistry'
+  }));
+
+  const requestedHeightsM = USSA_1976_LAYERS.map((sourceLayer) => {
+    const geopotentialMidpointM =
+      (sourceLayer.geopotentialBottomM + sourceLayer.geopotentialTopM) / 2;
+    return geopotentialToGeometricM(geopotentialMidpointM);
+  });
+
+  return {
+    body: {
+      bodyMassKg: USSA_1976_EQUIVALENT_BODY_MASS_KG,
+      referenceRadiusM,
+      provenance: {
+        ...USSA_1976_PROVENANCE,
+        method: 'equivalent spherical mass M = g0*r0^2/G; constructed to reproduce USSA g(h)',
+        note: 'canonical Earth reference constants; not read from a generated world'
+      }
+    },
+    surface: {
+      surfacePressurePa: 101325,
+      pressureProvenance: {
+        ...USSA_1976_PROVENANCE,
+        method: 'USSA 1976 standard sea-level pressure p0 = 101325 Pa'
+      },
+      bottomHeightM: 0
+    },
+    layers,
+    requestedHeightsM,
+    numerics: { gravitationMode: 'spherical-gravity' }
+  };
+}
+
+/** Run the canonical USSA 1976 Earth reference through Core's hydrostatic solver. */
+export function computeUssa1976ReferenceHydrostaticColumn(): HydrostaticColumnResult {
+  return computeHydrostaticColumn(createUssa1976HydrostaticColumnInput());
+}
+
+
+/**
+ * Canonical seven-layer USSA Earth reference with adaptive sublayers.
+ * The helper returns the refined input and the freshly re-integrated
+ * column; its child layer ids retain parentLayerId lineage to the 7 source
+ * layers so the Scheduler adapter can project provenance and inventories.
+ */
+export function computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn(
+  policy?: HydrostaticRefinementPolicy
+): AdaptiveHydrostaticColumnResult {
+  return computeAdaptivelyRefinedHydrostaticColumn(
+    createUssa1976HydrostaticColumnInput(),
+    policy
+  );
+}
+
+
+export const MGS_MARS_8028D38A_REFERENCE_PROFILE_ID = 'mgs_mars_1998_8028d38a' as const;
+
+/**
+ * Build a temperature-only atmospheric reference profile from the 74
+ * published MGS 8028D38A retrieval nodes.
+ *
+ * Adjacent measured nodes define 73 finite altitude intervals. Each
+ * interval's representative temperature is the linear interpolation at
+ * its midpoint (the arithmetic midpoint of its two endpoint temperatures).
+ * These are explicit estimates, not extra measured values. The 1-sigma
+ * endpoint errors and row IDs are retained in provenance, but are not
+ * combined into an interval uncertainty because the PDS product supplies
+ * no inter-node covariance matrix.
+ *
+ * This profile deliberately contains no composition, pressure field,
+ * radical abundance, or Scheduler initial inventory. Coverage is only the
+ * one occultation's 0.25–35.26 km retrieval interval.
+ */
+export function createMgsMars8028D38AAtmosphericTemperatureProfile(): AtmosphericTemperatureProfile {
+  if (
+    MGS_MARS_8028D38A_SAMPLES.length !== MGS_MARS_8028D38A_METADATA.rowCount ||
+    MGS_MARS_8028D38A_SAMPLES.length < 2
+  ) {
+    throw new Error('MGS Mars temperature profile: PDS sample count is inconsistent or too small');
+  }
+
+  const layers = [];
+  for (let index = 0; index < MGS_MARS_8028D38A_SAMPLES.length - 1; index += 1) {
+    const lower = MGS_MARS_8028D38A_SAMPLES[index]!;
+    const upper = MGS_MARS_8028D38A_SAMPLES[index + 1]!;
+    const altitudeSpanM = upper.heightAboveLocalSurfaceM - lower.heightAboveLocalSurfaceM;
+    if (
+      !Number.isFinite(altitudeSpanM) || altitudeSpanM <= 0 ||
+      !Number.isFinite(lower.temperatureK) || lower.temperatureK <= 0 ||
+      !Number.isFinite(upper.temperatureK) || upper.temperatureK <= 0
+    ) {
+      throw new Error('MGS Mars temperature profile: invalid or non-monotonic adjacent source rows ' +
+        lower.rowNumber + ' and ' + upper.rowNumber);
+    }
+
+    const midpointTemperatureK = (lower.temperatureK + upper.temperatureK) / 2;
+    const temperatureProvenance: DataProvenance = {
+      ...MGS_MARS_8028D38A_PROVENANCE,
+      recordId: 'interpolated-rows-' + lower.rowNumber + '-' + upper.rowNumber,
+      method: 'Piecewise-linear interpolation between adjacent measured PDS temperature nodes; representative value evaluated at the altitude-interval midpoint',
+      applicability: 'Only the midpoint of the interval between MGS PDS rows ' +
+        lower.rowNumber + ' and ' + upper.rowNumber + ' from occultation ' +
+        MGS_MARS_8028D38A_METADATA.occultationTimeUtc,
+      note: 'The source-node one-sigma errors are retained in rawInput but not propagated to this midpoint estimate: inter-node covariance is not published. This midpoint is an estimated layer representative, not a new measurement.',
+      rawInput: {
+        productId: MGS_MARS_8028D38A_METADATA.productId,
+        lowerRowNumber: lower.rowNumber,
+        upperRowNumber: upper.rowNumber,
+        lowerAltitudeM: lower.heightAboveLocalSurfaceM,
+        upperAltitudeM: upper.heightAboveLocalSurfaceM,
+        midpointAltitudeM: (lower.heightAboveLocalSurfaceM + upper.heightAboveLocalSurfaceM) / 2,
+        lowerTemperatureK: lower.temperatureK,
+        lowerTemperatureSigmaK: lower.temperatureSigmaK,
+        upperTemperatureK: upper.temperatureK,
+        upperTemperatureSigmaK: upper.temperatureSigmaK,
+        midpointTemperatureK
+      }
+    };
+
+    layers.push({
+      layerId: 'mgs-mars-8028d38a-layer-' + String(lower.rowNumber).padStart(2, '0'),
+      altitudeRangeM: {
+        min: lower.heightAboveLocalSurfaceM,
+        max: upper.heightAboveLocalSurfaceM
+      },
+      temperature: estimatedValue(
+        quantity(midpointTemperatureK, 'K'),
+        'Linear interpolation between adjacent MGS 8028D38A measured temperature nodes; value at the interval midpoint',
+        { provenance: temperatureProvenance }
+      ),
+      note: '73-interval partial reference profile derived from one MGS occultation; not a global Mars climatology'
+    });
+  }
+
+  return {
+    status: 'partial_profile',
+    layers,
+    provenance: {
+      ...MGS_MARS_8028D38A_PROVENANCE,
+      recordId: 'rows-1-' + String(MGS_MARS_8028D38A_METADATA.rowCount),
+      method: 'Temperature-only reference profile built from all 74 published MGS 8028D38A PDS retrieval nodes; adjacent samples define 73 piecewise-linear representative intervals'
+    },
+    limitations:
+      'One MGS radio occultation on 1998-01-28 at 29.213° N, 56.774° E, LTST 5.727 h, Ls=24.2°, SZA=105.35°. Coverage is only the measured interval from ' +
+      MGS_MARS_8028D38A_SAMPLES[0]!.heightAboveLocalSurfaceM + ' m to ' +
+      MGS_MARS_8028D38A_SAMPLES[MGS_MARS_8028D38A_SAMPLES.length - 1]!.heightAboveLocalSurfaceM +
+      ' m above the local radius-at-surface. Temperatures are retrieved quantities. Midpoint layer values are linearly interpolated estimates; node uncertainties are not reduced to independent layer uncertainties because covariance is unavailable. No composition, pressure, radical profile, surface boundary extrapolation, or global/seasonal representativeness is inferred.',
+    note:
+      'Explicit MGS 1998 temperature-only reference profile. Attach only when the Mars atmosphere preset and this reference option are selected; the generated body’s sampled gravity and the atmosphere preset remain independent and are not overwritten.'
+  };
+}
+
+
+// ============================================
+// MGS MARS OCCULTATION → HYDROSTATIC COLUMN (Stage 4.2)
+// ============================================
+
+/**
+ * A caller-supplied atmosphere composition for the MGS occultation
+ * reference. Composition is intentionally mandatory: PDS documents that
+ * the retrieval used a Viking-era composition assumption, but this product
+ * file does not provide a complete per-row gas-mixture table.
+ */
+export interface MgsMarsOccultationComposition {
+  readonly gases: readonly GasMoleFraction[];
+  readonly provenance: DataProvenance;
+}
+
+/** Mars mass used by the spherical Core approximation. */
+export const MGS_MARS_REFERENCE_BODY_MASS_KG = 0.64169e24;
+
+export const MGS_MARS_REFERENCE_BODY_MASS_PROVENANCE: DataProvenance = {
+  sourceName: 'NASA NSSDC Mars Planetary Fact Sheet',
+  sourceId: 'Mars bulk mass',
+  reference: 'https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html',
+  method: 'published planetary mass, used as a spherical-body approximation',
+  limitations:
+    'The MGS retrieval used a spherical-harmonic gravity field (GGM50A02.SHA). Core hydrostatic integration below uses spherical gravity from the published bulk mass and the occultation local radius; the two gravity models are not identical.'
+};
+
+/**
+ * Construct a hydrostatic-column input from the actual 8028D38A MGS
+ * radio-occultation P/T samples.
+ *
+ * Important semantics:
+ * - The bottom boundary is the FIRST measured PDS row (~250 m above the
+ *   local radius-at-surface), not the PDS header's extrapolated surface
+ *   pressure. This avoids treating a retrieval extrapolation as a direct
+ *   observation.
+ * - Every published temperature sample is passed as a measured node.
+ *   Linear interpolation is the explicit Core solver policy.
+ * - The caller must supply a normalized, identified composition. No
+ *   composition or trace gas is invented from this profile.
+ * - PDS sigma_P and sigma_T are retained in the source data. The base
+ *   deterministic solver does not propagate them; the explicit
+ *   computeMgsMars8028D38AHydrostaticColumnWithUncertainty() helper
+ *   performs a separate first-order 1σ estimate for P(z) and rho(z).
+ * - The output is a reference-column reconstruction with spherical
+ *   gravity, not an exact reproduction of the MGS gravity retrieval or a
+ *   general Mars atmosphere.
+ */
+export function createMgsMars8028D38AHydrostaticColumnInput(
+  composition: MgsMarsOccultationComposition
+): HydrostaticColumnInput {
+  if (!composition || typeof composition !== 'object' || !Array.isArray(composition.gases)) {
+    throw new TypeError('MGS Mars adapter: явный состав атмосферы обязателен');
+  }
+  if (composition.gases.length === 0) {
+    throw new RangeError('MGS Mars adapter: состав атмосферы не может быть пустым');
+  }
+  const sourceIdentity = [
+    composition.provenance?.sourceName,
+    composition.provenance?.sourceId,
+    composition.provenance?.datasetId,
+    composition.provenance?.reference
+  ].some((value) => typeof value === 'string' && value.trim().length > 0);
+  if (!sourceIdentity) {
+    throw new RangeError('MGS Mars adapter: для состава требуется provenance (источник/набор/ссылка)');
+  }
+
+  const seenGasIds = new Set<string>();
+  let moleFractionSum = 0;
+  for (const gas of composition.gases) {
+    if (!gas || typeof gas.gasId !== 'string' || gas.gasId.trim() === '') {
+      throw new RangeError('MGS Mars adapter: каждая доля состава должна иметь непустой gasId');
+    }
+    if (seenGasIds.has(gas.gasId)) {
+      throw new RangeError('MGS Mars adapter: повторяющийся gasId «' + gas.gasId + '»');
+    }
+    seenGasIds.add(gas.gasId);
+    if (!Number.isFinite(gas.moleFraction) || gas.moleFraction <= 0) {
+      throw new RangeError(
+        'MGS Mars adapter: молярная доля «' + gas.gasId + '» должна быть конечной и положительной'
+      );
+    }
+    moleFractionSum += gas.moleFraction;
+  }
+  if (!Number.isFinite(moleFractionSum) || Math.abs(moleFractionSum - 1) > 1e-6) {
+    throw new RangeError(
+      'MGS Mars adapter: сумма молярных долей состава должна быть 1 (получено ' +
+        String(moleFractionSum) +
+        '); автоматическая нормировка запрещена'
+    );
+  }
+
+  const first = MGS_MARS_8028D38A_SAMPLES[0];
+  const last = MGS_MARS_8028D38A_SAMPLES[MGS_MARS_8028D38A_SAMPLES.length - 1];
+  if (first === undefined || last === undefined || MGS_MARS_8028D38A_SAMPLES.length !== MGS_MARS_8028D38A_METADATA.rowCount) {
+    throw new Error('MGS Mars adapter: PDS profile is empty or its row count does not match the product label');
+  }
+
+  const nodeProvenance: DataProvenance = {
+    ...MGS_MARS_8028D38A_PROVENANCE,
+    recordId: 'rows-1-' + String(MGS_MARS_8028D38A_METADATA.rowCount),
+    method: 'PDS retrieved temperature nodes; Core uses piecewise-linear interpolation between the published samples'
+  };
+
+  return {
+    body: {
+      bodyMassKg: MGS_MARS_REFERENCE_BODY_MASS_KG,
+      referenceRadiusM: MGS_MARS_8028D38A_METADATA.radiusAtSurfaceM,
+      provenance: {
+        ...MGS_MARS_REFERENCE_BODY_MASS_PROVENANCE,
+        note:
+          'Reference radius is the local radius-at-surface from PDS product ' +
+          MGS_MARS_8028D38A_METADATA.productId +
+          '; spherical gravity is a Core approximation, not GGM50A02.'
+      }
+    },
+    surface: {
+      surfacePressurePa: first.pressurePa,
+      pressureProvenance: {
+        ...MGS_MARS_8028D38A_PROVENANCE,
+        recordId: 'row-' + String(first.rowNumber),
+        method: 'first measured PDS pressure sample; not the PDS header surface-pressure extrapolation',
+        rawInput: {
+          productId: MGS_MARS_8028D38A_METADATA.productId,
+          rowNumber: first.rowNumber,
+          measuredRadiusM: first.radiusM,
+          localSurfaceRadiusM: MGS_MARS_8028D38A_METADATA.radiusAtSurfaceM,
+          measuredPressurePa: first.pressurePa,
+          measuredPressureSigmaPa: first.pressureSigmaPa,
+          pdsHeaderExtrapolatedSurfacePressurePa:
+            MGS_MARS_8028D38A_METADATA.extrapolatedSurfacePressurePa
+        }
+      },
+      bottomHeightM: first.heightAboveLocalSurfaceM
+    },
+    layers: [
+      {
+        layerId: MGS_MARS_8028D38A_METADATA.profileId,
+        bottomHeightM: first.heightAboveLocalSurfaceM,
+        topHeightM: last.heightAboveLocalSurfaceM,
+        temperature: {
+          kind: 'measuredNodes',
+          nodes: MGS_MARS_8028D38A_SAMPLES.map((sample) => ({
+            heightM: sample.heightAboveLocalSurfaceM,
+            temperatureK: sample.temperatureK
+          })),
+          interpolation: 'linear'
+        },
+        composition: {
+          gases: composition.gases.map((gas) => ({ ...gas })),
+          provenance: { ...composition.provenance }
+        },
+        provenance: nodeProvenance,
+        applicability:
+          'One MGS radio-occultation retrieval only; explicit caller-provided composition; 0.25–35.26 km above the local radius-at-surface; not a global Mars climatology. An opt-in first-order 1σ postprocessor propagates boundary pressure and temperature-node errors to P/rho; interior retrieved pressure errors remain observational diagnostics.'
+      }
+    ],
+    requestedHeightsM: MGS_MARS_8028D38A_SAMPLES.map((sample) => sample.heightAboveLocalSurfaceM),
+    numerics: { gravitationMode: 'spherical-gravity' }
+  };
+}
+
+
+// ============================================
+// MGS MARS → HYDROSTATIC COLUMN + UNCERTAINTY (Stage 4.2)
+// ============================================
+
+function mgsMars8028D38AUncertaintyInput(): MeasuredNodeUncertaintyInput {
+  return {
+    // Use the sigma attached to the first measured pressure node because
+    // that node is the hydrostatic lower boundary. Other retrieved
+    // pressure sigmas remain observational diagnostics and are not
+    // independently folded into the predicted hydrostatic pressure.
+    surfacePressureSigmaPa: MGS_MARS_8028D38A_SAMPLES[0].pressureSigmaPa,
+    temperatureNodeSigmaK: MGS_MARS_8028D38A_SAMPLES.map(
+      (sample) => sample.temperatureSigmaK
+    )
+  };
+}
+
+export type MgsMarsHydrostaticWithUncertaintyResult =
+  | {
+      readonly status: 'completed';
+      readonly column: HydrostaticColumnCompleted;
+      readonly uncertainty: HydrostaticUncertaintyEstimate;
+    }
+  | {
+      readonly status: 'hydrostatic_failed';
+      readonly result: Exclude<HydrostaticColumnResult, HydrostaticColumnCompleted>;
+    }
+  | {
+      readonly status: 'uncertainty_failed';
+      readonly column: HydrostaticColumnCompleted;
+      readonly errors: readonly string[];
+    };
+
+/**
+ * Run the MGS measured-node column and propagate the published 1σ
+ * uncertainty of its lower pressure boundary and every temperature node.
+ * Other PDS pressure sigmas remain attached to the source observations;
+ * they are not treated as independent hydrostatic boundary conditions.
+ */
+export function computeMgsMars8028D38AHydrostaticColumnWithUncertainty(
+  composition: MgsMarsOccultationComposition
+): MgsMarsHydrostaticWithUncertaintyResult {
+  const input = createMgsMars8028D38AHydrostaticColumnInput(composition);
+  const column = computeHydrostaticColumn(input);
+  if (column.status !== 'completed') {
+    return { status: 'hydrostatic_failed', result: column };
+  }
+
+  const uncertainty: HydrostaticUncertaintyResult =
+    propagateMeasuredNodeHydrostaticUncertainty(
+      input,
+      column,
+      mgsMars8028D38AUncertaintyInput()
+    );
+  if (uncertainty.status !== 'estimated') {
+    return {
+      status: 'uncertainty_failed',
+      column,
+      errors: uncertainty.errors
+    };
+  }
+  return { status: 'completed', column, uncertainty };
+}
+
+export type MgsMarsAdaptiveHydrostaticWithUncertaintyResult =
+  | {
+      readonly status: 'completed';
+      readonly adaptive: Extract<AdaptiveHydrostaticColumnResult, { status: 'completed' }>;
+      readonly uncertainty: HydrostaticUncertaintyEstimate;
+    }
+  | {
+      readonly status: 'adaptive_rejected';
+      readonly result: Extract<AdaptiveHydrostaticColumnResult, { status: 'rejected' }>;
+    }
+  | {
+      readonly status: 'uncertainty_failed';
+      readonly adaptive: Extract<AdaptiveHydrostaticColumnResult, { status: 'completed' }>;
+      readonly errors: readonly string[];
+    };
+
+/**
+ * Adaptive variant: propagate the original PDS node errors onto every
+ * unique height in the final, re-integrated adaptive column. The ORIGINAL
+ * input is passed to the uncertainty operator so subdivision does not
+ * discard or duplicate source-node uncertainty.
+ */
+export function computeAdaptivelyRefinedMgsMars8028D38AHydrostaticColumnWithUncertainty(
+  composition: MgsMarsOccultationComposition,
+  policy?: HydrostaticRefinementPolicy
+): MgsMarsAdaptiveHydrostaticWithUncertaintyResult {
+  const input = createMgsMars8028D38AHydrostaticColumnInput(composition);
+  const adaptive = computeAdaptivelyRefinedHydrostaticColumn(input, policy);
+  if (adaptive.status !== 'completed') {
+    return { status: 'adaptive_rejected', result: adaptive };
+  }
+
+  const uncertainty: HydrostaticUncertaintyResult =
+    propagateMeasuredNodeHydrostaticUncertainty(
+      input,
+      adaptive.column,
+      mgsMars8028D38AUncertaintyInput()
+    );
+  if (uncertainty.status !== 'estimated') {
+    return {
+      status: 'uncertainty_failed',
+      adaptive,
+      errors: uncertainty.errors
+    };
+  }
+  return { status: 'completed', adaptive, uncertainty };
+}

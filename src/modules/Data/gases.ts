@@ -164,3 +164,17 @@ const gases: GasSpecies[] = [
 ];
 
 export default gases;
+
+// ============================================
+// Stage 4.8.1: доступ к каталогу по gasId.
+// Возврат null означает "вида нет в каталоге" и НЕ замещается
+// фиктивной (нулевой) молярной массой: вызывающая модель
+// обязана заблокировать расчёт (unknown/out_of_applicability).
+// ============================================
+
+const gasesById: ReadonlyMap<string, GasSpecies> = new Map(gases.map((g) => [g.id, g]));
+
+/** Поиск вида по id; null — отсутствует в каталоге. */
+export function tryGetGasSpecies(gasId: string): GasSpecies | null {
+  return gasesById.get(gasId) ?? null;
+}
