@@ -230,6 +230,12 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         sourceId: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
         classification: 'archive and CSV selection/parser contract',
         reasonNotEligibleAsInitialPointValue: 'No selected orbit/TID species rows are imported; a single-species profile is not a complete initial state and H is outside NGIMS mass coverage.'
+      },
+      {
+        sourceName: MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.sourceName ?? 'Taysum & Palmer (2020)',
+        sourceId: MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.sourceId ?? 'DOI:10.1029/2020JE006491',
+        classification: 'model-derived photolysis lookup scenario, not an atmospheric observation',
+        reasonNotEligibleAsInitialPointValue: 'Table B2 constrains the forcing scenario and tabulated J values; it does not provide an observed 16-species initial concentration vector.'
       }
     ]
   };
@@ -391,13 +397,15 @@ export function createMarsPhotochemicalObservationSnapshot(
   if (input.targetAltitudeKm !== 0.5 && input.targetAltitudeKm !== 42.67) {
     errors.push('targetAltitudeKm must be exactly 0.5 or 42.67 km');
   }
+  const observationsArray = Array.isArray(input.observations) ? input.observations : [];
   if (!Array.isArray(input.observations)) {
     errors.push('observations must be an array of species detections');
-  }
-  if (input.observations.length !== MARS_PHOTOCHEMICAL_SPECIES_ORDER.length) {
-    errors.push('exactly 16 species observations are required; received ' + input.observations.length);
+  } else if (observationsArray.length !== MARS_PHOTOCHEMICAL_SPECIES_ORDER.length) {
+    errors.push('exactly 16 species observations are required; received ' + observationsArray.length);
   }
   errors.push(...validateCoRegistrationPolicy(input.coRegistration));
+
+  if (errors.length > 0) return { status: 'rejected', errors };
 
   const temperature = input.temperatureObservation;
   if (!isPlainRecord(temperature)) {
@@ -420,11 +428,23 @@ export function createMarsPhotochemicalObservationSnapshot(
     }
   }
 
-  if (!Array.isArray(input.observations) || !isPlainRecord(temperature)) {
+  if (!isPlainRecord(temperature)) {
     return { status: 'rejected', errors };
   }
-  const anchor = temperature.context;
+  const temperatureObservation =
+    temperature as unknown as MarsPhotochemicalTemperatureObservation;
+  const anchor = temperatureObservation.context;
   errors.push(...validateContext(anchor, 'temperatureObservation.context', input.targetAltitudeKm));
+  if (!isPlainRecord(anchor)) {
+    return { status: 'rejected', errors };
+  }
+  if (
+    (temperatureObservation.temperature.status !== 'known' &&
+      temperatureObservation.temperature.status !== 'estimated') ||
+    !hasUsableTemperature(temperatureObservation.temperature)
+  ) {
+    return { status: 'rejected', errors };
+  }
 
   const seen = new Set<string>();
   const concentrations = {} as Record<MarsGasSpeciesId, number>;
@@ -432,13 +452,15 @@ export function createMarsPhotochemicalObservationSnapshot(
   const sigmaEntries: string[] = [];
   const sourceIds: string[] = [];
 
-  for (let index = 0; index < input.observations.length; index += 1) {
-    const observation = input.observations[index];
+  for (let index = 0; index < observationsArray.length; index += 1) {
+    const rawObservation = observationsArray[index];
     const label = 'observations[' + index + ']';
-    if (!isPlainRecord(observation)) {
+    if (!isPlainRecord(rawObservation)) {
       errors.push(label + ' must be a plain object');
       continue;
     }
+    const observation =
+      rawObservation as unknown as MarsPhotochemicalSpeciesObservation;
     const species = observation.speciesId as string;
     if (!MARS_PHOTOCHEMICAL_SPECIES_ORDER.includes(species as MarsGasSpeciesId)) {
       errors.push(label + '.speciesId is not part of the 16-species ODE');
@@ -486,12 +508,14 @@ export function createMarsPhotochemicalObservationSnapshot(
     }
 
     errors.push(...validateContext(observation.context, label + '.context', input.targetAltitudeKm));
-    errors.push(...validateCoRegisteredContext(
-      observation.context,
-      anchor,
-      input.coRegistration,
-      label + '.context'
-    ));
+    if (isPlainRecord(observation.context)) {
+      errors.push(...validateCoRegisteredContext(
+        observation.context,
+        anchor,
+        input.coRegistration,
+        label + '.context'
+      ));
+    }
 
     if (
       Number.isFinite(observation.numberDensityPerCm3) &&
@@ -572,6 +596,12 @@ export function createMarsPhotochemicalObservationSnapshot(
     materialProvenance: sourceProvenance,
     reservoirTemperature: temperature.temperature
   };
+  if (reservoir.material === undefined) {
+    return {
+      status: 'rejected',
+      errors: ['constructed observation reservoir has no material inventory']
+    };
+  }
   const inventoryCheck = validateMaterialInventory(reservoir.material);
   if (!inventoryCheck.valid) {
     return {
