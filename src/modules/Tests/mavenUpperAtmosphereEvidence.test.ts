@@ -11,6 +11,8 @@ import {
   parseMavenInsituKeyParameterRecord,
   parseMavenNgimsL3ScaleHeightTemperatureCsvRow,
   parseMavenNgimsL3ScaleHeightTemperatureCsvText,
+  parseMavenNgimsL3ResampledDensityCsvText,
+  selectMavenNgimsL3ResampledDensityProfile,
   selectMavenNgimsL3ScaleHeightTemperatureRows,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
@@ -88,6 +90,53 @@ function ngimsL2CsvText(rows: readonly MavenNgimsL2NeutralAbundanceRow[]): strin
     headers.join(','),
     ...rows.map((record) => headers.map((header) => String(record[header])).join(','))
   ].join('\r\n');
+}
+
+type ResampledDensityFixture = Record<string, string>;
+
+function resampledDensityCsvRow(overrides: Record<string, string> = {}): ResampledDensityFixture {
+  return {
+    t_utc: '2014-12-11T16:00:00Z',
+    t_utc_secondary: '2014-12-11T16:00:00Z',
+    t_unix: '1418313600',
+    t_sclk: '123456789',
+    t_tid: '120',
+    tid: '14282',
+    orbit: '391',
+    focusmode: 'csn',
+    alt: '150',
+    mass: '44',
+    species: 'CO2',
+    density_bins: '1.2e7',
+    quality: 'IV',
+    ...overrides
+  };
+}
+
+function l3ResampledDensityCsvText(
+  rows: readonly ResampledDensityFixture[],
+  duplicatedUtc = true
+): string {
+  const headers = duplicatedUtc
+    ? [
+        't_utc', 't_utc', 't_unix', 't_sclk', 't_tid', 'tid', 'orbit',
+        'focusmode', 'alt', 'mass', 'species', 'density_bins', 'quality'
+      ]
+    : [
+        't_utc', 't_unix', 't_sclk', 't_tid', 'tid', 'orbit',
+        'focusmode', 'alt', 'mass', 'species', 'density_bins', 'quality'
+      ];
+  const records = rows.map((row) => duplicatedUtc
+    ? [
+        row.t_utc, row.t_utc_secondary ?? row.t_utc, row.t_unix,
+        row.t_sclk, row.t_tid, row.tid, row.orbit, row.focusmode,
+        row.alt, row.mass, row.species, row.density_bins, row.quality
+      ]
+    : [
+        row.t_utc, row.t_unix, row.t_sclk, row.t_tid, row.tid, row.orbit,
+        row.focusmode, row.alt, row.mass, row.species, row.density_bins, row.quality
+      ]);
+  return [headers.join(','), ...records.map((record) => record.join(','))].join('\r\n');
 }
 
 function scaleHeightCsvRow(overrides: Record<string, string> = {}): Record<string, string> {
@@ -401,6 +450,126 @@ describe('MAVEN upper-atmosphere evidence', () => {
       expect(result.errors.join(' ')).toMatch(/fewer than two rows/);
       expect(result.excludedRows?.differentTid).toBe(0);
     }
+  });
+
+  it('imports the L3 res-den Table A-9 profile and keeps its resampling semantics explicit', () => {
+    const productId = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId;
+    const imported = parseMavenNgimsL3ResampledDensityCsvText(
+      l3ResampledDensityCsvText([
+        resampledDensityCsvRow({ alt: '150', density_bins: '1.2e7' }),
+        resampledDensityCsvRow({
+          t_utc: '2014-12-11T16:10:00Z',
+          t_utc_secondary: '2014-12-11T16:10:00Z',
+          alt: '160',
+          density_bins: '8.0e6'
+        }),
+        resampledDensityCsvRow({
+          t_utc: '2014-12-11T17:29:43Z',
+          t_utc_secondary: '2014-12-11T17:29:43Z',
+          alt: '170',
+          density_bins: '5.0e6'
+        }),
+        resampledDensityCsvRow({ tid: '14284', orbit: '392', alt: '180' }),
+        resampledDensityCsvRow({ focusmode: 'osnb', alt: '190' }),
+        resampledDensityCsvRow({ species: 'Ar', mass: '40', alt: '200' }),
+        resampledDensityCsvRow({ quality: 'IU', alt: '210' }),
+        resampledDensityCsvRow({ density_bins: 'NaN', alt: '220' }),
+        resampledDensityCsvRow({ quality: 'UR', alt: '230' }),
+        resampledDensityCsvRow({
+          t_utc: '2014-12-11T17:29:44Z',
+          t_utc_secondary: '2014-12-11T17:29:44Z',
+          alt: '240'
+        })
+      ]),
+      productId
+    );
+    expect(imported.status).toBe('parsed');
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+    expect(imported.duplicatedUtcHeader).toBe(true);
+    expect(imported.parsedRowCount).toBe(10);
+    expect(imported.evidenceStatusCounts).toMatchObject({
+      verified_resampled_value: 8,
+      uncertain_resampled_value: 1,
+      unreliable: 1,
+      not_available: 1
+    });
+
+    const selected = selectMavenNgimsL3ResampledDensityProfile(imported, {
+      sourceProductId: productId,
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'CO2',
+      quality: 'verified',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(selected.status).toBe('completed');
+    if (selected.status !== 'completed') throw new Error(selected.errors.join('; '));
+    expect(selected.measurements.map((measurement) => measurement.altitudeKm)).toEqual([150, 160, 170]);
+    expect(selected.measurements.map((measurement) => measurement.densityBinsPerCm3))
+      .toEqual([1.2e7, 8e6, 5e6]);
+    expect(selected.measurements[0].densityBinsPerM3).toBe(1.2e13);
+    expect(selected.measurements[0].reportedSigmaPerCm3).toBeNull();
+    expect(selected.measurements.every((measurement) =>
+      measurement.densityBasis === 'equal_pressure_altitude_constant_log_density_bins' &&
+      measurement.eligibleAsDirectL2Measurement === false &&
+      measurement.eligibleAsMarsPhotochemicalInitialState === false
+    )).toBe(true);
+    expect(selected.sourceProductIdentityBasis).toBe('caller-supplied-not-verified-from-csv-payload');
+    expect(selected.excludedRows).toEqual({
+      rejectedByRowValidation: 0,
+      differentTid: 1,
+      differentOrbit: 0,
+      differentFocusMode: 1,
+      differentSpecies: 1,
+      differentQuality: 1,
+      unavailableOrNonPositive: 2,
+      outsideUtcWindow: 1
+    });
+  });
+
+  it('accepts the single-t_utc Table A-9 header variant and rejects mismatched duplicate times or malformed fields', () => {
+    const productId = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId;
+    const single = parseMavenNgimsL3ResampledDensityCsvText(
+      l3ResampledDensityCsvText([
+        resampledDensityCsvRow({ alt: '150' }),
+        resampledDensityCsvRow({ t_utc: '2014-12-11T16:01:00Z', t_utc_secondary: '2014-12-11T16:01:00Z', alt: '160' })
+      ], false),
+      productId
+    );
+    expect(single.status).toBe('parsed');
+    if (single.status === 'parsed') {
+      expect(single.duplicatedUtcHeader).toBe(false);
+      expect(single.rows[0].validation.status).toBe('parsed');
+    }
+
+    const mismatch = parseMavenNgimsL3ResampledDensityCsvText(
+      l3ResampledDensityCsvText([
+        resampledDensityCsvRow({ t_utc_secondary: '2014-12-11T16:00:01Z' }),
+        resampledDensityCsvRow({ t_utc: '2014-12-11T16:01:00Z', t_utc_secondary: '2014-12-11T16:01:00Z' })
+      ]),
+      productId
+    );
+    expect(mismatch.status).toBe('parsed');
+    if (mismatch.status === 'parsed') {
+      expect(mismatch.rows[0].validation.status).toBe('rejected');
+      expect(mismatch.rows[0].validation.status === 'rejected'
+        ? mismatch.rows[0].validation.errors.join(' ')
+        : ''
+      ).toMatch(/duplicated Table A-9 t_utc columns/);
+    }
+
+    const blankRequiredValue = l3ResampledDensityCsvText([
+      resampledDensityCsvRow({ t_unix: '' }),
+      resampledDensityCsvRow({ t_utc: '2014-12-11T16:01:00Z', t_utc_secondary: '2014-12-11T16:01:00Z' })
+    ]);
+    const invalid = parseMavenNgimsL3ResampledDensityCsvText(blankRequiredValue, productId);
+    expect(invalid.status).toBe('parsed');
+    if (invalid.status === 'parsed') expect(invalid.rows[0].validation.status).toBe('rejected');
+
+    expect(parseMavenNgimsL3ResampledDensityCsvText('t_utc,tid,orbit\n2014-12-11T16:00:00Z,14282,391', productId).status)
+      .toBe('invalid_csv');
   });
 
   it('parses the SIS 1.13 Table A-10 derived scale-height temperature without upgrading it to a local observation', () => {
