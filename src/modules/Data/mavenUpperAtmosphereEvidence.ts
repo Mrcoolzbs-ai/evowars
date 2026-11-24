@@ -1483,11 +1483,11 @@ interface Pds4DetachedLabelElement {
  * root, and can mistake nested lookalike tags for label fields.
  */
 function readPds4DetachedLabelElement(
-  document: Document,
+  scope: Document | Element,
   elementName: string
 ): Pds4DetachedLabelElement {
   const matches = Array.from(
-    document.getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, elementName)
+    scope.getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, elementName)
   );
   const element = matches.length === 1 ? matches[0] : null;
   const hasElementChildren = element !== null && element.children.length > 0;
@@ -1499,6 +1499,7 @@ function readPds4DetachedLabelElement(
     unit: element?.getAttribute('unit') ?? null
   };
 }
+
 
 async function computeMavenPdsCsvSha256(csvText: string): Promise<string> {
   if (!globalThis.crypto?.subtle) {
@@ -1563,10 +1564,34 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
     };
   }
 
-  const logicalIdentifier = readPds4DetachedLabelElement(labelDocument, 'logical_identifier');
-  const fileName = readPds4DetachedLabelElement(labelDocument, 'file_name');
-  const fileSize = readPds4DetachedLabelElement(labelDocument, 'file_size');
+  const identificationAreas = Array.from(
+    labelDocument.getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, 'Identification_Area')
+  );
+  const fileAreas = Array.from(
+    labelDocument.getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, 'File_Area_Observational')
+  );
+  const observationalFiles = fileAreas.length === 1
+    ? Array.from(fileAreas[0].getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, 'File'))
+    : [];
+  const structureErrors: string[] = [];
+  if (identificationAreas.length !== 1) {
+    structureErrors.push('detached label must contain exactly one Identification_Area');
+  }
+  if (fileAreas.length !== 1) {
+    structureErrors.push('detached label must contain exactly one File_Area_Observational');
+  }
+  if (observationalFiles.length !== 1) {
+    structureErrors.push('File_Area_Observational must contain exactly one File entry');
+  }
+  const logicalIdentifier = readPds4DetachedLabelElement(
+    identificationAreas.length === 1 ? identificationAreas[0] : labelDocument,
+    'logical_identifier'
+  );
+  const fileScope = observationalFiles.length === 1 ? observationalFiles[0] : labelDocument;
+  const fileName = readPds4DetachedLabelElement(fileScope, 'file_name');
+  const fileSize = readPds4DetachedLabelElement(fileScope, 'file_size');
   const errors: string[] = [];
+  errors.push(...structureErrors);
   if (logicalIdentifier.count !== 1 || !logicalIdentifier.value) {
     errors.push('detached label must contain exactly one non-empty logical_identifier');
   } else if (logicalIdentifier.value !== input.expectedProductId.trim()) {
