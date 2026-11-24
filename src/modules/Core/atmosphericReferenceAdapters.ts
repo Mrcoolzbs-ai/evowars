@@ -31,10 +31,17 @@ import {
 import type {
   AdaptiveHydrostaticColumnResult,
   GasMoleFraction,
+  HydrostaticColumnCompleted,
   HydrostaticColumnInput,
   HydrostaticColumnResult,
   HydrostaticRefinementPolicy
 } from './hydrostaticAtmosphere';
+import { propagateMeasuredNodeHydrostaticUncertainty } from './hydrostaticUncertainty';
+import type {
+  HydrostaticUncertaintyEstimate,
+  HydrostaticUncertaintyResult,
+  MeasuredNodeUncertaintyInput
+} from './hydrostaticUncertainty';
 import {
   MGS_MARS_8028D38A_METADATA,
   MGS_MARS_8028D38A_PROVENANCE,
@@ -361,4 +368,117 @@ export function createMgsMars8028D38AHydrostaticColumnInput(
     requestedHeightsM: MGS_MARS_8028D38A_SAMPLES.map((sample) => sample.heightAboveLocalSurfaceM),
     numerics: { gravitationMode: 'spherical-gravity' }
   };
+}
+
+
+// ============================================
+// MGS MARS → HYDROSTATIC COLUMN + UNCERTAINTY (Stage 4.2)
+// ============================================
+
+function mgsMars8028D38AUncertaintyInput(): MeasuredNodeUncertaintyInput {
+  return {
+    // Use the sigma attached to the first measured pressure node because
+    // that node is the hydrostatic lower boundary. Other retrieved
+    // pressure sigmas remain observational diagnostics and are not
+    // independently folded into the predicted hydrostatic pressure.
+    surfacePressureSigmaPa: MGS_MARS_8028D38A_SAMPLES[0].pressureSigmaPa,
+    temperatureNodeSigmaK: MGS_MARS_8028D38A_SAMPLES.map(
+      (sample) => sample.temperatureSigmaK
+    )
+  };
+}
+
+export type MgsMarsHydrostaticWithUncertaintyResult =
+  | {
+      readonly status: 'completed';
+      readonly column: HydrostaticColumnCompleted;
+      readonly uncertainty: HydrostaticUncertaintyEstimate;
+    }
+  | {
+      readonly status: 'hydrostatic_failed';
+      readonly result: Exclude<HydrostaticColumnResult, HydrostaticColumnCompleted>;
+    }
+  | {
+      readonly status: 'uncertainty_failed';
+      readonly column: HydrostaticColumnCompleted;
+      readonly errors: readonly string[];
+    };
+
+/**
+ * Run the MGS measured-node column and propagate the published 1σ
+ * uncertainty of its lower pressure boundary and every temperature node.
+ * Other PDS pressure sigmas remain attached to the source observations;
+ * they are not treated as independent hydrostatic boundary conditions.
+ */
+export function computeMgsMars8028D38AHydrostaticColumnWithUncertainty(
+  composition: MgsMarsOccultationComposition
+): MgsMarsHydrostaticWithUncertaintyResult {
+  const input = createMgsMars8028D38AHydrostaticColumnInput(composition);
+  const column = computeHydrostaticColumn(input);
+  if (column.status !== 'completed') {
+    return { status: 'hydrostatic_failed', result: column };
+  }
+
+  const uncertainty: HydrostaticUncertaintyResult =
+    propagateMeasuredNodeHydrostaticUncertainty(
+      input,
+      column,
+      mgsMars8028D38AUncertaintyInput()
+    );
+  if (uncertainty.status !== 'estimated') {
+    return {
+      status: 'uncertainty_failed',
+      column,
+      errors: uncertainty.errors
+    };
+  }
+  return { status: 'completed', column, uncertainty };
+}
+
+export type MgsMarsAdaptiveHydrostaticWithUncertaintyResult =
+  | {
+      readonly status: 'completed';
+      readonly adaptive: Extract<AdaptiveHydrostaticColumnResult, { status: 'completed' }>;
+      readonly uncertainty: HydrostaticUncertaintyEstimate;
+    }
+  | {
+      readonly status: 'adaptive_rejected';
+      readonly result: Extract<AdaptiveHydrostaticColumnResult, { status: 'rejected' }>;
+    }
+  | {
+      readonly status: 'uncertainty_failed';
+      readonly adaptive: Extract<AdaptiveHydrostaticColumnResult, { status: 'completed' }>;
+      readonly errors: readonly string[];
+    };
+
+/**
+ * Adaptive variant: propagate the original PDS node errors onto every
+ * unique height in the final, re-integrated adaptive column. The ORIGINAL
+ * input is passed to the uncertainty operator so subdivision does not
+ * discard or duplicate source-node uncertainty.
+ */
+export function computeAdaptivelyRefinedMgsMars8028D38AHydrostaticColumnWithUncertainty(
+  composition: MgsMarsOccultationComposition,
+  policy?: HydrostaticRefinementPolicy
+): MgsMarsAdaptiveHydrostaticWithUncertaintyResult {
+  const input = createMgsMars8028D38AHydrostaticColumnInput(composition);
+  const adaptive = computeAdaptivelyRefinedHydrostaticColumn(input, policy);
+  if (adaptive.status !== 'completed') {
+    return { status: 'adaptive_rejected', result: adaptive };
+  }
+
+  const uncertainty: HydrostaticUncertaintyResult =
+    propagateMeasuredNodeHydrostaticUncertainty(
+      input,
+      adaptive.column,
+      mgsMars8028D38AUncertaintyInput()
+    );
+  if (uncertainty.status !== 'estimated') {
+    return {
+      status: 'uncertainty_failed',
+      adaptive,
+      errors: uncertainty.errors
+    };
+  }
+  return { status: 'completed', adaptive, uncertainty };
 }
