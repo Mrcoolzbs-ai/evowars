@@ -4,6 +4,8 @@ import {
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
   MAVEN_NGIMS_PDS_ARCHIVE,
   MAVEN_INSITU_KP_PDS_ARCHIVE,
+  MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT,
+  parseMavenInsituKeyParameterRecord,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
@@ -29,6 +31,46 @@ const row = (overrides: Partial<MavenNgimsL2NeutralAbundanceRow> = {}): MavenNgi
   quality: 'IV',
   ...overrides
 });
+
+function keyParameterRecord(overrides: Record<string, string> = {}): string {
+  let record = ' '.repeat(MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.recordLengthBytes);
+  const set = (start: number, length: number, value: string): void => {
+    record = record.slice(0, start - 1) + value.padStart(length, ' ') + record.slice(start - 1 + length);
+  };
+  set(1, 19, '2025-06-10T12:00:00');
+  set(2308, 16, '1.0e6');
+  set(2324, 16, '15');
+  set(2340, 16, 'D');
+  set(2356, 16, '2.0e6');
+  set(2372, 16, '20');
+  set(2388, 16, 'D');
+  set(2548, 16, '3.0e6');
+  set(2564, 16, '30');
+  set(2580, 16, 'D');
+  set(3076, 16, '123.4');
+  set(3092, 16, '-5');
+  set(3108, 16, '75');
+  set(3124, 16, '12.5');
+  set(3140, 16, '160');
+  set(3348, 16, '31000');
+  set(3364, 16, 'I');
+  set(3380, 16, '251');
+  const positions: Record<string, number> = {
+    timeUtc: 1,
+    O_density: 2308, O_precision: 2324, O_quality: 2340,
+    CO_density: 2356, CO_precision: 2372, CO_quality: 2388,
+    CO2_density: 2548, CO2_precision: 2564, CO2_quality: 2580,
+    longitude: 3076, latitude: 3092, sza: 3108, lst: 3124,
+    altitude: 3140, orbit: 3348, direction: 3364, solarLongitude: 3380
+  };
+  for (const [key, value] of Object.entries(overrides)) {
+    const start = positions[key];
+    if (start === undefined) throw new Error('unknown synthetic fixed-width field: ' + key);
+    const length = key === 'timeUtc' ? 19 : 16;
+    set(start, length, value);
+  }
+  return record;
+}
 
 describe('MAVEN upper-atmosphere evidence', () => {
   it('preserves the published IUVS NO retrieval geometry and method without inventing density points', () => {
@@ -83,22 +125,103 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.start).toBe('2014-03-18T12:00:00.000Z');
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.stop).toBe('2025-12-05T11:59:52.000Z');
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.observationDateUtc).toBe('2025-06-10');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.fileName).toBe('mvn_kp_insitu_20250610_v26_r01.tab');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.reportedDirectorySize).toBe('43 MB');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.productLabelRetrieved).toBe(false);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.exampleProduct.tableImportedIntoRepository).toBe(false);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.sisRevision).toBe('5.2');
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.recordLengthBytes).toBe(3765);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.O.density).toBe(2308);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.CO.density).toBe(2356);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.CO2.density).toBe(2548);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralDensityFields.map((field) => field.species)).toEqual([
       'He', 'O', 'CO', 'N2', 'NO', 'Ar', 'CO2'
     ]);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralDensityFields.find((field) => field.species === 'NO')?.status)
-      .toBe('field_present_values_not_verified');
+      .toBe('field_present_sis_declares_all_nan');
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.precision.upperLimitSentinel).toBe(-1);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directlyRepresentedSpecies)
       .toEqual(['O', 'CO', 'CO2']);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount).toBe(3);
-    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.note).toMatch(/actual NO row values are unverified/);
-    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/actual NO values.*unverified/i);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.note).toMatch(/all values set to NaN/i);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/all values set to NaN/i);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.totalNetworkSpeciesCount).toBe(16);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralTemperature.lpwTemperatureIsNeutralGasTemperature).toBe(false);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.sampling.geometryFromSpice).toBe(true);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/0\.5 or 42\.67 km/);
+  });
+
+  it('parses one SIS 5.2 fixed-width row and preserves the three neutral detection values', () => {
+    const result = parseMavenInsituKeyParameterRecord(
+      keyParameterRecord(),
+      'mvn_kp_insitu_20250610_v26_r01.tab'
+    );
+    expect(result.status).toBe('parsed');
+    if (result.status !== 'parsed') throw new Error(result.errors.join('; '));
+    expect(result.row.sourceProductId).toBe('mvn_kp_insitu_20250610_v26_r01.tab');
+    expect(result.row.timeUtc).toBe('2025-06-10T12:00:00.000Z');
+    expect(result.row.geometry).toEqual({
+      longitudeDeg: 123.4,
+      latitudeDeg: -5,
+      solarZenithAngleDeg: 75,
+      localSolarTimeHours: 12.5,
+      altitudeKm: 160,
+      orbitNumber: 31000,
+      direction: 'inbound',
+      solarLongitudeDeg: 251
+    });
+    expect(result.row.neutralDensities.O).toMatchObject({
+      numberDensityPerCm3: 1e6,
+      precisionPercent1Sigma: 15,
+      qualityFlag: 'D',
+      reportedSigmaPerCm3: 150000,
+      evidenceStatus: 'verified_detection'
+    });
+    expect(result.row.neutralDensities.CO.reportedSigmaPerCm3).toBe(400000);
+    expect(result.row.neutralDensities.CO2.reportedSigmaPerCm3).toBe(900000);
+    expect(result.row.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+  });
+
+  it('keeps NGIMS precision=-1 as an upper limit and never treats it as a detection', () => {
+    const result = parseMavenInsituKeyParameterRecord(keyParameterRecord({
+      O_density: '5.0e5',
+      O_precision: '-1'
+    }), 'mvn_kp_insitu_20250610_v26_r01.tab');
+    expect(result.status).toBe('parsed');
+    if (result.status !== 'parsed') throw new Error(result.errors.join('; '));
+    expect(result.row.neutralDensities.O.evidenceStatus).toBe('upper_limit');
+    expect(result.row.neutralDensities.O.reportedSigmaPerCm3).toBeNull();
+  });
+
+  it('keeps preliminary quality, NaN density, and unknown quality distinct from verified detections', () => {
+    const result = parseMavenInsituKeyParameterRecord(keyParameterRecord({
+      O_quality: 'P',
+      CO_density: 'NaN',
+      CO_precision: 'NaN',
+      CO_quality: 'P',
+      CO2_quality: 'X'
+    }), 'mvn_kp_insitu_20250610_v26_r01.tab');
+    expect(result.status).toBe('parsed');
+    if (result.status !== 'parsed') throw new Error(result.errors.join('; '));
+    expect(result.row.neutralDensities.O.evidenceStatus).toBe('preliminary');
+    expect(result.row.neutralDensities.CO).toMatchObject({
+      numberDensityPerCm3: null,
+      precisionPercent1Sigma: null,
+      evidenceStatus: 'not_available'
+    });
+    expect(result.row.neutralDensities.CO2.evidenceStatus).toBe('quality_unverified');
+  });
+
+  it('rejects wrong record widths, non-ASCII bytes, invalid numbers, timestamps, and missing product identity', () => {
+    expect(parseMavenInsituKeyParameterRecord('short', 'product').status).toBe('rejected');
+    const unicode = keyParameterRecord().slice(0, 2307) + 'é' +
+      keyParameterRecord().slice(2308);
+    expect(parseMavenInsituKeyParameterRecord(unicode, 'product').status).toBe('rejected');
+    expect(parseMavenInsituKeyParameterRecord(keyParameterRecord({ O_density: 'invalid' }), 'product').status)
+      .toBe('rejected');
+    expect(parseMavenInsituKeyParameterRecord(keyParameterRecord({ timeUtc: '2025-02-30T12:00:00' }), 'product').status)
+      .toBe('rejected');
+    expect(parseMavenInsituKeyParameterRecord(keyParameterRecord(), ' ').status).toBe('rejected');
   });
 
   it('converts one verified L2 abundance and its 1-sigma relative precision to SI', () => {
