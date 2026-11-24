@@ -1106,6 +1106,421 @@ export function parseMavenNgimsL2NeutralCsvText(
 }
 
 
+
+export type MavenNgimsL3ResampledDensityEvidenceStatus =
+  | 'verified_resampled_value'
+  | 'uncertain_resampled_value'
+  | 'unreliable'
+  | 'not_available'
+  | 'non_positive';
+
+export interface MavenNgimsL3ResampledDensityRow {
+  readonly sourceProductId: string;
+  readonly timeUtc: string;
+  readonly unixTimeSeconds: number;
+  readonly spacecraftClockSeconds: number;
+  readonly elapsedSinceTidStartSeconds: number;
+  readonly tid: number;
+  readonly orbit: number;
+  readonly focusMode: MavenNgimsFocusMode;
+  readonly altitudeKm: number;
+  readonly massAmu: number;
+  readonly species: string;
+  /** Interpolated/averaged L3 density in particles cm^-3. */
+  readonly densityBinsPerCm3: number | null;
+  /** SI conversion of densityBinsPerCm3; null remains unavailable. */
+  readonly densityBinsPerM3: number | null;
+  /** Table A-9 has no per-row precision/sigma column. */
+  readonly reportedSigmaPerCm3: null;
+  readonly qualityFlag: MavenNgimsNeutralQuality;
+  readonly evidenceStatus: MavenNgimsL3ResampledDensityEvidenceStatus;
+  readonly evidenceKind: 'l3_resampled_average_density';
+  readonly densityBasis: 'equal_pressure_altitude_constant_log_density_bins';
+  readonly duplicateUtcColumnsMatched: boolean;
+  readonly eligibleAsDirectL2Measurement: false;
+  readonly eligibleAsSchedulerInitialAbundance: false;
+  readonly eligibleAsMarsPhotochemicalInitialState: false;
+  readonly diagnostics: readonly string[];
+}
+
+export type MavenNgimsL3ResampledDensityRowValidation =
+  | { readonly status: 'parsed'; readonly row: MavenNgimsL3ResampledDensityRow }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+export interface MavenNgimsL3ResampledDensityCsvRowResult {
+  readonly recordNumber: number;
+  readonly validation: MavenNgimsL3ResampledDensityRowValidation;
+}
+
+export type MavenNgimsL3ResampledDensityCsvImportResult =
+  | {
+      readonly status: 'parsed';
+      readonly sourceProductId: string;
+      readonly headers: readonly string[];
+      readonly duplicatedUtcHeader: boolean;
+      readonly rows: readonly MavenNgimsL3ResampledDensityCsvRowResult[];
+      readonly parsedRowCount: number;
+      readonly rejectedRowCount: number;
+      readonly evidenceStatusCounts: Readonly<Record<MavenNgimsL3ResampledDensityEvidenceStatus, number>>;
+    }
+  | { readonly status: 'invalid_csv'; readonly errors: readonly string[] };
+
+export interface MavenNgimsL3ResampledDensitySelection {
+  readonly sourceProductId: string;
+  readonly tid: number;
+  readonly orbit: number;
+  readonly focusMode: MavenNgimsFocusMode;
+  readonly species: string;
+  readonly quality: 'verified' | 'uncertain';
+  readonly timeStartUtc: string;
+  readonly timeStopUtc: string;
+}
+
+export interface MavenNgimsL3ResampledDensityExcludedRowCounts {
+  readonly rejectedByRowValidation: number;
+  readonly differentTid: number;
+  readonly differentOrbit: number;
+  readonly differentFocusMode: number;
+  readonly differentSpecies: number;
+  readonly differentQuality: number;
+  readonly unavailableOrNonPositive: number;
+  readonly outsideUtcWindow: number;
+}
+
+export type MavenNgimsL3ResampledDensitySelectionResult =
+  | {
+      readonly status: 'completed';
+      readonly selection: MavenNgimsL3ResampledDensitySelection;
+      readonly measurements: readonly MavenNgimsL3ResampledDensityRow[];
+      readonly excludedRows: MavenNgimsL3ResampledDensityExcludedRowCounts;
+      readonly sourceProductIdentityBasis: 'caller-supplied-not-verified-from-csv-payload';
+      readonly eligibleAsMarsPhotochemicalInitialState: false;
+      readonly limitations: readonly string[];
+    }
+  | {
+      readonly status: 'rejected';
+      readonly errors: readonly string[];
+      readonly excludedRows?: MavenNgimsL3ResampledDensityExcludedRowCounts;
+    };
+
+const NGIMS_L3_RES_DEN_BASE_COLUMNS = [
+  't_utc', 't_unix', 't_sclk', 't_tid', 'tid', 'orbit',
+  'focusmode', 'alt', 'mass', 'species', 'density_bins', 'quality'
+] as const;
+
+/**
+ * Parse one Table A-9 row. SIS Rev. 1.13 prints two t_utc entries in its
+ * column table; both the single-timestamp-header and duplicated-header
+ * variants are accepted. When duplicated, the two row values must agree.
+ */
+export function parseMavenNgimsL3ResampledDensityCsvRow(
+  values: readonly string[],
+  headers: readonly string[],
+  sourceProductId: string,
+  recordNumber = 1
+): MavenNgimsL3ResampledDensityRowValidation {
+  if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
+    return { status: 'rejected', errors: ['sourceProductId must identify the exact L3 res-den PDS product'] };
+  }
+  const normalizedHeaders = headers.map((header) => header.trim().toLowerCase());
+  const duplicatedUtcHeader =
+    normalizedHeaders.length === 13 &&
+    normalizedHeaders[0] === 't_utc' &&
+    normalizedHeaders[1] === 't_utc';
+  const columnHeaders = duplicatedUtcHeader
+    ? [normalizedHeaders[0], ...normalizedHeaders.slice(2)]
+    : normalizedHeaders;
+  if (
+    columnHeaders.length !== NGIMS_L3_RES_DEN_BASE_COLUMNS.length ||
+    columnHeaders.some((header, index) => header !== NGIMS_L3_RES_DEN_BASE_COLUMNS[index])
+  ) {
+    return { status: 'rejected', errors: ['CSV columns do not match the NGIMS SIS Rev. 1.13 Table A-9 schema'] };
+  }
+  if (values.length !== normalizedHeaders.length) {
+    return {
+      status: 'rejected',
+      errors: ['record ' + recordNumber + ' has ' + values.length + ' values; expected ' + normalizedHeaders.length]
+    };
+  }
+
+  const record = Object.fromEntries(
+    columnHeaders.map((header, index) => [header, values[duplicatedUtcHeader ? (index === 0 ? 0 : index + 1) : index]])
+  ) as Record<string, string>;
+  const errors: string[] = [];
+  const timeUtc = strictNgimsUtcTimestamp(record.t_utc?.trim() ?? '');
+  if (timeUtc === null) errors.push('t_utc must be a valid calendar UTC timestamp ending in Z');
+  let duplicateUtcColumnsMatched = false;
+  if (duplicatedUtcHeader) {
+    const firstUtc = strictNgimsUtcTimestamp(values[0]?.trim() ?? '');
+    const secondUtc = strictNgimsUtcTimestamp(values[1]?.trim() ?? '');
+    duplicateUtcColumnsMatched = firstUtc !== null && firstUtc === secondUtc;
+    if (!duplicateUtcColumnsMatched) {
+      errors.push('the duplicated Table A-9 t_utc columns must contain the same UTC instant');
+    }
+  }
+
+  const numericFields = [
+    't_unix', 't_sclk', 't_tid', 'tid', 'orbit',
+    'alt', 'mass', 'density_bins'
+  ] as const;
+  const numeric = {} as Record<typeof numericFields[number], number | null>;
+  for (const field of numericFields) {
+    const raw = record[field]?.trim() ?? '';
+    if (field === 'density_bins' && (raw === '' || /^NaN$/i.test(raw))) {
+      numeric[field] = null;
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      errors.push(field + ' must be a finite numeric value' +
+        (field === 'density_bins' ? ' or an explicit NaN/blank unavailable marker' : ''));
+      numeric[field] = null;
+    } else {
+      numeric[field] = value;
+    }
+  }
+
+  const focusMode = record.focusmode?.trim().toLowerCase();
+  if (!FOCUS_MODES.includes(focusMode ?? '')) errors.push('focusmode is not an NGIMS-supported focus mode');
+  const species = record.species?.trim();
+  if (!species) errors.push('species must be non-empty');
+  const qualityFlag = record.quality?.trim().toUpperCase();
+  if (!QUALITY_FLAGS.includes(qualityFlag ?? '')) errors.push('quality must be one of IV, IU, OV, OU or UR');
+
+  if (errors.length > 0) return { status: 'rejected', errors };
+  if (!Number.isInteger(numeric.tid) || numeric.tid! <= 0) errors.push('tid must be a positive integer');
+  if (!Number.isInteger(numeric.orbit) || numeric.orbit! <= 0) errors.push('orbit must be a positive integer');
+  if (numeric.t_unix! < 0 || numeric.t_sclk! < 0 || numeric.t_tid! < 0) {
+    errors.push('unix, spacecraft-clock and elapsed TID times must be non-negative');
+  }
+  if (numeric.alt! <= 0) errors.push('alt must be positive km');
+  if (numeric.mass! < 2 || numeric.mass! > 150) errors.push('mass must be within NGIMS coverage [2,150] Da');
+  if (numeric.density_bins !== null && numeric.density_bins! < 0) {
+    errors.push('density_bins cannot be negative');
+  }
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  const density = numeric.density_bins;
+  const densityM3 = density === null ? null : density * 1e6;
+  const flag = qualityFlag as MavenNgimsNeutralQuality;
+  const evidenceStatus: MavenNgimsL3ResampledDensityEvidenceStatus =
+    density === null
+      ? 'not_available'
+      : density <= 0
+        ? 'non_positive'
+        : flag === 'UR'
+          ? 'unreliable'
+          : flag === 'IU' || flag === 'OU'
+            ? 'uncertain_resampled_value'
+            : 'verified_resampled_value';
+
+  const diagnostics = [
+    'L3 res-den density is interpolated to equal-pressure altitude and averaged in constant log-density bins (0.2 log steps); it is not a raw L2 point measurement.',
+    'Table A-9 supplies no per-row density precision or sigma; reportedSigmaPerCm3 is therefore null, not zero.',
+    'The row carries altitude, time, TID, orbit, focus mode, species and quality, but no per-row latitude, longitude, SZA or local solar time.',
+    'This L3 resampled profile is not eligible for direct Scheduler or Mars photochemical initial-state construction.'
+  ];
+  if (flag === 'UR') diagnostics.push('Quality UR marks this row unreliable and not usable for science.');
+  if (flag === 'IU' || flag === 'OU') diagnostics.push('Quality IU/OU marks this resampled density as uncertain.');
+  if (density === null) diagnostics.push('density_bins is unavailable/NaN.');
+  if (density !== null && density <= 0) diagnostics.push('Non-positive density is retained for audit and is not a positive detection.');
+
+  return {
+    status: 'parsed',
+    row: {
+      sourceProductId: sourceProductId.trim(),
+      timeUtc: timeUtc!,
+      unixTimeSeconds: numeric.t_unix!,
+      spacecraftClockSeconds: numeric.t_sclk!,
+      elapsedSinceTidStartSeconds: numeric.t_tid!,
+      tid: numeric.tid!,
+      orbit: numeric.orbit!,
+      focusMode: focusMode as MavenNgimsFocusMode,
+      altitudeKm: numeric.alt!,
+      massAmu: numeric.mass!,
+      species: species!,
+      densityBinsPerCm3: density,
+      densityBinsPerM3: densityM3,
+      reportedSigmaPerCm3: null,
+      qualityFlag: flag,
+      evidenceStatus,
+      evidenceKind: 'l3_resampled_average_density',
+      densityBasis: 'equal_pressure_altitude_constant_log_density_bins',
+      duplicateUtcColumnsMatched,
+      eligibleAsDirectL2Measurement: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      eligibleAsMarsPhotochemicalInitialState: false,
+      diagnostics
+    }
+  };
+}
+
+/** Parse the L3 res-den CSV; a schema/header failure rejects the entire product. */
+export function parseMavenNgimsL3ResampledDensityCsvText(
+  csvText: string,
+  sourceProductId: string
+): MavenNgimsL3ResampledDensityCsvImportResult {
+  if (typeof csvText !== 'string' || csvText.trim() === '') {
+    return { status: 'invalid_csv', errors: ['CSV text is empty'] };
+  }
+  if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
+    return { status: 'invalid_csv', errors: ['sourceProductId must identify the exact L3 res-den PDS product'] };
+  }
+  const parsed = parseNgimsCsvRecords(csvText.replace(/^\uFEFF/, ''));
+  if (parsed.error) return { status: 'invalid_csv', errors: [parsed.error] };
+  if (parsed.records.length < 2) {
+    return { status: 'invalid_csv', errors: ['CSV must contain a header and at least one data record'] };
+  }
+
+  const headers = parsed.records[0].map((header) => header.trim().toLowerCase());
+  const duplicatedUtcHeader =
+    headers.length === 13 && headers[0] === 't_utc' && headers[1] === 't_utc';
+  const columns = duplicatedUtcHeader ? [headers[0], ...headers.slice(2)] : headers;
+  if (
+    columns.length !== NGIMS_L3_RES_DEN_BASE_COLUMNS.length ||
+    columns.some((header, index) => header !== NGIMS_L3_RES_DEN_BASE_COLUMNS[index])
+  ) {
+    return { status: 'invalid_csv', errors: ['CSV header does not match the NGIMS SIS Rev. 1.13 Table A-9 schema'] };
+  }
+
+  const rows: MavenNgimsL3ResampledDensityCsvRowResult[] = parsed.records.slice(1).map((values, index) => ({
+    recordNumber: index + 1,
+    validation: parseMavenNgimsL3ResampledDensityCsvRow(values, headers, sourceProductId, index + 1)
+  }));
+  const statusCounts: Record<MavenNgimsL3ResampledDensityEvidenceStatus, number> = {
+    verified_resampled_value: 0,
+    uncertain_resampled_value: 0,
+    unreliable: 0,
+    not_available: 0,
+    non_positive: 0
+  };
+  for (const entry of rows) {
+    if (entry.validation.status === 'parsed') {
+      statusCounts[entry.validation.row.evidenceStatus] += 1;
+    }
+  }
+  const parsedRowCount = rows.filter((entry) => entry.validation.status === 'parsed').length;
+  return {
+    status: 'parsed',
+    sourceProductId: sourceProductId.trim(),
+    headers,
+    duplicatedUtcHeader,
+    rows,
+    parsedRowCount,
+    rejectedRowCount: rows.length - parsedRowCount,
+    evidenceStatusCounts: statusCounts
+  };
+}
+
+/** Select one L3 res-den species profile from an exact TID/orbit/focus-mode and UTC event window. */
+export function selectMavenNgimsL3ResampledDensityProfile(
+  imported: MavenNgimsL3ResampledDensityCsvImportResult,
+  selection: MavenNgimsL3ResampledDensitySelection
+): MavenNgimsL3ResampledDensitySelectionResult {
+  if (!imported || imported.status !== 'parsed') {
+    return { status: 'rejected', errors: ['a successfully parsed NGIMS L3 res-den CSV import is required'] };
+  }
+  if (!selection || typeof selection !== 'object') {
+    return { status: 'rejected', errors: ['an explicit L3 res-den event selection is required'] };
+  }
+  const errors: string[] = [];
+  if (selection.sourceProductId !== imported.sourceProductId) {
+    errors.push('selection sourceProductId must exactly match the imported L3 res-den product identity');
+  }
+  if (!Number.isInteger(selection.tid) || selection.tid <= 0) errors.push('TID must be a positive integer');
+  if (!Number.isInteger(selection.orbit) || selection.orbit <= 0) errors.push('orbit must be a positive integer');
+  if (!FOCUS_MODES.includes(selection.focusMode)) errors.push('focusMode must be an NGIMS-supported focus mode');
+  if (typeof selection.species !== 'string' || selection.species.trim() === '') errors.push('species must be explicit');
+  if (selection.quality !== 'verified' && selection.quality !== 'uncertain') {
+    errors.push('quality must be explicitly verified or uncertain');
+  }
+  const startUtc = normalizeMavenIndexUtc(selection.timeStartUtc);
+  const stopUtc = normalizeMavenIndexUtc(selection.timeStopUtc);
+  if (startUtc === null || stopUtc === null) errors.push('UTC selection window must contain valid calendar timestamps');
+  else if (Date.parse(startUtc) >= Date.parse(stopUtc)) errors.push('UTC stop must be later than start');
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  const excluded: MavenNgimsL3ResampledDensityExcludedRowCounts = {
+    rejectedByRowValidation: 0,
+    differentTid: 0,
+    differentOrbit: 0,
+    differentFocusMode: 0,
+    differentSpecies: 0,
+    differentQuality: 0,
+    unavailableOrNonPositive: 0,
+    outsideUtcWindow: 0
+  };
+  const selected: MavenNgimsL3ResampledDensityRow[] = [];
+  const targetSpecies = selection.species.trim().toUpperCase();
+  for (const entry of imported.rows) {
+    if (entry.validation.status === 'rejected') {
+      excluded.rejectedByRowValidation += 1;
+      continue;
+    }
+    const row = entry.validation.row;
+    if (row.tid !== selection.tid) { excluded.differentTid += 1; continue; }
+    if (row.orbit !== selection.orbit) { excluded.differentOrbit += 1; continue; }
+    if (row.focusMode !== selection.focusMode) { excluded.differentFocusMode += 1; continue; }
+    if (row.species.trim().toUpperCase() !== targetSpecies) { excluded.differentSpecies += 1; continue; }
+    if (
+      (selection.quality === 'verified' && row.evidenceStatus !== 'verified_resampled_value') ||
+      (selection.quality === 'uncertain' && row.evidenceStatus !== 'uncertain_resampled_value')
+    ) {
+      if (row.evidenceStatus === 'not_available' || row.evidenceStatus === 'non_positive' || row.evidenceStatus === 'unreliable') {
+        excluded.unavailableOrNonPositive += 1;
+      } else {
+        excluded.differentQuality += 1;
+      }
+      continue;
+    }
+    const timeUtc = normalizeMavenIndexUtc(row.timeUtc);
+    if (
+      timeUtc === null ||
+      Date.parse(timeUtc) < Date.parse(startUtc!) ||
+      Date.parse(timeUtc) > Date.parse(stopUtc!)
+    ) {
+      excluded.outsideUtcWindow += 1;
+      continue;
+    }
+    selected.push(row);
+  }
+
+  if (selected.length < 2) {
+    return {
+      status: 'rejected',
+      errors: ['fewer than two valid resampled-density rows match the exact product/TID/orbit/focus-mode/species/quality/UTC-window selection'],
+      excludedRows: excluded
+    };
+  }
+  selected.sort((a, b) => a.altitudeKm - b.altitudeKm);
+  for (let index = 1; index < selected.length; index += 1) {
+    if (selected[index].altitudeKm === selected[index - 1].altitudeKm) {
+      return { status: 'rejected', errors: ['duplicate altitude-bin rows are not averaged implicitly'], excludedRows: excluded };
+    }
+  }
+  return {
+    status: 'completed',
+    selection: {
+      ...selection,
+      sourceProductId: selection.sourceProductId.trim(),
+      species: selection.species.trim(),
+      timeStartUtc: startUtc!,
+      timeStopUtc: stopUtc!
+    },
+    measurements: selected,
+    excludedRows: excluded,
+    sourceProductIdentityBasis: 'caller-supplied-not-verified-from-csv-payload',
+    eligibleAsMarsPhotochemicalInitialState: false,
+    limitations: [
+      'L3 res-den is interpolated to equal-pressure altitude and averaged in constant log-density bins; it is not a raw L2 measurement profile.',
+      'Table A-9 does not publish a per-row precision or uncertainty column; no sigma is fabricated.',
+      'Each row contains altitude and event/species identifiers but not pointwise latitude, longitude, SZA or local solar time.',
+      'The source product ID is supplied by the caller and is not cryptographically verified from the CSV payload; retain the detached XML label and downloaded-file hash.',
+      'This resampled neutral-density profile is useful for upper-atmosphere analysis only and is not eligible for Mars photochemical or Scheduler initial-state construction.'
+    ]
+  };
+}
+
 export interface MavenNgimsL2EventWindowSelection {
   /** Exact PDS product URN or product identifier supplied with the downloaded CSV. */
   readonly sourceProductId: string;
