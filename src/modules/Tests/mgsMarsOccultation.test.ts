@@ -102,14 +102,18 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
       min: MGS_MARS_8028D38A_SAMPLES[72]!.heightAboveLocalSurfaceM,
       max: last.heightAboveLocalSurfaceM
     });
-    expect(profile.layers[0].temperature.status).toBe('estimated');
-    expect(profile.layers[0].temperature.quantity?.value).toBeCloseTo(
+    const firstLayerTemperature = profile.layers[0].temperature;
+    expect(firstLayerTemperature.status).toBe('estimated');
+    if (firstLayerTemperature.status !== 'estimated') {
+      throw new Error('MGS midpoint temperature must retain estimated status');
+    }
+    expect(firstLayerTemperature.quantity.value).toBeCloseTo(
       (first.temperatureK + MGS_MARS_8028D38A_SAMPLES[1]!.temperatureK) / 2,
       12
     );
-    expect(profile.layers[0].temperature.provenance?.recordId).toBe('interpolated-rows-1-2');
-    expect(profile.layers[0].temperature.provenance?.rawInput?.lowerTemperatureSigmaK).toBe(first.temperatureSigmaK);
-    expect(profile.layers[0].temperature.uncertainty).toBeUndefined();
+    expect(firstLayerTemperature.provenance?.recordId).toBe('interpolated-rows-1-2');
+    expect(firstLayerTemperature.provenance?.rawInput?.lowerTemperatureSigmaK).toBe(first.temperatureSigmaK);
+    expect(firstLayerTemperature.uncertainty).toBeUndefined();
 
     for (let index = 0; index < profile.layers.length; index += 1) {
       const layer = profile.layers[index]!;
