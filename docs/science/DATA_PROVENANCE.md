@@ -666,3 +666,6 @@ A single NGIMS density row/profile is not an initial world state: it lacks co-lo
 
 
 **Archive index identity:** The PDS logs directory lists `MAVEN_NGIMS_l2_del1-35.csv` as the L2 neutral index (revision del1-35, last modified 2023-11-15; 5.2 MB in the directory listing): https://pdsatmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_l2_del1-35.csv. This identifier is recorded in `MAVEN_NGIMS_PDS_ARCHIVE.archiveIndexFiles` as a retrieval locator. The index itself and its per-orbit row payloads have not yet been frozen in the repository; the CSV parser's test fixtures are explicitly synthetic.
+
+
+**Single-profile selection after whole-file import:** `buildMavenNgimsNeutralProfileFromCsvImport()` requires explicit selection of species, MAVEN orbit, NGIMS TID, inbound/outbound branch, and verified/uncertain quality class. Only accepted measurements matching all five selectors reach the monotonic profile builder; cross-species/orbit/direction/quality mixtures and duplicate altitudes remain rejected. This is an import/profile extraction helper only: no generated world, reservoir, or Scheduler state is mutated. Unit fixtures prove that O can be selected from a CSV that also contains NO, without mixing species.
