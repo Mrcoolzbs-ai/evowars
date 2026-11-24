@@ -198,6 +198,14 @@ The data module `Data/marsPhotochemistryEvidence.ts` preserves the nine inorgani
 
 Mars termolecular reactions use CO2 as the bath gas. The Table B1 efficiency multiplier (2.075 for a1, 2.5 for other direct termolecular rows) is included in the stored pre-exponential A; the caller must separately supply local CO2 number density. It is never inferred from pressure or a partial composition. The table gives no formal T validity intervals or numerical 1σ rate uncertainties; these remain unreported. This is a data/evaluation layer only, not a complete chemical network or Scheduler-connected atmospheric simulation.
 
+### 6.11 Coupled local Mars photochemical ODE step
+
+`ChemicalEvolution/marsPhotochemicalNetwork.ts` exposes `buildMarsPhotochemicalNetworkProblem()` and `runMarsPhotochemicalConcentrationStep()`. The adapter couples explicitly selected Taysum & Palmer (2020) Table B1 gas-phase reactions with Table B2 photolysis channels in a 16-species state (particles cm⁻³), at one explicit temperature, one exact photolysis altitude node, and one physical dt in seconds. All initial species concentrations, temperature, and their provenance are mandatory; no omitted state field is interpreted as zero.
+
+The local termolecular bath gas is the current dynamic CO₂ concentration; the existing KIDA N₂ mechanism is not reused. The built problem has an analytical Jacobian, non-negative state indices and C/H/O linear invariants, and is solved by the existing Radau IIA backend. Unsupported fall-off reactions c11/c17, e1 except at 298 K, and all off-grid photolysis altitudes fail closed. A solver error returns no partial state.
+
+This is a single homogeneous compartment only. It is not connected to Scheduler/GeneratedWorld, does not synthesize an initial atmosphere, and does not model vertical transport, boundary fluxes, or time-dependent radiative/meteorological forcing. The photolysis forcing remains SZA=0°, Ls=251°; no uncertainty is quantified for the imported table rates.
+
 ## 7. Химия и эволюция
 
 ### 7.1 Инвентари и стехиометрия
