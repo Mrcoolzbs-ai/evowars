@@ -1,32 +1,30 @@
-# React + TypeScript + Vite
+# Evolution Wars
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+**Evolution Wars** — браузерный генератор планетарных миров. Пользователь задаёт seed, выбирает реалистичный или аномальный режим и при необходимости фиксирует категории; приложение детерминированно собирает мир, показывает его паспорт, предупреждения совместимости и доступные сведения об атмосфере и химической эволюции.
 
-Currently, two official plugins are available:
+Полная восстановленная спецификация, пользовательские сценарии, модель данных, научные ограничения и статус реализации находятся в [SPECIFICATION.md](./SPECIFICATION.md).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Текущее состояние
 
-## React Compiler
+- Ветка `main` содержит работающий генератор и MVP-поток исследования с локальным сохранением.
+- Расширенная физическая модель, научное ядро, дополнительные данные Марса и экспериментальный Rust/WASM-путь развиваются в [PR #1 — Stage 3](https://github.com/Mrcoolzbs-ai/evowars/pull/1). До слияния PR эти функции не следует считать частью `main`.
+- Упрощённые диапазоны, эвристики и legacy-химический шаг явно не являются полноценными физическими моделями.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Запуск
 
-## Expanding the Oxlint configuration
+Требуется Node.js с npm.
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm ci
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Проверка
+
+```bash
+npm test -- --run
+npm run lint
+npm run build
+```
+
+Для подробных критериев приёмки и научной валидации см. разделы 13 и 15 в [SPECIFICATION.md](./SPECIFICATION.md).
