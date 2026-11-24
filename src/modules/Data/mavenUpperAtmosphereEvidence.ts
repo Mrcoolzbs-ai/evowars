@@ -1197,7 +1197,7 @@ export interface MavenNgimsL3ResampledDensityPds4ImportProvenance {
 export type MavenNgimsL3ResampledDensityPds4ImportResult =
   | {
       readonly status: 'imported';
-      readonly imported: MavenNgimsL3ResampledDensityCsvImportResult;
+      readonly imported: Extract<MavenNgimsL3ResampledDensityCsvImportResult, { readonly status: 'parsed' }>;
       readonly provenance: MavenNgimsL3ResampledDensityPds4ImportProvenance;
     }
   | { readonly status: 'rejected'; readonly errors: readonly string[] };
