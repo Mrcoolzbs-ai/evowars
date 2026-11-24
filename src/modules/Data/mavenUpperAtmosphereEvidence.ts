@@ -1188,8 +1188,11 @@ export interface MavenNgimsL3ResampledDensityPds4ImportProvenance {
     'file_name_matches_expected_csv_file_name',
     'file_size_matches_csv_utf8_byte_length'
   ];
-  /** The digest is recorded for fixity, but no signed PDS checksum was independently compared. */
-  readonly csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum';
+  /** Optional MD5 declared by the PDS4 File element; null when the label omits it. */
+  readonly csvMd5Checksum: string | null;
+  readonly csvMd5ChecksumStatus: 'not_present_in_detached_label' | 'verified_against_detached_label';
+  /** MD5 comparison checks file fixity against the supplied label, not label authenticity. */
+  readonly csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum' | 'md5_verified_against_detached_label';
   /** The label is user-supplied input; this function does not authenticate its publisher/signature. */
   readonly detachedLabelAuthenticity: 'not_independently_authenticated';
 }
@@ -1483,13 +1486,17 @@ interface Pds4DetachedLabelElement {
  * root, and can mistake nested lookalike tags for label fields.
  */
 function readPds4DetachedLabelElement(
-  scope: Document | Element,
+  scope: Element,
   elementName: string
 ): Pds4DetachedLabelElement {
+  // PDS4 File and Identification_Area attributes are direct children. Count
+  // descendants as well so nested lookalike tags cannot satisfy the contract.
   const matches = Array.from(
     scope.getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, elementName)
   );
-  const element = matches.length === 1 ? matches[0] : null;
+  const element = matches.length === 1 && matches[0].parentElement === scope
+    ? matches[0]
+    : null;
   const hasElementChildren = element !== null && element.children.length > 0;
   return {
     count: matches.length,
@@ -1510,6 +1517,88 @@ async function computeMavenPdsCsvSha256(csvText: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/**
+ * Compute the PDS4 File.md5_checksum value over the exact UTF-8 CSV bytes.
+ * MD5 is used only for archive fixity (not authenticity or security decisions).
+ */
+function computeMavenPdsCsvMd5(csvText: string): string {
+  const input = new TextEncoder().encode(csvText);
+  const paddedLength = Math.ceil((input.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(input);
+  padded[input.length] = 0x80;
+  const bitLength = input.length * 8;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLength - 8, bitLength >>> 0, true);
+  view.setUint32(paddedLength - 4, Math.floor(bitLength / 0x100000000), true);
+
+  const shifts = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+  ];
+  const constants = Array.from(
+    { length: 64 },
+    (_, index) => Math.floor(Math.abs(Math.sin(index + 1)) * 0x100000000) >>> 0
+  );
+
+  let a0 = 0x67452301;
+  let b0 = 0xefcdab89;
+  let c0 = 0x98badcfe;
+  let d0 = 0x10325476;
+
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    const words = new Uint32Array(16);
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + index * 4, true);
+    }
+
+    let a = a0;
+    let b = b0;
+    let c = c0;
+    let d = d0;
+
+    for (let index = 0; index < 64; index += 1) {
+      let mix: number;
+      let wordIndex: number;
+      if (index < 16) {
+        mix = (b & c) | (~b & d);
+        wordIndex = index;
+      } else if (index < 32) {
+        mix = (d & b) | (~d & c);
+        wordIndex = (5 * index + 1) % 16;
+      } else if (index < 48) {
+        mix = b ^ c ^ d;
+        wordIndex = (3 * index + 5) % 16;
+      } else {
+        mix = c ^ (b | ~d);
+        wordIndex = (7 * index) % 16;
+      }
+
+      const sum = (a + mix + constants[index] + words[wordIndex]) >>> 0;
+      const rotated = ((sum << shifts[index]) | (sum >>> (32 - shifts[index]))) >>> 0;
+      const nextA = d;
+      d = c;
+      c = b;
+      b = (b + rotated) >>> 0;
+      a = nextA;
+    }
+
+    a0 = (a0 + a) >>> 0;
+    b0 = (b0 + b) >>> 0;
+    c0 = (c0 + c) >>> 0;
+    d0 = (d0 + d) >>> 0;
+  }
+
+  return [a0, b0, c0, d0].flatMap((word) => [
+    word & 0xff,
+    (word >>> 8) & 0xff,
+    (word >>> 16) & 0xff,
+    (word >>> 24) & 0xff
+  ]).map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -1574,20 +1663,19 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
     ? Array.from(fileAreas[0].getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, 'File'))
     : [];
   const structureErrors: string[] = [];
-  if (identificationAreas.length !== 1) {
-    structureErrors.push('detached label must contain exactly one Identification_Area');
+  if (identificationAreas.length !== 1 || identificationAreas[0]?.parentElement !== root) {
+    structureErrors.push('detached label must contain exactly one direct-child Identification_Area');
   }
-  if (fileAreas.length !== 1) {
-    structureErrors.push('detached label must contain exactly one File_Area_Observational');
+  if (fileAreas.length !== 1 || fileAreas[0]?.parentElement !== root) {
+    structureErrors.push('detached label must contain exactly one direct-child File_Area_Observational');
   }
-  if (observationalFiles.length !== 1) {
-    structureErrors.push('File_Area_Observational must contain exactly one File entry');
+  if (observationalFiles.length !== 1 || observationalFiles[0]?.parentElement !== fileAreas[0]) {
+    structureErrors.push('File_Area_Observational must contain exactly one direct-child File entry');
   }
-  const logicalIdentifier = readPds4DetachedLabelElement(
-    identificationAreas.length === 1 ? identificationAreas[0] : labelDocument,
-    'logical_identifier'
-  );
-  const fileScope = observationalFiles.length === 1 ? observationalFiles[0] : labelDocument;
+  const logicalIdentifier = identificationAreas.length === 1
+    ? readPds4DetachedLabelElement(identificationAreas[0], 'logical_identifier')
+    : { count: 0, value: null, unit: null };
+  const fileScope = observationalFiles.length === 1 ? observationalFiles[0] : root;
   const fileName = readPds4DetachedLabelElement(fileScope, 'file_name');
   const fileSize = readPds4DetachedLabelElement(fileScope, 'file_size');
   const errors: string[] = [];
@@ -1612,6 +1700,15 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
   if (fileSize.count === 1 && (!Number.isSafeInteger(declaredFileSize) || declaredFileSize <= 0)) {
     errors.push('detached label file_size must be a positive integer number of bytes');
   }
+  const md5Checksum = readPds4DetachedLabelElement(fileScope, 'md5_checksum');
+  if (md5Checksum.count > 1) {
+    errors.push('detached label File must contain at most one direct md5_checksum');
+  } else if (
+    md5Checksum.count === 1 &&
+    (md5Checksum.value === null || !/^[a-f0-9]{32}$/i.test(md5Checksum.value))
+  ) {
+    errors.push('detached label md5_checksum must be exactly 32 hexadecimal characters');
+  }
 
   const csvByteLength = new TextEncoder().encode(input.csvText).length;
   if (Number.isSafeInteger(declaredFileSize) && declaredFileSize !== csvByteLength) {
@@ -1626,12 +1723,30 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
   }
 
   let csvSha256: string;
+  let csvMd5Checksum: string | null = null;
+  let csvMd5ChecksumStatus: MavenNgimsL3ResampledDensityPds4ImportProvenance['csvMd5ChecksumStatus'] =
+    'not_present_in_detached_label';
+  let csvFixityStatus: MavenNgimsL3ResampledDensityPds4ImportProvenance['csvFixityStatus'] =
+    'sha256_computed_not_compared_to_archive_checksum';
   try {
     csvSha256 = await computeMavenPdsCsvSha256(input.csvText);
+    if (md5Checksum.value !== null) {
+      const computedMd5 = computeMavenPdsCsvMd5(input.csvText);
+      const declaredMd5 = md5Checksum.value.toLowerCase();
+      if (computedMd5 !== declaredMd5) {
+        return {
+          status: 'rejected',
+          errors: ['CSV MD5 does not match the md5_checksum in the detached PDS4 label']
+        };
+      }
+      csvMd5Checksum = declaredMd5;
+      csvMd5ChecksumStatus = 'verified_against_detached_label';
+      csvFixityStatus = 'md5_verified_against_detached_label';
+    }
   } catch (error) {
     return {
       status: 'rejected',
-      errors: [error instanceof Error ? error.message : 'unable to compute CSV SHA-256']
+      errors: [error instanceof Error ? error.message : 'unable to compute CSV fixity hashes']
     };
   }
 
@@ -1643,6 +1758,8 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
       csvFileName: fileName.value!,
       csvByteLength,
       csvSha256,
+      csvMd5Checksum,
+      csvMd5ChecksumStatus,
       hashAlgorithm: 'SHA-256',
       sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
       detachedLabelChecks: [
@@ -1650,7 +1767,7 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
         'file_name_matches_expected_csv_file_name',
         'file_size_matches_csv_utf8_byte_length'
       ],
-      csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
+      csvFixityStatus,
       detachedLabelAuthenticity: 'not_independently_authenticated'
     }
   };
