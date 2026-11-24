@@ -206,17 +206,21 @@ The local termolecular bath gas is the current dynamic CO₂ concentration; the 
 
 This is a single homogeneous compartment only. It is not connected to Scheduler/GeneratedWorld, does not synthesize an initial atmosphere, and does not model vertical transport, boundary fluxes, or time-dependent radiative/meteorological forcing. The photolysis forcing remains SZA=0°, Ls=251°; no uncertainty is quantified for the imported table rates.
 
-### 6.10 Mars inorganic photochemical mechanism reference
+### 6.12 Mars inorganic photochemical mechanism reference
 
 `Data/marsGasPhaseKinetics.ts` preserves all 32 gas-phase rows from Taysum & Palmer (2020) Table B1: 29 explicit Arrhenius expressions, two unresolved fall-off rows (c11/c17), and e1 as a single measured/reported rate point at exactly 298 K. The 29 explicit expressions include 24 bimolecular reactions and five termolecular reactions that require an explicit local CO2 bath-gas density. No conversion from pressure or column inventory to local number density is implicit. All reactions are checked for C/H/O stoichiometric balance.
 
 `Data/marsPhotochemistryEvidence.ts` preserves the nine visible Table B2 photolysis channels at exactly 0.50 km and 42.67 km, for the stated reference scenario SZA=0° and Ls=251°. `ChemicalEvolution/marsPhotochemicalNetwork.ts` builds and integrates an explicitly selected subset in a 16-species single-compartment ODE using analytical Jacobian, C/H/O invariants, non-negativity checks and Radau IIA. It requires caller-supplied temperature, all 16 initial local number densities and provenance. The gas-phase model can use up to 30 executable rows (29 Arrhenius plus e1 at 298 K) with the nine tabulated photolysis channels; c11/c17 remain blocked. No vertical interpolation of J, time-varying radiation, vertical transport, surface coupling, column-to-volume conversion, or Scheduler/GeneratedWorld mutation is performed. This is a reference chemistry component, not a complete observation-constrained Mars atmosphere.
 
-### 6.11 Generator MGS 1998 Mars temperature reference
+### 6.13 Generator MGS 1998 Mars temperature reference
 
 The Generator can explicitly attach `mgs_mars_1998_8028d38a` only with the `mars` atmosphere preset and a planetary body. `Core/atmosphericReferenceAdapters.ts` converts the 74 MGS PDS temperature nodes into 73 contiguous finite-altitude intervals, each with a representative midpoint temperature estimated by linear interpolation between adjacent measured nodes. The profile status is `partial_profile`, its provenance keeps the two source row IDs and endpoint σT values, and no interpolation is done outside the observed range (~0.25–35.26 km). The node errors are not collapsed into layer uncertainties because their covariance is not available.
 
 The MGS selection is a temperature-only reference attachment. It does not replace generated body mass/radius/gravity or the separate Mars preset composition/pressure; it does not invent a full pressure/composition profile, radical inventories, reaction selection or `physicalKinetics`. The existing strict `importSourcedAtmosphericTemperatureProfileForKinetics()` can convert the 73 temperature/geometry intervals into kinetic-layer seeds, but species inventories and reactions remain caller-supplied. One occultation is not global/seasonal Mars climatology.
+
+### 6.14 Архив NGIMS: покрытие и метаданные селектора
+
+На странице PDS NGIMS указано, что архив наблюдений на момент документированного среза охватывает данные по 15 февраля 2025 года (Ls 44.2, MY 38; миссия продолжается). В годовом каталоге за 2025 год перечислено 308 МБ abundance-продуктов. В качестве селектора Single-Species указан файл `MAVEN_NGIMS_Single-Species_del1-43.csv` размером 6,6 МБ с датой изменения 19 декабря 2025 года. Дата изменения селектора — это дата ревизии файла, а не дата последнего наблюдения. Связанный файл `.htm` размером 62 байта не является читаемой HTML-таблицей. Содержимое самого CSV-селектора и выбранные продукты отдельных орбит ещё не импортированы; конкретные TID/orbit-наблюдения нельзя выводить из имён файлов или временных меток.
 
 ## 7. Химия и эволюция
 
@@ -293,25 +297,27 @@ UI отображает результат и объяснения, но не я
 
 ## 12. Текущее состояние реализации на 24.11.2026
 
-| Область | Статус | Существенные границы |
-|---|---|---|
-| Генератор миров, каталоги, seed, режимы, паспорт, история, экспорт | Реализовано | Диапазоны и часть правил являются игровыми оценками |
-| Физический этап генерации: тело, атмосфера, орбита, энергетика, геология, фазы | Реализовано частично по научной глубине | Орбитальные диапазоны модельные; геология преимущественно качественная; климатической модели нет |
-| MGS Mars `8028D38A.TPS` → гидростатический Core | Реализован reference-адаптер + first-order 1σ postprocessor P/rho/Σ/Nmol | Один retrieval-профиль, явный состав обязателен; диагональная covariance approximation; столбы оцениваются при фиксированной Mbar; uncertainty состава/гравитации/тела не рассчитана; не подключён к Scheduler-химии |
-| Mars SAM composition / ACS HO2 upper limits / OpenMARS HO2 estimates | Реализованы source-backed evidence records и coverage checks | SAM — неполный near-surface состав; ACS — upper limits, не detections; OpenMARS — модельный MY35 профиль; источники не образуют общий синхронный профиль и не инициализируют Scheduler |
-| MAVEN IUVS/NGIMS upper-atmosphere evidence | Реализован IUVS metadata/reference layer и NGIMS L2 quality-aware reader/profile builder | IUVS NO density values not digitized from figure; O/CO2 ratios model-constrained; NGIMS PDS orbit rows not yet frozen/imported; NO contamination caveat retained; no automatic Scheduler initialization |
-| Core: типизированные значения, provenance, резервуары, потоки, журналы, состояние мира | Реализовано как инфраструктура | Контракты/инварианты не означают наличие физического решателя для каждого процесса |
-| Часы, Scheduler, события, splitting, аудит | Инфраструктура реализована | Полная автоматизация всех физических процессов не завершена |
-| Химическая стехиометрия режима A | Реализовано | Это игровая степень превращения, не физическая кинетика |
-| Физическая кинетика мира | Частично реализовано | Ограниченный путь с явными слоями и реакциями #89/#106; полная сеть и генерация физических профилей отсутствуют |
-| Термодинамический каталог и NASA-7 функции | Частично реализовано | Этап данных/термодинамики в целом остаётся открытым; покрытие веществ и фаз ограничено |
-| Химическое равновесие идеального газа | Реализовано | Однофазная газовая постановка; стандартное состояние и состав должны быть валидны |
-| Peng–Robinson / VLE / TPD | Частично реализовано | Нет завершённой глобальной сертификации фазовой устойчивости; NO-GO по непрерывной validated error bound; LLE/PPR78 и ряд интеграций открыты |
-| Реакционная кинетика и ODE | Частично реализовано | Контракты, вычислитель k(T), Radau IIA; каталог JPL/KIDA и интеграция полной сети не завершены |
-| Rust/WASM | Экспериментальный пилот | Бенчмарки и проверка паритета; не считать обязательным runtime-путём продукта |
-| Полный климат, вертикальная атмосфера, фотохимия, динамическая многотельная модель, полноценная геохимия | Не завершено / отдельные прототипы и планы | Не описывать как доступную end-to-end функциональность |
+Таблица разделяет два разных снимка кода. **main** — текущая основная ветка (MVP/этапы 1–2). **stage-3-planetary-physics** — ветка открытого PR [#1](https://github.com/Mrcoolzbs-ai/evowars/pull/1); её функции не входят в `main`, пока PR не принят.
 
-**Важное различие веток.** Спецификация восстановлена в `main` и `stage-3-planetary-physics`, однако кодовые реализации, научные документы и расширенные тесты этапа 3 остаются в ветке `stage-3-planetary-physics` и открытом PR #1. В `main` на момент среза доступна более ранняя реализация (MVP/этап 2); добавление этого документа не означает, что PR #1 уже влит или функции этапа 3 выпущены.
+| Область | Снимок | Статус | Существенные границы |
+|---|---|---|---|
+| Генерация миров, каталоги, seed, режимы, фиксированные категории и паспорт | `main` | Реализовано | Диапазоны и часть правил являются модельными/игровыми оценками |
+| История миров, настройки, локальное сохранение и экспорт | `main` | Реализовано | Данные хранятся в браузере; серверной синхронизации нет |
+| Legacy-химический шаг (режим A) | `main` | Реализовано | Степень превращения за шаг — игровое правило, а не физическая кинетика |
+| Физика тела, атмосферы, орбиты, энергетики, геологии и фазовый скрининг | PR #1 / Stage 3 | Частично реализовано | Орбитальные диапазоны модельные; геология преимущественно качественная; климатической модели нет |
+| MGS Mars `8028D38A.TPS` и гидростатический Core-адаптер | PR #1 / Stage 3 | Reference-адаптер и first-order 1σ postprocessor | Один retrieval-профиль; состав задаётся явно; диагональное приближение ковариации; неопределённости состава/гравитации/тела не рассчитаны; нет автоматического подключения к Scheduler-химии |
+| SAM, ACS HO2 и OpenMARS | PR #1 / Stage 3 | Evidence records и проверки coverage | SAM — неполный near-surface состав; ACS — upper limits, не detections; OpenMARS — модельные оценки; источники не образуют общий синхронный профиль |
+| MAVEN IUVS/NGIMS | PR #1 / Stage 3 | IUVS metadata/reference layer и NGIMS quality-aware reader/profile builder | Численные IUVS NO density не оцифрованы из рисунка; NGIMS orbit rows ещё не зафиксированы/импортированы; сохраняется caveat о NO contamination |
+| Типизированные научные величины, provenance, резервуары, потоки, журналы и состояние мира | PR #1 / Stage 3 | Инфраструктура реализована | Наличие контрактов и инвариантов не означает наличие решателя для каждого физического процесса |
+| Часы, Scheduler, события, splitting и аудит | PR #1 / Stage 3 | Инфраструктура реализована | Полная автоматизация всех физических процессов не завершена |
+| Термодинамический каталог и NASA-7 функции | PR #1 / Stage 3 | Частично реализовано | Покрытие веществ, фаз и диапазонов ограничено |
+| Идеальногазовое химическое равновесие | PR #1 / Stage 3 | Реализовано | Однофазная газовая постановка; стандартное состояние и состав должны быть валидны |
+| Peng–Robinson / VLE / TPD | PR #1 / Stage 3 | Частично реализовано | Нет завершённой глобальной сертификации фазовой устойчивости; continuous validated error bound не подтверждён; LLE/PPR78 и ряд интеграций открыты |
+| Физическая кинетика и ODE | PR #1 / Stage 3 | Частично реализовано | Есть ограниченные механизмы и Radau IIA; полный JPL/KIDA-каталог и большая связанная сеть не завершены |
+| Rust/WASM | PR #1 / Stage 3 | Экспериментальный пилот | Бенчмарки и проверка паритета; это не обязательный production runtime |
+| Полный климат, многослойная вертикальная атмосфера, полная фотохимия, динамическая многотельная модель и полноценная геохимия | PR #1 / Stage 3 | Не завершено / отдельные прототипы и планы | Не описывать как доступную end-to-end функциональность |
+
+**Важно:** подробные разделы 6.6–6.14 и архитектурные модули Stage 3 описывают состояние ветки PR #1. Они не являются перечнем функций, доступных из текущей `main`.
 
 ## 13. Критерии приёмки изменений
 
@@ -339,51 +345,53 @@ npm run build
 
 ## 14. Структура исходников
 
+### 14.1 Текущая основная ветка `main`
+
 | Путь | Ответственность |
 |---|---|
-| `src/App.tsx`, `src/App.css` | React UI, сценарии пользователя и отображение паспорта |
-| `src/types/` | Доменные типы и типы физических величин |
-| `src/modules/Data/` | Каталоги сущностей, веществ, фазовых и физических параметров |
+| `src/App.tsx`, `src/App.css` | React UI, генератор, паспорт мира, история и пользовательские действия |
+| `src/types/index.ts` | Доменные типы, настройки генерации, модель мира и статусы |
+| `src/modules/Data/` | Каталоги космологий, эпох, центральных объектов, небесных тел, колыбелей, газов и реакций |
 | `src/modules/Generator/` | Seed/PRNG и детерминированная сборка мира |
+| `src/modules/Atmosphere/` | Атмосферные пресеты, состав и производные характеристики |
 | `src/modules/WorldModel/` | Производные характеристики и человекочитаемые описания |
-| `src/modules/Atmosphere/` | Атмосферные пресеты, состав и физика столба |
-| `src/modules/Data/mgsMarsOccultation1998.ts` | 74 строки source-backed MGS Mars PDS-профиля с неопределённостями и событием наблюдения |
-| `src/modules/Generator/generator.ts` | Explicit USSA Earth or MGS Mars partial thermal-reference profile attachment, gated by matching atmosphere preset/body type |
-| `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater annual means, ACS/TGO HO2 upper limits и OpenMARS HO2 model estimates с раздельным provenance |
-| `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS NO/O references, NGIMS L2 quality-aware CSV row parser and single-orbit profile builder |
-| `src/modules/Data/marsPhotochemistryEvidence.ts` | Taysum & Palmer (2020) Mars photolysis J values at two model-reference altitudes, with provenance-gated J×n evaluator |
-| `src/modules/Data/marsGasPhaseKinetics.ts` | 32 Taysum & Palmer (2020) Table B1 gas-phase reaction rows, CO2 third-body semantics, and explicit unresolved records |
-| `src/modules/ChemicalEvolution/marsPhotochemicalNetwork.ts` | 16-species single-compartment gas-phase + photolysis ODE using analytical Jacobian and Radau IIA |
-| `src/modules/Data/marsInorganicGasPhaseEvidence.ts` | 24 Taysum & Palmer (2020) inorganic bimolecular gas-phase rate laws, explicit omissions and source-gated rate evaluator |
-| `src/modules/Data/marsGasPhaseKinetics.ts` | Taysum & Palmer (2020) Mars gas-phase reactions, CO2-third-body Arrhenius evaluation and atom-balance audit |
-| `src/modules/Core/atmosphericReferenceAdapters.ts` | USSA reference adapters и MGS measured-node → hydrostatic-column адаптер |
-| `src/modules/Core/hydrostaticUncertainty.ts` | First-order uncertainty propagation PDS 1σ → P(z), rho(z), integrated mass/molar columns, including adaptive mesh results |
-| `src/modules/OrbitalMechanics/`, `EnergyBalance/`, `Geology/`, `PhaseEquilibrium/` | Физические предметные подсистемы |
-| `src/modules/ChemicalEvolution/` | Стехиометрия и физический кинетический сценарий |
-| `src/modules/Core/` | Каноническое состояние, научные контракты, учёт потоков, время, Scheduler и решатели |
 | `src/modules/Compatibility/` | Правила совместимости и предупреждения |
-| `src/modules/Storage/` | Local storage, версии и миграции |
-| `src/modules/Tests/` | Unit, regression и validation tests |
-| `rust/`, `scripts/` | Экспериментальный Rust/WASM-пилот, браузерные и вычислительные benchmark |
+| `src/modules/Storage/` | LocalStorage, история миров, настройки, импорт/экспорт |
+| `src/modules/Tests/` | Unit- и regression-тесты текущей реализации |
+
+### 14.2 Дополнения ветки `stage-3-planetary-physics` (открытый PR #1)
+
+Следующие подсистемы и файлы относятся к ветке PR #1 и отсутствуют в текущем снимке `main` до слияния PR:
+
+| Путь | Ответственность |
+|---|---|
+| `src/types/physics.ts`, `src/modules/Units/` | Типизированные физические величины, статусы достоверности, SI-константы и конвертеры |
+| `src/modules/OrbitalMechanics/`, `EnergyBalance/`, `Geology/`, `PhaseEquilibrium/` | Орбитальная механика, энергетический баланс, внутреннее тепло и фазовые состояния |
+| `src/modules/ChemicalEvolution/` | Стехиометрия, ограниченная физическая кинетика и локальная марсианская фотохимическая ODE-модель |
+| `src/modules/Core/` | Каноническое состояние, provenance, резервуары, потоки, время, Scheduler, аудит и решатели |
+| `src/modules/Data/mgsMarsOccultation1998.ts` | 74 строки MGS Mars PDS-профиля с опубликованными неопределённостями |
+| `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater, ACS/TGO HO2 upper limits и OpenMARS estimates с раздельным provenance |
+| `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS references и NGIMS L2 quality-aware reader/profile builder |
+| `src/modules/Data/marsPhotochemistryEvidence.ts`, `marsGasPhaseKinetics.ts` | Source-backed photolysis и gas-phase kinetics для ограниченного механизма Марса |
+| `src/modules/RustSim/`, `rust/`, `scripts/` | Экспериментальный Rust/WASM-пилот и benchmark-инфраструктура |
+| `docs/science/`, `docs/rust/`, `docs/research/` | Расширенные инженерные, научные и исследовательские документы ветки PR #1 |
+
+Не следует выводить наличие подсистемы в `main` только из того, что её путь описан в этой спецификации.
 
 ## 15. Документы-источники и порядок приоритета
 
-Эта спецификация — краткая точка входа, а не замена подробным инженерным документам. Для деталей следует обращаться к:
+Эта спецификация — краткая точка входа, а не замена подробным инженерным документам. Перечисленные ниже документы находятся в ветке `stage-3-planetary-physics` открытого PR #1; до слияния PR их относительные пути не существуют в `main`. Для деталей следует обращаться к:
 
-- [Научная основа](docs/science/SCIENTIFIC_FOUNDATION.md) — принципы моделирования и границы допущений.
-- [Полный аудит системы](docs/science/CURRENT_SYSTEM_AUDIT.md) — фактическое состояние модулей и известные проблемы.
-- [Научное ядро](docs/science/CORE_SCIENTIFIC_ENGINE.md) — типы, инварианты, резервуары, потоки, часы и Scheduler.
-- [Архитектура физики](docs/science/PHYSICS_ARCHITECTURE.md) — объекты, орбиты, температура, недра, атмосфера и климат.
-- [Архитектура химии](docs/science/CHEMISTRY_ARCHITECTURE.md) — данные веществ, термодинамика, равновесие, кинетика и фазы.
-- [Движок симуляции](docs/science/SIMULATION_ENGINE.md) — модель времени, splitting, события и решатели.
-- [Происхождение данных](docs/science/DATA_PROVENANCE.md) — источники, версии, неопределённость и лицензии, включая MGS `8028D38A.TPS`.
-- [Дорожная карта](docs/science/IMPLEMENTATION_ROADMAP.md) — поэтапные критерии готовности и текущие незавершённые этапы.
-- [План валидации](docs/science/VALIDATION_PLAN.md) — уровни тестирования и проверяемые сценарии.
-- [Инженерный пилот Rust/WASM](docs/rust/RUST_WASM_PILOT.md) — статус экспериментального переноса вычислений.
+- [Научная основа](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/SCIENTIFIC_FOUNDATION.md) — принципы моделирования и границы допущений.
+- [Полный аудит системы](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/CURRENT_SYSTEM_AUDIT.md) — фактическое состояние модулей и известные проблемы.
+- [Научное ядро](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/CORE_SCIENTIFIC_ENGINE.md) — типы, инварианты, резервуары, потоки, часы и Scheduler.
+- [Архитектура физики](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/PHYSICS_ARCHITECTURE.md) — объекты, орбиты, температура, недра, атмосфера и климат.
+- [Архитектура химии](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/CHEMISTRY_ARCHITECTURE.md) — данные веществ, термодинамика, равновесие, кинетика и фазы.
+- [Движок симуляции](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/SIMULATION_ENGINE.md) — модель времени, splitting, события и решатели.
+- [Происхождение данных](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/DATA_PROVENANCE.md) — источники, версии, неопределённость и лицензии, включая MGS `8028D38A.TPS`.
+- [Дорожная карта](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/IMPLEMENTATION_ROADMAP.md) — поэтапные критерии готовности и текущие незавершённые этапы.
+- [План валидации](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/science/VALIDATION_PLAN.md) — уровни тестирования и проверяемые сценарии.
+- [Инженерный пилот Rust/WASM](https://github.com/Mrcoolzbs-ai/evowars/blob/stage-3-planetary-physics/docs/rust/RUST_WASM_PILOT.md) — статус экспериментального переноса вычислений.
 
 При расхождении краткого описания с кодом и тестами приоритет имеют фактические контракты исходников и тестов. При расхождении с roadmap статус реализации должен быть уточнён, а не выведен из названия или наличия модуля.
 
-
-### 6.12 MAVEN NGIMS archive coverage and selector metadata
-
-The current PDS NGIMS landing page states that the data archive currently extends through 2025-02-15 (Ls 44.2, MY 38, ongoing). The annual 2025 archive listing reports 308 MB of abundance products. The current Single-Species selector is `MAVEN_NGIMS_Single-Species_del1-43.csv`, listed at 6.6 MB with file modification date 2025-12-19; this is a selector revision timestamp, not the last observation date. Its listed `.htm` companion is only 62 bytes and is not a readable HTML table. The actual selector CSV content and the selected per-orbit products remain unimported; exact TID/orbit observations must not be inferred from filenames or timestamps.
