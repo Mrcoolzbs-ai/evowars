@@ -12,6 +12,8 @@ import {
   parseMavenNgimsL3ScaleHeightTemperatureCsvRow,
   parseMavenNgimsL3ScaleHeightTemperatureCsvText,
   parseMavenNgimsL3ResampledDensityCsvText,
+  importMavenNgimsL3ResampledDensityPds4Product,
+  selectMavenNgimsL3ResampledDensityPds4Profile,
   selectMavenNgimsL3ScaleHeightTemperatureRows,
   selectMavenNgimsL3ResampledDensityProfile,
   buildMavenNgimsNeutralProfile,
@@ -527,6 +529,109 @@ describe('MAVEN upper-atmosphere evidence', () => {
       unavailableOrNonPositive: 2,
       outsideUtcWindow: 1
     });
+  });
+
+
+  it('binds res-den CSV bytes to a detached PDS4 label and carries SHA-256 into the selected profile', async () => {
+    const productId = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId;
+    const fileName = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.fileName;
+    const csvText = l3ResampledDensityCsvText([
+      resampledDensityCsvRow({ alt: '150', density_bins: '1.2e7' }),
+      resampledDensityCsvRow({
+        t_utc: '2014-12-11T16:10:00Z',
+        t_utc_secondary: '2014-12-11T16:10:00Z',
+        alt: '160',
+        density_bins: '8.0e6'
+      })
+    ]);
+    const byteLength = new TextEncoder().encode(csvText).length;
+    const label = (overrides: { productId?: string; fileName?: string; byteLength?: number } = {}): string => `
+      <?xml version="1.0" encoding="UTF-8"?>
+      <Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
+        <Identification_Area>
+          <logical_identifier>${overrides.productId ?? productId}</logical_identifier>
+          <version_id>1.0</version_id>
+        </Identification_Area>
+        <File_Area_Observational>
+          <File>
+            <file_name>${overrides.fileName ?? fileName}</file_name>
+            <file_size unit="byte">${overrides.byteLength ?? byteLength}</file_size>
+          </File>
+        </File_Area_Observational>
+      </Product_Observational>`;
+
+    const imported = await importMavenNgimsL3ResampledDensityPds4Product({
+      csvText,
+      detachedLabelXml: label(),
+      expectedProductId: productId,
+      expectedCsvFileName: fileName
+    });
+    expect(imported.status).toBe('imported');
+    if (imported.status !== 'imported') throw new Error(imported.errors.join('; '));
+    expect(imported.provenance).toMatchObject({
+      sourceProductId: productId,
+      csvFileName: fileName,
+      csvByteLength: byteLength,
+      hashAlgorithm: 'SHA-256',
+      sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
+      csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
+      detachedLabelAuthenticity: 'not_independently_authenticated'
+    });
+    expect(imported.provenance.csvSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(imported.imported.parsedRowCount).toBe(2);
+
+    const selected = selectMavenNgimsL3ResampledDensityPds4Profile(imported, {
+      sourceProductId: productId,
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'CO2',
+      quality: 'verified',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(selected.status).toBe('completed');
+    if (selected.status !== 'completed') throw new Error(selected.errors.join('; '));
+    expect(selected.measurements).toHaveLength(2);
+    expect(selected.sourceProductIdentityBasis).toBe('detached-pds4-label-logical-identifier');
+    expect(selected.sourceArtifactSha256).toBe(imported.provenance.csvSha256);
+    expect(selected.detachedLabelAuthenticity).toBe('not_independently_authenticated');
+    expect(selected.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+  });
+
+  it('rejects PDS4 detached-label identity, file-name, size and XML-entity mismatches', async () => {
+    const productId = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId;
+    const fileName = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.fileName;
+    const csvText = l3ResampledDensityCsvText([
+      resampledDensityCsvRow({ alt: '150' }),
+      resampledDensityCsvRow({ alt: '160', t_utc: '2014-12-11T16:10:00Z', t_utc_secondary: '2014-12-11T16:10:00Z' })
+    ]);
+    const byteLength = new TextEncoder().encode(csvText).length;
+    const label = (id: string, name: string, size: number): string => `
+      <Product_Observational>
+        <Identification_Area><logical_identifier>${id}</logical_identifier></Identification_Area>
+        <File_Area_Observational><File>
+          <file_name>${name}</file_name><file_size unit="byte">${size}</file_size>
+        </File></File_Area_Observational>
+      </Product_Observational>`;
+    const args = {
+      csvText,
+      expectedProductId: productId,
+      expectedCsvFileName: fileName
+    };
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: label('urn:nasa:pds:wrong-product', fileName, byteLength)
+    })).status).toBe('rejected');
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: label(productId, 'other.csv', byteLength)
+    })).status).toBe('rejected');
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: label(productId, fileName, byteLength + 1)
+    })).status).toBe('rejected');
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args,
+      detachedLabelXml: '<!DOCTYPE x [<!ENTITY e "bad">]><Product_Observational/>'
+    })).status).toBe('rejected');
   });
 
   it('accepts the single-t_utc Table A-9 header variant and rejects mismatched duplicate times or malformed fields', () => {
