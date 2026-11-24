@@ -298,6 +298,7 @@ export interface MarsInorganicReactionEvaluation {
 export interface MarsInorganicReactionEvaluationRejection {
   readonly status: 'rejected';
   readonly reason:
+    | 'invalid_input'
     | 'unknown_reaction'
     | 'invalid_temperature'
     | 'missing_concentration'
@@ -323,6 +324,16 @@ function hasIdentifiedProvenance(value: unknown): value is DataProvenance {
 export function evaluateMarsInorganicBimolecularReaction(
   input: MarsInorganicReactionEvaluationInput
 ): MarsInorganicReactionEvaluationResult {
+  if (
+    typeof input !== 'object' || input === null || Array.isArray(input) ||
+    typeof input.concentrationsPerCm3 !== 'object' || input.concentrationsPerCm3 === null ||
+    Array.isArray(input.concentrationsPerCm3) ||
+    typeof input.concentrationProvenance !== 'object' || input.concentrationProvenance === null ||
+    Array.isArray(input.concentrationProvenance)
+  ) {
+    return { status: 'rejected', reason: 'invalid_input' };
+  }
+
   const reaction = MARS_TAYSUM_2020_INORGANIC_BIMOLECULAR_REACTIONS.find(
     (candidate) => candidate.id === input.reactionId
   );
