@@ -229,6 +229,54 @@ describe('Generator: физическая модель (этап 3)', () => {
     });
   });
 
+  describe('MGS 1998 Mars temperature-only reference profile', () => {
+    it('attaches the explicit 8028D38A partial profile only to a Mars preset planet', () => {
+      const world = generateWorld(baseSettings({
+        seed: 'generator_mgs_mars_reference',
+        atmospherePreset: 'mars',
+        atmosphericReferenceProfile: 'mgs_mars_1998_8028d38a',
+        fixedCategories: { celestialBody: 'earth_like' }
+      }));
+
+      expect(world.celestialBody.bodyType).toBe('planet');
+      expect(world.atmosphericReferenceProfile?.status).toBe('partial_profile');
+      expect(world.atmosphericReferenceProfile?.layers).toHaveLength(73);
+      expect(world.atmosphericReferenceProfile?.provenance?.sourceId).toBe('PDS product 8028D38A.TPS');
+      expect(world.atmosphericReferenceProfile?.limitations).toMatch(/one MGS radio occultation/i);
+
+      const note = world.warnings.find((warning) =>
+        warning.ruleId === 'atmospheric_reference_profile'
+      );
+      expect(note?.severity).toBe('info');
+      expect(note?.message).toMatch(/не задаёт состав, pressure profile, радикалы/i);
+
+      // The selected preset and generated chemistry remain independent;
+      // attaching the temperature reference does not invent radical stocks
+      // or activate physical kinetics.
+      expect(world.atmosphere.components.find((component) => component.gasId === 'co2')?.percentage).toBe(95);
+      expect(world.chemicalState?.physicalKinetics).toBeUndefined();
+      for (const radical of ['o', 'o1d', 'oh', 'ho2', 'h']) {
+        expect(Object.prototype.hasOwnProperty.call(world.chemicalState?.inventory ?? {}, radical)).toBe(false);
+      }
+    });
+
+    it('does not attach the Mars reference profile when the atmosphere preset does not match', () => {
+      const world = generateWorld(baseSettings({
+        seed: 'generator_mgs_wrong_preset',
+        atmospherePreset: 'earth',
+        atmosphericReferenceProfile: 'mgs_mars_1998_8028d38a',
+        fixedCategories: { celestialBody: 'earth_like' }
+      }));
+
+      expect(world.atmosphericReferenceProfile).toBeUndefined();
+      const warning = world.warnings.find((item) =>
+        item.ruleId === 'atmospheric_reference_profile_not_applicable'
+      );
+      expect(warning?.severity).toBe('warning');
+      expect(warning?.message).toMatch(/atmosphere preset.*match|совпадать с пресетом/i);
+    });
+  });
+
   describe('связь атмосферной физики с остальной моделью', () => {
     it('метаново-этановый мир: давление в Па, инвентарь игровой, фазовый скрининг срабатывает', () => {
       const world = generateWorld(baseSettings({ seed: 'physics_methane_world' }));
