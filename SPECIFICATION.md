@@ -186,6 +186,12 @@ IUVS NO reference описывает девять последовательны
 
 Эти данные не объединяются автоматически с MGS 1998, SAM Gale, ACS HO2 или OpenMARS в единый вертикальный профиль и не загружаются как стартовые запасы Scheduler. Фактические PDS NGIMS строки конкретных орбит ещё должны быть выбраны и импортированы, после проверки geometry/time/quality. Подробные источники и ограничения: `docs/science/DATA_PROVENANCE.md` §2.32.
 
+### 6.9 Source-backed photolysis reference values for Mars
+
+The data module `Data/marsPhotochemistryEvidence.ts` preserves the nine inorganic photolysis channels listed in Taysum & Palmer (2020), Appendix Table B2 (DOI 10.1029/2020JE006491), with published frequencies J [s⁻¹] at exactly 0.50 km and 42.67 km. The table scenario is SZA=0° and Ls=251°; the source's Mars-adapted TUV look-up also depends on temperature, O3 and total atmospheric columns, Sun–Mars distance and optical/dust opacity. These are model lookup values, not observations or universal constants. Although the paper's method text says ten inorganic photolysis reactions, the accessible B2 table lists nine; the implementation imports the nine tabulated rows only.
+
+`evaluateMarsPhotolysisAtReferenceNode()` calculates J × n(parent) and tabulated net stoichiometric rates only at those exact two nodes, using an explicit caller-supplied local reactant density and its provenance. It rejects off-grid altitudes, unknown reactions, invalid densities and missing provenance; no interpolation or extrapolation is performed. Because the source table provides no 1σ for J, rate uncertainty remains not quantified. The result is a diagnostic/model-reference calculation only and is not Scheduler-eligible. It does not form a complete photochemical network or create radical inventories.
+
 ## 7. Химия и эволюция
 
 ### 7.1 Инвентари и стехиометрия
@@ -318,6 +324,7 @@ npm run build
 | `src/modules/Data/mgsMarsOccultation1998.ts` | 74 строки source-backed MGS Mars PDS-профиля с неопределённостями и событием наблюдения |
 | `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater annual means, ACS/TGO HO2 upper limits и OpenMARS HO2 model estimates с раздельным provenance |
 | `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS NO/O references, NGIMS L2 quality-aware CSV row parser and single-orbit profile builder |
+| `src/modules/Data/marsPhotochemistryEvidence.ts` | Taysum & Palmer (2020) Mars photolysis J values at two model-reference altitudes, with provenance-gated J×n evaluator |
 | `src/modules/Core/atmosphericReferenceAdapters.ts` | USSA reference adapters и MGS measured-node → hydrostatic-column адаптер |
 | `src/modules/Core/hydrostaticUncertainty.ts` | First-order uncertainty propagation PDS 1σ → P(z), rho(z), integrated mass/molar columns, including adaptive mesh results |
 | `src/modules/OrbitalMechanics/`, `EnergyBalance/`, `Geology/`, `PhaseEquilibrium/` | Физические предметные подсистемы |
