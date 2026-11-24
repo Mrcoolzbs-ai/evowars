@@ -149,7 +149,7 @@ describe('Mars single-compartment source-backed photochemical network', () => {
     );
     const completeFixture = Object.fromEntries(
       MARS_PHOTOCHEMICAL_SPECIES_ORDER.map((species) => [species, 1e3])
-    ) as MarsPhotochemicalInitialConcentrations;
+    ) as unknown as MarsPhotochemicalInitialConcentrations;
 
     const built = buildMarsPhotochemicalNetworkProblem(input({
       temperatureK: 298,
