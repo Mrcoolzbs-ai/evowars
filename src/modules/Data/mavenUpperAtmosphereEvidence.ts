@@ -110,6 +110,111 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
   provenance: MAVEN_NGIMS_PDS_SIS_PROVENANCE
 } as const;
 
+/**
+ * Newer PDS/PPI in-situ Key Parameters collection (bundle v41.0).
+ * This is an averaged, uniformly sampled L2-derived daily product, not the
+ * native single-orbit NGIMS L2 abundance file. The example label is useful
+ * for schema/evidence auditing; the full .tab payload is not imported here.
+ */
+export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
+  archive: 'NASA Planetary Data System, Planetary Plasma Interactions Node',
+  bundle: {
+    name: 'MAVEN Insitu Key Parameters Data Bundle',
+    logicalIdentifier: 'urn:nasa:pds:maven.insitu.calibrated',
+    version: '41.0',
+    doi: '10.17189/4sjk-t793',
+    publicationYear: 2026,
+    description: 'Selected fully calibrated Level 2 data from the MAVEN Particles and Fields package and NGIMS, together with SPICE ephemeris information; values are in physical units and sampled/averaged at a uniform cadence.',
+    source: 'https://pds.nasa.gov/ds-view/pds/viewBundle.jsp?identifier=urn%3Anasa%3Apds%3Amaven.insitu.calibrated&version=41.0'
+  },
+  collection: {
+    name: 'MAVEN Insitu Key Parameters Data Collection',
+    logicalIdentifier: 'urn:nasa:pds:maven.insitu.calibrated:data.kp',
+    version: '41.0',
+    doi: '10.17189/1jfy-9a74',
+    source: 'https://search-pdsppi.igpp.ucla.edu/search/view/?f=null&id=pds%3A%2F%2FPPI%2Fmaven.insitu.calibrated%2Fdata'
+  },
+  coverageUtc: {
+    start: '2014-03-18T12:00:00.000Z',
+    stop: '2025-12-05T11:59:52.000Z'
+  },
+  exampleProduct: {
+    observationDateUtc: '2025-06-10',
+    fileName: 'mvn_kp_insitu_20250610_v25_r01.tab',
+    labelFileName: 'mvn_kp_insitu_20250610_v25_r01.xml',
+    logicalIdentifier: 'urn:nasa:pds:maven.insitu.calibrated:data.kp:mvn_kp_insitu_20250610',
+    fileSizeBytes: 45209823,
+    source: 'https://search-pdsppi.igpp.ucla.edu/ditdos/viewFile?id=pds%3A%2F%2FPPI%2Fmaven.insitu.calibrated%2Fdata%2F2025%2F06%2Fmvn_kp_insitu_20250610_v25_r01.xml',
+    tableImportedIntoRepository: false
+  },
+  sampling: {
+    description: 'Uniformly sampled/averaged key-parameter time series derived from instrument Level 2 products; not identical to the native NGIMS single-orbit abundance product.',
+    geometryFromSpice: true,
+    spacecraftAltitudeField: 'SPICE:Spacecraft altitude w.r.t. ellipsoid',
+    orbitField: 'SPICE:Orbit Number',
+    inboundOutboundField: 'SPICE:Inbound/Outbound Flag',
+    solarLongitudeField: 'SPICE:Mars Season (Ls)',
+    solarZenithAngleField: 'SPICE:Spacecraft solar zenith angle',
+    localTimeField: 'SPICE:Spacecraft local time',
+    latitudeField: 'SPICE:Spacecraft GEO Latitude',
+    longitudeField: 'SPICE:Spacecraft GEO Longitude'
+  },
+  neutralDensityFields: [
+    { species: 'He', networkSpeciesId: null, status: 'field_present' },
+    { species: 'O', networkSpeciesId: 'O', status: 'field_present' },
+    { species: 'CO', networkSpeciesId: 'CO', status: 'field_present' },
+    { species: 'N2', networkSpeciesId: null, status: 'field_present' },
+    { species: 'NO', networkSpeciesId: null, status: 'removed_all_values_nan' },
+    { species: 'Ar', networkSpeciesId: null, status: 'field_present' },
+    { species: 'CO2', networkSpeciesId: 'CO2', status: 'field_present' }
+  ],
+  precision: {
+    fieldName: 'NGIMS:Precision',
+    meaning: 'Percent error (1 sigma) for the corresponding density field.',
+    upperLimitSentinel: -1,
+    upperLimitMeaning: 'The corresponding density value is an upper limit, not a positive detection.',
+    qualityFieldName: 'NGIMS:Precision quality',
+    qualityFlags: ['IV', 'IU', 'OV', 'OU', 'UR'],
+    verifiedFlags: ['IV', 'OV'],
+    uncertainFlags: ['IU', 'OU'],
+    unreliableFlag: 'UR'
+  },
+  neutralTemperature: {
+    presentInInsituKeyParameterNgimsDensityRows: false,
+    lpwTemperatureField: 'LPW:Electron Temperature',
+    lpwTemperatureIsNeutralGasTemperature: false,
+    separateNgimsProduct: 'Scale-heights and temperatures',
+    interpretation: 'The LPW field is electron temperature and cannot be substituted for neutral-gas temperature. NGIMS scale-height/temperature products are separate derived products and require their own event/geometry/provenance matching.'
+  },
+  photochemicalNetworkCoverage: {
+    directlyRepresentedSpecies: ['O', 'CO', 'CO2'],
+    directSpeciesCount: 3,
+    totalNetworkSpeciesCount: 16,
+    missingNetworkSpecies: [
+      'O1D', 'O2', 'O3', 'H', 'H2', 'H2O', 'OH',
+      'HO2', 'H2O2', 'CH4', 'CH3', 'CH3O', 'HCHO'
+    ],
+    note: 'NO is not a species in the current 16-species gas-phase network; the KP NO column is nevertheless unavailable because the NGIMS team removed it and set all values to NaN.'
+  },
+  limitations: [
+    'This is a schema and archive-coverage record, not an imported numerical observation set; no full .tab rows are checked into this repository.',
+    'The key-parameter table offers only three named neutral-density species that overlap the current 16-species network (O, CO, CO2); no complete initial vector can be formed from it.',
+    'The NGIMS NO density field is explicitly removed from the key-parameter data set and populated with NaN because the counts cannot be reliably separated from noise.',
+    'The precision sentinel -1 denotes an upper limit and must not be promoted to a measured point concentration.',
+    'The inspected table contains LPW electron temperature, not a co-registered neutral-gas temperature; the separate NGIMS scale-height/temperature product must be independently selected and validated.',
+    'MAVEN/NGIMS samples the upper atmosphere along an orbital spacecraft track; it does not provide direct measurements at the Taysum Table B2 lower-atmosphere nodes 0.5 or 42.67 km.',
+    'H is outside NGIMS mass coverage (2–150 Da), and O2+ fields are ion measurements rather than neutral O2 number density.'
+  ],
+  provenance: {
+    sourceName: 'MAVEN Insitu Key Parameters Data Bundle, PDS version 41.0',
+    sourceId: 'urn:nasa:pds:maven.insitu.calibrated::41.0 / DOI:10.17189/4sjk-t793',
+    reference: 'https://pds.nasa.gov/ds-view/pds/viewBundle.jsp?identifier=urn%3Anasa%3Apds%3Amaven.insitu.calibrated&version=41.0',
+    method: 'PDS L2-derived uniformly sampled key-parameter data with SPICE geometry; NGIMS abundance and precision fields retained as distinct measurements/flags',
+    applicability: 'MAVEN in-situ upper-atmosphere observations, 2014-03-18 through 2025-12-05',
+    limitations: 'The record documents archive metadata and an inspected product schema. It does not import a numerical product, does not provide a complete 16-species vector, lacks neutral-gas temperature in the inspected table, and cannot meet the Table B2 lower-atmosphere altitude nodes.'
+  }
+} as const;
+
 export type MavenNgimsNeutralQuality = 'IV' | 'IU' | 'OV' | 'OU' | 'UR';
 export type MavenNgimsFocusMode = 'csn' | 'osnb' | 'osion' | 'osnt';
 
