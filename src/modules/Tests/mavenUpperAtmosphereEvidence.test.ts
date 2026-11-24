@@ -159,9 +159,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
       '"2016-04-07T06:00:00Z",12345,14016,osnb,155,18,120,53,75,16,O,12000000,0.15,IV',
       '"2016-04-07T06:00:01Z",12345,14016,osnb,156,18,120,53,75,16,O,11000000,0.20,IU'
-    ].join('\\r\\n');
+    ].join('\r\n');
 
-    const parsed = parseMavenNgimsL2NeutralCsvText('\\uFEFF' + csv);
+    const parsed = parseMavenNgimsL2NeutralCsvText('\uFEFF' + csv);
     expect(parsed.status).toBe('parsed');
     if (parsed.status !== 'parsed') throw new Error(parsed.errors.join('; '));
     expect(parsed.rows).toHaveLength(2);
@@ -172,9 +172,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
   });
 
   it('rejects malformed CSV structure and missing required PDS columns', () => {
-    expect(parseMavenNgimsL2NeutralCsvText(
-      't_utc,tid,orbit\\n"unterminated,1,2'
-    )).toEqual({
+    expect(parseMavenNgimsL2NeutralCsvText('t_utc,tid,orbit')).toEqual({
       status: 'invalid_csv',
       errors: ['CSV must contain a header and at least one data record']
     });
@@ -182,7 +180,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     const missingColumn = [
       't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,quality',
       '2016-04-07T06:00:00Z,12345,14016,osnb,155,18,120,53,75,16,O,12000000,IV'
-    ].join('\\n');
+    ].join('\n');
     const missing = parseMavenNgimsL2NeutralCsvText(missingColumn);
     expect(missing.status).toBe('invalid_csv');
     if (missing.status !== 'invalid_csv') throw new Error('missing columns must reject the CSV');
@@ -191,7 +189,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     const unclosedQuote = [
       't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
       '"2016-04-07T06:00:00Z,12345,14016,osnb,155,18,120,53,75,16,O,12000000,0.15,IV'
-    ].join('\\n');
+    ].join('\n');
     expect(parseMavenNgimsL2NeutralCsvText(unclosedQuote)).toEqual({
       status: 'invalid_csv',
       errors: ['unterminated quoted CSV field']
@@ -203,7 +201,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
       '2016-04-07T06:00:00Z,12345,14016,osnb,155,18,120,53,75,16,O,12000000,0.15,IV',
       '2016-04-07T06:00:01Z,12345,14016,osnb,156,18,120,53,75,16,O,11000000,0.20'
-    ].join('\\n');
+    ].join('\n');
     const parsed = parseMavenNgimsL2NeutralCsvText(csv);
     expect(parsed.status).toBe('parsed');
     if (parsed.status !== 'parsed') throw new Error(parsed.errors.join('; '));
