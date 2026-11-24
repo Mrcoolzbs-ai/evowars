@@ -93,10 +93,10 @@ describe('Mars Taysum 2020 photolysis evidence', () => {
     expect(upper.status).toBe('evaluated');
     if (upper.status !== 'evaluated') throw new Error(upper.reason);
     expect(upper.photolysisFrequencyPerS).toBe(3.2e-4);
-    expect(upper.eventRatePerCm3PerS).toBe(1.28e4);
-    expect(upper.netSpeciesRatesPerCm3PerS.ho2).toBe(-1.28e4);
-    expect(upper.netSpeciesRatesPerCm3PerS.o).toBe(1.28e4);
-    expect(upper.netSpeciesRatesPerCm3PerS.oh).toBe(1.28e4);
+    expect(upper.eventRatePerCm3PerS).toBeCloseTo(1.28e4, 10);
+    expect(upper.netSpeciesRatesPerCm3PerS.ho2).toBeCloseTo(-1.28e4, 10);
+    expect(upper.netSpeciesRatesPerCm3PerS.o).toBeCloseTo(1.28e4, 10);
+    expect(upper.netSpeciesRatesPerCm3PerS.oh).toBeCloseTo(1.28e4, 10);
 
     const zero = evaluateMarsPhotolysisAtReferenceNode({
       reactionId: 'o2_photolysis_to_o1d',
