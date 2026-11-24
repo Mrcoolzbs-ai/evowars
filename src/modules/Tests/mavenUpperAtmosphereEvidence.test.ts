@@ -612,7 +612,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     ]);
     const byteLength = new TextEncoder().encode(csvText).length;
     const label = (id: string, name: string, size: number): string => `
-      <Product_Observational>
+      <Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
         <Identification_Area><logical_identifier>${id}</logical_identifier></Identification_Area>
         <File_Area_Observational><File>
           <file_name>${name}</file_name><file_size unit="byte">${size}</file_size>
@@ -635,6 +635,56 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect((await importMavenNgimsL3ResampledDensityPds4Product({
       ...args,
       detachedLabelXml: '<!DOCTYPE x [<!ENTITY e "bad">]><Product_Observational/>'
+    })).status).toBe('rejected');
+  });
+
+  it('requires a well-formed PDS4 root and reads namespace-prefixed elements by local name', async () => {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
+    const productId = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId;
+    const fileName = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.fileName;
+    const csvText = l3ResampledDensityCsvText([
+      resampledDensityCsvRow({ alt: '150' }),
+      resampledDensityCsvRow({ alt: '160', t_utc: '2014-12-11T16:10:00Z', t_utc_secondary: '2014-12-11T16:10:00Z' })
+    ]);
+    const byteLength = new TextEncoder().encode(csvText).length;
+    const args = { csvText, expectedProductId: productId, expectedCsvFileName: fileName };
+    const prefixedLabel = `<?xml version="1.0" encoding="UTF-8"?>
+      <pds-x:Product_Observational xmlns:pds-x="http://pds.nasa.gov/pds4/pds/v1">
+        <pds-x:Identification_Area>
+          <pds-x:logical_identifier>${productId}</pds-x:logical_identifier>
+        </pds-x:Identification_Area>
+        <pds-x:File_Area_Observational><pds-x:File>
+          <pds-x:file_name>${fileName}</pds-x:file_name>
+          <pds-x:file_size unit="byte">${byteLength}</pds-x:file_size>
+        </pds-x:File></pds-x:File_Area_Observational>
+      </pds-x:Product_Observational>`;
+    const prefixedImport = await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: prefixedLabel
+    });
+    expect(prefixedImport.status).toBe('imported');
+
+    const wrongRoot = `<Envelope xmlns="http://pds.nasa.gov/pds4/pds/v1">
+      <Product_Observational/>
+    </Envelope>`;
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: wrongRoot
+    })).status).toBe('rejected');
+
+    const wrongNamespace = `<p:Product_Observational xmlns:p="urn:example:not-pds">
+      <p:Identification_Area><p:logical_identifier>${productId}</p:logical_identifier></p:Identification_Area>
+      <p:File_Area_Observational><p:File>
+        <p:file_name>${fileName}</p:file_name><p:file_size unit="byte">${byteLength}</p:file_size>
+      </p:File></p:File_Area_Observational>
+    </p:Product_Observational>`;
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: wrongNamespace
+    })).status).toBe('rejected');
+
+    const malformedXml = `<Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
+      <Identification_Area><logical_identifier>${productId}</logical_identifier>
+    </Product_Observational>`;
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args, detachedLabelXml: malformedXml
     })).status).toBe('rejected');
   });
 
