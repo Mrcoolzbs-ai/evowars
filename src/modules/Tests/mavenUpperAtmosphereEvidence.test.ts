@@ -567,7 +567,6 @@ describe('MAVEN upper-atmosphere evidence', () => {
     const label = (overrides: {
       productId?: string; fileName?: string; byteLength?: number; md5Checksum?: string
     } = {}): string => `
-      <?xml version="1.0" encoding="UTF-8"?>
       <Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
         <Identification_Area>
           <logical_identifier>${overrides.productId ?? productId}</logical_identifier>
