@@ -663,3 +663,6 @@ A single NGIMS density row/profile is not an initial world state: it lacks co-lo
 
 
 **Whole-file parsing:** `parseMavenNgimsL2NeutralCsvText()` processes complete ASCII CSV text, including BOM, CRLF/LF, quoted fields and escaped quotes. It requires the documented L2 column set and unique header names. The file-level result distinguishes malformed CSV/header from per-record validation: every data row keeps its record number and a verified/uncertain/rejected result, so unreliable or malformed rows remain auditable rather than being silently removed. This reader is covered with controlled fixture tests; no fixture is represented as an actual MAVEN orbit observation.
+
+
+**Archive index identity:** The PDS logs directory lists `MAVEN_NGIMS_l2_del1-35.csv` as the L2 neutral index (revision del1-35, last modified 2023-11-15; 5.2 MB in the directory listing): https://pdsatmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_l2_del1-35.csv. This identifier is recorded in `MAVEN_NGIMS_PDS_ARCHIVE.archiveIndexFiles` as a retrieval locator. The index itself and its per-orbit row payloads have not yet been frozen in the repository; the CSV parser's test fixtures are explicitly synthetic.
