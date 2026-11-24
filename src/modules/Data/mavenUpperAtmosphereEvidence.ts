@@ -1112,7 +1112,8 @@ export type MavenNgimsL3ResampledDensityEvidenceStatus =
   | 'uncertain_resampled_value'
   | 'unreliable'
   | 'not_available'
-  | 'non_positive';
+  | 'non_positive'
+  | 'unclassified_quality';
 
 export interface MavenNgimsL3ResampledDensityRow {
   readonly sourceProductId: string;
@@ -1126,13 +1127,17 @@ export interface MavenNgimsL3ResampledDensityRow {
   readonly altitudeKm: number;
   readonly massAmu: number;
   readonly species: string;
-  /** Interpolated/averaged L3 density in particles cm^-3. */
-  readonly densityBinsPerCm3: number | null;
-  /** SI conversion of densityBinsPerCm3; null remains unavailable. */
-  readonly densityBinsPerM3: number | null;
+  /** Raw Table A-9 density_bins number. The source's log-bin prose conflicts with its Part/cc unit declaration. */
+  readonly reportedDensityBinValue: number | null;
+  /** No linear concentration is emitted until the PDS density-bin transform is resolved. */
+  readonly densityBinsPerCm3: null;
+  readonly densityBinsPerM3: null;
+  readonly densityBinInterpretationStatus: 'unresolved_log_bin_vs_part_cm3_contract';
   /** Table A-9 has no per-row precision/sigma column. */
   readonly reportedSigmaPerCm3: null;
-  readonly qualityFlag: MavenNgimsNeutralQuality;
+  /** Unknown source flags are preserved, but never promoted to verified/uncertain. */
+  readonly qualityFlag: MavenNgimsNeutralQuality | 'unrecognized';
+  readonly qualityFlagRaw: string;
   readonly evidenceStatus: MavenNgimsL3ResampledDensityEvidenceStatus;
   readonly evidenceKind: 'l3_resampled_average_density';
   readonly densityBasis: 'equal_pressure_altitude_constant_log_density_bins';
@@ -1173,12 +1178,21 @@ export interface MavenNgimsL3ResampledDensityPds4ImportInput {
   readonly expectedProductId: string;
   /** Expected CSV file name taken from an independent archive directory/index. */
   readonly expectedCsvFileName: string;
+  /** Explicit forensic-only opt-in for a source whose bytes disagree with the detached label file_size. */
+  readonly allowLabelSizeMismatchForensicAnalysis?: boolean;
 }
 
 export interface MavenNgimsL3ResampledDensityPds4ImportProvenance {
   readonly sourceProductId: string;
   readonly csvFileName: string;
+  /** Actual length of the exact UTF-8 CSV bytes supplied to the importer. */
   readonly csvByteLength: number;
+  readonly labelDeclaredFileSizeBytes: number;
+  readonly csvSizeConsistencyStatus: 'matches_detached_label_file_size' | 'mismatch_explicitly_accepted_for_forensic_analysis';
+  readonly labelHeaderObjectLengthBytes: number | null;
+  readonly labelTableOffsetBytes: number | null;
+  readonly labelTableObjectLengthBytes: number | null;
+  readonly labelFileLayoutDiagnosis: 'consistent' | 'possible_header_double_count_in_label' | 'not_diagnosable';
   /** SHA-256 of the exact UTF-8 text supplied to this importer (BOM/newlines preserved). */
   readonly csvSha256: string;
   readonly hashAlgorithm: 'SHA-256';
@@ -1186,7 +1200,7 @@ export interface MavenNgimsL3ResampledDensityPds4ImportProvenance {
   readonly detachedLabelChecks: readonly [
     'logical_identifier_matches_expected_product_id',
     'file_name_matches_expected_csv_file_name',
-    'file_size_matches_csv_utf8_byte_length'
+    'pds4_root_namespace_and_scoped_file_structure_validated'
   ];
   /** Optional MD5 declared by the PDS4 File element; null when the label omits it. */
   readonly csvMd5Checksum: string | null;
@@ -1200,6 +1214,15 @@ export interface MavenNgimsL3ResampledDensityPds4ImportProvenance {
 export type MavenNgimsL3ResampledDensityPds4ImportResult =
   | {
       readonly status: 'imported';
+      readonly forensicOnly: false;
+      readonly warnings: readonly [];
+      readonly imported: Extract<MavenNgimsL3ResampledDensityCsvImportResult, { readonly status: 'parsed' }>;
+      readonly provenance: MavenNgimsL3ResampledDensityPds4ImportProvenance;
+    }
+  | {
+      readonly status: 'imported_forensic_only';
+      readonly forensicOnly: true;
+      readonly warnings: readonly string[];
       readonly imported: Extract<MavenNgimsL3ResampledDensityCsvImportResult, { readonly status: 'parsed' }>;
       readonly provenance: MavenNgimsL3ResampledDensityPds4ImportProvenance;
     }
@@ -1214,6 +1237,9 @@ export type MavenNgimsL3ResampledDensityPds4SelectionResult =
       readonly sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier';
       readonly sourceArtifactSha256: string;
       readonly detachedLabelAuthenticity: 'not_independently_authenticated';
+      readonly csvSizeConsistencyStatus: MavenNgimsL3ResampledDensityPds4ImportProvenance['csvSizeConsistencyStatus'];
+      readonly forensicOnly: boolean;
+      readonly warnings: readonly string[];
       readonly eligibleAsMarsPhotochemicalInitialState: false;
       readonly limitations: readonly string[];
     }
@@ -1237,6 +1263,7 @@ export interface MavenNgimsL3ResampledDensityExcludedRowCounts {
   readonly differentFocusMode: number;
   readonly differentSpecies: number;
   readonly differentQuality: number;
+  readonly unrecognizedQualityFlag: number;
   readonly unavailableOrNonPositive: number;
   readonly outsideUtcWindow: number;
 }
@@ -1301,12 +1328,12 @@ export function parseMavenNgimsL3ResampledDensityCsvRow(
     columnHeaders.map((header, index) => [header, values[duplicatedUtcHeader ? (index === 0 ? 0 : index + 1) : index]])
   ) as Record<string, string>;
   const errors: string[] = [];
-  const timeUtc = strictNgimsUtcTimestamp(record.t_utc?.trim() ?? '');
-  if (timeUtc === null) errors.push('t_utc must be a valid calendar UTC timestamp ending in Z');
+  const timeUtc = strictNgimsL3UtcTimestamp(record.t_utc?.trim() ?? '');
+  if (timeUtc === null) errors.push('t_utc must be a valid UTC calendar timestamp in Table A-9 format');
   let duplicateUtcColumnsMatched = false;
   if (duplicatedUtcHeader) {
-    const firstUtc = strictNgimsUtcTimestamp(values[0]?.trim() ?? '');
-    const secondUtc = strictNgimsUtcTimestamp(values[1]?.trim() ?? '');
+    const firstUtc = strictNgimsL3UtcTimestamp(values[0]?.trim() ?? '');
+    const secondUtc = strictNgimsL3UtcTimestamp(values[1]?.trim() ?? '');
     duplicateUtcColumnsMatched = firstUtc !== null && firstUtc === secondUtc;
     if (!duplicateUtcColumnsMatched) {
       errors.push('the duplicated Table A-9 t_utc columns must contain the same UTC instant');
@@ -1344,7 +1371,7 @@ export function parseMavenNgimsL3ResampledDensityCsvRow(
   const species = record.species?.trim();
   if (!species) errors.push('species must be non-empty');
   const qualityFlag = record.quality?.trim().toUpperCase();
-  if (!QUALITY_FLAGS.includes(qualityFlag ?? '')) errors.push('quality must be one of IV, IU, OV, OU or UR');
+  if (!qualityFlag) errors.push('quality flag must be present');
 
   if (errors.length > 0) return { status: 'rejected', errors };
   if (!Number.isInteger(numeric.tid) || numeric.tid! <= 0) errors.push('tid must be a positive integer');
@@ -1359,30 +1386,35 @@ export function parseMavenNgimsL3ResampledDensityCsvRow(
   }
   if (errors.length > 0) return { status: 'rejected', errors };
 
-  const density = numeric.density_bins;
-  const densityM3 = density === null ? null : density * 1e6;
-  const flag = qualityFlag as MavenNgimsNeutralQuality;
+  const densityBinValue = numeric.density_bins;
+  const knownQuality = !!qualityFlag && QUALITY_FLAGS.includes(qualityFlag);
+  const flag: MavenNgimsNeutralQuality | 'unrecognized' =
+    knownQuality ? qualityFlag as MavenNgimsNeutralQuality : 'unrecognized';
   const evidenceStatus: MavenNgimsL3ResampledDensityEvidenceStatus =
-    density === null
+    densityBinValue === null
       ? 'not_available'
-      : density <= 0
+      : densityBinValue <= 0
         ? 'non_positive'
-        : flag === 'UR'
-          ? 'unreliable'
-          : flag === 'IU' || flag === 'OU'
-            ? 'uncertain_resampled_value'
-            : 'verified_resampled_value';
+        : !knownQuality
+          ? 'unclassified_quality'
+          : flag === 'UR'
+            ? 'unreliable'
+            : flag === 'IU' || flag === 'OU'
+              ? 'uncertain_resampled_value'
+              : 'verified_resampled_value';
 
   const diagnostics = [
-    'L3 res-den density is interpolated to equal-pressure altitude and averaged in constant log-density bins (0.2 log steps); it is not a raw L2 point measurement.',
+    'L3 res-den values are altitude-resampled and averaged on density bins; they are not raw L2 point measurements.',
+    'The PDS SIS describes density bins as log(density)-spaced but Table A-9 labels density_bins in Part/cc; raw values are retained without a linear SI conversion until this contract conflict is resolved.',
     'Table A-9 supplies no per-row density precision or sigma; reportedSigmaPerCm3 is therefore null, not zero.',
     'The row carries altitude, time, TID, orbit, focus mode, species and quality, but no per-row latitude, longitude, SZA or local solar time.',
     'This L3 resampled profile is not eligible for direct Scheduler or Mars photochemical initial-state construction.'
   ];
   if (flag === 'UR') diagnostics.push('Quality UR marks this row unreliable and not usable for science.');
   if (flag === 'IU' || flag === 'OU') diagnostics.push('Quality IU/OU marks this resampled density as uncertain.');
-  if (density === null) diagnostics.push('density_bins is unavailable/NaN.');
-  if (density !== null && density <= 0) diagnostics.push('Non-positive density is retained for audit and is not a positive detection.');
+  if (flag === 'unrecognized') diagnostics.push('Quality flag "' + qualityFlag + '" is not defined by NGIMS SIS Rev. 1.13 neutral L2/L3 flags; retained raw and excluded from science selections.');
+  if (densityBinValue === null) diagnostics.push('density_bins is unavailable/NaN.');
+  if (densityBinValue !== null && densityBinValue <= 0) diagnostics.push('Non-positive density-bin coordinate is retained for audit and is not a positive detection.');
 
   return {
     status: 'parsed',
@@ -1398,10 +1430,13 @@ export function parseMavenNgimsL3ResampledDensityCsvRow(
       altitudeKm: numeric.alt!,
       massAmu: numeric.mass!,
       species: species!,
-      densityBinsPerCm3: density,
-      densityBinsPerM3: densityM3,
+      reportedDensityBinValue: densityBinValue,
+      densityBinsPerCm3: null,
+      densityBinsPerM3: null,
+      densityBinInterpretationStatus: 'unresolved_log_bin_vs_part_cm3_contract',
       reportedSigmaPerCm3: null,
       qualityFlag: flag,
+      qualityFlagRaw: qualityFlag!,
       evidenceStatus,
       evidenceKind: 'l3_resampled_average_density',
       densityBasis: 'equal_pressure_altitude_constant_log_density_bins',
@@ -1504,6 +1539,34 @@ function readPds4DetachedLabelElement(
       ? (element.textContent ?? '').trim()
       : null,
     unit: element?.getAttribute('unit') ?? null
+  };
+}
+
+interface Pds4TableObjectLayout {
+  readonly count: number;
+  readonly offsetBytes: number | null;
+  readonly objectLengthBytes: number | null;
+}
+
+function readPds4TableObjectLayout(
+  fileArea: Element | null,
+  objectName: 'Header' | 'Table_Delimited'
+): Pds4TableObjectLayout {
+  if (!fileArea) return { count: 0, offsetBytes: null, objectLengthBytes: null };
+  const matches = Array.from(fileArea.children).filter(
+    (child) => child.namespaceURI === PDS4_LABEL_NAMESPACE && child.localName === objectName
+  );
+  if (matches.length !== 1) {
+    return { count: matches.length, offsetBytes: null, objectLengthBytes: null };
+  }
+  const offset = readPds4DetachedLabelElement(matches[0], 'offset');
+  const length = readPds4DetachedLabelElement(matches[0], 'object_length');
+  const offsetValue = offset.count === 1 && offset.value !== null ? Number(offset.value) : Number.NaN;
+  const lengthValue = length.count === 1 && length.value !== null ? Number(length.value) : Number.NaN;
+  return {
+    count: 1,
+    offsetBytes: Number.isSafeInteger(offsetValue) && offsetValue >= 0 ? offsetValue : null,
+    objectLengthBytes: Number.isSafeInteger(lengthValue) && lengthValue >= 0 ? lengthValue : null
   };
 }
 
@@ -1711,9 +1774,31 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
   }
 
   const csvByteLength = new TextEncoder().encode(input.csvText).length;
-  if (Number.isSafeInteger(declaredFileSize) && declaredFileSize !== csvByteLength) {
-    errors.push('CSV UTF-8 byte length does not match detached label file_size');
+  const csvSizeMatchesLabel = Number.isSafeInteger(declaredFileSize) && declaredFileSize === csvByteLength;
+  const labelSizeMismatchForensicOptIn =
+    input.allowLabelSizeMismatchForensicAnalysis === true;
+  if (
+    Number.isSafeInteger(declaredFileSize) &&
+    declaredFileSize !== csvByteLength &&
+    !labelSizeMismatchForensicOptIn
+  ) {
+    errors.push('CSV UTF-8 byte length does not match detached label file_size; forensic opt-in is required');
   }
+  const headerLayout = readPds4TableObjectLayout(fileAreas.length === 1 ? fileAreas[0] : null, 'Header');
+  const tableLayout = readPds4TableObjectLayout(fileAreas.length === 1 ? fileAreas[0] : null, 'Table_Delimited');
+  const labelFileLayoutDiagnosis: MavenNgimsL3ResampledDensityPds4ImportProvenance['labelFileLayoutDiagnosis'] =
+    csvSizeMatchesLabel
+      ? 'consistent'
+      : (
+        headerLayout.objectLengthBytes !== null &&
+        tableLayout.offsetBytes !== null &&
+        tableLayout.objectLengthBytes !== null &&
+        tableLayout.offsetBytes === headerLayout.objectLengthBytes &&
+        tableLayout.objectLengthBytes === csvByteLength &&
+        declaredFileSize === headerLayout.objectLengthBytes + tableLayout.objectLengthBytes
+      )
+        ? 'possible_header_double_count_in_label'
+        : 'not_diagnosable';
   if (errors.length > 0) return { status: 'rejected', errors };
 
   const sourceProductId = logicalIdentifier.value!;
@@ -1750,26 +1835,53 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
     };
   }
 
+  const provenance: MavenNgimsL3ResampledDensityPds4ImportProvenance = {
+    sourceProductId,
+    csvFileName: fileName.value!,
+    csvByteLength,
+    labelDeclaredFileSizeBytes: declaredFileSize,
+    csvSizeConsistencyStatus: csvSizeMatchesLabel
+      ? 'matches_detached_label_file_size'
+      : 'mismatch_explicitly_accepted_for_forensic_analysis',
+    labelHeaderObjectLengthBytes: headerLayout.objectLengthBytes,
+    labelTableOffsetBytes: tableLayout.offsetBytes,
+    labelTableObjectLengthBytes: tableLayout.objectLengthBytes,
+    labelFileLayoutDiagnosis,
+    csvSha256,
+    hashAlgorithm: 'SHA-256',
+    sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
+    detachedLabelChecks: [
+      'logical_identifier_matches_expected_product_id',
+      'file_name_matches_expected_csv_file_name',
+      'pds4_root_namespace_and_scoped_file_structure_validated'
+    ],
+    csvMd5Checksum,
+    csvMd5ChecksumStatus,
+    csvFixityStatus,
+    detachedLabelAuthenticity: 'not_independently_authenticated'
+  };
+  if (!csvSizeMatchesLabel) {
+    return {
+      status: 'imported_forensic_only',
+      forensicOnly: true,
+      warnings: [
+        'Detached PDS4 label file_size is inconsistent with the exact CSV byte length; the import is forensic-only.',
+        'No byte rewriting, line-ending normalization, or inferred repair has been applied.',
+        'No md5_checksum is present in the label; SHA-256 is recorded but not independently authenticated.',
+        labelFileLayoutDiagnosis === 'possible_header_double_count_in_label'
+          ? 'The label Header.object_length + Table_Delimited.object_length equals file_size, while Table_Delimited.object_length also equals the complete archived CSV byte length; this is a possible header double-count in the label metadata.'
+          : 'The label object layout does not independently explain the declared file-size discrepancy.'
+      ],
+      imported,
+      provenance
+    };
+  }
   return {
     status: 'imported',
+    forensicOnly: false,
+    warnings: [],
     imported,
-    provenance: {
-      sourceProductId,
-      csvFileName: fileName.value!,
-      csvByteLength,
-      csvSha256,
-      csvMd5Checksum,
-      csvMd5ChecksumStatus,
-      hashAlgorithm: 'SHA-256',
-      sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
-      detachedLabelChecks: [
-        'logical_identifier_matches_expected_product_id',
-        'file_name_matches_expected_csv_file_name',
-        'file_size_matches_csv_utf8_byte_length'
-      ],
-      csvFixityStatus,
-      detachedLabelAuthenticity: 'not_independently_authenticated'
-    }
+    provenance
   };
 }
 
@@ -1808,6 +1920,7 @@ export function selectMavenNgimsL3ResampledDensityProfile(
     differentFocusMode: 0,
     differentSpecies: 0,
     differentQuality: 0,
+    unrecognizedQualityFlag: 0,
     unavailableOrNonPositive: 0,
     outsideUtcWindow: 0
   };
@@ -1823,6 +1936,7 @@ export function selectMavenNgimsL3ResampledDensityProfile(
     if (row.orbit !== selection.orbit) { excluded.differentOrbit += 1; continue; }
     if (row.focusMode !== selection.focusMode) { excluded.differentFocusMode += 1; continue; }
     if (row.species.trim().toUpperCase() !== targetSpecies) { excluded.differentSpecies += 1; continue; }
+    if (row.qualityFlag === 'unrecognized') { excluded.unrecognizedQualityFlag += 1; continue; }
     if (
       (selection.quality === 'verified' && row.evidenceStatus !== 'verified_resampled_value') ||
       (selection.quality === 'uncertain' && row.evidenceStatus !== 'uncertain_resampled_value')
@@ -1888,7 +2002,7 @@ export function selectMavenNgimsL3ResampledDensityPds4Profile(
   imported: MavenNgimsL3ResampledDensityPds4ImportResult,
   selection: MavenNgimsL3ResampledDensitySelection
 ): MavenNgimsL3ResampledDensityPds4SelectionResult {
-  if (!imported || imported.status !== 'imported') {
+  if (!imported || (imported.status !== 'imported' && imported.status !== 'imported_forensic_only')) {
     return {
       status: 'rejected',
       errors: imported?.status === 'rejected'
@@ -1903,11 +2017,15 @@ export function selectMavenNgimsL3ResampledDensityPds4Profile(
     sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
     sourceArtifactSha256: imported.provenance.csvSha256,
     detachedLabelAuthenticity: imported.provenance.detachedLabelAuthenticity,
+    csvSizeConsistencyStatus: imported.provenance.csvSizeConsistencyStatus,
+    forensicOnly: imported.forensicOnly,
+    warnings: imported.warnings,
     limitations: [
       ...selected.limitations,
-      'The detached PDS4 label logical_identifier, file_name and file_size were checked against the expected archive identity and exact CSV UTF-8 byte length.',
-      'SHA-256 is recorded for the exact supplied CSV text, but no signed/independently published archive checksum was compared and the detached label itself is not authenticated.',
-      'L3 res-den remains an altitude-resampled product; this provenance check does not make it a raw L2 measurement or a planetary initial state.'
+      'The PDS4 label logical_identifier and file_name were checked against the expected archive identity; the detached label file_size status is carried separately.',
+      'The file declares no MD5 checksum; SHA-256 is recorded for exact CSV text but is not an independent authenticity or archive fixity proof.',
+      'L3 res-den remains an altitude-resampled product; density-bin coordinate semantics are unresolved, no linear concentration is emitted, and it is not a planetary initial state.',
+      ...(imported.forensicOnly ? imported.warnings : [])
     ]
   };
 }
@@ -2486,6 +2604,13 @@ function strictNgimsUtcTimestamp(value: string): string | null {
     return null;
   }
   return new Date(timestamp).toISOString();
+}
+
+/** Table A-9 t_utc is defined as UTC yyyy-mm-ddThh:mm:ss; a trailing Z is optional in the ASCII product. */
+function strictNgimsL3UtcTimestamp(value: string): string | null {
+  const trimmed = value.trim();
+  const withUtcSuffix = /Z$/i.test(trimmed) ? trimmed : trimmed + 'Z';
+  return strictNgimsUtcTimestamp(withUtcSuffix);
 }
 
 /** Parse one Table A-10 row. "parsed" means structurally valid, not a measured local temperature. */
