@@ -33,6 +33,35 @@ describe('Mars Taysum 2020 photolysis evidence', () => {
     expect(MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.note).toMatch(/nine channels/);
   });
 
+  it('keeps the published photolysis channel stoichiometries element-balanced', () => {
+    const composition: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+      o2: { O: 2 },
+      o: { O: 1 },
+      o1d: { O: 1 },
+      co2: { C: 1, O: 2 },
+      co: { C: 1, O: 1 },
+      o3: { O: 3 },
+      h2o: { H: 2, O: 1 },
+      h: { H: 1 },
+      oh: { O: 1, H: 1 },
+      h2o2: { H: 2, O: 2 },
+      ho2: { H: 1, O: 2 }
+    };
+
+    for (const channel of MARS_TAYSUM_2020_PHOTOLYSIS_CHANNELS) {
+      const net: Record<string, number> = {};
+      for (const [element, count] of Object.entries(composition[channel.reactant]!)) {
+        net[element] = (net[element] ?? 0) - count;
+      }
+      for (const product of channel.products) {
+        for (const [element, count] of Object.entries(composition[product.speciesId]!)) {
+          net[element] = (net[element] ?? 0) + product.coefficient * count;
+        }
+      }
+      expect(Object.values(net).every((value) => value === 0), channel.id).toBe(true);
+    }
+  });
+
   it('calculates local CO2 photolysis event and species rates as J × n', () => {
     const result = evaluateMarsPhotolysisAtReferenceNode({
       reactionId: 'co2_photolysis_to_co_o',
