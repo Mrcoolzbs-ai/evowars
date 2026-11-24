@@ -225,12 +225,22 @@ describe('MAVEN upper-atmosphere evidence', () => {
       ['H0', 'bad_or_negative_fit_do_not_use']
     ] as const;
     for (const [quality, fitQuality] of cases) {
+      const overrides = quality === 'H0'
+        ? { quality, scale_height: '-10.5', temperature: '-210' }
+        : { quality };
       const result = parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
-        scaleHeightCsvRow({ quality }),
+        scaleHeightCsvRow(overrides),
         'maven-ngims-l3-scale-height-test-product'
       );
       expect(result.status).toBe('parsed');
-      if (result.status === 'parsed') expect(result.row.fitQuality).toBe(fitQuality);
+      if (result.status === 'parsed') {
+        expect(result.row.fitQuality).toBe(fitQuality);
+        if (quality === 'H0') {
+          expect(result.row.scaleHeightKm).toBe(-10.5);
+          expect(result.row.scaleHeightTemperatureK).toBe(-210);
+          expect(result.row.diagnostics.join(' ')).toMatch(/retained only for audit/);
+        }
+      }
     }
   });
 
