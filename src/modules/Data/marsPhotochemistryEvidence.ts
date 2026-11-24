@@ -47,7 +47,7 @@ export const MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE: DataProvenance = {
   method: 'Published photolysis frequencies interpolated from an offline look-up table constructed with a Mars-adapted TUV radiation model',
   modelVersion: 'Mars-adapted TUV look-up table as described by Taysum & Palmer (2020)',
   applicability: 'The table values are for solar zenith angle 0 degrees and solar longitude Ls=251 degrees (perihelion), at the exact tabulated altitudes 0.50 km and 42.67 km.',
-  conditions: 'The underlying look-up table also varies with atmospheric temperature, O3 column abundance, total atmospheric column abundance, Sun-Mars distance and optical opacity/dust loading. Only the table reference scenario is retained here.',
+  conditions: 'Solar zenith angle SZA=0 degrees; solar longitude Ls=251 degrees (perihelion). The underlying look-up table also varies with atmospheric temperature, O3 column abundance, total atmospheric column abundance, Sun-Mars distance and optical opacity/dust loading; the compact table does not publish all corresponding model input values.',
   limitations: 'Model-derived lookup values, not observations or universally applicable J constants. The paper does not report a 1-sigma uncertainty for these tabulated frequencies. The compact table cannot reconstruct the full radiation field or its dependencies; no interpolation/extrapolation is provided. No automatic Scheduler use.',
   note: 'The paper describes 10 inorganic photolysis reactions in the text, while the accessible Table B2 lists the nine channels stored here. This module preserves the nine tabulated rows only and does not claim to be the complete 1-D photochemical mechanism.'
 };
