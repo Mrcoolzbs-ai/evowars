@@ -567,9 +567,10 @@ describe('MAVEN upper-atmosphere evidence', () => {
       csvText, detachedLabelXml, expectedProductId: productId, expectedCsvFileName: fileName
     });
     expect(strict.status).toBe('rejected');
-    if (strict.status === 'rejected') {
-      expect(strict.errors.join(' ')).toMatch(/forensic opt-in is required/);
+    if (strict.status !== 'rejected') {
+      throw new Error('strict PDS4 importer must reject the file_size mismatch');
     }
+    expect(strict.errors.join(' ')).toMatch(/forensic opt-in is required/);
 
     const forensic = await importMavenNgimsL3ResampledDensityPds4Product({
       csvText,
@@ -579,8 +580,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
       allowLabelSizeMismatchForensicAnalysis: true
     });
     expect(forensic.status).toBe('imported_forensic_only');
+    if (forensic.status === 'rejected') {
+      throw new Error(forensic.errors.join('; '));
+    }
     if (forensic.status !== 'imported_forensic_only') {
-      throw new Error(forensic.status === 'rejected' ? forensic.errors.join('; ') : 'unexpected non-forensic result');
+      throw new Error('expected an explicitly forensic-only PDS4 import');
     }
     expect(forensic).toMatchObject({ forensicOnly: true });
     expect(forensic.provenance).toMatchObject({
