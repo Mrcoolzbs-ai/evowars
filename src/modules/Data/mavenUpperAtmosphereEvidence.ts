@@ -372,6 +372,193 @@ export function parseMavenNgimsL2NeutralCsvRow(
   return validateMavenNgimsL2NeutralRow(parsed, policy);
 }
 
+
+export interface MavenNgimsL2CsvRowResult {
+  /** One-based record number after the CSV header (not a physical line number). */
+  readonly recordNumber: number;
+  readonly validation: MavenNgimsRowValidation;
+}
+
+export type MavenNgimsL2CsvImportResult =
+  | {
+      readonly status: 'parsed';
+      readonly headers: readonly string[];
+      readonly rows: readonly MavenNgimsL2CsvRowResult[];
+      readonly acceptedRowCount: number;
+      readonly rejectedRowCount: number;
+    }
+  | {
+      readonly status: 'invalid_csv';
+      readonly errors: readonly string[];
+    };
+
+const REQUIRED_NGIMS_L2_NEUTRAL_COLUMNS = [
+  't_utc', 'tid', 'orbit', 'focusmode', 'alt', 'lst', 'long',
+  'lat', 'sza', 'mass', 'species', 'abundance', 'precision', 'quality'
+] as const;
+
+/**
+ * Small RFC-4180-style record reader for the ASCII CSV delivered by the
+ * NGIMS PDS index. It handles quoted commas, escaped quotes, CRLF and
+ * LF records. A quoted newline is retained in its field and subsequently
+ * rejected by the typed UTC/numeric validators where inappropriate.
+ */
+function parseNgimsCsvRecords(text: string): { records: string[][]; error?: string } {
+  const records: string[][] = [];
+  let fields: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  let quoteClosed = false;
+  let rowTouched = false;
+
+  const pushField = (): void => {
+    fields.push(field);
+    field = '';
+    quoteClosed = false;
+  };
+  const pushRecord = (): void => {
+    pushField();
+    if (rowTouched || fields.some((value) => value.length > 0)) {
+      records.push(fields);
+    }
+    fields = [];
+    rowTouched = false;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (inQuotes) {
+      if (character === '"') {
+        if (text[index + 1] === '"') {
+          field += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+          quoteClosed = true;
+        }
+      } else {
+        field += character;
+      }
+      rowTouched = true;
+      continue;
+    }
+
+    if (quoteClosed) {
+      if (character === ',') {
+        pushField();
+        rowTouched = true;
+        continue;
+      }
+      if (character === '\r' || character === '\n') {
+        if (character === '\r' && text[index + 1] === '\n') index += 1;
+        pushRecord();
+        continue;
+      }
+      return { records: [], error: 'unexpected character after a closing CSV quote at offset ' + index };
+    }
+
+    if (character === '"') {
+      if (field.length !== 0) {
+        return { records: [], error: 'quote inside an unquoted CSV field at offset ' + index };
+      }
+      inQuotes = true;
+      rowTouched = true;
+      continue;
+    }
+    if (character === ',') {
+      pushField();
+      rowTouched = true;
+      continue;
+    }
+    if (character === '\r' || character === '\n') {
+      if (character === '\r' && text[index + 1] === '\n') index += 1;
+      pushRecord();
+      continue;
+    }
+
+    field += character;
+    rowTouched = true;
+  }
+
+  if (inQuotes) return { records: [], error: 'unterminated quoted CSV field' };
+  if (rowTouched || fields.length > 0 || field.length > 0 || quoteClosed) pushRecord();
+  return { records };
+}
+
+/**
+ * Parse a complete NGIMS L2 neutral CSV text export. Syntax/header failures
+ * reject the file; per-row quality or numeric failures remain attached to
+ * their individual records so a caller can audit every excluded sample.
+ * No rows are averaged, interpolated, or promoted to a complete atmosphere.
+ */
+export function parseMavenNgimsL2NeutralCsvText(
+  csvText: string,
+  policy: MavenNgimsImportPolicy = {}
+): MavenNgimsL2CsvImportResult {
+  if (typeof csvText !== 'string' || csvText.trim() === '') {
+    return { status: 'invalid_csv', errors: ['CSV text is empty'] };
+  }
+
+  const parsed = parseNgimsCsvRecords(csvText.replace(/^\uFEFF/, ''));
+  if (parsed.error) return { status: 'invalid_csv', errors: [parsed.error] };
+  if (parsed.records.length < 2) {
+    return { status: 'invalid_csv', errors: ['CSV must contain a header and at least one data record'] };
+  }
+
+  const headers = parsed.records[0].map((header) => header.trim());
+  if (headers.length === 0 || headers.some((header) => header === '')) {
+    return { status: 'invalid_csv', errors: ['CSV header contains an empty column name'] };
+  }
+  const duplicateHeaders = headers.filter((header, index) => headers.indexOf(header) !== index);
+  if (duplicateHeaders.length > 0) {
+    return {
+      status: 'invalid_csv',
+      errors: ['CSV header contains duplicate columns: ' + [...new Set(duplicateHeaders)].join(', ')]
+    };
+  }
+
+  const missingColumns = REQUIRED_NGIMS_L2_NEUTRAL_COLUMNS.filter((column) => !headers.includes(column));
+  if (missingColumns.length > 0) {
+    return {
+      status: 'invalid_csv',
+      errors: ['CSV is missing required NGIMS L2 neutral columns: ' + missingColumns.join(', ')]
+    };
+  }
+
+  const rows: MavenNgimsL2CsvRowResult[] = parsed.records.slice(1).map((values, index) => {
+    if (values.length !== headers.length) {
+      return {
+        recordNumber: index + 1,
+        validation: {
+          status: 'rejected',
+          errors: [{
+            field: 'row',
+            message: 'CSV record has ' + values.length + ' fields; expected ' + headers.length
+          }]
+        }
+      };
+    }
+
+    const record: Record<string, string | undefined> = Object.fromEntries(
+      headers.map((header, columnIndex) => [header, values[columnIndex]])
+    );
+    return {
+      recordNumber: index + 1,
+      validation: parseMavenNgimsL2NeutralCsvRow(record, policy)
+    };
+  });
+
+  const acceptedRowCount = rows.filter((entry) => entry.validation.status !== 'rejected').length;
+  return {
+    status: 'parsed',
+    headers,
+    rows,
+    acceptedRowCount,
+    rejectedRowCount: rows.length - acceptedRowCount
+  };
+}
+
 export const MAVEN_IUVS_NO_DAYGLOW_REFERENCE = {
   species: 'NO',
   speciesId: 'no',
