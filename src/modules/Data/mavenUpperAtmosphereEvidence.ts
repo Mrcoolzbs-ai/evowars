@@ -140,11 +140,12 @@ export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
   },
   exampleProduct: {
     observationDateUtc: '2025-06-10',
-    fileName: 'mvn_kp_insitu_20250610_v25_r01.tab',
-    labelFileName: 'mvn_kp_insitu_20250610_v25_r01.xml',
+    fileName: 'mvn_kp_insitu_20250610_v26_r01.tab',
+    labelFileName: 'mvn_kp_insitu_20250610_v26_r01.xml',
     logicalIdentifier: 'urn:nasa:pds:maven.insitu.calibrated:data.kp:mvn_kp_insitu_20250610',
-    fileSizeBytes: 45209823,
-    source: 'https://search-pdsppi.igpp.ucla.edu/ditdos/viewFile?id=pds%3A%2F%2FPPI%2Fmaven.insitu.calibrated%2Fdata%2F2025%2F06%2Fmvn_kp_insitu_20250610_v25_r01.xml',
+    reportedDirectorySize: '43 MB',
+    source: 'https://pds-ppi.igpp.ucla.edu/data/maven-insitu-calibrated/data/2025/06/',
+    productLabelRetrieved: false,
     tableImportedIntoRepository: false
   },
   sampling: {
@@ -164,7 +165,7 @@ export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
     { species: 'O', networkSpeciesId: 'O', status: 'field_present' },
     { species: 'CO', networkSpeciesId: 'CO', status: 'field_present' },
     { species: 'N2', networkSpeciesId: null, status: 'field_present' },
-    { species: 'NO', networkSpeciesId: null, status: 'field_present_values_not_verified' },
+    { species: 'NO', networkSpeciesId: null, status: 'field_present_sis_declares_all_nan' },
     { species: 'Ar', networkSpeciesId: null, status: 'field_present' },
     { species: 'CO2', networkSpeciesId: 'CO2', status: 'field_present' }
   ],
@@ -194,12 +195,12 @@ export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
       'O1D', 'O2', 'O3', 'H', 'H2', 'H2O', 'OH',
       'HO2', 'H2O2', 'CH4', 'CH3', 'CH3O', 'HCHO'
     ],
-    note: 'NO is not a species in the current 16-species gas-phase network. An older Key Parameter SIS revision described the NO values as removed/all-NaN, while the inspected 2025-06-10 product label retains the density/precision/quality fields with generic descriptions; without the .tab payload, actual NO row values are unverified.'
+    note: 'NO is not a species in the current 16-species gas-phase network. MAVEN Key Parameter PDS Archive SIS Rev. 5.2 explicitly defines the NO density, precision and quality fields as removed by the NGIMS team with all values set to NaN. The 2025 product label retains the fixed-width field definitions, but that does not make them measurements.'
   },
   limitations: [
     'This is a schema and archive-coverage record, not an imported numerical observation set; no full .tab rows are checked into this repository.',
     'The key-parameter table offers only three named neutral-density species that overlap the current 16-species network (O, CO, CO2); no complete initial vector can be formed from it.',
-    'The older Key Parameter SIS describes NO as removed/all-NaN, but the inspected 2025-06-10 product label retains generic NO density/precision/quality field definitions. Since the numerical .tab rows are not imported, the actual NO values in that product remain unverified and must not be credited as detections.',
+    'The Key Parameter PDS Archive SIS Rev. 5.2 says the NO density, precision and quality fields were removed by NGIMS and all values set to NaN. A field definition in a product label is not evidence of a positive NO detection.',
     'The precision sentinel -1 denotes an upper limit and must not be promoted to a measured point concentration.',
     'The inspected table contains LPW electron temperature, not a co-registered neutral-gas temperature; the separate NGIMS scale-height/temperature product must be independently selected and validated.',
     'MAVEN/NGIMS samples the upper atmosphere along an orbital spacecraft track; it does not provide direct measurements at the Taysum Table B2 lower-atmosphere nodes 0.5 or 42.67 km.',
@@ -214,6 +215,284 @@ export const MAVEN_INSITU_KP_PDS_ARCHIVE = {
     limitations: 'The record documents archive metadata and an inspected product schema. It does not import a numerical product, does not provide a complete 16-species vector, lacks neutral-gas temperature in the inspected table, and cannot meet the Table B2 lower-atmosphere altitude nodes.'
   }
 } as const;
+
+export const MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT = {
+  fixedWidthAsciiSchema: {
+    sisRevision: '5.2',
+    recordLengthBytes: 3765,
+    fieldWidthBytes: 16,
+    source: 'https://pds-ppi.igpp.ucla.edu/data/maven-insitu-calibrated/document/maven_sis_kp_insitu_r05.2.pdf',
+    bytePositionsAreOneBased: true,
+    timeUtc: { start: 1, length: 19 },
+    O: { density: 2308, precisionPercent: 2324, quality: 2340 },
+    CO: { density: 2356, precisionPercent: 2372, quality: 2388 },
+    CO2: { density: 2548, precisionPercent: 2564, quality: 2580 },
+    longitudeDeg: 3076,
+    latitudeDeg: 3092,
+    solarZenithAngleDeg: 3108,
+    localSolarTimeHours: 3124,
+    altitudeKm: 3140,
+    orbitNumber: 3348,
+    inboundOutboundFlag: 3364,
+    solarLongitudeDeg: 3380
+  },
+} as const;
+
+
+// ============================================
+// MAVEN INSITU KEY-PARAMETER FIXED-WIDTH READER
+// ============================================
+
+export type MavenInsituKeyParameterSpecies = 'O' | 'CO' | 'CO2';
+
+export type MavenInsituKeyParameterEvidenceStatus =
+  | 'verified_detection'
+  | 'upper_limit'
+  | 'preliminary'
+  | 'not_available'
+  | 'non_positive'
+  | 'quality_unverified';
+
+export interface MavenInsituKeyParameterSpeciesValue {
+  readonly species: MavenInsituKeyParameterSpecies;
+  /** NGIMS neutral abundance in particles cm^-3, as reported by PDS. */
+  readonly numberDensityPerCm3: number | null;
+  /** PDS NGIMS precision is a percent 1-sigma relative error, not a fraction. */
+  readonly precisionPercent1Sigma: number | null;
+  readonly qualityFlag: 'D' | 'P' | null;
+  readonly reportedSigmaPerCm3: number | null;
+  readonly evidenceStatus: MavenInsituKeyParameterEvidenceStatus;
+}
+
+export interface MavenInsituKeyParameterGeometry {
+  readonly longitudeDeg: number | null;
+  readonly latitudeDeg: number | null;
+  readonly solarZenithAngleDeg: number | null;
+  readonly localSolarTimeHours: number | null;
+  readonly altitudeKm: number | null;
+  readonly orbitNumber: number | null;
+  readonly direction: 'inbound' | 'outbound' | null;
+  readonly solarLongitudeDeg: number | null;
+}
+
+export interface MavenInsituKeyParameterRow {
+  readonly sourceProductId: string;
+  readonly timeUtc: string;
+  readonly geometry: MavenInsituKeyParameterGeometry;
+  readonly neutralDensities: Readonly<Record<MavenInsituKeyParameterSpecies, MavenInsituKeyParameterSpeciesValue>>;
+  /** Key Parameters are upper-atmosphere orbital rows, not Table B2 lower-atmosphere initial states. */
+  readonly eligibleAsMarsPhotochemicalInitialState: false;
+  readonly diagnostics: readonly string[];
+}
+
+export type MavenInsituKeyParameterParseResult =
+  | { readonly status: 'parsed'; readonly row: MavenInsituKeyParameterRow }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+type MavenInsituFieldValue =
+  | { readonly status: 'value'; readonly value: number }
+  | { readonly status: 'missing' }
+  | { readonly status: 'invalid'; readonly raw: string };
+
+function readMavenInsituFixedField(
+  record: string,
+  startByteOneBased: number,
+  lengthBytes: number
+): string {
+  return record.slice(startByteOneBased - 1, startByteOneBased - 1 + lengthBytes).trim();
+}
+
+function parseMavenInsituNumericField(raw: string): MavenInsituFieldValue {
+  if (raw.trim() === '' || /^NaN$/i.test(raw.trim())) return { status: 'missing' };
+  const value = Number(raw.trim());
+  return Number.isFinite(value)
+    ? { status: 'value', value }
+    : { status: 'invalid', raw };
+}
+
+function parseMavenInsituDensity(
+  record: string,
+  species: MavenInsituKeyParameterSpecies,
+  positions: { readonly density: number; readonly precisionPercent: number; readonly quality: number }
+): MavenInsituKeyParameterSpeciesValue {
+  const densityRaw = readMavenInsituFixedField(record, positions.density, 16);
+  const precisionRaw = readMavenInsituFixedField(record, positions.precisionPercent, 16);
+  const qualityRaw = readMavenInsituFixedField(record, positions.quality, 16);
+  const density = parseMavenInsituNumericField(densityRaw);
+  const precision = parseMavenInsituNumericField(precisionRaw);
+  const qualityFlag = qualityRaw === 'D' || qualityRaw === 'P' ? qualityRaw : null;
+
+  if (density.status === 'invalid' || precision.status === 'invalid') {
+    throw new Error('invalid numeric NGIMS field for ' + species);
+  }
+  if (precision.status === 'value' && precision.value < -1) {
+    throw new Error('NGIMS precision for ' + species + ' must be -1 (upper limit) or non-negative percent');
+  }
+  if (density.status === 'value' && density.value < 0) {
+    throw new Error('NGIMS density for ' + species + ' cannot be negative');
+  }
+
+  const numberDensityPerCm3 = density.status === 'value' ? density.value : null;
+  const precisionPercent1Sigma = precision.status === 'value' ? precision.value : null;
+  let evidenceStatus: MavenInsituKeyParameterEvidenceStatus;
+  let reportedSigmaPerCm3: number | null = null;
+
+  if (numberDensityPerCm3 === null) {
+    evidenceStatus = 'not_available';
+  } else if (precisionPercent1Sigma === -1) {
+    evidenceStatus = numberDensityPerCm3 > 0 ? 'upper_limit' : 'non_positive';
+  } else if (numberDensityPerCm3 <= 0) {
+    evidenceStatus = 'non_positive';
+  } else if (precisionPercent1Sigma === null || qualityFlag === null) {
+    evidenceStatus = 'quality_unverified';
+  } else if (qualityFlag === 'P') {
+    evidenceStatus = 'preliminary';
+  } else {
+    evidenceStatus = 'verified_detection';
+    reportedSigmaPerCm3 = numberDensityPerCm3 * precisionPercent1Sigma / 100;
+  }
+
+  return {
+    species,
+    numberDensityPerCm3,
+    precisionPercent1Sigma,
+    qualityFlag,
+    reportedSigmaPerCm3,
+    evidenceStatus
+  };
+}
+
+/**
+ * Parse one fixed-width PDS Key Parameters data record using SIS Rev. 5.2
+ * one-based byte positions. This parser consumes a data row only, not the
+ * detached XML label or any leading file/header bytes. It preserves upper
+ * limits and preliminary rows as such; it never creates Scheduler inventory.
+ */
+export function parseMavenInsituKeyParameterRecord(
+  rawRecord: string,
+  sourceProductId: string
+): MavenInsituKeyParameterParseResult {
+  if (typeof rawRecord !== 'string') {
+    return { status: 'rejected', errors: ['record must be a string'] };
+  }
+  const record = rawRecord.endsWith('\r\n')
+    ? rawRecord.slice(0, -2)
+    : rawRecord.endsWith('\n') || rawRecord.endsWith('\r')
+      ? rawRecord.slice(0, -1)
+      : rawRecord;
+  if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
+    return { status: 'rejected', errors: ['sourceProductId must identify the exact PDS product'] };
+  }
+  if (record.length !== MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.recordLengthBytes) {
+    return {
+      status: 'rejected',
+      errors: ['record must contain exactly ' + MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.recordLengthBytes + ' ASCII bytes']
+    };
+  }
+  if ([...record].some((character) => character.charCodeAt(0) > 0x7f)) {
+    return { status: 'rejected', errors: ['PDS Key Parameter rows must be 7-bit ASCII'] };
+  }
+
+  const timeRaw = readMavenInsituFixedField(record, 1, 19);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(timeRaw)) {
+    return { status: 'rejected', errors: ['TIME (UTC/SCET) must use YYYY-MM-DDTHH:mm:ss'] };
+  }
+  const timestamp = Date.parse(timeRaw + 'Z');
+  if (!Number.isFinite(timestamp)) {
+    return { status: 'rejected', errors: ['TIME (UTC/SCET) is not a valid UTC timestamp'] };
+  }
+
+  const readGeometry = (field: number): MavenInsituFieldValue =>
+    parseMavenInsituNumericField(readMavenInsituFixedField(record, field, 16));
+  const geometryFields = {
+    longitudeDeg: readGeometry(3076),
+    latitudeDeg: readGeometry(3092),
+    solarZenithAngleDeg: readGeometry(3108),
+    localSolarTimeHours: readGeometry(3124),
+    altitudeKm: readGeometry(3140),
+    orbitNumber: readGeometry(3348),
+    solarLongitudeDeg: readGeometry(3380)
+  };
+  const diagnostics: string[] = [];
+  const invalidGeometry = Object.entries(geometryFields)
+    .filter(([, value]) => value.status === 'invalid')
+    .map(([field]) => field + ' is not a finite numeric field');
+  if (invalidGeometry.length > 0) {
+    return { status: 'rejected', errors: invalidGeometry };
+  }
+  const geometryValue = (field: keyof typeof geometryFields): number | null => {
+    const value = geometryFields[field];
+    return value.status === 'value' ? value.value : null;
+  };
+  const orbitNumberValue = geometryValue('orbitNumber');
+  const directionRaw = readMavenInsituFixedField(record, 3364, 16);
+  const direction = directionRaw === 'I'
+    ? 'inbound'
+    : directionRaw === 'O'
+      ? 'outbound'
+      : null;
+
+  const geometry: MavenInsituKeyParameterGeometry = {
+    longitudeDeg: geometryValue('longitudeDeg'),
+    latitudeDeg: geometryValue('latitudeDeg'),
+    solarZenithAngleDeg: geometryValue('solarZenithAngleDeg'),
+    localSolarTimeHours: geometryValue('localSolarTimeHours'),
+    altitudeKm: geometryValue('altitudeKm'),
+    orbitNumber: orbitNumberValue,
+    direction,
+    solarLongitudeDeg: geometryValue('solarLongitudeDeg')
+  };
+  if (Object.values(geometry).some((value) => value === null)) {
+    diagnostics.push('One or more SPICE geometry fields are absent; this row cannot be used for geometry-based co-registration.');
+  }
+  if (orbitNumberValue !== null && !Number.isInteger(orbitNumberValue)) {
+    return { status: 'rejected', errors: ['SPICE orbit number must be an integer'] };
+  }
+  if (geometry.altitudeKm !== null && geometry.altitudeKm <= 0) {
+    return { status: 'rejected', errors: ['SPICE spacecraft altitude must be positive km'] };
+  }
+  if (geometry.solarZenithAngleDeg !== null &&
+      (geometry.solarZenithAngleDeg < 0 || geometry.solarZenithAngleDeg > 180)) {
+    return { status: 'rejected', errors: ['SPICE solar zenith angle must be within [0,180] degrees'] };
+  }
+  if (geometry.localSolarTimeHours !== null &&
+      (geometry.localSolarTimeHours < 0 || geometry.localSolarTimeHours >= 24)) {
+    return { status: 'rejected', errors: ['SPICE local solar time must be within [0,24) hours'] };
+  }
+  if (geometry.latitudeDeg !== null &&
+      (geometry.latitudeDeg < -90 || geometry.latitudeDeg > 90)) {
+    return { status: 'rejected', errors: ['SPICE latitude must be within [-90,90] degrees'] };
+  }
+  if (geometry.solarLongitudeDeg !== null &&
+      (geometry.solarLongitudeDeg < 0 || geometry.solarLongitudeDeg >= 360)) {
+    return { status: 'rejected', errors: ['SPICE solar longitude must be within [0,360) degrees'] };
+  }
+  if (direction === null) diagnostics.push('SPICE inbound/outbound flag is absent or unrecognized.');
+
+  try {
+    const neutralDensities = {
+      O: parseMavenInsituDensity(record, 'O', { density: 2308, precisionPercent: 2324, quality: 2340 }),
+      CO: parseMavenInsituDensity(record, 'CO', { density: 2356, precisionPercent: 2372, quality: 2388 }),
+      CO2: parseMavenInsituDensity(record, 'CO2', { density: 2548, precisionPercent: 2564, quality: 2580 })
+    } as const;
+    return {
+      status: 'parsed',
+      row: {
+        sourceProductId,
+        timeUtc: new Date(timestamp).toISOString(),
+        geometry,
+        neutralDensities,
+        eligibleAsMarsPhotochemicalInitialState: false,
+        diagnostics
+      }
+    };
+  } catch (error) {
+    return {
+      status: 'rejected',
+      errors: [error instanceof Error ? error.message : 'unknown NGIMS Key Parameter row error']
+    };
+  }
+}
 
 export type MavenNgimsNeutralQuality = 'IV' | 'IU' | 'OV' | 'OU' | 'UR';
 export type MavenNgimsFocusMode = 'csn' | 'osnb' | 'osion' | 'osnt';
