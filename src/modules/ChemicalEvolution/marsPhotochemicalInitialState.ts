@@ -34,7 +34,8 @@ import {
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
   MAVEN_NGIMS_PDS_ARCHIVE,
-  MAVEN_INSITU_KP_PDS_ARCHIVE
+  MAVEN_INSITU_KP_PDS_ARCHIVE,
+  MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE
 } from '../Data/mavenUpperAtmosphereEvidence';
 import { MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE } from '../Data/marsPhotochemistryEvidence';
 import type { DataProvenance, ScientificValue } from '../Core/scientificValue';
@@ -198,7 +199,7 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount + '/16 network species (O, CO, CO2). The -1 precision sentinel means upper limits; the PDS Key Parameter SIS Rev. 5.2 says the NO density/precision/quality columns were removed by NGIMS and all values set to NaN. A product-label field definition is not a detection, and the actual .tab rows are not imported.',
       'The inspected MAVEN key-parameter schema has LPW electron temperature rather than neutral-gas temperature; the separate NGIMS scale-height/temperature selection index is ' +
         MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision +
-        ', but no selected TID or numerical temperature product is imported/co-registered. MAVEN/NGIMS is an upper-atmosphere orbital measurement and cannot supply the Taysum Table B2 nodes at 0.5 or 42.67 km.',
+        ', but no selected TID or numerical temperature product is imported/co-registered. Its Table A-10 temperature is computed from a species-specific log-density scale-height fit over the exobase-to-homopause interval, with exo_alt rather than a local sample altitude; it is not a pointwise neutral-temperature detection. MAVEN/NGIMS is an upper-atmosphere orbital measurement and cannot supply the Taysum Table B2 nodes at 0.5 or 42.67 km.',
       'Taysum Table B2 requires SZA=0 deg, Ls=251 deg and exact altitude nodes 0.5/42.67 km. Its compact table does not publish all TUV inputs (temperature, O3 and total columns, Sun–Mars distance, opacity/dust), so the matching context alone does not close radiation-forcing uncertainty.',
       'The co-registration policy must be justified per imported dataset. Tolerances cannot be widened to disguise a mismatch between instruments, seasons, altitudes or retrieval methods.'
     ],
@@ -250,6 +251,12 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         sourceId: MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.url,
         classification: 'index for a separate derived temperature/scale-height product',
         reasonNotEligibleAsInitialPointValue: 'This is selection metadata only; no TID-specific product or numerical neutral-temperature profile is imported, and temporal/altitude co-registration with a selected Key Parameters row has not been demonstrated.'
+      },
+      {
+        sourceName: MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.sourceName,
+        sourceId: MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.sourceId,
+        classification: 'L3 species-specific derived temperature from an altitude/log-density scale-height fit',
+        reasonNotEligibleAsInitialPointValue: 'The Table A-10 temperature is calculated from H=m g/(k T) over the exobase-to-homopause fit interval; exo_alt is not a local sampling altitude, and fit errors/quality flags do not supply a direct pointwise neutral-gas temperature measurement.'
       },
       {
         sourceName: MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE.sourceName ?? 'Taysum & Palmer (2020)',
