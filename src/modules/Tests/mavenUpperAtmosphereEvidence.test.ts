@@ -57,6 +57,12 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.neutralSpeciesOfInterest).toContain('NO');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.dataAvailableThroughUtc).toBe('2025-02-15');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveIndexFiles[0].fileName).toBe('MAVEN_NGIMS_l2_del1-35.csv');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.selectionIndexFiles[0].fileName).toBe('MAVEN_NGIMS_Single-Species_del1-43.csv');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.selectionIndexFiles[0].revision).toBe('del1-43');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.selectionIndexFiles[0].role).toMatch(/not an L2 measurement table/);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.selectionIndexContentRetrieved).toBe(false);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.orbitProductScope.maximumSpacecraftAltitudeKm).toBe(500);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.l3AltitudeResamplingAvailability.generalAvailabilityEndsUtc).toBe('2020-07');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.l2AbundanceUnit).toBe('part/cm3');
   });
 
