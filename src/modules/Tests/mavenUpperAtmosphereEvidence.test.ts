@@ -116,6 +116,12 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.orbitProductScope.maximumSpacecraftAltitudeKm).toBe(500);
     expect(MAVEN_NGIMS_PDS_ARCHIVE.l3AltitudeResamplingAvailability.generalAvailabilityEndsUtc).toBe('2020-07');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.l2AbundanceUnit).toBe('part/cm3');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.fileName)
+      .toBe('MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision).toBe('del1-42');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.role).toMatch(/not a temperature measurement file/);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.retrievalStatus)
+      .toBe('index_not_retrieved_and_no_TID_selected');
   });
 
   it('records the newer PDS v41.0 Key Parameters coverage without promoting schema fields to observations', () => {
