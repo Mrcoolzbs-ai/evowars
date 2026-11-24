@@ -232,6 +232,7 @@ def parse_and_summarize(csv_bytes: bytes) -> dict:
     malformed_width = 0
     duplicate_time_mismatch = 0
     positive_density_count = 0
+    naive_utc_timestamp_rows = 0
 
     for record_number, values in enumerate(reader, start=1):
         if not values:
@@ -268,7 +269,10 @@ def parse_and_summarize(csv_bytes: bytes) -> dict:
             try:
                 parsed_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 if parsed_time.tzinfo is None:
-                    fail(f"row {record_number} has a timestamp without timezone")
+                    # PDS Table A-9 names this field t_utc; its values are UTC
+                    # calendar time even when the ASCII token omits a trailing Z.
+                    naive_utc_timestamp_rows += 1
+                    parsed_time = parsed_time.replace(tzinfo=timezone.utc)
                 times.append(parsed_time.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
             except ValueError:
                 continue
@@ -298,6 +302,8 @@ def parse_and_summarize(csv_bytes: bytes) -> dict:
         "tidRowCounts": dict(sorted(tids.items())),
         "timeStartUtc": min(times) if times else None,
         "timeStopUtc": max(times) if times else None,
+        "timezoneInterpretation": "PDS t_utc column interpreted as UTC; explicit offsets normalized to UTC",
+        "naiveUtcTimestampRowsInterpretedAsUtc": naive_utc_timestamp_rows,
         "profileCandidates": candidates,
     }
 
