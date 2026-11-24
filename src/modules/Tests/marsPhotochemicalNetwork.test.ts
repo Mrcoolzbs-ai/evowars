@@ -192,7 +192,7 @@ describe('Mars single-compartment source-backed photochemical network', () => {
 
   it('rejects unsupported photolysis altitude, unknown IDs and invalid initial concentrations', () => {
     expect(() => buildMarsPhotochemicalNetworkProblem(input({
-      altitudeKm: 10 as 0.5
+      altitudeKm: 10 as unknown as 0.5
     }))).toThrowError(/exact Table B2 node/);
 
     expect(() => buildMarsPhotochemicalNetworkProblem(input({
