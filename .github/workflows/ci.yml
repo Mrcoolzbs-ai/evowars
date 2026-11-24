@@ -1,4 +1,5 @@
 name: CI
+# Keep the science-branch push check explicit and rerunnable from its latest HEAD.
 
 on:
   push:
