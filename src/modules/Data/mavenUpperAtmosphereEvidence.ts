@@ -1336,9 +1336,15 @@ export function parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
   }
   if (numbers.exo_alt <= 0) errors.push('exo_alt must be positive km');
   if (numbers.mass < 2 || numbers.mass > 150) errors.push('mass must be within NGIMS coverage [2,150] Da');
-  if (numbers.scale_height <= 0) errors.push('scale_height must be positive km');
+  // H0 explicitly means a bad or negative slope. Preserve its finite
+  // non-positive fit outputs for audit, but never treat that row as usable.
+  if (numbers.scale_height <= 0 && qualityFlag !== 'H0') {
+    errors.push('scale_height must be positive km unless quality is H0');
+  }
   if (numbers.scale_height_error < 0) errors.push('scale_height_error cannot be negative');
-  if (numbers.temperature <= 0) errors.push('temperature must be positive K');
+  if (numbers.temperature <= 0 && qualityFlag !== 'H0') {
+    errors.push('temperature must be positive K unless quality is H0');
+  }
   if (numbers.temperature_error < 0) errors.push('temperature_error cannot be negative K');
   if (numbers.fit_residual < 0 || numbers.fit_residual > 500) errors.push('fit_residual must be within the SIS range [0,500]');
   if (errors.length > 0) return { status: 'rejected', errors };
@@ -1358,7 +1364,7 @@ export function parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
   ];
   if (qualityFlag === 'HW') diagnostics.push('SIS quality HW denotes a wavy or structured fit with r2 < 75%.');
   if (qualityFlag === 'HA') diagnostics.push('SIS quality HA denotes a high-altitude fit with the spacecraft above 200 km.');
-  if (qualityFlag === 'H0') diagnostics.push('SIS quality H0 denotes a bad or negative fit and must not be used as a temperature estimate.');
+  if (qualityFlag === 'H0') diagnostics.push('SIS quality H0 denotes a bad or negative fit and must not be used as a temperature estimate; finite non-positive fit outputs are retained only for audit.');
 
   return {
     status: 'parsed',
