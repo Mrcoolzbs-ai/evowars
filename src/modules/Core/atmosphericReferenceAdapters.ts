@@ -30,10 +30,16 @@ import {
 } from './hydrostaticAtmosphere';
 import type {
   AdaptiveHydrostaticColumnResult,
+  GasMoleFraction,
   HydrostaticColumnInput,
   HydrostaticColumnResult,
   HydrostaticRefinementPolicy
 } from './hydrostaticAtmosphere';
+import {
+  MGS_MARS_8028D38A_METADATA,
+  MGS_MARS_8028D38A_PROVENANCE,
+  MGS_MARS_8028D38A_SAMPLES
+} from '../Data/mgsMarsOccultation1998';
 
 export const USSA_1976_REFERENCE_PROFILE_ID = 'ussa_1976_earth' as const;
 
@@ -194,4 +200,163 @@ export function computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn(
     createUssa1976HydrostaticColumnInput(),
     policy
   );
+}
+
+
+// ============================================
+// MGS MARS OCCULTATION → HYDROSTATIC COLUMN (Stage 4.2)
+// ============================================
+
+/**
+ * A caller-supplied atmosphere composition for the MGS occultation
+ * reference. Composition is intentionally mandatory: PDS documents that
+ * the retrieval used a Viking-era composition assumption, but this product
+ * file does not provide a complete per-row gas-mixture table.
+ */
+export interface MgsMarsOccultationComposition {
+  readonly gases: readonly GasMoleFraction[];
+  readonly provenance: DataProvenance;
+}
+
+/** Mars mass used by the spherical Core approximation. */
+export const MGS_MARS_REFERENCE_BODY_MASS_KG = 0.64169e24;
+
+export const MGS_MARS_REFERENCE_BODY_MASS_PROVENANCE: DataProvenance = {
+  sourceName: 'NASA NSSDC Mars Planetary Fact Sheet',
+  sourceId: 'Mars bulk mass',
+  reference: 'https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html',
+  method: 'published planetary mass, used as a spherical-body approximation',
+  limitations:
+    'The MGS retrieval used a spherical-harmonic gravity field (GGM50A02.SHA). Core hydrostatic integration below uses spherical gravity from the published bulk mass and the occultation local radius; the two gravity models are not identical.'
+};
+
+/**
+ * Construct a hydrostatic-column input from the actual 8028D38A MGS
+ * radio-occultation P/T samples.
+ *
+ * Important semantics:
+ * - The bottom boundary is the FIRST measured PDS row (~250 m above the
+ *   local radius-at-surface), not the PDS header's extrapolated surface
+ *   pressure. This avoids treating a retrieval extrapolation as a direct
+ *   observation.
+ * - Every published temperature sample is passed as a measured node.
+ *   Linear interpolation is the explicit Core solver policy.
+ * - The caller must supply a normalized, identified composition. No
+ *   composition or trace gas is invented from this profile.
+ * - The output is a reference-column reconstruction with spherical
+ *   gravity, not an exact reproduction of the MGS gravity retrieval or a
+ *   general Mars atmosphere.
+ */
+export function createMgsMars8028D38AHydrostaticColumnInput(
+  composition: MgsMarsOccultationComposition
+): HydrostaticColumnInput {
+  if (!composition || typeof composition !== 'object' || !Array.isArray(composition.gases)) {
+    throw new TypeError('MGS Mars adapter: явный состав атмосферы обязателен');
+  }
+  if (composition.gases.length === 0) {
+    throw new RangeError('MGS Mars adapter: состав атмосферы не может быть пустым');
+  }
+  const sourceIdentity = [
+    composition.provenance?.sourceName,
+    composition.provenance?.sourceId,
+    composition.provenance?.datasetId,
+    composition.provenance?.reference
+  ].some((value) => typeof value === 'string' && value.trim().length > 0);
+  if (!sourceIdentity) {
+    throw new RangeError('MGS Mars adapter: для состава требуется provenance (источник/набор/ссылка)');
+  }
+
+  const seenGasIds = new Set<string>();
+  let moleFractionSum = 0;
+  for (const gas of composition.gases) {
+    if (!gas || typeof gas.gasId !== 'string' || gas.gasId.trim() === '') {
+      throw new RangeError('MGS Mars adapter: каждая доля состава должна иметь непустой gasId');
+    }
+    if (seenGasIds.has(gas.gasId)) {
+      throw new RangeError('MGS Mars adapter: повторяющийся gasId «' + gas.gasId + '»');
+    }
+    seenGasIds.add(gas.gasId);
+    if (!Number.isFinite(gas.moleFraction) || gas.moleFraction <= 0) {
+      throw new RangeError(
+        'MGS Mars adapter: молярная доля «' + gas.gasId + '» должна быть конечной и положительной'
+      );
+    }
+    moleFractionSum += gas.moleFraction;
+  }
+  if (!Number.isFinite(moleFractionSum) || Math.abs(moleFractionSum - 1) > 1e-6) {
+    throw new RangeError(
+      'MGS Mars adapter: сумма молярных долей состава должна быть 1 (получено ' +
+        String(moleFractionSum) +
+        '); автоматическая нормировка запрещена'
+    );
+  }
+
+  const first = MGS_MARS_8028D38A_SAMPLES[0];
+  const last = MGS_MARS_8028D38A_SAMPLES[MGS_MARS_8028D38A_SAMPLES.length - 1];
+  if (first === undefined || last === undefined || MGS_MARS_8028D38A_SAMPLES.length !== MGS_MARS_8028D38A_METADATA.rowCount) {
+    throw new Error('MGS Mars adapter: PDS profile is empty or its row count does not match the product label');
+  }
+
+  const nodeProvenance: DataProvenance = {
+    ...MGS_MARS_8028D38A_PROVENANCE,
+    recordId: 'rows-1-' + String(MGS_MARS_8028D38A_METADATA.rowCount),
+    method: 'PDS retrieved temperature nodes; Core uses piecewise-linear interpolation between the published samples'
+  };
+
+  return {
+    body: {
+      bodyMassKg: MGS_MARS_REFERENCE_BODY_MASS_KG,
+      referenceRadiusM: MGS_MARS_8028D38A_METADATA.radiusAtSurfaceM,
+      provenance: {
+        ...MGS_MARS_REFERENCE_BODY_MASS_PROVENANCE,
+        note:
+          'Reference radius is the local radius-at-surface from PDS product ' +
+          MGS_MARS_8028D38A_METADATA.productId +
+          '; spherical gravity is a Core approximation, not GGM50A02.'
+      }
+    },
+    surface: {
+      surfacePressurePa: first.pressurePa,
+      pressureProvenance: {
+        ...MGS_MARS_8028D38A_PROVENANCE,
+        recordId: 'row-' + String(first.rowNumber),
+        method: 'first measured PDS pressure sample; not the PDS header surface-pressure extrapolation',
+        rawInput: {
+          productId: MGS_MARS_8028D38A_METADATA.productId,
+          rowNumber: first.rowNumber,
+          measuredRadiusM: first.radiusM,
+          localSurfaceRadiusM: MGS_MARS_8028D38A_METADATA.radiusAtSurfaceM,
+          measuredPressurePa: first.pressurePa,
+          measuredPressureSigmaPa: first.pressureSigmaPa,
+          pdsHeaderExtrapolatedSurfacePressurePa:
+            MGS_MARS_8028D38A_METADATA.extrapolatedSurfacePressurePa
+        }
+      },
+      bottomHeightM: first.heightAboveLocalSurfaceM
+    },
+    layers: [
+      {
+        layerId: MGS_MARS_8028D38A_METADATA.profileId,
+        bottomHeightM: first.heightAboveLocalSurfaceM,
+        topHeightM: last.heightAboveLocalSurfaceM,
+        temperature: {
+          kind: 'measuredNodes',
+          nodes: MGS_MARS_8028D38A_SAMPLES.map((sample) => ({
+            heightM: sample.heightAboveLocalSurfaceM,
+            temperatureK: sample.temperatureK
+          })),
+          interpolation: 'linear'
+        },
+        composition: {
+          gases: composition.gases.map((gas) => ({ ...gas })),
+          provenance: { ...composition.provenance }
+        },
+        provenance: nodeProvenance,
+        applicability:
+          'One MGS radio-occultation retrieval only; explicit caller-provided composition; 0.25–35.26 km above the local radius-at-surface; not a global Mars climatology.'
+      }
+    ],
+    requestedHeightsM: MGS_MARS_8028D38A_SAMPLES.map((sample) => sample.heightAboveLocalSurfaceM),
+    numerics: { gravitationMode: 'spherical-gravity' }
+  };
 }
