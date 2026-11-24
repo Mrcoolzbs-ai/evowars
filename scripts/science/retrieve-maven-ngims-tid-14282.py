@@ -44,7 +44,7 @@ def fail(message: str) -> "None":
     raise RuntimeError(message)
 
 
-def download(name: str, max_bytes: int) -> bytes:
+def download(name: str, max_bytes: int) -> tuple[bytes, dict]:
     url = BASE_URL + "/" + name
     request = urllib.request.Request(
         url,
@@ -59,7 +59,13 @@ def download(name: str, max_bytes: int) -> bytes:
         payload = response.read(max_bytes + 1)
         if len(payload) > max_bytes:
             fail(f"{name} exceeds safety limit ({max_bytes} bytes)")
-        return payload
+        metadata = {
+            "httpContentType": response.headers.get("Content-Type"),
+            "httpContentLength": response.headers.get("Content-Length"),
+            "httpContentEncoding": response.headers.get("Content-Encoding"),
+            "httpPayloadByteLength": len(payload),
+        }
+        return payload, metadata
 
 
 def one_direct_child(scope: ET.Element, name: str, *, optional: bool = False) -> str | None:
@@ -78,7 +84,7 @@ def one_direct_child(scope: ET.Element, name: str, *, optional: bool = False) ->
     return value or None
 
 
-def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> dict:
+def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> tuple[dict, bytes]:
     try:
         root = ET.fromstring(xml_bytes)
     except ET.ParseError as error:
@@ -113,31 +119,64 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> dict:
         file_size = int(file_size_text or "")
     except ValueError:
         fail("PDS4 file_size is not an integer")
-    if file_size <= 0 or file_size != len(csv_bytes):
-        fail(f"PDS4 file_size={file_size} does not match downloaded bytes={len(csv_bytes)}")
+    if file_size <= 0:
+        fail("PDS4 file_size must be positive")
 
     md5_value = one_direct_child(file_node, "md5_checksum", optional=True)
+    canonical_bytes = csv_bytes
+    transport_normalization = "none"
     if md5_value is not None:
         if not re.fullmatch(r"[0-9a-fA-F]{32}", md5_value):
             fail("PDS4 md5_checksum is not 32 hexadecimal characters")
-        computed_md5 = hashlib.md5(csv_bytes).hexdigest()
-        if computed_md5 != md5_value.lower():
-            fail("downloaded CSV MD5 does not match detached PDS4 md5_checksum")
-        md5_status = "verified_against_detached_label"
+        declared_md5 = md5_value.lower()
     else:
-        computed_md5 = None
-        md5_status = "not_present_in_detached_label"
+        declared_md5 = None
 
-    return {
+    direct_size_matches = len(csv_bytes) == file_size
+    direct_md5_matches = (
+        declared_md5 is None or hashlib.md5(csv_bytes).hexdigest() == declared_md5
+    )
+    if not (direct_size_matches and direct_md5_matches):
+        # Some HTTP layers canonicalize ASCII text newlines from CRLF to LF.
+        # Reconstruct the archive bytes only when the detached label's MD5
+        # independently confirms the exact reconstructed byte sequence.
+        if declared_md5 is None:
+            fail(
+                f"PDS4 file_size={file_size} does not match downloaded bytes="
+                f"{len(csv_bytes)} and no MD5 is available to verify reconstruction"
+            )
+        can_restore_crlf = b"\\r\\n" not in csv_bytes and b"\\n" in csv_bytes
+        restored = csv_bytes.replace(b"\\n", b"\\r\\n") if can_restore_crlf else csv_bytes
+        restored_md5 = hashlib.md5(restored).hexdigest()
+        if len(restored) != file_size or restored_md5 != declared_md5:
+            fail(
+                "PDS4 fixity mismatch: raw bytes do not match and strict LF-to-CRLF "
+                f"reconstruction failed (raw={len(csv_bytes)} bytes, restored={len(restored)}, "
+                f"label={file_size}, MD5 raw={hashlib.md5(csv_bytes).hexdigest()}, "
+                f"restored={restored_md5}, label MD5={declared_md5})"
+            )
+        canonical_bytes = restored
+        transport_normalization = "lf_to_crlf_reconstructed_and_md5_verified"
+
+    computed_md5 = hashlib.md5(canonical_bytes).hexdigest() if declared_md5 else None
+    md5_status = (
+        "verified_against_detached_label"
+        if declared_md5
+        else "not_present_in_detached_label"
+    )
+    return ({
         "productId": logical_identifier,
         "csvFileName": file_name,
         "csvByteLength": file_size,
+        "downloadedHttpByteLength": len(csv_bytes),
+        "transportNormalization": transport_normalization,
         "md5Checksum": computed_md5,
         "md5ChecksumStatus": md5_status,
-        "sha256": hashlib.sha256(csv_bytes).hexdigest(),
+        "sha256": hashlib.sha256(canonical_bytes).hexdigest(),
+        "downloadedResponseSha256": hashlib.sha256(csv_bytes).hexdigest(),
         "detachedLabelSha256": hashlib.sha256(xml_bytes).hexdigest(),
         "detachedLabelAuthenticity": "not_independently_authenticated",
-    }
+    }, canonical_bytes)
 
 
 def parse_and_summarize(csv_bytes: bytes) -> dict:
@@ -238,10 +277,12 @@ def parse_and_summarize(csv_bytes: bytes) -> dict:
 
 
 def main() -> int:
-    csv_bytes = download(CSV_NAME, max_bytes=512_000)
-    xml_bytes = download(XML_NAME, max_bytes=256_000)
-    provenance = validate_label(xml_bytes, csv_bytes)
+    csv_download, csv_http = download(CSV_NAME, max_bytes=512_000)
+    xml_bytes, xml_http = download(XML_NAME, max_bytes=256_000)
+    provenance, csv_bytes = validate_label(xml_bytes, csv_download)
     summary = parse_and_summarize(csv_bytes)
+    provenance["httpResponse"] = csv_http
+    provenance["xmlHttpResponse"] = xml_http
     manifest = {
         "archive": "NASA PDS Planetary Atmospheres Node / MAVEN NGIMS PDS4",
         "archiveDirectory": BASE_URL + "/",
