@@ -144,7 +144,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.fileName)
       .toBe('MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision).toBe('del1-42');
-    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.role).toMatch(/not a temperature measurement file/);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.role).toMatch(/not itself a temperature measurement file/);
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.retrievalStatus)
       .toBe('index_not_retrieved_and_no_TID_selected');
   });
@@ -265,7 +265,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0].species).toBe('CO2');
     expect(selectMavenNgimsL3ScaleHeightTemperatureRows(imported, {
-      tid: 45678, orbit: 31000, species: 'O', qualityFlag: 'HI'
+      tid: 45678, orbit: 31000, species: 'NO', qualityFlag: 'HI'
     }).status).toBe('rejected');
   });
 
