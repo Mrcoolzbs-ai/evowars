@@ -514,3 +514,20 @@ export {
   MGS_MARS_8028D38A_SAMPLES
 } from './mgsMarsOccultation1998';
 export type { MgsMarsOccultationSample } from './mgsMarsOccultation1998';
+
+
+// Stage 4.2: source-separated Mars atmospheric composition and radical constraints.
+export {
+  MARS_SAM_GALE_CRATER_PROVENANCE,
+  MARS_SAM_GALE_CRATER_ANNUAL_MEAN,
+  assessMarsSamCompositionCoverage,
+  MARS_HO2_ACS_UPPER_LIMITS,
+  MARS_HO2_OPENMARS_DUSTY_SEASON_ESTIMATES
+} from './marsAtmosphericChemistry';
+export type {
+  MarsAtmosphericSourceProvenance,
+  MarsSamAnnualMeanRecord,
+  MarsSamCompositionCoverage,
+  MarsHo2UpperLimitPoint,
+  MarsHo2ModelledRange
+} from './marsAtmosphericChemistry';
