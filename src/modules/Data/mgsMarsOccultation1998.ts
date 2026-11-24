@@ -79,7 +79,7 @@ export const MGS_MARS_8028D38A_PROVENANCE: DataProvenance = {
     'P/T are retrieved quantities rather than direct in-situ thermometer readings; retrieval uses an atmospheric-composition assumption based on Viking measurements and a gravity-field model GGM50A02.SHA. This is one spatial/temporal sample, not a global or climatological Mars profile. The Core adapter uses spherical gravity and must not be confused with the retrieval gravity model.',
   conditions:
     'Occultation time 1998-01-28T03:30:14.324Z; areocentric latitude 29.213° N; east longitude 56.774°; local true solar time 5.727 h; solar zenith angle 105.35°',
-  license: 'NASA Planetary Data System public science archive; retain PDS citation and product identifier',
+  license: 'No separate license statement was confirmed in the retrieved PDS product label; retain PDS citation and product identifier.',
   note:
     'The PDS header surface pressure 594.23 ± 7.25 Pa is extrapolated from the lowest retrieved sample. The hydrostatic adapter anchors at the first actual table row instead.'
 };
