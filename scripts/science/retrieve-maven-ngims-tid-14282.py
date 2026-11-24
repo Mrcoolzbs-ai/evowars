@@ -182,12 +182,6 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> tuple[dict, bytes]:
     transport_normalization = "none"
     canonical_bytes = csv_bytes
 
-    computed_md5 = hashlib.md5(canonical_bytes).hexdigest() if declared_md5 else None
-    md5_status = (
-        "verified_against_detached_label"
-        if declared_md5
-        else "not_present_in_detached_label"
-    )
     return ({
         "productId": logical_identifier,
         "csvFileName": file_name,
@@ -351,10 +345,11 @@ def main() -> int:
             "csvFixityStatus": provenance["csvFixityStatus"],
             "transportNormalization": "none; original archive member preserved byte-for-byte",
             "schedulerEligibleAsCompleteMarsInitialState": False,
-            "schedulerEligibleAsCompleteMarsInitialState": False,
             "notes": [
                 "Rows are archived L3 resampled/interpolated densities, not raw L2 point measurements.",
                 "The PDS4 detached label is structurally checked but not independently authenticated.",
+                "The PDS4 file_size is inconsistent with the archived CSV bytes; the payload is quarantined for forensic analysis.",
+                "No md5_checksum is present in the detached label; only SHA-256 of the archived bytes is recorded.",
                 "The file alone does not provide a complete T(z), P(z), bulk composition, or all radical inventories.",
             ],
         },
