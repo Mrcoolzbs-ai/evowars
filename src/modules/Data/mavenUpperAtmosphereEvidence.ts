@@ -36,6 +36,15 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
   archiveUrl: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
   dataSearchUrl: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims_data_search.html',
   dataAvailableThroughUtc: '2025-02-15',
+  archiveIndexFiles: [
+    {
+      product: 'L2 neutral single-species abundance index',
+      fileName: 'MAVEN_NGIMS_l2_del1-35.csv',
+      revision: 'del1-35',
+      lastModifiedUtc: '2023-11-15',
+      url: 'https://pdsatmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_l2_del1-35.csv'
+    }
+  ] as const,
   availableProducts: ['L1A raw', 'L1B calibrated', 'L2 single-species abundance', 'L3 altitude-resampled abundance', 'L3 scale heights and temperatures'] as const,
   neutralSpeciesOfInterest: ['O', 'NO', 'CO2', 'N2', 'CO', 'O2', 'Ar', 'N', 'He'] as const,
   l2NeutralColumns: [
