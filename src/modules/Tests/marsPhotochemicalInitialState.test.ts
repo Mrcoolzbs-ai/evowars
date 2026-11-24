@@ -238,6 +238,21 @@ describe('Stage 4.2: strict Mars photochemical observation snapshot', () => {
     expect(result.errors.join(' ')).toMatch(/temperatureObservation.temperature.provenance/);
   });
 
+  it('rejects a malformed or missing temperature ScientificValue without throwing', () => {
+    const result = createMarsPhotochemicalObservationSnapshot(input({
+      temperatureObservation: {
+        temperature: null as never,
+        evidenceKind: 'in_situ_detection',
+        quality: 'verified',
+        context: context(),
+        provenance: TEMPERATURE_PROVENANCE
+      }
+    }));
+    expect(result.status).toBe('rejected');
+    if (result.status !== 'rejected') throw new Error('Expected malformed temperature rejection');
+    expect(result.errors.join(' ')).toMatch(/temperatureObservation.temperature must be a ScientificValue record/);
+  });
+
   it('requires sourced temperature and a provenance-backed, explicit co-registration policy', () => {
     const missingTemperatureProvenance = input({
       temperatureObservation: {
