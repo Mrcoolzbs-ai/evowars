@@ -41,7 +41,16 @@ const INITIAL: MarsPhotochemicalInitialConcentrations = {
 const STATE_PROVENANCE: DataProvenance = {
   sourceName: 'synthetic test fixture — explicit Mars-compartment initial state',
   sourceId: 'evowars/tests/mars-scheduler/initial-state',
-  method: 'synthetic fixture only; not an observational profile'
+  method: 'synthetic fixture only; not an observational profile',
+  rawInput: {
+    eventId: 'synthetic-fixture-event-001',
+    timeUtc: '2025-01-01T00:00:00.000Z',
+    marsYear: 37,
+    solarLongitudeDeg: 251,
+    altitudeKm: 0.5,
+    sourceIds: 'synthetic-source-O;synthetic-source-HO2',
+    coRegistrationPolicySource: 'synthetic fixture tolerance policy'
+  }
 };
 
 const TEMPERATURE_PROVENANCE: DataProvenance = {
@@ -155,6 +164,16 @@ describe('Stage 4.2: Mars photochemical ODE through Core Scheduler', () => {
     expect(beforeReservoir.material?.basis).toBe('molar_concentration');
     expect(afterReservoir.material?.basis).toBe('molar_concentration');
     expect(afterReservoir.materialProvenance?.sourceId).toBe('evowars/core/mars-single-compartment-ode');
+    expect(afterReservoir.materialProvenance?.rawInput?.initialStateSnapshotSourceId)
+      .toBe('evowars/tests/mars-scheduler/initial-state');
+    expect(afterReservoir.materialProvenance?.rawInput?.initialStateEventId)
+      .toBe('synthetic-fixture-event-001');
+    expect(afterReservoir.materialProvenance?.rawInput?.initialStateSampleTimeUtc)
+      .toBe('2025-01-01T00:00:00.000Z');
+    expect(afterReservoir.materialProvenance?.rawInput?.initialStateSpeciesSourceIds)
+      .toBe('synthetic-source-O;synthetic-source-HO2');
+    expect(afterReservoir.materialProvenance?.rawInput?.initialCoRegistrationPolicySource)
+      .toBe('synthetic fixture tolerance policy');
 
     for (const species of MARS_PHOTOCHEMICAL_SPECIES_ORDER) {
       const afterMolM3 = afterReservoir.material!.entries[species]!;
