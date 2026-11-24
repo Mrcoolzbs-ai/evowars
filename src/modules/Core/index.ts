@@ -164,3 +164,6 @@ export * from './geochemicalKinetics';
 // аудит инвентарей (elementTotals/chargeTotal) и макро-атомарность.
 export * from './geochemicalCycleMacroStep';
 export * from './atmosphericReferenceAdapters';
+
+
+// Stage 4.2: explicit MGS Mars occultation → hydrostatic-column adapter.
