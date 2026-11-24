@@ -1307,14 +1307,34 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
     productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406',
     fileName: 'MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv',
     indexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.htm',
-    rowMidpointUtc: '2014-12-11T17:15:29.000Z'
+    rowMidpointUtc: '2014-12-11T17:15:29.000Z',
+    indexObservationGeometry: {
+      closestApproachUtc: '2014-12-11T17:15:29.000Z',
+      solarLongitudeDegSigned: -110.209,
+      solarLatitudeDeg: -23.431,
+      subSpacecraftLongitudeDeg: 161.514,
+      subSpacecraftLatitudeDeg: 73.674,
+      spacecraftAltitudeKm: 152.981,
+      phaseAngleDeg: 112.218,
+      orbitNumber: 391,
+      marsSolarLongitudeDeg: 250.49,
+      marsYear: 32,
+      sourceTable: 'MAVEN_NGIMS_Scale_Heights_del1-22 HTML index',
+      isIndexGeometryNotSpeciesMeasurement: true
+    }
   },
   l2AbundanceProduct: {
     productId: 'urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406',
     fileName: 'mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv',
     labelFileName: 'mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.xml',
     archiveDirectory: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l2/2014/12/',
-    directoryRowVerified: true
+    directoryRowVerified: true,
+    directoryReportedSize: '526 KB',
+    directoryLastModifiedUtc: '2018-08-15T14:27:00Z',
+    focusMode: 'csn',
+    neutralSpecies: ['Ar', 'CO2', 'He', 'N2'],
+    productPayloadImported: false,
+    labelPayloadImported: false
   },
   matching: {
     exactTidMatch: true,
