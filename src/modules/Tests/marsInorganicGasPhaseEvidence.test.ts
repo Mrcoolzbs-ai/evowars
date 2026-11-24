@@ -163,6 +163,19 @@ describe('Taysum & Palmer 2020 Table B1 inorganic bimolecular evidence', () => {
     })).toEqual({ status: 'rejected', reason: 'missing_concentration_provenance', speciesId: 'O3' });
   });
 
+  it('rejects malformed runtime objects rather than throwing', () => {
+    expect(evaluateMarsInorganicBimolecularReaction(null as unknown as Parameters<
+      typeof evaluateMarsInorganicBimolecularReaction
+    >[0])).toEqual({ status: 'rejected', reason: 'invalid_input' });
+
+    expect(evaluateMarsInorganicBimolecularReaction({
+      reactionId: 'taysum2020-b1-a3',
+      temperatureK: 298,
+      concentrationsPerCm3: null as unknown as Record<string, number>,
+      concentrationProvenance: allProvenance
+    })).toEqual({ status: 'rejected', reason: 'invalid_input' });
+  });
+
   it('rejects unsupported reaction IDs and non-positive temperatures', () => {
     expect(evaluateMarsInorganicBimolecularReaction({
       reactionId: 'unknown',
