@@ -296,6 +296,19 @@ describe('MAVEN upper-atmosphere evidence', () => {
       table: 'NGIMS SIS Rev. 1.13 Table A-9',
       productPayloadImported: false
     });
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityIndex).toMatchObject({
+      productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
+      timeStartUtc: '2014-12-11T15:45:25.000Z',
+      timeStopUtc: '2014-12-11T17:29:43.000Z',
+      indexObservationGeometry: {
+        orbitNumber: 391,
+        marsSolarLongitudeDeg: 250.49,
+        marsYear: 32,
+        spacecraftAltitudeKm: 152.981,
+        isIndexGeometryNotSpeciesMeasurement: true
+      }
+    });
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.matching.resampledDensityIndexVerified).toBe(true);
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.fileName)
       .toBe('mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv');
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.productId)
