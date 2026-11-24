@@ -16,8 +16,8 @@
 // The source PDS product does not provide the node-to-node covariance
 // matrix. This implementation therefore uses an explicitly documented
 // diagonal covariance approximation (independent one-sigma node errors).
-// It does not propagate uncertainty to integrated column inventories,
-// composition, gravity coefficients, or kinetic rates.
+// It does not propagate uncertainty to composition, gravity coefficients,
+// or kinetic rates.
 
 import type { DataProvenance } from './scientificValue';
 import type {
@@ -42,10 +42,22 @@ export interface HydrostaticPointUncertainty {
   readonly pressureRelativeSigma: number;
   readonly densitySigmaKgPerM3: number;
   readonly densityRelativeSigma: number;
+  /** First-order one-sigma uncertainty of integrated mass column, kg/m². */
+  readonly columnMassSigmaKgPerM2: number;
+  /** null at the zero-thickness lower boundary, where the relative error is undefined. */
+  readonly columnMassRelativeSigma: number | null;
+  /** First-order one-sigma uncertainty of integrated molar column, mol/m². */
+  readonly columnMolesSigmaPerM2: number;
+  /** null at the zero-thickness lower boundary, where the relative error is undefined. */
+  readonly columnMolesRelativeSigma: number | null;
   readonly pressureLowerOneSigmaPa: number;
   readonly pressureUpperOneSigmaPa: number;
   readonly densityLowerOneSigmaKgPerM3: number;
   readonly densityUpperOneSigmaKgPerM3: number;
+  readonly columnMassLowerOneSigmaKgPerM2: number;
+  readonly columnMassUpperOneSigmaKgPerM2: number;
+  readonly columnMolesLowerOneSigmaPerM2: number;
+  readonly columnMolesUpperOneSigmaPerM2: number;
 }
 
 export interface HydrostaticUncertaintyEstimate {
@@ -55,6 +67,8 @@ export interface HydrostaticUncertaintyEstimate {
   readonly covarianceAssumption: string;
   readonly conditionalOn: readonly string[];
   readonly limitations: readonly string[];
+  /** Maximum |quadrature column mass - Core inventory| / max(1, |Core inventory|). */
+  readonly columnIntegralConsistencyMaxRelativeDeviation: number;
   readonly points: readonly HydrostaticPointUncertainty[];
   readonly provenance: DataProvenance;
 }
@@ -228,62 +242,263 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
   }
   const orderedPoints = Array.from(uniquePoints.values()).sort((a, b) => a.heightM - b.heightM);
 
+  // Reconstruct the continuous hydrostatic solution on a union mesh made
+  // from every source-temperature node and every solver output height.
+  // This gives a quadrature path for d(Sigma)/d(T_j) without interpolating
+  // the integrated inventory or treating intermediate PDS pressures as
+  // independent boundary conditions.
+  interface PartialSensitivityIntegral {
+    readonly pressureExponent: number;
+    readonly lowerTemperatureSensitivity: number;
+    readonly upperTemperatureSensitivity: number;
+  }
+  interface IntegratedSensitivityState {
+    readonly pressureTemperatureSensitivities: readonly number[];
+    readonly columnMassTemperatureSensitivities: readonly number[];
+    readonly reconstructedColumnMassKgPerM2: number;
+    readonly reconstructedPressurePa: number;
+  }
+
+  const outputPointByHeight = new Map(orderedPoints.map((point) => [point.heightM, point]));
+  const integrationHeights = Array.from(new Set([
+    ...nodes.map((node) => node.heightM),
+    ...orderedPoints.map((point) => point.heightM)
+  ])).sort((a, b) => a - b);
+  if (
+    integrationHeights.length < 2 ||
+    Math.abs(integrationHeights[0] - firstNode.heightM) > 1e-6 ||
+    Math.abs(integrationHeights[integrationHeights.length - 1] - lastNode.heightM) > 1e-6
+  ) {
+    return invalid('не удалось построить общий интеграционный mesh по исходным узлам и точкам Core');
+  }
+
+  const integratedSensitivityByHeight = new Map<number, IntegratedSensitivityState>();
+  const pressureTemperatureSensitivities = new Array<number>(nodes.length).fill(0);
+  const columnMassTemperatureSensitivities = new Array<number>(nodes.length).fill(0);
+  let reconstructedColumnMassKgPerM2 = 0;
+  let logPressureAtCurrentHeight = Math.log(pressurePa);
+  let sourceSegmentIndex = 0;
+
+  const gravityAt = (heightM: number): number =>
+    completed.gravitationMode === 'constant-gravity'
+      ? constantGravityMs2
+      : (G * bodyMassKg) / ((bodyRadiusM + heightM) * (bodyRadiusM + heightM));
+
+  integratedSensitivityByHeight.set(integrationHeights[0], {
+    pressureTemperatureSensitivities: [...pressureTemperatureSensitivities],
+    columnMassTemperatureSensitivities: [...columnMassTemperatureSensitivities],
+    reconstructedColumnMassKgPerM2: 0,
+    reconstructedPressurePa: pressurePa
+  });
+
+  for (let intervalIndex = 1; intervalIndex < integrationHeights.length; intervalIndex += 1) {
+    const intervalBottomM = integrationHeights[intervalIndex - 1];
+    const intervalTopM = integrationHeights[intervalIndex];
+    if (!(intervalTopM > intervalBottomM)) continue;
+
+    while (
+      sourceSegmentIndex < nodes.length - 2 &&
+      intervalBottomM >= nodes[sourceSegmentIndex + 1].heightM
+    ) {
+      sourceSegmentIndex += 1;
+    }
+    const lowerNode = nodes[sourceSegmentIndex];
+    const upperNode = nodes[sourceSegmentIndex + 1];
+    if (
+      intervalBottomM < lowerNode.heightM - 1e-6 ||
+      intervalTopM > upperNode.heightM + 1e-6
+    ) {
+      return invalid(
+        'интеграционный интервал [' + intervalBottomM + ', ' + intervalTopM +
+        '] не принадлежит одному исходному температурному сегменту'
+      );
+    }
+
+    const sourceSegmentWidthM = upperNode.heightM - lowerNode.heightM;
+    const integratePartial = (endHeightM: number): PartialSensitivityIntegral => {
+      const halfWidthM = (endHeightM - intervalBottomM) / 2;
+      const midpointM = (endHeightM + intervalBottomM) / 2;
+      let pressureExponent = 0;
+      let lowerTemperatureSensitivity = 0;
+      let upperTemperatureSensitivity = 0;
+
+      for (let q = 0; q < GAUSS_LEGENDRE_5_NODES.length; q += 1) {
+        const z = midpointM + halfWidthM * GAUSS_LEGENDRE_5_NODES[q];
+        const fraction = (z - lowerNode.heightM) / sourceSegmentWidthM;
+        const temperatureK =
+          lowerNode.temperatureK * (1 - fraction) + upperNode.temperatureK * fraction;
+        const gravityMs2 = gravityAt(z);
+        const weightedBase = halfWidthM * GAUSS_LEGENDRE_5_WEIGHTS[q] *
+          gravityMs2 * meanMolarMassKgPerMol /
+          (gasConstant * temperatureK);
+        const weightedTemperatureSensitivity = weightedBase / temperatureK;
+
+        pressureExponent += weightedBase;
+        lowerTemperatureSensitivity += weightedTemperatureSensitivity * (1 - fraction);
+        upperTemperatureSensitivity += weightedTemperatureSensitivity * fraction;
+      }
+
+      return {
+        pressureExponent,
+        lowerTemperatureSensitivity,
+        upperTemperatureSensitivity
+      };
+    };
+
+    const fullIntervalIntegral = integratePartial(intervalTopM);
+    const intervalMassSensitivity = new Array<number>(nodes.length).fill(0);
+    let intervalMassKgPerM2 = 0;
+    const outerHalfWidthM = (intervalTopM - intervalBottomM) / 2;
+    const outerMidpointM = (intervalTopM + intervalBottomM) / 2;
+
+    for (let q = 0; q < GAUSS_LEGENDRE_5_NODES.length; q += 1) {
+      const z = outerMidpointM + outerHalfWidthM * GAUSS_LEGENDRE_5_NODES[q];
+      const outerWeightM = outerHalfWidthM * GAUSS_LEGENDRE_5_WEIGHTS[q];
+      const fraction = (z - lowerNode.heightM) / sourceSegmentWidthM;
+      const temperatureK =
+        lowerNode.temperatureK * (1 - fraction) + upperNode.temperatureK * fraction;
+      const partial = integratePartial(z);
+      const logPressureAtQuadrature = logPressureAtCurrentHeight - partial.pressureExponent;
+      const pressureAtQuadraturePa = Math.exp(logPressureAtQuadrature);
+      const densityAtQuadratureKgPerM3 =
+        pressureAtQuadraturePa * meanMolarMassKgPerMol /
+        (gasConstant * temperatureK);
+
+      if (
+        !Number.isFinite(pressureAtQuadraturePa) ||
+        pressureAtQuadraturePa <= 0 ||
+        !Number.isFinite(densityAtQuadratureKgPerM3) ||
+        densityAtQuadratureKgPerM3 <= 0
+      ) {
+        return invalid('квадратура интегральной чувствительности дала неконечные P или rho');
+      }
+
+      intervalMassKgPerM2 += outerWeightM * densityAtQuadratureKgPerM3;
+      for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
+        const partialPressureSensitivity =
+          nodeIndex === sourceSegmentIndex
+            ? partial.lowerTemperatureSensitivity
+            : nodeIndex === sourceSegmentIndex + 1
+              ? partial.upperTemperatureSensitivity
+              : 0;
+        const pressureSensitivity =
+          pressureTemperatureSensitivities[nodeIndex] + partialPressureSensitivity;
+        const localTemperatureWeight =
+          nodeIndex === sourceSegmentIndex
+            ? 1 - fraction
+            : nodeIndex === sourceSegmentIndex + 1
+              ? fraction
+              : 0;
+        const logDensitySensitivity =
+          pressureSensitivity - localTemperatureWeight / temperatureK;
+        intervalMassSensitivity[nodeIndex] +=
+          outerWeightM * densityAtQuadratureKgPerM3 * logDensitySensitivity;
+      }
+    }
+
+    reconstructedColumnMassKgPerM2 += intervalMassKgPerM2;
+    logPressureAtCurrentHeight -= fullIntervalIntegral.pressureExponent;
+    pressureTemperatureSensitivities[sourceSegmentIndex] +=
+      fullIntervalIntegral.lowerTemperatureSensitivity;
+    pressureTemperatureSensitivities[sourceSegmentIndex + 1] +=
+      fullIntervalIntegral.upperTemperatureSensitivity;
+    for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
+      columnMassTemperatureSensitivities[nodeIndex] += intervalMassSensitivity[nodeIndex];
+    }
+
+    const outputPoint = outputPointByHeight.get(intervalTopM);
+    if (outputPoint !== undefined) {
+      const reconstructedPressurePa = Math.exp(logPressureAtCurrentHeight);
+      if (!Number.isFinite(reconstructedPressurePa) || reconstructedPressurePa <= 0) {
+        return invalid('восстановленное давление на высоте ' + intervalTopM + ' м некорректно');
+      }
+
+      const pressureRelativeMismatch =
+        Math.abs(reconstructedPressurePa - outputPoint.pressurePa) / outputPoint.pressurePa;
+      if (pressureRelativeMismatch > 5e-5) {
+        return invalid(
+          'квадратура гидростатического давления не согласуется с Core на высоте ' +
+          intervalTopM + ' м (относительное расхождение ' + pressureRelativeMismatch + ')'
+        );
+      }
+
+      const massAbsoluteMismatch = Math.abs(
+        reconstructedColumnMassKgPerM2 - outputPoint.columnMassKgPerM2
+      );
+      const massConsistencyScale = Math.max(1, Math.abs(outputPoint.columnMassKgPerM2));
+      if (massAbsoluteMismatch > Math.max(1e-6, massConsistencyScale * 5e-5)) {
+        return invalid(
+          'квадратура массового столба не согласуется с Core на высоте ' +
+          intervalTopM + ' м (абсолютное расхождение ' + massAbsoluteMismatch + ' кг/м²)'
+        );
+      }
+
+      integratedSensitivityByHeight.set(intervalTopM, {
+        pressureTemperatureSensitivities: [...pressureTemperatureSensitivities],
+        columnMassTemperatureSensitivities: [...columnMassTemperatureSensitivities],
+        reconstructedColumnMassKgPerM2,
+        reconstructedPressurePa
+      });
+    }
+  }
+
   const points: HydrostaticPointUncertainty[] = [];
+  let columnIntegralConsistencyMaxRelativeDeviation = 0;
   for (const point of orderedPoints) {
     const local = interpolateTemperatureSigma(nodes, uncertainty.temperatureNodeSigmaK, point.heightM);
     if (local === null) {
       return invalid('профиль результата содержит высоту вне measuredNodes: ' + point.heightM + ' м');
     }
-
-    // d ln(P(z)) / d T_j = integral[g*Mbar/(R*T^2) * phi_j(z)] dz.
-    // The piecewise-linear measuredNodes basis has only two nonzero
-    // hat functions inside any one interval.
-    const logPressureSensitivity = new Array<number>(nodes.length).fill(0);
-    for (let i = 0; i < nodes.length - 1; i += 1) {
-      const lower = nodes[i];
-      const upper = nodes[i + 1];
-      const segmentEndM = Math.min(upper.heightM, point.heightM);
-      if (segmentEndM <= lower.heightM) continue;
-
-      const segmentWidthM = upper.heightM - lower.heightM;
-      const halfWidthM = (segmentEndM - lower.heightM) / 2;
-      const midpointM = (segmentEndM + lower.heightM) / 2;
-      for (let q = 0; q < GAUSS_LEGENDRE_5_NODES.length; q += 1) {
-        const z = midpointM + halfWidthM * GAUSS_LEGENDRE_5_NODES[q];
-        const fraction = (z - lower.heightM) / segmentWidthM;
-        const temperatureK =
-          lower.temperatureK * (1 - fraction) + upper.temperatureK * fraction;
-        const gravityMs2 = completed.gravitationMode === 'constant-gravity'
-          ? constantGravityMs2
-          : (G * bodyMassKg) / ((bodyRadiusM + z) * (bodyRadiusM + z));
-        const integrand = halfWidthM * GAUSS_LEGENDRE_5_WEIGHTS[q] *
-          gravityMs2 * meanMolarMassKgPerMol /
-          (gasConstant * temperatureK * temperatureK);
-        logPressureSensitivity[i] += integrand * (1 - fraction);
-        logPressureSensitivity[i + 1] += integrand * fraction;
-      }
-      if (point.heightM <= upper.heightM) break;
+    const integrated = integratedSensitivityByHeight.get(point.heightM);
+    if (integrated === undefined) {
+      return invalid('нет интегрированной чувствительности для высоты ' + point.heightM + ' м');
     }
+
+    const massMismatch = Math.abs(
+      integrated.reconstructedColumnMassKgPerM2 - point.columnMassKgPerM2
+    );
+    columnIntegralConsistencyMaxRelativeDeviation = Math.max(
+      columnIntegralConsistencyMaxRelativeDeviation,
+      massMismatch / Math.max(1, Math.abs(point.columnMassKgPerM2))
+    );
 
     const boundaryLogPressureSensitivity = pressureSigmaPa / pressurePa;
     let pressureRelativeVariance =
       boundaryLogPressureSensitivity * boundaryLogPressureSensitivity;
     let densityRelativeVariance = pressureRelativeVariance;
+    let columnMassVariance =
+      (point.columnMassKgPerM2 / pressurePa * pressureSigmaPa) ** 2;
+
     for (let i = 0; i < nodes.length; i += 1) {
       const sigmaSquared = uncertainty.temperatureNodeSigmaK[i] ** 2;
-      const pressureSensitivity = logPressureSensitivity[i];
+      const pressureSensitivity = integrated.pressureTemperatureSensitivities[i];
       pressureRelativeVariance += pressureSensitivity * pressureSensitivity * sigmaSquared;
       const localWeight =
         i === local.lowerNode ? 1 - local.upperWeight :
         i === local.lowerNode + 1 ? local.upperWeight : 0;
       const densitySensitivity = pressureSensitivity - localWeight / local.temperatureK;
       densityRelativeVariance += densitySensitivity * densitySensitivity * sigmaSquared;
+      const columnMassSensitivity = integrated.columnMassTemperatureSensitivities[i];
+      columnMassVariance += columnMassSensitivity * columnMassSensitivity * sigmaSquared;
     }
 
     const pressureRelativeSigma = Math.sqrt(pressureRelativeVariance);
     const densityRelativeSigma = Math.sqrt(densityRelativeVariance);
+    const columnMassSigmaKgPerM2 = Math.sqrt(columnMassVariance);
     const pressureSigmaAtPointPa = point.pressurePa * pressureRelativeSigma;
     const densitySigmaAtPoint = point.densityKgPerM3 * densityRelativeSigma;
+    const columnMassRelativeSigma = point.columnMassKgPerM2 > 0
+      ? columnMassSigmaKgPerM2 / point.columnMassKgPerM2
+      : null;
+
+    // One fixed-composition layer is required above, so Mbar is constant
+    // and Nmol(z) = Sigma(z) / Mbar exactly. Its relative uncertainty is
+    // therefore identical; its absolute uncertainty is scaled by 1/Mbar.
+    const columnMolesSigmaPerM2 =
+      columnMassSigmaKgPerM2 / meanMolarMassKgPerMol;
+    const columnMolesRelativeSigma = point.columnMolesPerM2 > 0
+      ? columnMolesSigmaPerM2 / point.columnMolesPerM2
+      : null;
 
     points.push({
       heightM: point.heightM,
@@ -292,20 +507,36 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       pressureRelativeSigma,
       densitySigmaKgPerM3: densitySigmaAtPoint,
       densityRelativeSigma,
+      columnMassSigmaKgPerM2,
+      columnMassRelativeSigma,
+      columnMolesSigmaPerM2,
+      columnMolesRelativeSigma,
       pressureLowerOneSigmaPa: Math.max(0, point.pressurePa - pressureSigmaAtPointPa),
       pressureUpperOneSigmaPa: point.pressurePa + pressureSigmaAtPointPa,
       densityLowerOneSigmaKgPerM3: Math.max(0, point.densityKgPerM3 - densitySigmaAtPoint),
-      densityUpperOneSigmaKgPerM3: point.densityKgPerM3 + densitySigmaAtPoint
+      densityUpperOneSigmaKgPerM3: point.densityKgPerM3 + densitySigmaAtPoint,
+      columnMassLowerOneSigmaKgPerM2: Math.max(
+        0,
+        point.columnMassKgPerM2 - columnMassSigmaKgPerM2
+      ),
+      columnMassUpperOneSigmaKgPerM2:
+        point.columnMassKgPerM2 + columnMassSigmaKgPerM2,
+      columnMolesLowerOneSigmaPerM2: Math.max(
+        0,
+        point.columnMolesPerM2 - columnMolesSigmaPerM2
+      ),
+      columnMolesUpperOneSigmaPerM2:
+        point.columnMolesPerM2 + columnMolesSigmaPerM2
     });
   }
 
   const provenance: DataProvenance = {
     sourceName: 'First-order propagation of measured atmospheric profile uncertainties',
     method:
-      'Linearized hydrostatic sensitivities integrated with 5-point Gauss-Legendre quadrature over piecewise-linear measured temperature nodes; pressure and density use first-order standard-error propagation',
+      'First-order hydrostatic sensitivities and integrated mass-column sensitivities evaluated with nested 5-point Gauss-Legendre quadrature over the piecewise-linear measured temperature profile; molar-column uncertainty follows from fixed mean molar mass',
     applicability: 'Single measuredNodes layer with fixed body mass, radius and composition; original or adaptively subdivided hydrostatic result',
     limitations:
-      'Diagonal covariance approximation: pressure-boundary and temperature-node one-sigma errors are treated as mutually independent because their covariance matrix is unavailable. Density includes the local temperature contribution and its covariance with pressure through the shared temperature nodes. Nonlinear higher-order effects, composition, gravity-field, radius, mass, column-integral and kinetic-rate uncertainties are not propagated.',
+      'Diagonal covariance approximation: pressure-boundary and temperature-node one-sigma errors are treated as mutually independent because their covariance matrix is unavailable. Density and integrated-column uncertainties include the direct local temperature contribution and its covariance with pressure through the shared temperature nodes. Nonlinear higher-order effects, composition, gravity-field, radius, mass and kinetic-rate uncertainties are not propagated.',
     note: 'Output intervals are linearized ±1σ estimates, not guaranteed physical bounds or a confidence interval with asserted coverage probability.'
   };
 
@@ -319,14 +550,17 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       'body mass and reference radius fixed',
       'atmospheric composition and mean molar mass fixed',
       'gravity model fixed to the selected hydrostatic solver mode',
-      'piecewise-linear interpolation between measured temperature nodes'
+      'piecewise-linear interpolation between measured temperature nodes',
+      'single layer with fixed mean molar mass for Nmol = Sigma / Mbar'
     ],
     limitations: [
       'No published cross-node or pressure-temperature covariance matrix is supplied to this propagation step.',
-      'Uncertainty of integrated mass and molar column inventories is not propagated.',
+      'Integrated mass and molar column inventories are propagated by differentiating rho(z) and integrating its first-order sensitivities over height.',
+      'Molar-column uncertainty assumes one layer with fixed mean molar mass; multilayer composition covariance is not supported.',
       'No uncertainty is assigned to body mass, local radius, gravity harmonics, composition or ideal-gas EOS applicability.',
       'First-order linearization is not a nonlinear ensemble and does not provide guaranteed bounds.'
     ],
+    columnIntegralConsistencyMaxRelativeDeviation,
     points,
     provenance
   };
