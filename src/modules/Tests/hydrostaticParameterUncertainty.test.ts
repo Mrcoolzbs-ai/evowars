@@ -106,8 +106,6 @@ describe('Hydrostatic physical-parameter uncertainty (Stage 4.2)', () => {
     const baseInput = makeInput();
     const base = solve(baseInput);
     const baseMetrics = readMetrics(baseInput);
-    const target = base.profile.find((entry) => Math.abs(entry.heightM - 15000) < 1e-6);
-    if (!target) throw new Error('Expected target point');
 
     const massDelta = BODY_MASS_KG * 1e-5;
     const radiusDelta = BODY_RADIUS_M * 1e-5;
