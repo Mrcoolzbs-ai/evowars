@@ -206,7 +206,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       '2016-04-07T06:00:00Z,12345,14016,osnb,165,18,120,53,75,16,O,10000000,0.15,IV',
       '2016-04-07T06:00:01Z,12345,14016,osnb,145,18,120,53,75,16,O,14000000,0.15,IV',
       '2016-04-07T06:00:02Z,12345,14016,osnb,155,18,120,53,75,30,NO,3000000,0.20,IV'
-    ].join('\\n');
+    ].join('\n');
     const imported = parseMavenNgimsL2NeutralCsvText(csv);
     expect(imported.status).toBe('parsed');
     if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
@@ -230,7 +230,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
       '2016-04-07T06:00:00Z,12345,14016,osnb,145,18,120,53,75,16,O,14000000,0.15,IV',
       '2016-04-07T06:00:01Z,12345,14016,osnb,165,18,120,53,75,16,O,10000000,0.15,IV'
-    ].join('\\n');
+    ].join('\n');
     const imported = parseMavenNgimsL2NeutralCsvText(csv);
     if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
 
