@@ -43,3 +43,7 @@ export * from './kineticTrajectory.test';
 
 // --- Пользовательский кинетический эксперимент №89/№106 в паспорте мира (Stage 4.5.5, интеграционный срез) ---
 export * from './kineticWorldAdapter.test';
+
+
+// --- MGS Mars radio-occultation profile → hydrostatic Core bridge (Stage 4.2) ---
+export * from './mgsMarsOccultation.test';
