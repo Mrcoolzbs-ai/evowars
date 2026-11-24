@@ -243,7 +243,7 @@ describe('Stage 4.2: Mars photochemical ODE through Core Scheduler', () => {
     );
     expect(invalidAltitude.status).toBe('rejected');
     expect(invalidAltitude.world).toBe(world);
-    expect(invalidAltitude.diagnostics.join(' ')).toMatch(/0.5 or 42.67/);
+    expect(invalidAltitude.diagnostics.join(' ')).toMatch(/0\.5 или 42\.67/);
   });
 
   it('rejects invalid duration before changing world time', () => {
