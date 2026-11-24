@@ -210,6 +210,104 @@ export function computeAdaptivelyRefinedUssa1976ReferenceHydrostaticColumn(
 }
 
 
+export const MGS_MARS_8028D38A_REFERENCE_PROFILE_ID = 'mgs_mars_1998_8028d38a' as const;
+
+/**
+ * Build a temperature-only atmospheric reference profile from the 74
+ * published MGS 8028D38A retrieval nodes.
+ *
+ * Adjacent measured nodes define 73 finite altitude intervals. Each
+ * interval's representative temperature is the linear interpolation at
+ * its midpoint (the arithmetic midpoint of its two endpoint temperatures).
+ * These are explicit estimates, not extra measured values. The 1-sigma
+ * endpoint errors and row IDs are retained in provenance, but are not
+ * combined into an interval uncertainty because the PDS product supplies
+ * no inter-node covariance matrix.
+ *
+ * This profile deliberately contains no composition, pressure field,
+ * radical abundance, or Scheduler initial inventory. Coverage is only the
+ * one occultation's 0.25–35.26 km retrieval interval.
+ */
+export function createMgsMars8028D38AAtmosphericTemperatureProfile(): AtmosphericTemperatureProfile {
+  if (
+    MGS_MARS_8028D38A_SAMPLES.length !== MGS_MARS_8028D38A_METADATA.rowCount ||
+    MGS_MARS_8028D38A_SAMPLES.length < 2
+  ) {
+    throw new Error('MGS Mars temperature profile: PDS sample count is inconsistent or too small');
+  }
+
+  const layers = [];
+  for (let index = 0; index < MGS_MARS_8028D38A_SAMPLES.length - 1; index += 1) {
+    const lower = MGS_MARS_8028D38A_SAMPLES[index]!;
+    const upper = MGS_MARS_8028D38A_SAMPLES[index + 1]!;
+    const altitudeSpanM = upper.heightAboveLocalSurfaceM - lower.heightAboveLocalSurfaceM;
+    if (
+      !Number.isFinite(altitudeSpanM) || altitudeSpanM <= 0 ||
+      !Number.isFinite(lower.temperatureK) || lower.temperatureK <= 0 ||
+      !Number.isFinite(upper.temperatureK) || upper.temperatureK <= 0
+    ) {
+      throw new Error('MGS Mars temperature profile: invalid or non-monotonic adjacent source rows ' +
+        lower.rowNumber + ' and ' + upper.rowNumber);
+    }
+
+    const midpointTemperatureK = (lower.temperatureK + upper.temperatureK) / 2;
+    const temperatureProvenance: DataProvenance = {
+      ...MGS_MARS_8028D38A_PROVENANCE,
+      recordId: 'interpolated-rows-' + lower.rowNumber + '-' + upper.rowNumber,
+      method: 'Piecewise-linear interpolation between adjacent measured PDS temperature nodes; representative value evaluated at the altitude-interval midpoint',
+      applicability: 'Only the midpoint of the interval between MGS PDS rows ' +
+        lower.rowNumber + ' and ' + upper.rowNumber + ' from occultation ' +
+        MGS_MARS_8028D38A_METADATA.occultationTimeUtc,
+      note: 'The source-node one-sigma errors are retained in rawInput but not propagated to this midpoint estimate: inter-node covariance is not published. This midpoint is an estimated layer representative, not a new measurement.',
+      rawInput: {
+        productId: MGS_MARS_8028D38A_METADATA.productId,
+        lowerRowNumber: lower.rowNumber,
+        upperRowNumber: upper.rowNumber,
+        lowerAltitudeM: lower.heightAboveLocalSurfaceM,
+        upperAltitudeM: upper.heightAboveLocalSurfaceM,
+        midpointAltitudeM: (lower.heightAboveLocalSurfaceM + upper.heightAboveLocalSurfaceM) / 2,
+        lowerTemperatureK: lower.temperatureK,
+        lowerTemperatureSigmaK: lower.temperatureSigmaK,
+        upperTemperatureK: upper.temperatureK,
+        upperTemperatureSigmaK: upper.temperatureSigmaK,
+        midpointTemperatureK
+      }
+    };
+
+    layers.push({
+      layerId: 'mgs-mars-8028d38a-layer-' + String(lower.rowNumber).padStart(2, '0'),
+      altitudeRangeM: {
+        min: lower.heightAboveLocalSurfaceM,
+        max: upper.heightAboveLocalSurfaceM
+      },
+      temperature: estimatedValue(
+        quantity(midpointTemperatureK, 'K'),
+        'Linear interpolation between adjacent MGS 8028D38A measured temperature nodes; value at the interval midpoint',
+        { provenance: temperatureProvenance }
+      ),
+      note: '73-interval partial reference profile derived from one MGS occultation; not a global Mars climatology'
+    });
+  }
+
+  return {
+    status: 'partial_profile',
+    layers,
+    provenance: {
+      ...MGS_MARS_8028D38A_PROVENANCE,
+      recordId: 'rows-1-' + String(MGS_MARS_8028D38A_METADATA.rowCount),
+      method: 'Temperature-only reference profile built from all 74 published MGS 8028D38A PDS retrieval nodes; adjacent samples define 73 piecewise-linear representative intervals'
+    },
+    limitations:
+      'One MGS radio occultation on 1998-01-28 at 29.213° N, 56.774° E, LTST 5.727 h, Ls=24.2°, SZA=105.35°. Coverage is only the measured interval from ' +
+      MGS_MARS_8028D38A_SAMPLES[0]!.heightAboveLocalSurfaceM + ' m to ' +
+      MGS_MARS_8028D38A_SAMPLES[MGS_MARS_8028D38A_SAMPLES.length - 1]!.heightAboveLocalSurfaceM +
+      ' m above the local radius-at-surface. Temperatures are retrieved quantities. Midpoint layer values are linearly interpolated estimates; node uncertainties are not reduced to independent layer uncertainties because covariance is unavailable. No composition, pressure, radical profile, surface boundary extrapolation, or global/seasonal representativeness is inferred.',
+    note:
+      'Explicit MGS 1998 temperature-only reference profile. Attach only when the Mars atmosphere preset and this reference option are selected; the generated body’s sampled gravity and the atmosphere preset remain independent and are not overwritten.'
+  };
+}
+
+
 // ============================================
 // MGS MARS OCCULTATION → HYDROSTATIC COLUMN (Stage 4.2)
 // ============================================
