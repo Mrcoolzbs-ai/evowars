@@ -18,7 +18,9 @@ import {
   buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
   parseMavenNgimsL2NeutralCsvText,
+  parseMavenNgimsL3ResampledDensityCsvText,
   selectMavenNgimsL2EventWindowProfile,
+  selectMavenNgimsL3ResampledDensityProfile,
   validateMavenNgimsL2NeutralRow,
   type MavenNgimsL2NeutralAbundanceRow
 } from '../Data/mavenUpperAtmosphereEvidence';
@@ -488,7 +490,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(imported.duplicatedUtcHeader).toBe(true);
     expect(imported.parsedRowCount).toBe(10);
     expect(imported.evidenceStatusCounts).toMatchObject({
-      verified_resampled_value: 8,
+      verified_resampled_value: 7,
       uncertain_resampled_value: 1,
       unreliable: 1,
       not_available: 1
