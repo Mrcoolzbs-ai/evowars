@@ -1541,10 +1541,25 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
     productPayloadImported: false,
     labelPayloadImported: false
   },
+  l3ResampledDensityProduct: {
+    productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
+    fileName: 'mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv',
+    labelFileName: 'mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml',
+    archiveDirectory: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l3/2014/12/',
+    directoryRowVerified: true,
+    directoryReportedSize: '23 KB',
+    directoryLastModifiedUtc: '2021-08-12T16:28:00Z',
+    productType: 'res-den',
+    table: 'NGIMS SIS Rev. 1.13 Table A-9',
+    densitySemantics: 'interpolated to equal-pressure altitude and averaged in constant log-density bins (0.2 log steps)',
+    productPayloadImported: false,
+    labelPayloadImported: false
+  },
   matching: {
     exactTidMatch: true,
     exactUtcWindowMatch: true,
     numericL2CsvImported: false,
+    numericL3ResampledDensityCsvImported: false,
     numericL3TemperatureCsvImported: false,
     temperatureIsDerivedScaleHeightFit: true,
     neutralDensitySpeciesFromClosedSource: ['Ar', 'CO2', 'He', 'N2'],
