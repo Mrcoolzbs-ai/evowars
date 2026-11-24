@@ -549,6 +549,23 @@ export type {
   MarsPhotolysisEvaluationResult
 } from './marsPhotochemistryEvidence';
 
+// Stage 4.2: source-backed gas-phase Mars photochemistry rates (Taysum & Palmer, 2020).
+export {
+  MARS_TAYSUM_2020_GAS_PHASE_PROVENANCE,
+  MARS_TAYSUM_2020_GAS_PHASE_REACTIONS,
+  MARS_GAS_PHASE_SPECIES_ELEMENTS,
+  evaluateMarsGasPhaseReaction,
+  validateMarsGasPhaseReactionBalance
+} from './marsGasPhaseKinetics';
+export type {
+  MarsGasSpeciesId,
+  MarsGasStoichiometricTerm,
+  MarsGasRateExpression,
+  MarsGasPhaseReaction,
+  MarsGasPhaseEvaluationInput,
+  MarsGasPhaseEvaluationResult
+} from './marsGasPhaseKinetics';
+
 
 // Stage 4.2: MAVEN IUVS published retrieval evidence and NGIMS L2 profile reader.
 export {
