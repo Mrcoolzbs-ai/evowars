@@ -1486,7 +1486,8 @@ export function parseMavenNgimsL3ResampledDensityCsvText(
     uncertain_resampled_value: 0,
     unreliable: 0,
     not_available: 0,
-    non_positive: 0
+    non_positive: 0,
+    unclassified_quality: 0
   };
   for (const entry of rows) {
     if (entry.validation.status === 'parsed') {
