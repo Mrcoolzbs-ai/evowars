@@ -76,7 +76,10 @@ import {
   type AtmosphereTemperatureLayer
 } from '../Core/thermalState';
 import { unknownValue } from '../Core/scientificValue';
-import { createUssa1976AtmosphericTemperatureProfile } from '../Core/atmosphericReferenceAdapters';
+import {
+  createUssa1976AtmosphericTemperatureProfile,
+  createMgsMars8028D38AAtmosphericTemperatureProfile
+} from '../Core/atmosphericReferenceAdapters';
 
 // ============================================
 // ГЛАВНАЯ ФУНКЦИЯ ГЕНЕРАЦИИ
@@ -172,17 +175,34 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
     surfaceGravityMs2: bodyPhysics.surfaceGravityMs2.value
   });
 
-  // Optional source-backed reference profile. It is NOT silently attached
-  // to every Earth-like world: caller must select USSA 1976 and the Earth
-  // atmosphere preset explicitly. It remains a reference profile, not a
-  // claim that the generated body's random gravity/composition equal Earth.
+  // Optional source-backed reference profile. The selected source must match
+  // the selected atmosphere preset and a planetary body. The profile never
+  // overwrites generated body physics, atmospheric composition or inventory.
   const requestedAtmosphericReferenceProfile = settings.atmosphericReferenceProfile;
   const atmosphericReferenceProfile =
     requestedAtmosphericReferenceProfile === 'ussa_1976_earth' &&
     settings.atmospherePreset === 'earth' &&
     celestialBody.bodyType === 'planet'
       ? createUssa1976AtmosphericTemperatureProfile()
-      : undefined;
+      : requestedAtmosphericReferenceProfile === 'mgs_mars_1998_8028d38a' &&
+        settings.atmospherePreset === 'mars' &&
+        celestialBody.bodyType === 'planet'
+        ? createMgsMars8028D38AAtmosphericTemperatureProfile()
+        : undefined;
+
+  const selectedReferenceLabel =
+    requestedAtmosphericReferenceProfile === 'ussa_1976_earth'
+      ? 'USSA 1976'
+      : requestedAtmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+        ? 'MGS 1998 PDS 8028D38A'
+        : null;
+  const selectedReferenceApplicability =
+    requestedAtmosphericReferenceProfile === 'ussa_1976_earth'
+      ? settings.atmospherePreset === 'earth'
+      : requestedAtmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+        ? settings.atmospherePreset === 'mars'
+        : false;
+
   const atmosphericReferenceProfileWarning: GenerationWarning | null =
     requestedAtmosphericReferenceProfile === undefined
       ? null
@@ -192,8 +212,12 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
             ruleId: 'atmospheric_reference_profile',
             category: 'atmosphere',
             severity: 'info',
-            message: 'USSA 1976 подключён как внешний reference-профиль; он не подменяет физические параметры сгенерированного тела и требует отдельной проверки совместимости перед использованием в химии.',
-            suggestions: ['Сверьте массу, радиус, гравитацию, давление и состав мира с USSA 1976 перед применением профиля как физического состояния'],
+            message: selectedReferenceLabel === 'MGS 1998 PDS 8028D38A'
+              ? 'MGS 1998 подключён как исторический температурный reference-профиль одной радиоколонки Марса (29.213° N, 56.774° E, LTST 5.727 h, Ls=24.2°; примерно 0.25–35.26 км). Он содержит 73 интерполированных интервала из 74 retrieved temperature nodes и не задаёт состав, pressure profile, радикалы или глобальную климатологию.'
+              : 'USSA 1976 подключён как внешний reference-профиль; он не подменяет физические параметры сгенерированного тела и требует отдельной проверки совместимости перед использованием в химии.',
+            suggestions: selectedReferenceLabel === 'MGS 1998 PDS 8028D38A'
+              ? ['Сверьте массу, радиус, гравитацию, давление, состав, дату и геометрию с MGS occultation; не используйте температурный reference как полный наблюдательный стартовый профиль']
+              : ['Сверьте массу, радиус, гравитацию, давление и состав мира с USSA 1976 перед применением профиля как физического состояния'],
             affectedFields: ['atmosphericReferenceProfile', 'atmospherePhysics', 'bodyPhysics']
           }
         : {
@@ -201,8 +225,12 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
             ruleId: 'atmospheric_reference_profile_not_applicable',
             category: 'atmosphere',
             severity: 'warning',
-            message: 'USSA 1976 reference-профиль не подключён: требуется явно выбранный atmospherePreset=earth и небесное тело типа planet.',
-            suggestions: ['Выберите preset earth для планеты либо снимите atmosphericReferenceProfile'],
+            message: selectedReferenceLabel + ' reference-профиль не подключён: выбранный источник должен совпадать с пресетом атмосферы (USSA→earth, MGS→mars), а небесное тело должно быть типа planet.',
+            suggestions: [
+              requestedAtmosphericReferenceProfile === 'ussa_1976_earth'
+                ? 'Выберите preset earth и небесное тело типа planet либо снимите atmosphericReferenceProfile'
+                : 'Выберите preset mars и небесное тело типа planet либо снимите atmosphericReferenceProfile'
+            ],
             affectedFields: ['atmosphericReferenceProfile', 'atmosphere']
           };
 
