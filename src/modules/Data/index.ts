@@ -554,3 +554,9 @@ export type {
   MavenNgimsImportPolicy,
   MavenNgimsProfileBuildResult
 } from './mavenUpperAtmosphereEvidence';
+
+export { parseMavenNgimsL2NeutralCsvText } from './mavenUpperAtmosphereEvidence';
+export type {
+  MavenNgimsL2CsvRowResult,
+  MavenNgimsL2CsvImportResult
+} from './mavenUpperAtmosphereEvidence';
