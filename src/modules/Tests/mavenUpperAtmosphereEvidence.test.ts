@@ -16,6 +16,7 @@ import {
   buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
   parseMavenNgimsL2NeutralCsvText,
+  selectMavenNgimsL2EventWindowProfile,
   validateMavenNgimsL2NeutralRow,
   type MavenNgimsL2NeutralAbundanceRow
 } from '../Data/mavenUpperAtmosphereEvidence';
@@ -76,6 +77,17 @@ function keyParameterRecord(overrides: Record<string, string> = {}): string {
     set(start, length, value);
   }
   return record;
+}
+
+function ngimsL2CsvText(rows: readonly MavenNgimsL2NeutralAbundanceRow[]): string {
+  const headers = [
+    't_utc', 'tid', 'orbit', 'focusmode', 'alt', 'lst', 'long',
+    'lat', 'sza', 'mass', 'species', 'abundance', 'precision', 'quality'
+  ] as const;
+  return [
+    headers.join(','),
+    ...rows.map((record) => headers.map((header) => String(record[header])).join(','))
+  ].join('\r\n');
 }
 
 function scaleHeightCsvRow(overrides: Record<string, string> = {}): Record<string, string> {
@@ -280,6 +292,103 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(linkMavenNgimsL2L3IndexEventWindow(l2, {
       ...l3, timeStartUtc: '2014-02-30T15:45:25Z'
     }).status).toBe('rejected');
+  });
+
+  it('selects one exact NGIMS L2 product/TID/orbit/focus-mode/species/track/quality/UTC profile', () => {
+    const csv = ngimsL2CsvText([
+      row({
+        t_utc: '2014-12-11T15:45:25Z', tid: 14282, orbit: 391,
+        focusmode: 'csn', species: 'CO2', alt: 150, quality: 'IV'
+      }),
+      row({
+        t_utc: '2014-12-11T16:10:00Z', tid: 14282, orbit: 391,
+        focusmode: 'csn', species: 'CO2', alt: 160, quality: 'IV'
+      }),
+      row({
+        t_utc: '2014-12-11T17:29:43Z', tid: 14282, orbit: 391,
+        focusmode: 'csn', species: 'CO2', alt: 170, quality: 'IV'
+      }),
+      row({
+        t_utc: '2014-12-11T16:20:00Z', tid: 14284, orbit: 392,
+        focusmode: 'csn', species: 'CO2', alt: 180, quality: 'IV'
+      }),
+      row({
+        t_utc: '2014-12-11T16:25:00Z', tid: 14282, orbit: 391,
+        focusmode: 'osnb', species: 'CO2', alt: 190, quality: 'IV'
+      }),
+      row({
+        t_utc: '2014-12-11T16:30:00Z', tid: 14282, orbit: 391,
+        focusmode: 'csn', species: 'O', alt: 200, mass: 16, quality: 'IV'
+      }),
+      row({
+        t_utc: '2014-12-11T17:30:00Z', tid: 14282, orbit: 391,
+        focusmode: 'csn', species: 'CO2', alt: 210, quality: 'IV'
+      })
+    ]);
+    const imported = parseMavenNgimsL2NeutralCsvText(csv);
+    expect(imported.status).toBe('parsed');
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+
+    const result = selectMavenNgimsL2EventWindowProfile(imported, {
+      sourceProductId: MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.productId,
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'CO2',
+      direction: 'inbound',
+      quality: 'verified',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') throw new Error(result.errors.join('; '));
+    expect(result.profile.measurements).toHaveLength(3);
+    expect(result.profile.measurements.map((measurement) => measurement.altitudeM))
+      .toEqual([150000, 160000, 170000]);
+    expect(result.profile.measurements.every((measurement) =>
+      measurement.tid === 14282 &&
+      measurement.orbit === 391 &&
+      measurement.focusMode === 'csn' &&
+      measurement.species === 'CO2'
+    )).toBe(true);
+    expect(result.excludedRows).toEqual({
+      rejectedByRowValidation: 0,
+      differentTid: 1,
+      differentOrbit: 0,
+      differentFocusMode: 1,
+      differentSpecies: 1,
+      differentDirection: 0,
+      differentQuality: 0,
+      outsideUtcWindow: 1
+    });
+    expect(result.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+  });
+
+  it('rejects an event profile selector with a mismatched source window or fewer than two selected rows', () => {
+    const imported = parseMavenNgimsL2NeutralCsvText(ngimsL2CsvText([
+      row({
+        t_utc: '2014-12-11T16:00:00Z', tid: 14282, orbit: 391,
+        focusmode: 'csn', species: 'CO2', alt: 150, quality: 'IV'
+      })
+    ]));
+    expect(imported.status).toBe('parsed');
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+    const result = selectMavenNgimsL2EventWindowProfile(imported, {
+      sourceProductId: 'mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv',
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'CO2',
+      direction: 'inbound',
+      quality: 'verified',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') {
+      expect(result.errors.join(' ')).toMatch(/fewer than two rows/);
+      expect(result.excludedRows?.differentTid).toBe(0);
+    }
   });
 
   it('parses the SIS 1.13 Table A-10 derived scale-height temperature without upgrading it to a local observation', () => {
