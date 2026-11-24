@@ -205,6 +205,20 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
     expect(last.pressureSigmaPa).toBeGreaterThan(0);
     expect(last.densitySigmaKgPerM3).toBeGreaterThan(0);
     expect(last.densityRelativeSigma).toBeGreaterThan(0);
+    expect(first.columnMassSigmaKgPerM2).toBe(0);
+    expect(first.columnMassRelativeSigma).toBeNull();
+    expect(first.columnMolesSigmaPerM2).toBe(0);
+    expect(first.columnMolesRelativeSigma).toBeNull();
+    expect(last.columnMassSigmaKgPerM2).toBeGreaterThan(0);
+    expect(last.columnMassRelativeSigma).toBeGreaterThan(0);
+    expect(last.columnMolesSigmaPerM2).toBeGreaterThan(0);
+    expect(last.columnMolesRelativeSigma).toBeCloseTo(last.columnMassRelativeSigma!, 10);
+    expect(last.columnMolesSigmaPerM2).toBeCloseTo(
+      last.columnMassSigmaKgPerM2 /
+        result.column.requestedHeightPoints[73].meanMolarMassKgPerMol,
+      10
+    );
+    expect(result.uncertainty.columnIntegralConsistencyMaxRelativeDeviation).toBeLessThan(5e-5);
 
     for (const point of result.uncertainty.points) {
       expect(Number.isFinite(point.pressureSigmaPa)).toBe(true);
@@ -275,6 +289,74 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
     expect(propagatedSigmaPa).toBeCloseTo(expectedSigmaPa, 4);
   });
 
+  it('matches an independent finite-difference sensitivity for integrated mass and molar columns', () => {
+    const input = createMgsMars8028D38AHydrostaticColumnInput(TEST_ONLY_COMPOSITION);
+    const layer = input.layers[0];
+    const model = layer.temperature;
+    if (model.kind !== 'measuredNodes') {
+      throw new Error('finite-difference inventory test requires measuredNodes');
+    }
+
+    const selectedNode = 35;
+    const perturbationK = 1e-3;
+    const sigmaK = 0.25;
+    const buildPerturbedInput = (deltaK: number): HydrostaticColumnInput => ({
+      ...input,
+      layers: [{
+        ...layer,
+        temperature: {
+          kind: 'measuredNodes',
+          interpolation: 'linear',
+          nodes: model.nodes.map((node, index) => ({
+            ...node,
+            temperatureK: node.temperatureK + (index === selectedNode ? deltaK : 0)
+          }))
+        }
+      }]
+    });
+
+    const base = computeHydrostaticColumn(input);
+    const plus = computeHydrostaticColumn(buildPerturbedInput(perturbationK));
+    const minus = computeHydrostaticColumn(buildPerturbedInput(-perturbationK));
+    expect(base.status).toBe('completed');
+    expect(plus.status).toBe('completed');
+    expect(minus.status).toBe('completed');
+    if (base.status !== 'completed' || plus.status !== 'completed' || minus.status !== 'completed') {
+      throw new Error('finite-difference inventory solve failed');
+    }
+
+    const sigmas = new Array<number>(model.nodes.length).fill(0);
+    sigmas[selectedNode] = sigmaK;
+    const uncertainty = propagateMeasuredNodeHydrostaticUncertainty(input, base, {
+      surfacePressureSigmaPa: 0,
+      temperatureNodeSigmaK: sigmas
+    });
+    expect(uncertainty.status).toBe('estimated');
+    if (uncertainty.status !== 'estimated') {
+      throw new Error(uncertainty.errors.join('; '));
+    }
+
+    const topIndex = base.requestedHeightPoints.length - 1;
+    const expectedMassSigma =
+      Math.abs(
+        (plus.requestedHeightPoints[topIndex].columnMassKgPerM2 -
+          minus.requestedHeightPoints[topIndex].columnMassKgPerM2) /
+          (2 * perturbationK)
+      ) * sigmaK;
+    const expectedMolesSigma =
+      Math.abs(
+        (plus.requestedHeightPoints[topIndex].columnMolesPerM2 -
+          minus.requestedHeightPoints[topIndex].columnMolesPerM2) /
+          (2 * perturbationK)
+      ) * sigmaK;
+    const propagatedTop = uncertainty.points[uncertainty.points.length - 1];
+
+    expect(expectedMassSigma).toBeGreaterThan(0);
+    expect(expectedMolesSigma).toBeGreaterThan(0);
+    expect(propagatedTop.columnMassSigmaKgPerM2).toBeCloseTo(expectedMassSigma, 3);
+    expect(propagatedTop.columnMolesSigmaPerM2).toBeCloseTo(expectedMolesSigma, 3);
+  });
+
   it('propagates original PDS node errors onto the adaptively refined hydrostatic mesh', () => {
     const result =
       computeAdaptivelyRefinedMgsMars8028D38AHydrostaticColumnWithUncertainty(
@@ -299,6 +381,12 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
     expect(result.uncertainty.points[result.uncertainty.points.length - 1].heightM).toBe(
       MGS_MARS_8028D38A_SAMPLES[73].heightAboveLocalSurfaceM
     );
+    expect(result.uncertainty.points.every((point) =>
+      Number.isFinite(point.columnMassSigmaKgPerM2) &&
+      Number.isFinite(point.columnMolesSigmaPerM2)
+    )).toBe(true);
+    expect(result.uncertainty.points[result.uncertainty.points.length - 1]
+      .columnMassSigmaKgPerM2).toBeGreaterThan(0);
     for (let i = 1; i < result.uncertainty.points.length; i += 1) {
       expect(result.uncertainty.points[i].heightM).toBeGreaterThan(
         result.uncertainty.points[i - 1].heightM
