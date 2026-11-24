@@ -2244,9 +2244,31 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
     productPayloadImported: false,
     labelPayloadImported: false
   },
+  l3ResampledDensityIndex: {
+    productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
+    indexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_Derived_Density_NGIMS_Del-1-18.html',
+    rowMidpointUtc: '2014-12-11T17:15:29.000Z',
+    timeStartUtc: '2014-12-11T15:45:25.000Z',
+    timeStopUtc: '2014-12-11T17:29:43.000Z',
+    indexObservationGeometry: {
+      closestApproachUtc: '2014-12-11T17:15:29.000Z',
+      solarLongitudeDegSigned: -110.209,
+      solarLatitudeDeg: -23.431,
+      subSpacecraftLongitudeDeg: 161.514,
+      subSpacecraftLatitudeDeg: 73.674,
+      spacecraftAltitudeKm: 152.981,
+      phaseAngleDeg: 112.218,
+      orbitNumber: 391,
+      marsSolarLongitudeDeg: 250.49,
+      marsYear: 32,
+      sourceTable: 'MAVEN_Derived_Density_NGIMS_Del-1-18 HTML index',
+      isIndexGeometryNotSpeciesMeasurement: true
+    }
+  },
   matching: {
     exactTidMatch: true,
     exactUtcWindowMatch: true,
+    resampledDensityIndexVerified: true,
     numericL2CsvImported: false,
     numericL3ResampledDensityCsvImported: false,
     numericL3TemperatureCsvImported: false,
@@ -2258,6 +2280,7 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
   provenance: {
     l2IndexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN%20NGIMS%20Single%20Species.html',
     l3IndexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.htm',
+    l3ResampledDensityIndexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_Derived_Density_NGIMS_Del-1-18.html',
     pds4L2Directory: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l2/2014/12/',
     sis: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/document/ngims_pds_sis_v03_r01.pdf'
   }
