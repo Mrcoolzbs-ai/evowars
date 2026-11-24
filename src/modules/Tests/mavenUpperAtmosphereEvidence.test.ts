@@ -94,7 +94,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       .toEqual(['O', 'CO', 'CO2']);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount).toBe(3);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.note).toMatch(/actual NO row values are unverified/);
-    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/current NO values.*unverified/i);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/actual NO values.*unverified/i);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.totalNetworkSpeciesCount).toBe(16);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralTemperature.lpwTemperatureIsNeutralGasTemperature).toBe(false);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.sampling.geometryFromSpice).toBe(true);
