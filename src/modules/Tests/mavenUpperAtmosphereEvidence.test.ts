@@ -74,7 +74,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     const unreliable = validateMavenNgimsL2NeutralRow(row({ quality: 'UR' }));
     expect(unreliable.status).toBe('rejected');
     if (unreliable.status !== 'rejected') throw new Error('UR must be rejected');
-    expect(unreliable.errors.join(' ')).toMatch(/not usable for science/);
+    expect(unreliable.errors.map((error) => error.message).join(' ')).toMatch(/not usable for science/);
   });
 
   it('allows uncertain data only under explicit policy and never upgrades it to verified', () => {
