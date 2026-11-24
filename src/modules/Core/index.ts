@@ -93,6 +93,7 @@ export * from './interiorThermalEvolution';
 export * from './heatBudgetClassification';
 // Stage 4.8.1: Ð²ÐµÑÑÐ¸ÐºÐ°Ð»ÑÐ½Ð°Ñ Ð³Ð¸Ð´ÑÐ¾ÑÑÐ°ÑÐ¸ÑÐµÑÐºÐ°Ñ ÑÑÑÑÐºÑÑÑÐ° Ð°ÑÐ¼Ð¾ÑÑÐµÑÑ (ÐºÐ¾Ð»Ð¾Ð½ÐºÐ° P(z), T(z), rho, g, H, ÑÑÐ¾Ð»Ð±Ñ).
 export * from './hydrostaticAtmosphere';
+export * from './hydrostaticUncertainty';
 // Stage 4.8.2.1: ÑÐ¿ÐµÐºÑÑÐ°Ð»ÑÐ½Ð°Ñ Ð½ÐµÐ¿ÑÐ¾Ð·ÑÐ°ÑÐ½Ð¾ÑÑÑ (line-by-line: S(T), Doppler, Lorentz, Voigt, sigma, alpha).
 export * from './spectralOpacity';
 // Stage 4.9a: фундамент геохимических потоков (контракт процесса mol/m2/yr,
