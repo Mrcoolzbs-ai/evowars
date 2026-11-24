@@ -1105,6 +1105,208 @@ export function parseMavenNgimsL2NeutralCsvText(
   };
 }
 
+
+export interface MavenNgimsL2EventWindowSelection {
+  /** Exact PDS product URN or product identifier supplied with the downloaded CSV. */
+  readonly sourceProductId: string;
+  readonly tid: number;
+  readonly orbit: number;
+  readonly focusMode: MavenNgimsFocusMode;
+  readonly species: string;
+  readonly direction: 'inbound' | 'outbound';
+  readonly quality: 'verified' | 'uncertain';
+  readonly timeStartUtc: string;
+  readonly timeStopUtc: string;
+}
+
+export interface MavenNgimsL2EventWindowExcludedRowCounts {
+  readonly rejectedByRowValidation: number;
+  readonly differentTid: number;
+  readonly differentOrbit: number;
+  readonly differentFocusMode: number;
+  readonly differentSpecies: number;
+  readonly differentDirection: number;
+  readonly differentQuality: number;
+  readonly outsideUtcWindow: number;
+}
+
+export interface MavenNgimsL2EventWindowProfile {
+  readonly species: string;
+  readonly orbit: number;
+  readonly tid: number;
+  readonly direction: 'inbound' | 'outbound';
+  readonly quality: 'verified' | 'uncertain';
+  readonly measurements: readonly MavenNgimsNeutralMeasurement[];
+  readonly limitations: readonly string[];
+}
+
+export type MavenNgimsL2EventWindowSelectionResult =
+  | {
+      readonly status: 'completed';
+      readonly selection: MavenNgimsL2EventWindowSelection;
+      readonly profile: MavenNgimsL2EventWindowProfile;
+      readonly excludedRows: MavenNgimsL2EventWindowExcludedRowCounts;
+      readonly eligibleAsMarsPhotochemicalInitialState: false;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly errors: readonly string[];
+      readonly excludedRows?: MavenNgimsL2EventWindowExcludedRowCounts;
+    };
+
+/**
+ * Select one homogeneous NGIMS L2 profile from one exact product/TID/orbit
+ * and a caller-declared UTC event window. All non-selected rows are counted
+ * by the first exclusion reason; no cross-track, cross-species or cross-window
+ * values are averaged. This is a source-backed upper-atmosphere profile only.
+ */
+export function selectMavenNgimsL2EventWindowProfile(
+  imported: MavenNgimsL2CsvImportResult,
+  selection: MavenNgimsL2EventWindowSelection
+): MavenNgimsL2EventWindowSelectionResult {
+  const errors: string[] = [];
+  if (!imported || imported.status !== 'parsed') {
+    return {
+      status: 'rejected',
+      errors: imported?.status === 'invalid_csv'
+        ? [...imported.errors]
+        : ['a successfully parsed NGIMS L2 CSV import is required']
+    };
+  }
+  if (!selection || typeof selection !== 'object') {
+    return { status: 'rejected', errors: ['an explicit NGIMS L2 event-window selection is required'] };
+  }
+  if (typeof selection.sourceProductId !== 'string' || selection.sourceProductId.trim() === '') {
+    errors.push('sourceProductId must identify the exact selected PDS product');
+  }
+  if (!Number.isInteger(selection.tid) || selection.tid <= 0) {
+    errors.push('TID must be a positive integer');
+  }
+  if (!Number.isInteger(selection.orbit) || selection.orbit <= 0) {
+    errors.push('orbit must be a positive integer');
+  }
+  if (!FOCUS_MODES.includes(selection.focusMode)) {
+    errors.push('focusMode must be an NGIMS-supported focus mode');
+  }
+  if (typeof selection.species !== 'string' || selection.species.trim() === '') {
+    errors.push('species must be explicit');
+  }
+  if (selection.direction !== 'inbound' && selection.direction !== 'outbound') {
+    errors.push('track direction must be explicitly inbound or outbound');
+  }
+  if (selection.quality !== 'verified' && selection.quality !== 'uncertain') {
+    errors.push('quality class must be explicitly verified or uncertain');
+  }
+  const startUtc = normalizeMavenIndexUtc(selection.timeStartUtc);
+  const stopUtc = normalizeMavenIndexUtc(selection.timeStopUtc);
+  if (startUtc === null || stopUtc === null) {
+    errors.push('selection window must use valid calendar UTC timestamps ending in Z');
+  } else if (Date.parse(startUtc) >= Date.parse(stopUtc)) {
+    errors.push('selection window stop must be later than start');
+  }
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  const excluded = {
+    rejectedByRowValidation: 0,
+    differentTid: 0,
+    differentOrbit: 0,
+    differentFocusMode: 0,
+    differentSpecies: 0,
+    differentDirection: 0,
+    differentQuality: 0,
+    outsideUtcWindow: 0
+  };
+  const selected: MavenNgimsNeutralMeasurement[] = [];
+  const selectedSpecies = selection.species.trim().toUpperCase();
+
+  for (const entry of imported.rows) {
+    if (entry.validation.status === 'rejected') {
+      excluded.rejectedByRowValidation += 1;
+      continue;
+    }
+    const measurement = entry.validation.measurement;
+    if (measurement.tid !== selection.tid) {
+      excluded.differentTid += 1;
+      continue;
+    }
+    if (measurement.orbit !== selection.orbit) {
+      excluded.differentOrbit += 1;
+      continue;
+    }
+    if (measurement.focusMode !== selection.focusMode) {
+      excluded.differentFocusMode += 1;
+      continue;
+    }
+    if (measurement.species.trim().toUpperCase() !== selectedSpecies) {
+      excluded.differentSpecies += 1;
+      continue;
+    }
+    if (measurement.direction !== selection.direction) {
+      excluded.differentDirection += 1;
+      continue;
+    }
+    if (measurement.quality !== selection.quality) {
+      excluded.differentQuality += 1;
+      continue;
+    }
+    const measurementTime = normalizeMavenIndexUtc(measurement.timeUtc);
+    if (
+      measurementTime === null ||
+      Date.parse(measurementTime) < Date.parse(startUtc!) ||
+      Date.parse(measurementTime) > Date.parse(stopUtc!)
+    ) {
+      excluded.outsideUtcWindow += 1;
+      continue;
+    }
+    selected.push(measurement);
+  }
+
+  if (selected.length < 2) {
+    return {
+      status: 'rejected',
+      errors: ['fewer than two rows match the exact product/TID/orbit/focus-mode/species/track/quality/UTC-window selection'],
+      excludedRows: excluded
+    };
+  }
+
+  const profile = buildMavenNgimsNeutralProfileFromMeasurements(selected);
+  if (profile.status !== 'completed' || !profile.measurements) {
+    return {
+      status: 'rejected',
+      errors: profile.status === 'rejected'
+        ? [...(profile.errors ?? ['selected NGIMS rows do not form a homogeneous vertical profile'])]
+        : ['selected NGIMS rows do not form a homogeneous vertical profile'],
+      excludedRows: excluded
+    };
+  }
+
+  return {
+    status: 'completed',
+    selection: {
+      ...selection,
+      sourceProductId: selection.sourceProductId.trim(),
+      species: selection.species.trim(),
+      timeStartUtc: startUtc!,
+      timeStopUtc: stopUtc!
+    },
+    profile: {
+      species: profile.species ?? selection.species,
+      orbit: profile.orbit ?? selection.orbit,
+      tid: profile.tid ?? selection.tid,
+      direction: profile.direction ?? selection.direction,
+      quality: profile.quality ?? selection.quality,
+      measurements: profile.measurements,
+      limitations: [
+        ...(profile.limitations ?? []),
+        'Selection is tied to one exact PDS product identifier and inclusive UTC event window.',
+        'The profile remains an upper-atmosphere single-species NGIMS observation; it is not a complete planetary initial state.'
+      ]
+    },
+    excludedRows: excluded,
+    eligibleAsMarsPhotochemicalInitialState: false
+  };
+}
+
 export const MAVEN_IUVS_NO_DAYGLOW_REFERENCE = {
   species: 'NO',
   speciesId: 'no',
