@@ -137,6 +137,7 @@ export interface MarsHo2UpperLimitPoint {
  */
 export const MARS_HO2_ACS_UPPER_LIMITS = {
   species: 'HO2',
+  speciesId: 'ho2',
   detectionStatus: 'no_confident_detection',
   observationCount: 200,
   marsYearRange: { start: 36, end: 37 },
@@ -167,6 +168,7 @@ export interface MarsHo2ModelledRange {
  */
 export const MARS_HO2_OPENMARS_DUSTY_SEASON_ESTIMATES = {
   species: 'HO2',
+  speciesId: 'ho2',
   evidenceKind: 'modelled_range',
   model: 'OpenMARS 3-D GCM/reanalysis with photochemistry',
   modelMarsYear: 35,
