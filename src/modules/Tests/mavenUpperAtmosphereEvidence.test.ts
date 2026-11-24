@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // Node crypto supplies the same WebCrypto implementation used by the hash test
 // and an independent MD5 oracle for the optional PDS4 fixity field.
+// @ts-expect-error Node built-ins are used only as test oracles in jsdom.
 import { createHash, webcrypto } from 'node:crypto';
 import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
