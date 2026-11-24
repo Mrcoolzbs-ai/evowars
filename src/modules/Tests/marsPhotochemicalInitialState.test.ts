@@ -223,6 +223,21 @@ describe('Stage 4.2: strict Mars photochemical observation snapshot', () => {
     expect(szaResult.errors.join(' ')).toMatch(/SZA does not match/);
   });
 
+  it('rejects a temperature ScientificValue without its own stored provenance', () => {
+    const result = createMarsPhotochemicalObservationSnapshot(input({
+      temperatureObservation: {
+        temperature: knownValue(quantity(220, 'K')),
+        evidenceKind: 'in_situ_detection',
+        quality: 'verified',
+        context: context(),
+        provenance: TEMPERATURE_PROVENANCE
+      }
+    }));
+    expect(result.status).toBe('rejected');
+    if (result.status !== 'rejected') throw new Error('Expected embedded temperature provenance rejection');
+    expect(result.errors.join(' ')).toMatch(/temperatureObservation.temperature.provenance/);
+  });
+
   it('requires sourced temperature and a provenance-backed, explicit co-registration policy', () => {
     const missingTemperatureProvenance = input({
       temperatureObservation: {
