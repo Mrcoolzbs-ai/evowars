@@ -153,6 +153,67 @@ describe('MAVEN upper-atmosphere evidence', () => {
     ]).status).toBe('rejected');
   });
 
+
+  it('parses a complete quoted CRLF NGIMS L2 CSV and retains per-row quality results', () => {
+    const csv = [
+      't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
+      '"2016-04-07T06:00:00Z",12345,14016,osnb,155,18,120,53,75,16,O,12000000,0.15,IV',
+      '"2016-04-07T06:00:01Z",12345,14016,osnb,156,18,120,53,75,16,O,11000000,0.20,IU'
+    ].join('\\r\\n');
+
+    const parsed = parseMavenNgimsL2NeutralCsvText('\\uFEFF' + csv);
+    expect(parsed.status).toBe('parsed');
+    if (parsed.status !== 'parsed') throw new Error(parsed.errors.join('; '));
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.acceptedRowCount).toBe(1);
+    expect(parsed.rejectedRowCount).toBe(1);
+    expect(parsed.rows[0].validation.status).toBe('verified');
+    expect(parsed.rows[1].validation.status).toBe('rejected');
+  });
+
+  it('rejects malformed CSV structure and missing required PDS columns', () => {
+    expect(parseMavenNgimsL2NeutralCsvText(
+      't_utc,tid,orbit\\n"unterminated,1,2'
+    )).toEqual({
+      status: 'invalid_csv',
+      errors: ['CSV must contain a header and at least one data record']
+    });
+
+    const missingColumn = [
+      't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,quality',
+      '2016-04-07T06:00:00Z,12345,14016,osnb,155,18,120,53,75,16,O,12000000,IV'
+    ].join('\\n');
+    const missing = parseMavenNgimsL2NeutralCsvText(missingColumn);
+    expect(missing.status).toBe('invalid_csv');
+    if (missing.status !== 'invalid_csv') throw new Error('missing columns must reject the CSV');
+    expect(missing.errors.join(' ')).toMatch(/precision/);
+
+    const unclosedQuote = [
+      't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
+      '"2016-04-07T06:00:00Z,12345,14016,osnb,155,18,120,53,75,16,O,12000000,0.15,IV'
+    ].join('\\n');
+    expect(parseMavenNgimsL2NeutralCsvText(unclosedQuote)).toEqual({
+      status: 'invalid_csv',
+      errors: ['unterminated quoted CSV field']
+    });
+  });
+
+  it('retains malformed row-width diagnostics instead of discarding records', () => {
+    const csv = [
+      't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
+      '2016-04-07T06:00:00Z,12345,14016,osnb,155,18,120,53,75,16,O,12000000,0.15,IV',
+      '2016-04-07T06:00:01Z,12345,14016,osnb,156,18,120,53,75,16,O,11000000,0.20'
+    ].join('\\n');
+    const parsed = parseMavenNgimsL2NeutralCsvText(csv);
+    expect(parsed.status).toBe('parsed');
+    if (parsed.status !== 'parsed') throw new Error(parsed.errors.join('; '));
+    expect(parsed.acceptedRowCount).toBe(1);
+    expect(parsed.rejectedRowCount).toBe(1);
+    expect(parsed.rows[1].validation.status).toBe('rejected');
+    if (parsed.rows[1].validation.status !== 'rejected') throw new Error('short row must be rejected');
+    expect(parsed.rows[1].validation.errors[0].message).toMatch(/expected 14/);
+  });
+
   it('validates the source precision range and the NGIMS mass coverage', () => {
     expect(validateMavenNgimsL2NeutralRow(row({ precision: 1.01 })).status).toBe('rejected');
     expect(validateMavenNgimsL2NeutralRow(row({ mass: 1 })).status).toBe('rejected');
