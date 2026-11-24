@@ -214,6 +214,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
         exactTidMatch: true,
         exactUtcWindowMatch: true,
         numericL2CsvImported: false,
+        numericL3ResampledDensityCsvImported: false,
         numericL3TemperatureCsvImported: false,
         schedulerInitialStateEligible: false
       }
@@ -233,6 +234,14 @@ describe('MAVEN upper-atmosphere evidence', () => {
       neutralSpecies: ['Ar', 'CO2', 'He', 'N2'],
       productPayloadImported: false,
       labelPayloadImported: false
+    });
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct).toMatchObject({
+      productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
+      fileName: 'mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv',
+      directoryReportedSize: '23 KB',
+      directoryRowVerified: true,
+      table: 'NGIMS SIS Rev. 1.13 Table A-9',
+      productPayloadImported: false
     });
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.fileName)
       .toBe('mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv');
