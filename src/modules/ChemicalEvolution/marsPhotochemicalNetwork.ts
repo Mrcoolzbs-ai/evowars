@@ -179,6 +179,10 @@ function photolysisSpeciesToGasSpecies(species: MarsPhotolysisSpeciesId): MarsGa
     case 'h2o': return 'H2O';
     case 'h2o2': return 'H2O2';
     case 'ho2': return 'HO2';
+    default: {
+      const exhaustive: never = species;
+      throw new Error('Unsupported photolysis species: ' + String(exhaustive));
+    }
   }
 }
 
