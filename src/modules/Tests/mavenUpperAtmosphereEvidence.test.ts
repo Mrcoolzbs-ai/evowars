@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error Node's built-in WebCrypto is used only to provide SubtleCrypto in jsdom tests.
 import { webcrypto } from 'node:crypto';
 import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
