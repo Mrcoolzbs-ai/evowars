@@ -202,7 +202,9 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         ' km, orbit ' + MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.indexObservationGeometry.orbitNumber +
         ', MY' + MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.indexObservationGeometry.marsYear +
         ' and Ls=' + MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.indexObservationGeometry.marsSolarLongitudeDeg +
-        ' deg. Their numerical CSV payloads are not imported, so this confirms archive identity and index geometry only, not measured concentrations or fit temperature.',
+        ' deg. The same TID also has a PDS4 L3 res-den file ' +
+        MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.fileName +
+        ' (Table A-9 altitude-resampled density); that payload is not imported and its per-species coverage is not yet known. These catalogue matches establish archive identity and index geometry, not measurements or fit temperature.',
       'The selected PDS4 L2 product is closed-source neutral abundance (Ar, CO2, He, N2), not a full open-source neutral suite; only CO2 overlaps the 16-species network. NGIMS also has a 2–150 Da mass range; atomic H (1 Da) is outside its coverage.',
       'The PDS MAVEN Insitu Key Parameters bundle v' + MAVEN_INSITU_KP_PDS_ARCHIVE.bundle.version +
         ' covers ' + MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.start + ' through ' +
@@ -268,8 +270,14 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         sourceName: 'MAVEN NGIMS selected TID 14282 cross-index candidate',
         sourceId: MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.productId +
           ' | ' + MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.productId,
-        classification: 'exact TID + identical UTC observation-window cross-link between PDS4 L2 csn-abund and L3 res-sht index',
-        reasonNotEligibleAsInitialPointValue: 'The cross-link proves both archive products refer to one event; the legacy index gives closest-approach altitude 152.981 km (orbit 391, MY32, Ls 250.49), not a lower-atmosphere sample. Numeric CSV rows are not imported or quality-validated. Closed-source csn abundance covers Ar, CO2, He and N2 only; L3 temperature is derived over a scale-height fit interval, not local.'
+        classification: 'exact TID + identical UTC observation-window cross-link between PDS4 L2 csn-abund and legacy L3 res-sht index',
+        reasonNotEligibleAsInitialPointValue: 'The cross-link proves archive entries refer to one event; the index gives closest-approach altitude 152.981 km (orbit 391, MY32, Ls 250.49), not a lower-atmosphere sample. Numeric CSV rows are not imported or quality-validated. Closed-source csn abundance covers Ar, CO2, He and N2 only; res-sht temperature is derived over a scale-height fit interval, not local.'
+      },
+      {
+        sourceName: 'MAVEN NGIMS TID 14282 L3 resampled-density product',
+        sourceId: MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId,
+        classification: 'PDS4 L3 res-den product, SIS Rev. 1.13 Table A-9, same orbit/TID as L2 csn-abund',
+        reasonNotEligibleAsInitialPointValue: 'The 23 KB CSV payload is present in the PDS4 directory but is not imported. Table A-9 density_bins are interpolated to equal-pressure altitude and averaged on constant log-density bins (0.2 steps), lack per-row precision and SZA/latitude/longitude, and are not raw L2 point measurements. Species coverage for this event is unknown until the actual CSV is parsed.'
       },
       {
         sourceName: MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.sourceName,
