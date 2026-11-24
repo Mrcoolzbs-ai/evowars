@@ -1137,3 +1137,22 @@
 > **Продолжение Stage 4.2 (25.11.2026): независимая запись L3 res-den event index для TID 14282.** В `MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE` добавлена отдельная запись из официального `MAVEN_Derived_Density_NGIMS_Del-1-18.html`: product URN `mvn_ngi_l3_res-den-14282_20141211t154406`, точные UTC start/stop, midpoint/closest approach, orbit 391, MY32, Ls=250.49° и index geometry (spacecraft altitude 152.981 km, phase angle 112.218°). Эти поля сохраняются как metadata строки индекса, не как измеренные species densities. L3 res-den index теперь непосредственно сопоставлен с PDS4 product URN в manifest и покрыт тестом на exact event metadata. Источник: https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_Derived_Density_NGIMS_Del-1-18.html. Кодовый коммит: `c3f417d9abcb9e02a1c31c7e810108bed5267549`; тест: `61d4f9528a01a76de1729c928a8e7f211eaa8531`.
 >
 > **Граница:** это ещё одна независимая проверка event identity/time/geometry, но не получение CSV payload. В manifest по-прежнему явно стоят `productPayloadImported=false` и `labelPayloadImported=false`; никакие species densities не извлекаются из индексной строки. Stage 4.2 остаётся **OPEN / NOT_READY**.
+
+
+> Stage 4.2 — PDS4 fixity gate (2026-11-24): NGIMS L3 res-den detached-label
+> importer расширен необязательной проверкой PDS4 `File/md5_checksum`.
+> Поле считается только внутри единственного `File`; checksum должен
+> быть ровно 32 hex-символа и совпадать с MD5 точных UTF-8 байтов CSV.
+> В provenance раздельно записываются наличие/проверка MD5 и статус
+> SHA-256. При отсутствии MD5 импорт сохраняет прежний честный статус
+> «SHA-256 вычислен, с внешней контрольной суммой не сравнивался»;
+> mismatch/некорректная сумма приводят к fail-closed rejection.
+> Структурный scope также ужесточён: Identification_Area и
+> File_Area_Observational — прямые дети корня, File — прямой ребёнок
+> File_Area_Observational, поля — потомки ожидаемого контейнера и не
+> могут быть подменены одноимёнными вложенными элементами. MD5 здесь
+> подтверждает fixity относительно предоставленной XML-метки, но не
+> аутентичность самой метки и не источник измерения. Добавлены тесты
+> для отсутствующего/совпадающего/несовпадающего/некорректного MD5.
+> Этап 4.2 остаётся OPEN / NOT_READY: данные CSV/XML пока не загружены
+> в репозиторий, а профиль не допускается как Scheduler initial state.
