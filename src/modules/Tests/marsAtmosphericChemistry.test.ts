@@ -3,6 +3,7 @@ import {
   MARS_HO2_ACS_UPPER_LIMITS,
   MARS_HO2_OPENMARS_DUSTY_SEASON_ESTIMATES,
   MARS_SAM_GALE_CRATER_ANNUAL_MEAN,
+  MARS_SAM_GALE_CRATER_PROVENANCE,
   assessMarsSamCompositionCoverage
 } from '../Data/marsAtmosphericChemistry';
 import { createMgsMars8028D38AHydrostaticColumnInput } from '../Core/atmosphericReferenceAdapters';
