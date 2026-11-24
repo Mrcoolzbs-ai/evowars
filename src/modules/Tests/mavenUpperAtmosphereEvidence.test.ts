@@ -728,14 +728,13 @@ describe('MAVEN upper-atmosphere evidence', () => {
     if (imported.status !== 'imported') throw new Error(imported.errors.join('; '));
     expect(imported).toMatchObject({ forensicOnly: false, warnings: [] });
     expect(imported.provenance).toMatchObject({
-      csvSizeConsistencyStatus: 'matches_detached_label_file_size',
-      labelFileLayoutDiagnosis: 'not_diagnosable'
-    });
       sourceProductId: productId,
       csvFileName: fileName,
       csvByteLength: byteLength,
       hashAlgorithm: 'SHA-256',
       sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
+      csvSizeConsistencyStatus: 'matches_detached_label_file_size',
+      labelFileLayoutDiagnosis: 'not_diagnosable',
       csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
       detachedLabelAuthenticity: 'not_independently_authenticated'
     });
