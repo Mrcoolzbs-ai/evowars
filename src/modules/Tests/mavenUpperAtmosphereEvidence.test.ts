@@ -12,15 +12,13 @@ import {
   parseMavenNgimsL3ScaleHeightTemperatureCsvRow,
   parseMavenNgimsL3ScaleHeightTemperatureCsvText,
   parseMavenNgimsL3ResampledDensityCsvText,
-  selectMavenNgimsL3ResampledDensityProfile,
   selectMavenNgimsL3ScaleHeightTemperatureRows,
+  selectMavenNgimsL3ResampledDensityProfile,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
   parseMavenNgimsL2NeutralCsvText,
-  parseMavenNgimsL3ResampledDensityCsvText,
   selectMavenNgimsL2EventWindowProfile,
-  selectMavenNgimsL3ResampledDensityProfile,
   validateMavenNgimsL2NeutralRow,
   type MavenNgimsL2NeutralAbundanceRow
 } from '../Data/mavenUpperAtmosphereEvidence';
