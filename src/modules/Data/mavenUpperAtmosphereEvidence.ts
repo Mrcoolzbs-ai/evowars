@@ -82,18 +82,20 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
     product: 'NGIMS scale heights and temperatures product-selection index',
     fileName: 'MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv',
     revision: 'del1-42',
-    url: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.csv',
-    linkedFrom: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
+    url: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.csv',
+    linkedFrom: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
     lastModifiedUtc: '2025-08-14T10:04:00Z',
     reportedFileSize: '3.1 MB',
     htmlCompanion: {
       fileName: 'MAVEN_NGIMS_Scale-Height&Temp_del1-42.htm',
       lastModifiedUtc: '2026-11-16T10:09:00Z',
-      reportedFileSizeBytes: 62,
-      fullTableAvailable: false
+      reportedFileSize: '9.0 MB',
+      fullTableAvailable: true,
+      searchableIndexRowsVerified: true
     },
-    role: 'Latest observed selection-index revision in the PDS logs directory; it identifies derived per-orbit products but is not itself a temperature measurement file.',
-    retrievalStatus: 'index_contents_not_retrieved_and_no_TID_selected'
+    mirrorNote: 'The pds-atmospheres.nmsu.edu mirror currently exposes a 62-byte .htm stub; the canonical atmos.nmsu.edu archive exposes the full ~9.0 MB HTML rendering and search-indexed data rows.',
+    role: 'Current NGIMS scale-height/temperature product-selection index; it identifies per-orbit derived products but is not itself a temperature measurement file.',
+    retrievalStatus: 'html_index_rows_searchable_csv_payload_not_imported'
   },
   dataProductArchiveFormat: 'ASCII tables with detached XML labels',
   orbitProductScope: {
@@ -1203,6 +1205,134 @@ export const MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE: MavenUpperAtmos
   applicability: 'MAVEN NGIMS upper-atmosphere per-orbit products; output temperature is a derived fit result for the measured species and fitted altitude interval',
   limitations: 'Temperature is not a local direct detection at exo_alt. Fit quality flags HI/HW/HA/H0 must be retained. The error is fit-residual uncertainty, not a complete physical/instrument covariance. The product cannot by itself initialise the lower-atmosphere Taysum Table B2 photochemical compartment.'
 };
+
+
+export interface MavenNgimsIndexEventWindowIdentity {
+  readonly sourceProductId: string;
+  readonly tid: number;
+  readonly timeStartUtc: string;
+  readonly timeStopUtc: string;
+}
+
+export type MavenNgimsIndexEventWindowLinkResult =
+  | {
+      readonly status: 'matched';
+      readonly tid: number;
+      readonly timeStartUtc: string;
+      readonly timeStopUtc: string;
+      readonly l2SourceProductId: string;
+      readonly l3SourceProductId: string;
+      readonly coRegistrationBasis: 'same-tid-and-exact-time-window';
+      readonly eligibleAsMarsPhotochemicalInitialState: false;
+    }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+function normalizeMavenIndexUtc(value: unknown): string | null {
+  if (
+    typeof value !== 'string' ||
+    !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$/.test(value.trim())
+  ) return null;
+  const raw = value.trim();
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return null;
+  const normalized = new Date(timestamp).toISOString();
+  const expectedSecond = raw.slice(0, 19);
+  return normalized.slice(0, 19) === expectedSecond ? normalized : null;
+}
+
+/**
+ * Link L2 abundance and L3 scale-height index rows only when their TID and
+ * UTC observation interval match exactly. This links archive identities, not
+ * numerical measurements; it cannot produce density or temperature values.
+ */
+export function linkMavenNgimsL2L3IndexEventWindow(
+  l2: MavenNgimsIndexEventWindowIdentity,
+  l3: MavenNgimsIndexEventWindowIdentity
+): MavenNgimsIndexEventWindowLinkResult {
+  const errors: string[] = [];
+  if (!l2 || typeof l2 !== 'object') errors.push('L2 index identity is required');
+  if (!l3 || typeof l3 !== 'object') errors.push('L3 index identity is required');
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  if (typeof l2.sourceProductId !== 'string' || l2.sourceProductId.trim() === '') {
+    errors.push('L2 sourceProductId must identify the indexed product');
+  }
+  if (typeof l3.sourceProductId !== 'string' || l3.sourceProductId.trim() === '') {
+    errors.push('L3 sourceProductId must identify the indexed product');
+  }
+  if (!Number.isInteger(l2.tid) || l2.tid <= 0 || !Number.isInteger(l3.tid) || l3.tid <= 0) {
+    errors.push('both NGIMS TIDs must be positive integers');
+  }
+  const l2Start = normalizeMavenIndexUtc(l2.timeStartUtc);
+  const l2Stop = normalizeMavenIndexUtc(l2.timeStopUtc);
+  const l3Start = normalizeMavenIndexUtc(l3.timeStartUtc);
+  const l3Stop = normalizeMavenIndexUtc(l3.timeStopUtc);
+  if (l2Start === null || l2Stop === null) errors.push('L2 observation window must contain valid UTC start/stop timestamps');
+  if (l3Start === null || l3Stop === null) errors.push('L3 observation window must contain valid UTC start/stop timestamps');
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  if (l2.tid !== l3.tid) {
+    return { status: 'rejected', errors: ['L2 and L3 TIDs differ; these rows cannot be linked as the same NGIMS event'] };
+  }
+  if (l2Start !== l3Start || l2Stop !== l3Stop) {
+    return { status: 'rejected', errors: ['L2 and L3 UTC observation windows do not match exactly'] };
+  }
+  if (Date.parse(l2Start!) >= Date.parse(l2Stop!)) {
+    return { status: 'rejected', errors: ['NGIMS observation window stop must be later than start'] };
+  }
+
+  return {
+    status: 'matched',
+    tid: l2.tid,
+    timeStartUtc: l2Start!,
+    timeStopUtc: l2Stop!,
+    l2SourceProductId: l2.sourceProductId,
+    l3SourceProductId: l3.sourceProductId,
+    coRegistrationBasis: 'same-tid-and-exact-time-window',
+    eligibleAsMarsPhotochemicalInitialState: false
+  };
+}
+
+/**
+ * Canonical index cross-match candidate selected from the official NGIMS
+ * del1-42 scale-height index and the PDS4 L2 archive directory. Only index
+ * identifiers/timing are frozen here; numerical CSV payloads are not present.
+ */
+export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
+  tid: 14282,
+  observationDateUtc: '2014-12-11',
+  timeStartUtc: '2014-12-11T15:45:25.000Z',
+  timeStopUtc: '2014-12-11T17:29:43.000Z',
+  scaleHeightIndex: {
+    productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406',
+    fileName: 'MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv',
+    indexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.htm',
+    rowMidpointUtc: '2014-12-11T17:15:29.000Z'
+  },
+  l2AbundanceProduct: {
+    productId: 'urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406',
+    fileName: 'mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv',
+    labelFileName: 'mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.xml',
+    archiveDirectory: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l2/2014/12/',
+    directoryRowVerified: true
+  },
+  matching: {
+    exactTidMatch: true,
+    exactUtcWindowMatch: true,
+    numericL2CsvImported: false,
+    numericL3TemperatureCsvImported: false,
+    temperatureIsDerivedScaleHeightFit: true,
+    neutralDensitySpeciesFromClosedSource: ['Ar', 'CO2', 'He', 'N2'],
+    schedulerInitialStateEligible: false,
+    note: 'This is an archive cross-index candidate, not an imported measurement row. It links one TID and exact observation interval; it does not prove per-species numeric values, fit-quality class, or local temperature.'
+  },
+  provenance: {
+    l2IndexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN%20NGIMS%20Single%20Species.html',
+    l3IndexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.htm',
+    pds4L2Directory: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/l2/2014/12/',
+    sis: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/document/ngims_pds_sis_v03_r01.pdf'
+  }
+} as const;
 
 export type MavenNgimsL3ScaleHeightQualityFlag = 'HI' | 'HW' | 'HA' | 'H0';
 export type MavenNgimsL3ScaleHeightFitQuality =
