@@ -4,6 +4,7 @@ import {
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
   MAVEN_NGIMS_PDS_ARCHIVE,
   buildMavenNgimsNeutralProfile,
+  buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
   parseMavenNgimsL2NeutralCsvText,
   validateMavenNgimsL2NeutralRow,
@@ -196,6 +197,53 @@ describe('MAVEN upper-atmosphere evidence', () => {
       status: 'invalid_csv',
       errors: ['unterminated quoted CSV field']
     });
+  });
+
+
+  it('selects one homogeneous O profile from a mixed full-file L2 CSV', () => {
+    const csv = [
+      't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
+      '2016-04-07T06:00:00Z,12345,14016,osnb,165,18,120,53,75,16,O,10000000,0.15,IV',
+      '2016-04-07T06:00:01Z,12345,14016,osnb,145,18,120,53,75,16,O,14000000,0.15,IV',
+      '2016-04-07T06:00:02Z,12345,14016,osnb,155,18,120,53,75,30,NO,3000000,0.20,IV'
+    ].join('\\n');
+    const imported = parseMavenNgimsL2NeutralCsvText(csv);
+    expect(imported.status).toBe('parsed');
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+
+    const profile = buildMavenNgimsNeutralProfileFromCsvImport(imported, {
+      species: 'O',
+      orbit: 14016,
+      tid: 12345,
+      direction: 'inbound',
+      quality: 'verified'
+    });
+    expect(profile.status).toBe('completed');
+    if (profile.status !== 'completed') throw new Error(profile.errors?.join('; '));
+    expect(profile.species).toBe('O');
+    expect(profile.measurements?.map((measurement) => measurement.altitudeM)).toEqual([145000, 165000]);
+    expect(profile.measurements?.every((measurement) => measurement.species === 'O')).toBe(true);
+  });
+
+  it('requires an exact homogeneous selection and rejects a selection without matching rows', () => {
+    const csv = [
+      't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
+      '2016-04-07T06:00:00Z,12345,14016,osnb,145,18,120,53,75,16,O,14000000,0.15,IV',
+      '2016-04-07T06:00:01Z,12345,14016,osnb,165,18,120,53,75,16,O,10000000,0.15,IV'
+    ].join('\\n');
+    const imported = parseMavenNgimsL2NeutralCsvText(csv);
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+
+    const missing = buildMavenNgimsNeutralProfileFromCsvImport(imported, {
+      species: 'NO',
+      orbit: 14016,
+      tid: 12345,
+      direction: 'inbound',
+      quality: 'verified'
+    });
+    expect(missing.status).toBe('rejected');
+    if (missing.status !== 'rejected') throw new Error('missing species selection must reject');
+    expect(missing.errors?.join(' ')).toMatch(/no accepted rows/);
   });
 
   it('retains malformed row-width diagnostics instead of discarding records', () => {
