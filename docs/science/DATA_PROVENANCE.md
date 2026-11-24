@@ -678,3 +678,28 @@ A re-check of the official PDS NGIMS landing page distinguishes the historical l
 The official PDS query page states that NGIMS products are ASCII tables with detached XML labels and that one or two science-product files span each MAVEN orbit over spacecraft altitudes up to 500 km. The archive page describes two retrieval paths: selecting product URNs from an index and submitting the revised list, or requesting limited products through the parameter/time-range selector. The archive coverage is stated through 2025-02-15. The PDS page further cautions that altitude-resampled abundance products generally cease after July 2020 following the periapsis raise, with occasional exceptions when periapsis falls below 190 km and suitable profiles exist. Thus, the next evidence-import attempt must select orbit-specific L2 single-species products rather than assume a continuous L3 altitude-resampled archive for later years.
 
 Sources: PDS NGIMS archive https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html; PDS NGIMS specific-data query https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims_data_search.html. No actual index rows, TID, orbit number or density samples have been imported in this revision. Tests assert the index identity, separation between index and measurement CSV, orbit scope, and L3 availability caveat.
+
+
+## 2.34 Mars photolysis reference values: Taysum & Palmer (2020), Table B2
+
+**Source:** Taysum, B. M. & Palmer, P. I. (2020), *Photochemistry of Methane and Ethane in the Martian Atmosphere*, Journal of Geophysical Research: Planets, DOI https://doi.org/10.1029/2020JE006491. The open article describes a one-dimensional LMD-UK-derived photochemistry model. Its inorganic scheme uses a Mars-adapted TUV radiation model and precomputed look-up values. The nine photolysis channels visibly tabulated in Appendix Table B2 are imported into `src/modules/Data/marsPhotochemistryEvidence.ts` with both published altitude nodes (0.50 km and 42.67 km), retaining exact zero entries.
+
+Table B2 lists these first-order photolysis frequencies J [s⁻¹]:
+
+| Channel | J at 0.50 km | J at 42.67 km |
+|---|---:|---:|
+| O2 + hν → O + O | 2.95×10⁻¹⁰ | 5.16×10⁻⁹ |
+| O2 + hν → O + O(1D) | 0 | 0 |
+| CO2 + hν → CO + O | 3.79×10⁻¹² | 1.02×10⁻¹⁰ |
+| CO2 + hν → CO + O(1D) | 0 | 0 |
+| O3 + hν → O2 + O(1D) | 3.12×10⁻³ | 4.09×10⁻³ |
+| O3 + hν → O2 + O | 5.22×10⁻⁴ | 6.86×10⁻⁴ |
+| H2O + hν → H + OH | 1.28×10⁻¹⁰ | 4.67×10⁻⁸ |
+| H2O2 + hν → OH + OH | 3.93×10⁻⁵ | 5.26×10⁻⁵ |
+| HO2 + hν → O + OH | 2.40×10⁻⁴ | 3.20×10⁻⁴ |
+
+The table note specifies SZA=0° and solar longitude Ls=251° (perihelion). In the paper's method section, the TUV look-up values are described as depending additionally on atmospheric temperature, O3 column, total atmospheric column, Sun–Mars distance and optical opacity/dust loading. The abbreviated table does not provide a machine-readable spectral radiation field or enough information to reconstruct these dependencies at arbitrary altitude/time. These values are **model look-up outputs**, not observations, not universal photolysis constants and not a complete photochemical network. The article's method section says there are ten inorganic photolysis reactions, whereas the accessible Table B2 shows nine rows; the data module preserves the nine table rows and explicitly does not invent a tenth channel.
+
+`evaluateMarsPhotolysisAtReferenceNode()` computes only the local volumetric event rate `J × n(parent)` at one of the exact two published altitude nodes, where the caller provides a non-negative reactant number density [particles cm⁻³] with identified provenance. It returns the stoichiometric net rates for the tabulated channel in [particles cm⁻³ s⁻¹], preserves separate provenance for J and n, and flags uncertainty as `not_quantified` because the paper does not report a 1σ for these tabulated J values. It rejects unknown channels, non-finite/negative density, missing density provenance and all off-grid altitudes. No altitude interpolation, extrapolation, inferred density, profile reconstruction or Scheduler mutation occurs; output explicitly carries `schedulerEligible=false`.
+
+This is a quantitative building block for later source/sink coupling, not closure of atmospheric photochemistry: the Taysum radiation scenario is not time/space-co-registered to the MGS 1998 occultation, SAM MY31–MY34 surface means, ACS HO2 MY36–MY37 upper limits or any not-yet-imported MAVEN orbit. These unlike data sets must not be combined into one initial atmosphere without a synchronized, sourced forcing/profile. Tests verify the exact table values, elemental balance of all nine tabulated channels, `J×n` dimensional arithmetic, exact-node-only behavior and fail-closed provenance/validation.
