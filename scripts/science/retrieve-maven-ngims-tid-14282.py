@@ -15,6 +15,7 @@ import io
 import json
 import re
 import sys
+import tarfile
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
@@ -25,6 +26,11 @@ BASE_URL = (
     "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/"
     "l3/2014/12"
 )
+ANNUAL_ARCHIVE_URL = (
+    "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/"
+    "ngims_derivedL3_2014.tar.gz"
+)
+ANNUAL_ARCHIVE_NAME = "ngims_derivedL3_2014.tar.gz"
 PRODUCT_ID = (
     "urn:nasa:pds:maven_ngims:l3:"
     "mvn_ngi_l3_res-den-14282_20141211t154406"
@@ -44,21 +50,21 @@ def fail(message: str) -> "None":
     raise RuntimeError(message)
 
 
-def download(name: str, max_bytes: int) -> tuple[bytes, dict]:
-    url = BASE_URL + "/" + name
+def download_url(url: str, display_name: str, max_bytes: int) -> tuple[bytes, dict]:
     request = urllib.request.Request(
         url,
         headers={
             "User-Agent": "EvoWars-Scientific-Archive-Importer/1.0",
-            "Accept": "text/plain,application/xml,*/*",
+            "Accept": "application/x-gzip,application/octet-stream,*/*",
+            "Accept-Encoding": "identity",
         },
     )
-    with urllib.request.urlopen(request, timeout=45) as response:
+    with urllib.request.urlopen(request, timeout=90) as response:
         if response.status != 200:
-            fail(f"HTTP {response.status} retrieving {name}")
+            fail(f"HTTP {response.status} retrieving {display_name}")
         payload = response.read(max_bytes + 1)
         if len(payload) > max_bytes:
-            fail(f"{name} exceeds safety limit ({max_bytes} bytes)")
+            fail(f"{display_name} exceeds safety limit ({max_bytes} bytes)")
         metadata = {
             "httpContentType": response.headers.get("Content-Type"),
             "httpContentLength": response.headers.get("Content-Length"),
@@ -66,6 +72,30 @@ def download(name: str, max_bytes: int) -> tuple[bytes, dict]:
             "httpPayloadByteLength": len(payload),
         }
         return payload, metadata
+
+
+def extract_unique_tar_member(archive_bytes: bytes, file_name: str, max_bytes: int) -> tuple[bytes, str]:
+    try:
+        archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")
+    except (tarfile.TarError, OSError) as error:
+        fail(f"2014 NGIMS annual L3 archive is not a valid gzip tar: {error}")
+    with archive:
+        matches = [
+            member for member in archive.getmembers()
+            if Path(member.name).name == file_name and member.isfile()
+        ]
+        if len(matches) != 1:
+            fail(f"annual archive must contain exactly one regular {file_name}; found {len(matches)}")
+        member = matches[0]
+        if member.size <= 0 or member.size > max_bytes:
+            fail(f"archive member {file_name} has disallowed size {member.size}")
+        stream = archive.extractfile(member)
+        if stream is None:
+            fail(f"unable to read archive member {member.name}")
+        payload = stream.read(max_bytes + 1)
+        if len(payload) != member.size or len(payload) > max_bytes:
+            fail(f"archive member {member.name} size mismatch or safety limit exceeded")
+        return payload, member.name
 
 
 def one_direct_child(scope: ET.Element, name: str, *, optional: bool = False) -> str | None:
@@ -290,15 +320,30 @@ def parse_and_summarize(csv_bytes: bytes) -> dict:
 
 
 def main() -> int:
-    csv_download, csv_http = download(CSV_NAME, max_bytes=512_000)
-    xml_bytes, xml_http = download(XML_NAME, max_bytes=256_000)
-    provenance, csv_bytes = validate_label(xml_bytes, csv_download)
+    archive_bytes, archive_http = download_url(
+        ANNUAL_ARCHIVE_URL, ANNUAL_ARCHIVE_NAME, max_bytes=20_000_000
+    )
+    csv_bytes, csv_member = extract_unique_tar_member(
+        archive_bytes, CSV_NAME, max_bytes=512_000
+    )
+    xml_bytes, xml_member = extract_unique_tar_member(
+        archive_bytes, XML_NAME, max_bytes=256_000
+    )
+    provenance, csv_bytes = validate_label(xml_bytes, csv_bytes)
     summary = parse_and_summarize(csv_bytes)
-    provenance["httpResponse"] = csv_http
-    provenance["xmlHttpResponse"] = xml_http
+    provenance["sourceArchive"] = {
+        "url": ANNUAL_ARCHIVE_URL,
+        "fileName": ANNUAL_ARCHIVE_NAME,
+        "byteLength": len(archive_bytes),
+        "sha256": hashlib.sha256(archive_bytes).hexdigest(),
+        "httpResponse": archive_http,
+        "csvTarMember": csv_member,
+        "xmlTarMember": xml_member,
+    }
     manifest = {
         "archive": "NASA PDS Planetary Atmospheres Node / MAVEN NGIMS PDS4",
         "archiveDirectory": BASE_URL + "/",
+        "annualArchiveUrl": ANNUAL_ARCHIVE_URL,
         "csvUrl": BASE_URL + "/" + CSV_NAME,
         "xmlUrl": BASE_URL + "/" + XML_NAME,
         "productId": PRODUCT_ID,
@@ -339,7 +384,7 @@ def main() -> int:
     )
 
     print(json.dumps({
-        "status": "verified_and_frozen",
+        "status": "retrieved_from_annual_archive_and_label_checked",
         "productId": PRODUCT_ID,
         "csvByteLength": provenance["csvByteLength"],
         "md5ChecksumStatus": provenance["md5ChecksumStatus"],
