@@ -263,31 +263,34 @@ export interface MavenNgimsProfileBuildResult {
   readonly limitations?: readonly string[];
 }
 
+export interface MavenNgimsProfileSelection {
+  readonly species: string;
+  readonly orbit: number;
+  readonly tid: number;
+  readonly direction: 'inbound' | 'outbound';
+  readonly quality: 'verified' | 'uncertain';
+}
+
 /**
- * Build one monotonic single-orbit, single-species profile.
- * No cross-orbit, inbound/outbound, or multi-species averaging is performed.
+ * Build one monotonic single-orbit, single-species profile from already
+ * validated measurements. The identity checks are repeated at this boundary
+ * so callers cannot bypass them by constructing a measurement array.
  */
-export function buildMavenNgimsNeutralProfile(
-  rows: readonly MavenNgimsL2NeutralAbundanceRow[],
-  policy: MavenNgimsImportPolicy = {}
+export function buildMavenNgimsNeutralProfileFromMeasurements(
+  measurements: readonly MavenNgimsNeutralMeasurement[]
 ): MavenNgimsProfileBuildResult {
-  if (!Array.isArray(rows) || rows.length < 2) {
-    return { status: 'rejected', errors: ['at least two L2 rows are required for a vertical profile'] };
+  if (!Array.isArray(measurements) || measurements.length < 2) {
+    return { status: 'rejected', errors: ['at least two accepted measurements are required for a vertical profile'] };
   }
 
-  const validated = rows.map((row) => validateMavenNgimsL2NeutralRow(row, policy));
-  const rejected = validated.flatMap((result, index) =>
-    result.status === 'rejected' ? result.errors.map((error) => 'row ' + index + ' (' + error.field + '): ' + error.message) : []
-  );
-  if (rejected.length > 0) return { status: 'rejected', errors: rejected };
-
-  const measurements = validated.flatMap((result) =>
-    result.status === 'rejected' ? [] : [result.measurement]
-  );
   const first = measurements[0];
   const identityErrors: string[] = [];
-  for (let index = 1; index < measurements.length; index += 1) {
+  for (let index = 0; index < measurements.length; index += 1) {
     const current = measurements[index];
+    if (!current || current.eligibleAsSchedulerInitialAbundance !== false) {
+      identityErrors.push('measurement is malformed or incorrectly marked for Scheduler initialization');
+      continue;
+    }
     if (current.orbit !== first.orbit) identityErrors.push('profile cannot combine different MAVEN orbits');
     if (current.tid !== first.tid) identityErrors.push('profile cannot combine different NGIMS TIDs');
     if (current.species.trim().toUpperCase() !== first.species.trim().toUpperCase()) {
@@ -326,6 +329,84 @@ export function buildMavenNgimsNeutralProfile(
       'NO-specific limitation: the IUVS publication reports a possible positive NGIMS bias from N+O recombination inside the instrument; this profile is not independently corrected.'
     ] : [])
   };
+}
+
+/**
+ * Validate raw L2 rows and build a single-orbit profile. No cross-orbit,
+ * inbound/outbound, or multi-species averaging is performed.
+ */
+export function buildMavenNgimsNeutralProfile(
+  rows: readonly MavenNgimsL2NeutralAbundanceRow[],
+  policy: MavenNgimsImportPolicy = {}
+): MavenNgimsProfileBuildResult {
+  if (!Array.isArray(rows) || rows.length < 2) {
+    return { status: 'rejected', errors: ['at least two L2 rows are required for a vertical profile'] };
+  }
+
+  const validated = rows.map((row) => validateMavenNgimsL2NeutralRow(row, policy));
+  const rejected = validated.flatMap((result, index) =>
+    result.status === 'rejected'
+      ? result.errors.map((error) => 'row ' + index + ' (' + error.field + '): ' + error.message)
+      : []
+  );
+  if (rejected.length > 0) return { status: 'rejected', errors: rejected };
+
+  const measurements = validated.flatMap((result) =>
+    result.status === 'rejected' ? [] : [result.measurement]
+  );
+  return buildMavenNgimsNeutralProfileFromMeasurements(measurements);
+}
+
+/**
+ * Select one homogeneous profile from a full L2 CSV import. Species, orbit,
+ * TID, track direction and quality class are all mandatory filters: a broad
+ * CSV export is never silently averaged into one atmosphere.
+ */
+export function buildMavenNgimsNeutralProfileFromCsvImport(
+  imported: MavenNgimsL2CsvImportResult,
+  selection: MavenNgimsProfileSelection
+): MavenNgimsProfileBuildResult {
+  if (!imported || imported.status !== 'parsed') {
+    return {
+      status: 'rejected',
+      errors: imported?.status === 'invalid_csv'
+        ? [...imported.errors]
+        : ['a successfully parsed NGIMS L2 CSV import is required']
+    };
+  }
+  if (
+    !selection ||
+    typeof selection.species !== 'string' ||
+    selection.species.trim() === '' ||
+    !Number.isInteger(selection.orbit) ||
+    selection.orbit <= 0 ||
+    !Number.isInteger(selection.tid) ||
+    selection.tid < 0 ||
+    (selection.direction !== 'inbound' && selection.direction !== 'outbound') ||
+    (selection.quality !== 'verified' && selection.quality !== 'uncertain')
+  ) {
+    return { status: 'rejected', errors: ['profile selection must explicitly identify species, positive orbit, TID, track direction and quality class'] };
+  }
+
+  const selected = imported.rows.flatMap((entry) => {
+    if (entry.validation.status === 'rejected') return [];
+    const measurement = entry.validation.measurement;
+    return (
+      measurement.species.trim().toUpperCase() === selection.species.trim().toUpperCase() &&
+      measurement.orbit === selection.orbit &&
+      measurement.tid === selection.tid &&
+      measurement.direction === selection.direction &&
+      measurement.quality === selection.quality
+    ) ? [measurement] : [];
+  });
+
+  if (selected.length === 0) {
+    return {
+      status: 'rejected',
+      errors: ['the requested NGIMS species/orbit/TID/direction/quality selection has no accepted rows']
+    };
+  }
+  return buildMavenNgimsNeutralProfileFromMeasurements(selected);
 }
 
 function parseFiniteField(
