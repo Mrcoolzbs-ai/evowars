@@ -14,12 +14,6 @@ import { knownValue } from '../Core/scientificValue';
 import type { DataProvenance } from '../Core/scientificValue';
 import { quantity } from '../Core/physicalQuantity';
 
-const EVENT_PROVENANCE: DataProvenance = {
-  sourceName: 'synthetic unit-test fixture (not observational data)',
-  sourceId: 'evowars/tests/mars-photochemical-snapshot/event',
-  method: 'Fixture solely for exercising the strict observation-snapshot contract'
-};
-
 const TEMPERATURE_PROVENANCE: DataProvenance = {
   sourceName: 'synthetic unit-test fixture local temperature',
   sourceId: 'evowars/tests/mars-photochemical-snapshot/temperature',
