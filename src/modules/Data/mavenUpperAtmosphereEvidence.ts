@@ -35,7 +35,13 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
   archive: 'NASA Planetary Data System, Planetary Atmospheres Node',
   archiveUrl: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
   dataSearchUrl: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims_data_search.html',
-  dataAvailableThroughUtc: '2025-02-15',
+  archiveCoverage: {
+    latestAnnualCollectionYearListed: 2025,
+    annual2025AbundancesSize: '308 MB',
+    exactLatestMeasurementUtc: null,
+    note: 'The PDS landing page lists an annual 2025 abundance collection. The exact last measurement timestamp has not been established from the inaccessible selection-index contents; the index file modification timestamp is not substituted for the observation end time.',
+    source: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html'
+  },
   archiveIndexFiles: [
     {
       product: 'Legacy L2 neutral single-species abundance index locator',
@@ -52,7 +58,21 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
       fileName: 'MAVEN_NGIMS_Single-Species_del1-43.csv',
       revision: 'del1-43',
       url: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Single-Species_del1-43.csv',
+      mirroredUrls: [
+        'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Single-Species_del1-43.csv',
+        'https://atmos-ah-vs.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Single-Species_del1-43.csv'
+      ],
+      lastModifiedUtc: '2025-12-19',
+      reportedFileSize: '6.6 MB',
+      htmlCompanion: {
+        fileName: 'MAVEN_NGIMS_Single-Species_del1-43.htm',
+        lastModifiedUtc: '2026-11-16',
+        reportedFileSizeBytes: 62,
+        fullTableAvailable: false,
+        note: 'The directory reports only a 62-byte .htm companion; it is a stub, not an HTML rendering of the CSV index.'
+      },
       role: 'Selection metadata and product identifiers/URNs; not an L2 measurement table and not valid input to parseMavenNgimsL2NeutralCsvText().',
+      retrievalStatus: 'content_not_retrieved_in_this_environment',
       linkedFrom: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html'
     }
   ] as const,
