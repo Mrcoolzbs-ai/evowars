@@ -1146,6 +1146,7 @@ export type MavenNgimsL2EventWindowSelectionResult =
       readonly selection: MavenNgimsL2EventWindowSelection;
       readonly profile: MavenNgimsL2EventWindowProfile;
       readonly excludedRows: MavenNgimsL2EventWindowExcludedRowCounts;
+      readonly sourceProductIdentityBasis: 'caller-supplied-not-verified-from-csv-payload';
       readonly eligibleAsMarsPhotochemicalInitialState: false;
     }
   | {
@@ -1298,11 +1299,13 @@ export function selectMavenNgimsL2EventWindowProfile(
       measurements: profile.measurements,
       limitations: [
         ...(profile.limitations ?? []),
-        'Selection is tied to one exact PDS product identifier and inclusive UTC event window.',
+        'Selection is tied to one exact PDS product identifier supplied by the caller and an inclusive UTC event window.',
+        'The CSV payload itself does not embed or cryptographically verify the PDS URN; retain the downloaded file hash and detached XML label as external provenance.',
         'The profile remains an upper-atmosphere single-species NGIMS observation; it is not a complete planetary initial state.'
       ]
     },
     excludedRows: excluded,
+    sourceProductIdentityBasis: 'caller-supplied-not-verified-from-csv-payload',
     eligibleAsMarsPhotochemicalInitialState: false
   };
 }
