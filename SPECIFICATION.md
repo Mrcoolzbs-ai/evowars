@@ -206,6 +206,12 @@ The local termolecular bath gas is the current dynamic CO₂ concentration; the 
 
 This is a single homogeneous compartment only. It is not connected to Scheduler/GeneratedWorld, does not synthesize an initial atmosphere, and does not model vertical transport, boundary fluxes, or time-dependent radiative/meteorological forcing. The photolysis forcing remains SZA=0°, Ls=251°; no uncertainty is quantified for the imported table rates.
 
+### 6.10 Mars inorganic bimolecular kinetics reference (Taysum & Palmer 2020)
+
+`Data/marsInorganicGasPhaseEvidence.ts` contains 24 of the explicitly parameterized bimolecular reactions listed in Table B1 of Taysum & Palmer (2020), DOI 10.1029/2020JE006491. It stores the published Arrhenius-form expression, cm³ molecule⁻¹ s⁻¹ unit and independent 298 K reference rate. `evaluateMarsInorganicBimolecularReaction()` computes the local event rate from explicit reactant number densities and their separate provenance, then returns stoichiometric species source/sink rates. It does not reconstruct concentrations from column inventories, integrate chemistry, create radical inventories or mutate Scheduler state.
+
+The remaining eight Table B1 rows are explicitly excluded: seven termolecular channels use the authors' CO₂ bath-gas correction (×2.5 versus N₂/dry air) and cannot be fed into the current N₂ third-body contract; the eighth row has no temperature-dependent rate law printed in Table B1. Individual rate uncertainty and numeric temperature ranges are not specified per row, so those are not inferred. All calculated values remain diagnostic (`schedulerEligible=false`, uncertainty not quantified), not a complete Mars photochemical model.
+
 ## 7. Химия и эволюция
 
 ### 7.1 Инвентари и стехиометрия
@@ -339,6 +345,7 @@ npm run build
 | `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater annual means, ACS/TGO HO2 upper limits и OpenMARS HO2 model estimates с раздельным provenance |
 | `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS NO/O references, NGIMS L2 quality-aware CSV row parser and single-orbit profile builder |
 | `src/modules/Data/marsPhotochemistryEvidence.ts` | Taysum & Palmer (2020) Mars photolysis J values at two model-reference altitudes, with provenance-gated J×n evaluator |
+| `src/modules/Data/marsInorganicGasPhaseEvidence.ts` | 24 Taysum & Palmer (2020) inorganic bimolecular gas-phase rate laws, explicit omissions and source-gated rate evaluator |
 | `src/modules/Data/marsGasPhaseKinetics.ts` | Taysum & Palmer (2020) Mars gas-phase reactions, CO2-third-body Arrhenius evaluation and atom-balance audit |
 | `src/modules/Core/atmosphericReferenceAdapters.ts` | USSA reference adapters и MGS measured-node → hydrostatic-column адаптер |
 | `src/modules/Core/hydrostaticUncertainty.ts` | First-order uncertainty propagation PDS 1σ → P(z), rho(z), integrated mass/molar columns, including adaptive mesh results |
