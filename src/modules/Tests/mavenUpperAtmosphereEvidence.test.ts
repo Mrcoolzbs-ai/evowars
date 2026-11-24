@@ -362,6 +362,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       outsideUtcWindow: 1
     });
     expect(result.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+    expect(result.sourceProductIdentityBasis)
+      .toBe('caller-supplied-not-verified-from-csv-payload');
+    expect(result.profile.limitations.join(' ')).toMatch(/does not embed or cryptographically verify the PDS URN/i);
   });
 
   it('rejects an event profile selector with a mismatched source window or fewer than two selected rows', () => {
