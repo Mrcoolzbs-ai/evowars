@@ -1539,11 +1539,11 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
     return { status: 'rejected', errors: ['expectedCsvFileName from the archive index is required'] };
   }
 
-  const xml = input.detachedLabelXml.replace(/<!--[\\s\\S]*?-->/g, '');
+  const xml = input.detachedLabelXml.replace(/<!--[\s\S]*?-->/g, '');
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
     return { status: 'rejected', errors: ['PDS4 label must not contain a DTD or entity declaration'] };
   }
-  if (!/<(?:[\\w.-]+:)?Product_Observational\\b/i.test(xml)) {
+  if (!/<(?:[\w.-]+:)?Product_Observational\b/i.test(xml)) {
     return { status: 'rejected', errors: ['detached label root must identify a PDS4 Product_Observational product'] };
   }
 
@@ -1564,7 +1564,7 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
   if (fileSize.count !== 1 || !fileSize.value) {
     errors.push('detached label must contain exactly one file_size value');
   }
-  if (fileSize.count === 1 && !/\\bunit\\s*=\\s*["']byte["']/i.test(fileSize.attributes)) {
+  if (fileSize.count === 1 && !/\bunit\s*=\s*["']byte["']/i.test(fileSize.attributes)) {
     errors.push('detached label file_size must use unit="byte"');
   }
   const declaredFileSize = fileSize.value === null ? Number.NaN : Number(fileSize.value);
