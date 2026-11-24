@@ -179,17 +179,18 @@ function GeneratorPanel(props: {
             value={localSettings.atmospherePreset || ''}
             onChange={(e) => {
               const atmospherePreset = e.target.value || undefined;
+              const atmosphericReferenceProfile: GenerationSettings['atmosphericReferenceProfile'] =
+                atmospherePreset === 'earth' &&
+                localSettings.atmosphericReferenceProfile === 'ussa_1976_earth'
+                  ? 'ussa_1976_earth'
+                  : atmospherePreset === 'mars' &&
+                    localSettings.atmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+                    ? 'mgs_mars_1998_8028d38a'
+                    : undefined;
               const newSettings = {
                 ...localSettings,
                 atmospherePreset,
-                atmosphericReferenceProfile:
-                  atmospherePreset === 'earth' &&
-                  localSettings.atmosphericReferenceProfile === 'ussa_1976_earth'
-                    ? 'ussa_1976_earth'
-                    : atmospherePreset === 'mars' &&
-                      localSettings.atmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
-                      ? 'mgs_mars_1998_8028d38a'
-                      : undefined
+                atmosphericReferenceProfile
               };
               setLocalSettings(newSettings);
               props.onSettingsChange(newSettings);
