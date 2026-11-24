@@ -505,3 +505,12 @@ export {
   buildGeochemicalSpeciesCatalog,
   addGeochemicalSpeciesToCatalog
 } from './geochemicalSpeciesCatalog';
+
+
+// Stage 4.2: source-backed Mars radio-occultation data (MGS PDS product 8028D38A).
+export {
+  MGS_MARS_8028D38A_METADATA,
+  MGS_MARS_8028D38A_PROVENANCE,
+  MGS_MARS_8028D38A_SAMPLES
+} from './mgsMarsOccultation1998';
+export type { MgsMarsOccultationSample } from './mgsMarsOccultation1998';
