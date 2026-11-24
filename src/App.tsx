@@ -183,9 +183,13 @@ function GeneratorPanel(props: {
                 ...localSettings,
                 atmospherePreset,
                 atmosphericReferenceProfile:
-                  atmospherePreset === 'earth'
-                    ? localSettings.atmosphericReferenceProfile
-                    : undefined
+                  atmospherePreset === 'earth' &&
+                  localSettings.atmosphericReferenceProfile === 'ussa_1976_earth'
+                    ? 'ussa_1976_earth'
+                    : atmospherePreset === 'mars' &&
+                      localSettings.atmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+                      ? 'mgs_mars_1998_8028d38a'
+                      : undefined
               };
               setLocalSettings(newSettings);
               props.onSettingsChange(newSettings);
@@ -217,27 +221,38 @@ function GeneratorPanel(props: {
               })()}
             </p>
           )}
-          {localSettings.atmospherePreset === 'earth' && (
+          {(localSettings.atmospherePreset === 'earth' || localSettings.atmospherePreset === 'mars') && (
             <div className="category-selector">
               <label>Вертикальный reference-профиль:</label>
               <select
                 value={localSettings.atmosphericReferenceProfile || ''}
                 onChange={(e) => {
+                  const selectedProfile =
+                    localSettings.atmospherePreset === 'earth' && e.target.value === 'ussa_1976_earth'
+                      ? 'ussa_1976_earth' as const
+                      : localSettings.atmospherePreset === 'mars' && e.target.value === 'mgs_mars_1998_8028d38a'
+                        ? 'mgs_mars_1998_8028d38a' as const
+                        : undefined;
                   const newSettings = {
                     ...localSettings,
-                    atmosphericReferenceProfile:
-                      e.target.value === 'ussa_1976_earth' ? 'ussa_1976_earth' as const : undefined
+                    atmosphericReferenceProfile: selectedProfile
                   };
                   setLocalSettings(newSettings);
                   props.onSettingsChange(newSettings);
                 }}
               >
                 <option value="">Не подключать</option>
-                <option value="ussa_1976_earth">US Standard Atmosphere 1976 — 7 слоёв до 86 км</option>
+                {localSettings.atmospherePreset === 'earth' && (
+                  <option value="ussa_1976_earth">US Standard Atmosphere 1976 — 7 слоёв до 86 км</option>
+                )}
+                {localSettings.atmospherePreset === 'mars' && (
+                  <option value="mgs_mars_1998_8028d38a">MGS 1998 PDS 8028D38A — одна радиоколонка, 74 температурных узла</option>
+                )}
               </select>
               <p className="preset-note">
-                Профиль подключается как внешний reference, не заменяет параметры сгенерированной планеты.
-                Температура каждого слоя — изотермическое приближение в середине слоя; химические запасы и радикалы не задаются.
+                {localSettings.atmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
+                  ? 'Одна историческая MGS-радиоколонка (28.01.1998; 29.213° N, 56.774° E), только 0.25–35.26 км. 74 measured T-узла задают 73 линейно интерполированных слоя; неопределённости слоёв не выводятся без covariance. Профиль не задаёт полный состав, давление, радикалы или климатологию Марса.'
+                  : 'Профиль подключается как внешний reference и не заменяет параметры сгенерированной планеты. Температуры слоёв — представительные значения в серединах интервалов; химические запасы и радикалы не задаются.'}
               </p>
             </div>
           )}
