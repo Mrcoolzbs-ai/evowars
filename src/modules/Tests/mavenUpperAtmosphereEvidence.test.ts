@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
@@ -533,6 +534,8 @@ describe('MAVEN upper-atmosphere evidence', () => {
 
 
   it('binds res-den CSV bytes to a detached PDS4 label and carries SHA-256 into the selected profile', async () => {
+    // jsdom omits SubtleCrypto; use Node's real WebCrypto implementation for this test.
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
     const productId = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId;
     const fileName = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.fileName;
     const csvText = l3ResampledDensityCsvText([
