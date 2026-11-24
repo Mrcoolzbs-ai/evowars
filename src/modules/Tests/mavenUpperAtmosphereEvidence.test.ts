@@ -6,6 +6,8 @@ import {
   MAVEN_INSITU_KP_PDS_ARCHIVE,
   MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT,
   MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE,
+  MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE,
+  linkMavenNgimsL2L3IndexEventWindow,
   parseMavenInsituKeyParameterRecord,
   parseMavenNgimsL3ScaleHeightTemperatureCsvRow,
   parseMavenNgimsL3ScaleHeightTemperatureCsvText,
@@ -186,8 +188,82 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision).toBe('del1-42');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.lastModifiedUtc).toBe('2025-08-14T10:04:00Z');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.reportedFileSize).toBe('3.1 MB');
-    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.htmlCompanion.reportedFileSizeBytes).toBe(62);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.url).toContain('https://atmos.nmsu.edu/');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.htmlCompanion.reportedFileSize).toBe('9.0 MB');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.htmlCompanion.fullTableAvailable).toBe(true);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.mirrorNote).toMatch(/62-byte .htm stub/i);
     expect(MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.method).toMatch(/linear fit of altitude versus log density/);
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE).toMatchObject({
+      tid: 14282,
+      observationDateUtc: '2014-12-11',
+      timeStartUtc: '2014-12-11T15:45:25.000Z',
+      timeStopUtc: '2014-12-11T17:29:43.000Z',
+      matching: {
+        exactTidMatch: true,
+        exactUtcWindowMatch: true,
+        numericL2CsvImported: false,
+        numericL3TemperatureCsvImported: false,
+        schedulerInitialStateEligible: false
+      }
+    });
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.fileName)
+      .toBe('mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv');
+    expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.productId)
+      .toContain('res-sht-14282_20141211t154406');
+  });
+
+  it('links one real L2/L3 NGIMS index candidate only on identical TID and UTC event window', () => {
+    const candidate = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE;
+    const result = linkMavenNgimsL2L3IndexEventWindow(
+      {
+        sourceProductId: candidate.l2AbundanceProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc
+      },
+      {
+        sourceProductId: candidate.scaleHeightIndex.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc
+      }
+    );
+    expect(result).toEqual({
+      status: 'matched',
+      tid: 14282,
+      timeStartUtc: '2014-12-11T15:45:25.000Z',
+      timeStopUtc: '2014-12-11T17:29:43.000Z',
+      l2SourceProductId: candidate.l2AbundanceProduct.productId,
+      l3SourceProductId: candidate.scaleHeightIndex.productId,
+      coRegistrationBasis: 'same-tid-and-exact-time-window',
+      eligibleAsMarsPhotochemicalInitialState: false
+    });
+  });
+
+  it('rejects NGIMS L2/L3 links when TID or either endpoint of the time window differs', () => {
+    const candidate = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE;
+    const l2 = {
+      sourceProductId: candidate.l2AbundanceProduct.productId,
+      tid: candidate.tid,
+      timeStartUtc: candidate.timeStartUtc,
+      timeStopUtc: candidate.timeStopUtc
+    };
+    const l3 = {
+      sourceProductId: candidate.scaleHeightIndex.productId,
+      tid: candidate.tid,
+      timeStartUtc: candidate.timeStartUtc,
+      timeStopUtc: candidate.timeStopUtc
+    };
+    expect(linkMavenNgimsL2L3IndexEventWindow(l2, { ...l3, tid: 14284 }).status).toBe('rejected');
+    expect(linkMavenNgimsL2L3IndexEventWindow(l2, {
+      ...l3, timeStopUtc: '2014-12-11T17:29:44Z'
+    }).status).toBe('rejected');
+    expect(linkMavenNgimsL2L3IndexEventWindow(l2, {
+      ...l3, timeStartUtc: '2014-12-11T15:45:25.100Z'
+    }).status).toBe('rejected');
+    expect(linkMavenNgimsL2L3IndexEventWindow(l2, {
+      ...l3, timeStartUtc: '2014-02-30T15:45:25Z'
+    }).status).toBe('rejected');
   });
 
   it('parses the SIS 1.13 Table A-10 derived scale-height temperature without upgrading it to a local observation', () => {
