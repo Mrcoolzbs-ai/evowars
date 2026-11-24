@@ -105,6 +105,12 @@ describe('Stage 4.2: strict Mars photochemical observation snapshot', () => {
     expect(report.blockers.join(' ')).toMatch(/3\/16 network species/i);
     expect(report.blockers.join(' ')).toMatch(/LPW electron temperature/i);
     expect(report.blockers.join(' ')).toMatch(/species-specific log-density scale-height fit/i);
+    expect(report.blockers.join(' ')).toMatch(/TID 14282/i);
+    expect(report.blockers.join(' ')).toMatch(/exact event window/i);
+    expect(report.sourceEvidence.some((source) =>
+      source.sourceId.includes('res-sht-14282_20141211t154406') &&
+      source.sourceId.includes('csn-abund-14282_20141211t154406')
+    )).toBe(true);
     expect(report.sourceEvidence.some((source) =>
       source.sourceId.includes('Table A-10')
     )).toBe(true);
