@@ -15,7 +15,8 @@ import {
 import {
   computeAdaptivelyRefinedMgsMars8028D38AHydrostaticColumnWithUncertainty,
   computeMgsMars8028D38AHydrostaticColumnWithUncertainty,
-  createMgsMars8028D38AHydrostaticColumnInput
+  createMgsMars8028D38AHydrostaticColumnInput,
+  createMgsMars8028D38AAtmosphericTemperatureProfile
 } from '../Core/atmosphericReferenceAdapters';
 import { propagateMeasuredNodeHydrostaticUncertainty } from '../Core/hydrostaticUncertainty';
 import {
@@ -80,6 +81,43 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
       expect(
         Math.abs(reconstructedNumberDensity / sample.numberDensityPerM3 - 1)
       ).toBeLessThan(2e-4);
+    }
+  });
+
+  it('builds a source-grounded partial temperature profile from exactly 74 nodes and 73 adjacent intervals', () => {
+    const profile = createMgsMars8028D38AAtmosphericTemperatureProfile();
+    expect(profile.status).toBe('partial_profile');
+    expect(profile.layers).toHaveLength(73);
+    expect(profile.provenance?.sourceId).toBe('PDS product 8028D38A.TPS');
+    expect(profile.limitations).toMatch(/one MGS radio occultation/i);
+    expect(profile.limitations).toMatch(/covariance/i);
+
+    const first = MGS_MARS_8028D38A_SAMPLES[0]!;
+    const last = MGS_MARS_8028D38A_SAMPLES[73]!;
+    expect(profile.layers[0].altitudeRangeM).toEqual({
+      min: first.heightAboveLocalSurfaceM,
+      max: MGS_MARS_8028D38A_SAMPLES[1]!.heightAboveLocalSurfaceM
+    });
+    expect(profile.layers[72].altitudeRangeM).toEqual({
+      min: MGS_MARS_8028D38A_SAMPLES[72]!.heightAboveLocalSurfaceM,
+      max: last.heightAboveLocalSurfaceM
+    });
+    expect(profile.layers[0].temperature.status).toBe('estimated');
+    expect(profile.layers[0].temperature.quantity?.value).toBeCloseTo(
+      (first.temperatureK + MGS_MARS_8028D38A_SAMPLES[1]!.temperatureK) / 2,
+      12
+    );
+    expect(profile.layers[0].temperature.provenance?.recordId).toBe('interpolated-rows-1-2');
+    expect(profile.layers[0].temperature.provenance?.rawInput?.lowerTemperatureSigmaK).toBe(first.temperatureSigmaK);
+    expect(profile.layers[0].temperature.uncertainty).toBeUndefined();
+
+    for (let index = 0; index < profile.layers.length; index += 1) {
+      const layer = profile.layers[index]!;
+      expect(layer.temperature.status).toBe('estimated');
+      expect(layer.altitudeRangeM!.max).toBeGreaterThan(layer.altitudeRangeM!.min);
+      if (index > 0) {
+        expect(layer.altitudeRangeM!.min).toBe(profile.layers[index - 1]!.altitudeRangeM!.max);
+      }
     }
   });
 
