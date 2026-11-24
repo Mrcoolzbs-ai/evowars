@@ -84,8 +84,16 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
     revision: 'del1-42',
     url: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Scale-Height%26Temp_del1-42.csv',
     linkedFrom: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html',
-    role: 'Selection metadata for a separate derived NGIMS scale-height/temperature product; not a temperature measurement file itself.',
-    retrievalStatus: 'index_not_retrieved_and_no_TID_selected'
+    lastModifiedUtc: '2025-08-14T10:04:00Z',
+    reportedFileSize: '3.1 MB',
+    htmlCompanion: {
+      fileName: 'MAVEN_NGIMS_Scale-Height&Temp_del1-42.htm',
+      lastModifiedUtc: '2026-11-16T10:09:00Z',
+      reportedFileSizeBytes: 62,
+      fullTableAvailable: false
+    },
+    role: 'Latest observed selection-index revision in the PDS logs directory; it identifies derived per-orbit products but is not itself a temperature measurement file.',
+    retrievalStatus: 'index_contents_not_retrieved_and_no_TID_selected'
   },
   dataProductArchiveFormat: 'ASCII tables with detached XML labels',
   orbitProductScope: {
@@ -1180,3 +1188,313 @@ export const MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS = {
     limitations: 'These are model-constrained ratios rather than direct in-situ atomic oxygen densities. The model scaling factors differ between MY32 and MY33. Surface recombination contributes a factor-of-two uncertainty to retrieved atomic-O densities; CO2 density can be uncertain by about a factor 1.5. The paper does not publish a numerical uncertainty sigma for the final ratios or a tabulated vertical density profile.'
   }
 } as const;
+
+
+/**
+ * NGIMS L3 resampled scale-height / scale-height-temperature product.
+ * This is a derived species-specific fit over the exobase-to-homopause
+ * density range, not a pointwise thermometer reading at exo_alt.
+ */
+export const MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE: MavenUpperAtmosphereProvenance = {
+  sourceName: 'MAVEN NGIMS PDS Software Interface Specification, Revision 1.13, Table A-10',
+  sourceId: 'MAVEN-NGIMS-SIS-0001 / Rev 1.13 / Table A-10',
+  reference: 'https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/document/ngims_pds_sis_v03_r01.pdf',
+  method: 'L3 scale height from linear fit of altitude versus log density between exobase and homopause; species-specific temperature computed from H = m g / (k T)',
+  applicability: 'MAVEN NGIMS upper-atmosphere per-orbit products; output temperature is a derived fit result for the measured species and fitted altitude interval',
+  limitations: 'Temperature is not a local direct detection at exo_alt. Fit quality flags HI/HW/HA/H0 must be retained. The error is fit-residual uncertainty, not a complete physical/instrument covariance. The product cannot by itself initialise the lower-atmosphere Taysum Table B2 photochemical compartment.'
+};
+
+export type MavenNgimsL3ScaleHeightQualityFlag = 'HI' | 'HW' | 'HA' | 'H0';
+export type MavenNgimsL3ScaleHeightFitQuality =
+  | 'good_near_isothermic_fit'
+  | 'structured_or_wavy_fit'
+  | 'high_altitude_fit'
+  | 'bad_or_negative_fit_do_not_use';
+
+export interface MavenNgimsL3ScaleHeightTemperatureRow {
+  readonly sourceProductId: string;
+  readonly timeUtc: string;
+  readonly unixTimeSeconds: number;
+  readonly spacecraftClockSeconds: number;
+  readonly elapsedSinceTidStartSeconds: number;
+  readonly tid: number;
+  readonly orbit: number;
+  readonly exobaseAltitudeKm: number;
+  readonly massAmu: number;
+  readonly species: string;
+  readonly scaleHeightKm: number;
+  readonly scaleHeightFitErrorKm: number;
+  readonly scaleHeightTemperatureK: number;
+  readonly temperatureFitErrorK: number;
+  readonly fitResidual: number;
+  readonly qualityFlag: MavenNgimsL3ScaleHeightQualityFlag;
+  readonly fitQuality: MavenNgimsL3ScaleHeightFitQuality;
+  readonly evidenceKind: 'derived_scale_height_temperature';
+  readonly eligibleAsLocalNeutralTemperatureObservation: false;
+  readonly eligibleAsMarsPhotochemicalInitialState: false;
+  readonly provenance: MavenUpperAtmosphereProvenance;
+  readonly diagnostics: readonly string[];
+}
+
+export type MavenNgimsL3ScaleHeightTemperatureRowValidation =
+  | { readonly status: 'parsed'; readonly row: MavenNgimsL3ScaleHeightTemperatureRow }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+export interface MavenNgimsL3ScaleHeightTemperatureCsvRowResult {
+  readonly recordNumber: number;
+  readonly validation: MavenNgimsL3ScaleHeightTemperatureRowValidation;
+}
+
+export type MavenNgimsL3ScaleHeightTemperatureCsvImportResult =
+  | {
+      readonly status: 'parsed';
+      readonly sourceProductId: string;
+      readonly headers: readonly string[];
+      readonly rows: readonly MavenNgimsL3ScaleHeightTemperatureCsvRowResult[];
+      readonly parsedRowCount: number;
+      readonly rejectedRowCount: number;
+      readonly goodFitCount: number;
+    }
+  | { readonly status: 'invalid_csv'; readonly errors: readonly string[] };
+
+export interface MavenNgimsL3ScaleHeightTemperatureSelection {
+  readonly tid: number;
+  readonly orbit: number;
+  readonly species: string;
+  readonly qualityFlag: MavenNgimsL3ScaleHeightQualityFlag;
+}
+
+export type MavenNgimsL3ScaleHeightTemperatureSelectionResult =
+  | {
+      readonly status: 'completed';
+      readonly selection: MavenNgimsL3ScaleHeightTemperatureSelection;
+      readonly rows: readonly MavenNgimsL3ScaleHeightTemperatureRow[];
+      readonly limitations: readonly string[];
+    }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+const REQUIRED_NGIMS_L3_SCALE_HEIGHT_COLUMNS = [
+  't_utc', 't_unix', 't_sclk', 't_tid', 'tid', 'orbit', 'exo_alt',
+  'mass', 'species', 'scale_height', 'scale_height_error',
+  'temperature', 'temperature_error', 'fit_residual', 'quality'
+] as const;
+
+function strictNgimsUtcTimestamp(value: string): string | null {
+  const match = value.match(/^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})(?:\\.\\d{1,9})?Z$/);
+  if (!match) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 19) !== match[1]) {
+    return null;
+  }
+  return new Date(timestamp).toISOString();
+}
+
+/** Parse one Table A-10 row. "parsed" means structurally valid, not a measured local temperature. */
+export function parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
+  rawRow: Readonly<Record<string, string | undefined>>,
+  sourceProductId: string
+): MavenNgimsL3ScaleHeightTemperatureRowValidation {
+  if (!rawRow || typeof rawRow !== 'object' || Array.isArray(rawRow)) {
+    return { status: 'rejected', errors: ['CSV row must be an object'] };
+  }
+  if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
+    return { status: 'rejected', errors: ['sourceProductId must identify the exact NGIMS L3 product'] };
+  }
+
+  const row = Object.fromEntries(
+    Object.entries(rawRow).map(([key, value]) => [key.trim().toLowerCase(), value])
+  ) as Record<string, string | undefined>;
+  const errors: string[] = [];
+  const timeRaw = row.t_utc;
+  const timeUtc = typeof timeRaw === 'string' ? strictNgimsUtcTimestamp(timeRaw.trim()) : null;
+  if (timeUtc === null) errors.push('t_utc must be a valid UTC timestamp ending in Z');
+
+  const numberFields = [
+    't_unix', 't_sclk', 't_tid', 'tid', 'orbit', 'exo_alt', 'mass',
+    'scale_height', 'scale_height_error', 'temperature',
+    'temperature_error', 'fit_residual'
+  ] as const;
+  const numbers = Object.fromEntries(numberFields.map((field) => {
+    const raw = row[field];
+    const value = typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : Number.NaN;
+    if (!Number.isFinite(value)) errors.push(field + ' must be a finite numeric field');
+    return [field, value];
+  })) as Record<typeof numberFields[number], number>;
+
+  const species = row.species?.trim();
+  if (!species) errors.push('species must be non-empty');
+  const qualityFlag = row.quality?.trim().toUpperCase();
+  if (qualityFlag !== 'HI' && qualityFlag !== 'HW' && qualityFlag !== 'HA' && qualityFlag !== 'H0') {
+    errors.push('quality must be one of HI, HW, HA or H0');
+  }
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  if (!Number.isInteger(numbers.tid) || numbers.tid < 0) errors.push('tid must be a non-negative integer');
+  if (!Number.isInteger(numbers.orbit) || numbers.orbit <= 0) errors.push('orbit must be a positive integer');
+  if (numbers.t_unix < 0 || numbers.t_sclk < 0 || numbers.t_tid < 0) {
+    errors.push('unix, spacecraft-clock and elapsed TID times must be non-negative');
+  }
+  if (numbers.exo_alt <= 0) errors.push('exo_alt must be positive km');
+  if (numbers.mass < 2 || numbers.mass > 150) errors.push('mass must be within NGIMS coverage [2,150] Da');
+  if (numbers.scale_height <= 0) errors.push('scale_height must be positive km');
+  if (numbers.scale_height_error < 0) errors.push('scale_height_error cannot be negative');
+  if (numbers.temperature <= 0) errors.push('temperature must be positive K');
+  if (numbers.temperature_error < 0) errors.push('temperature_error cannot be negative K');
+  if (numbers.fit_residual < 0 || numbers.fit_residual > 500) errors.push('fit_residual must be within the SIS range [0,500]');
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  const fitQuality: MavenNgimsL3ScaleHeightFitQuality =
+    qualityFlag === 'HI'
+      ? 'good_near_isothermic_fit'
+      : qualityFlag === 'HW'
+        ? 'structured_or_wavy_fit'
+        : qualityFlag === 'HA'
+          ? 'high_altitude_fit'
+          : 'bad_or_negative_fit_do_not_use';
+  const diagnostics: string[] = [
+    'Temperature is derived from a species-specific scale-height fit using H = m g / (k T), not a direct point measurement.',
+    'The fit spans the exobase-to-homopause density range; exo_alt is not a representative local-temperature altitude.',
+    'This L3 result is not eligible for direct Mars photochemical initial-state construction.'
+  ];
+  if (qualityFlag === 'HW') diagnostics.push('SIS quality HW denotes a wavy or structured fit with r2 < 75%.');
+  if (qualityFlag === 'HA') diagnostics.push('SIS quality HA denotes a high-altitude fit with the spacecraft above 200 km.');
+  if (qualityFlag === 'H0') diagnostics.push('SIS quality H0 denotes a bad or negative fit and must not be used as a temperature estimate.');
+
+  return {
+    status: 'parsed',
+    row: {
+      sourceProductId,
+      timeUtc: timeUtc!,
+      unixTimeSeconds: numbers.t_unix,
+      spacecraftClockSeconds: numbers.t_sclk,
+      elapsedSinceTidStartSeconds: numbers.t_tid,
+      tid: numbers.tid,
+      orbit: numbers.orbit,
+      exobaseAltitudeKm: numbers.exo_alt,
+      massAmu: numbers.mass,
+      species: species!,
+      scaleHeightKm: numbers.scale_height,
+      scaleHeightFitErrorKm: numbers.scale_height_error,
+      scaleHeightTemperatureK: numbers.temperature,
+      temperatureFitErrorK: numbers.temperature_error,
+      fitResidual: numbers.fit_residual,
+      qualityFlag: qualityFlag as MavenNgimsL3ScaleHeightQualityFlag,
+      fitQuality,
+      evidenceKind: 'derived_scale_height_temperature',
+      eligibleAsLocalNeutralTemperatureObservation: false,
+      eligibleAsMarsPhotochemicalInitialState: false,
+      provenance: MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE,
+      diagnostics
+    }
+  };
+}
+
+export function parseMavenNgimsL3ScaleHeightTemperatureCsvText(
+  csvText: string,
+  sourceProductId: string
+): MavenNgimsL3ScaleHeightTemperatureCsvImportResult {
+  if (typeof csvText !== 'string' || csvText.trim() === '') {
+    return { status: 'invalid_csv', errors: ['CSV text is empty'] };
+  }
+  if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
+    return { status: 'invalid_csv', errors: ['sourceProductId must identify the exact NGIMS L3 product'] };
+  }
+  const parsed = parseNgimsCsvRecords(csvText.replace(/^\\uFEFF/, ''));
+  if (parsed.error) return { status: 'invalid_csv', errors: [parsed.error] };
+  if (parsed.records.length < 2) {
+    return { status: 'invalid_csv', errors: ['CSV must contain a header and at least one data record'] };
+  }
+
+  const headers = parsed.records[0].map((header) => header.trim().toLowerCase());
+  if (headers.some((header) => header === '')) {
+    return { status: 'invalid_csv', errors: ['CSV header contains an empty column name'] };
+  }
+  const duplicateHeaders = headers.filter((header, index) => headers.indexOf(header) !== index);
+  if (duplicateHeaders.length > 0) {
+    return { status: 'invalid_csv', errors: ['CSV header contains duplicate columns: ' + [...new Set(duplicateHeaders)].join(', ')] };
+  }
+  const missing = REQUIRED_NGIMS_L3_SCALE_HEIGHT_COLUMNS.filter((column) => !headers.includes(column));
+  if (missing.length > 0) {
+    return { status: 'invalid_csv', errors: ['CSV is missing required NGIMS L3 scale-height columns: ' + missing.join(', ')] };
+  }
+
+  const rows: MavenNgimsL3ScaleHeightTemperatureCsvRowResult[] = parsed.records.slice(1).map((values, index) => {
+    if (values.length !== headers.length) {
+      return {
+        recordNumber: index + 1,
+        validation: { status: 'rejected' as const, errors: ['CSV record has ' + values.length + ' fields; expected ' + headers.length] }
+      };
+    }
+    const record = Object.fromEntries(headers.map((header, column) => [header, values[column]]));
+    return {
+      recordNumber: index + 1,
+      validation: parseMavenNgimsL3ScaleHeightTemperatureCsvRow(record, sourceProductId)
+    };
+  });
+  const parsedRowCount = rows.filter((entry) => entry.validation.status === 'parsed').length;
+  const goodFitCount = rows.filter((entry) =>
+    entry.validation.status === 'parsed' && entry.validation.row.fitQuality === 'good_near_isothermic_fit'
+  ).length;
+  return {
+    status: 'parsed',
+    sourceProductId,
+    headers,
+    rows,
+    parsedRowCount,
+    rejectedRowCount: rows.length - parsedRowCount,
+    goodFitCount
+  };
+}
+
+/** Select one exact species/orbit/TID/quality class; never average across products or species. */
+export function selectMavenNgimsL3ScaleHeightTemperatureRows(
+  imported: MavenNgimsL3ScaleHeightTemperatureCsvImportResult,
+  selection: MavenNgimsL3ScaleHeightTemperatureSelection
+): MavenNgimsL3ScaleHeightTemperatureSelectionResult {
+  if (!imported || imported.status !== 'parsed') {
+    return { status: 'rejected', errors: ['a successfully parsed NGIMS L3 scale-height CSV is required'] };
+  }
+  if (
+    !selection ||
+    !Number.isInteger(selection.tid) || selection.tid < 0 ||
+    !Number.isInteger(selection.orbit) || selection.orbit <= 0 ||
+    typeof selection.species !== 'string' || selection.species.trim() === '' ||
+    !['HI', 'HW', 'HA', 'H0'].includes(selection.qualityFlag)
+  ) {
+    return { status: 'rejected', errors: ['selection must identify TID, orbit, species and exact quality flag'] };
+  }
+
+  const rows = imported.rows.flatMap((entry) => {
+    if (entry.validation.status !== 'parsed') return [];
+    const row = entry.validation.row;
+    return row.tid === selection.tid &&
+      row.orbit === selection.orbit &&
+      row.species.trim().toUpperCase() === selection.species.trim().toUpperCase() &&
+      row.qualityFlag === selection.qualityFlag
+      ? [row]
+      : [];
+  }).sort((a, b) => Date.parse(a.timeUtc) - Date.parse(b.timeUtc));
+
+  if (rows.length === 0) {
+    return { status: 'rejected', errors: ['no rows match the exact NGIMS TID/orbit/species/quality selection'] };
+  }
+  if (rows.some((row) =>
+    row.tid !== selection.tid || row.orbit !== selection.orbit ||
+    row.species.trim().toUpperCase() !== selection.species.trim().toUpperCase() ||
+    row.qualityFlag !== selection.qualityFlag
+  )) {
+    return { status: 'rejected', errors: ['selected NGIMS L3 rows do not share one TID/orbit/species/quality identity'] };
+  }
+
+  return {
+    status: 'completed',
+    selection: { ...selection, species: selection.species.trim() },
+    rows,
+    limitations: [
+      'Rows retain the exact L3 TID, orbit, species, fit quality and original product ID; no cross-orbit, cross-TID or cross-species aggregation is performed.',
+      'The temperature is derived from a linear altitude-versus-log-density scale-height fit over the exobase-to-homopause interval, not a local temperature measurement.',
+      'The table supplies exobase altitude, not the representative altitude of the fitted interval; it cannot be co-registered to a single lower-atmosphere altitude node.',
+      'The selected derived temperature is not eligible for direct Mars photochemical initial-state construction.'
+    ]
+  };
+}
