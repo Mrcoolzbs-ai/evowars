@@ -1469,37 +1469,34 @@ export function parseMavenNgimsL3ResampledDensityCsvText(
 }
 
 
+const PDS4_LABEL_NAMESPACE = 'http://pds.nasa.gov/pds4/pds/v1';
+
 interface Pds4DetachedLabelElement {
   readonly count: number;
   readonly value: string | null;
-  readonly attributes: string;
+  readonly unit: string | null;
 }
 
+/**
+ * Read a single scalar from the PDS namespace. DOM parsing is intentional:
+ * regular expressions cannot establish XML well-formedness or the document
+ * root, and can mistake nested lookalike tags for label fields.
+ */
 function readPds4DetachedLabelElement(
-  xmlText: string,
+  document: Document,
   elementName: string
 ): Pds4DetachedLabelElement {
-  const expression = new RegExp(
-    '<(?:(\\w+):)?' + elementName + '\\b([^>]*)>([^<]*)<\\/(?:\\1:)?' + elementName + '\\s*>',
-    'gi'
+  const matches = Array.from(
+    document.getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, elementName)
   );
-  const matches: { value: string; attributes: string }[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = expression.exec(xmlText)) !== null) {
-    matches.push({
-      value: match[3].trim()
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&amp;/g, '&'),
-      attributes: match[2] ?? ''
-    });
-  }
+  const element = matches.length === 1 ? matches[0] : null;
+  const hasElementChildren = element !== null && element.children.length > 0;
   return {
     count: matches.length,
-    value: matches.length === 1 ? matches[0].value : null,
-    attributes: matches.length === 1 ? matches[0].attributes : ''
+    value: element !== null && !hasElementChildren
+      ? (element.textContent ?? '').trim()
+      : null,
+    unit: element?.getAttribute('unit') ?? null
   };
 }
 
@@ -1543,13 +1540,32 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
     return { status: 'rejected', errors: ['PDS4 label must not contain a DTD or entity declaration'] };
   }
-  if (!/<(?:[\w.-]+:)?Product_Observational\b/i.test(xml)) {
-    return { status: 'rejected', errors: ['detached label root must identify a PDS4 Product_Observational product'] };
+  if (typeof DOMParser === 'undefined') {
+    return { status: 'rejected', errors: ['XML DOMParser is unavailable in this runtime'] };
   }
 
-  const logicalIdentifier = readPds4DetachedLabelElement(xml, 'logical_identifier');
-  const fileName = readPds4DetachedLabelElement(xml, 'file_name');
-  const fileSize = readPds4DetachedLabelElement(xml, 'file_size');
+  let labelDocument: Document;
+  try {
+    labelDocument = new DOMParser().parseFromString(xml, 'application/xml');
+  } catch {
+    return { status: 'rejected', errors: ['detached PDS4 XML label could not be parsed'] };
+  }
+  const root = labelDocument.documentElement;
+  if (
+    !root ||
+    root.localName === 'parsererror' ||
+    root.localName !== 'Product_Observational' ||
+    root.namespaceURI !== PDS4_LABEL_NAMESPACE
+  ) {
+    return {
+      status: 'rejected',
+      errors: ['detached label must be a well-formed PDS4 Product_Observational document in the PDS namespace']
+    };
+  }
+
+  const logicalIdentifier = readPds4DetachedLabelElement(labelDocument, 'logical_identifier');
+  const fileName = readPds4DetachedLabelElement(labelDocument, 'file_name');
+  const fileSize = readPds4DetachedLabelElement(labelDocument, 'file_size');
   const errors: string[] = [];
   if (logicalIdentifier.count !== 1 || !logicalIdentifier.value) {
     errors.push('detached label must contain exactly one non-empty logical_identifier');
@@ -1564,7 +1580,7 @@ export async function importMavenNgimsL3ResampledDensityPds4Product(
   if (fileSize.count !== 1 || !fileSize.value) {
     errors.push('detached label must contain exactly one file_size value');
   }
-  if (fileSize.count === 1 && !/\bunit\s*=\s*["']byte["']/i.test(fileSize.attributes)) {
+  if (fileSize.count === 1 && fileSize.unit !== 'byte') {
     errors.push('detached label file_size must use unit="byte"');
   }
   const declaredFileSize = fileSize.value === null ? Number.NaN : Number(fileSize.value);
