@@ -970,3 +970,6 @@
 
 
 > **Расширение MAVEN NGIMS ingestion (24.11.2026):** reader теперь принимает полный ASCII CSV через `parseMavenNgimsL2NeutralCsvText()`, а не только заранее разобранный объект одной строки. Парсер поддерживает BOM, CRLF/LF, quoted fields и escaped quotes; проверяет уникальность/наличие PDS L2 headers. Результат сохраняет recordNumber и individual validation для каждой строки: структурная ошибка файла отклоняет файл целиком, но плохая ширина/числовые значения/quality флаг одной записи не стирают соседние записи. Добавлены тесты для quoted CSV, BOM, переводов строк, missing headers, незакрытых кавычек и сохранения row-width diagnostics. Полная PDS orbit CSV-выгрузка пока не зафиксирована в Data: парсер проверен на контролируемых fixtures, а не на заявленном как реальный профиле неизвестном наборе строк. Никаких фактических O/NO density nodes из такого fixture не импортировано.
+
+
+> **CI verification for complete MAVEN NGIMS L2 CSV import:** GitHub Actions run #827 (run ID 45384826345) on functional HEAD `18c553c17bfd07ecdae6014c0d230d6e7185dc5b` — success. TypeScript, tests, lint and production build all passed. Vitest: 92 files passed / 2 skipped; 3257 tests passed / 53 skipped. The MAVEN upper-atmosphere test file now contains 14 passing tests. Lint: 62 warnings / 0 errors. Production build successful.
