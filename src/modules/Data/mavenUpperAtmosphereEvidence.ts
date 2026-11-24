@@ -383,10 +383,10 @@ export function parseMavenInsituKeyParameterRecord(
   if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
     return { status: 'rejected', errors: ['sourceProductId must identify the exact PDS product'] };
   }
-  if (record.length !== MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.recordLengthBytes) {
+  if (record.length !== MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.recordLengthBytes) {
     return {
       status: 'rejected',
-      errors: ['record must contain exactly ' + MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.recordLengthBytes + ' ASCII bytes']
+      errors: ['record must contain exactly ' + MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT.fixedWidthAsciiSchema.recordLengthBytes + ' ASCII bytes']
     };
   }
   if ([...record].some((character) => character.charCodeAt(0) > 0x7f)) {
