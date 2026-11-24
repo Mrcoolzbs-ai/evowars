@@ -573,6 +573,7 @@ export type {
 export {
   MAVEN_NGIMS_PDS_SIS_PROVENANCE,
   MAVEN_NGIMS_PDS_ARCHIVE,
+  MAVEN_INSITU_KP_PDS_ARCHIVE,
   validateMavenNgimsL2NeutralRow,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromMeasurements,
