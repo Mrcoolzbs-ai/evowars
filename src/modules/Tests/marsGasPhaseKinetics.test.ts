@@ -6,8 +6,10 @@ import {
   evaluateMarsGasPhaseReaction,
   validateMarsGasPhaseReactionBalance
 } from '../Data/marsGasPhaseKinetics';
+import type { MarsGasSpeciesId } from '../Data/marsGasPhaseKinetics';
 
-const density = (values: Record<string, number>) => values as never;
+const density = (values: Record<string, number>) =>
+  values as Readonly<Partial<Record<MarsGasSpeciesId, number>>>;
 
 describe('Mars Taysum & Palmer 2020 gas-phase kinetics evidence', () => {
   it('preserves all 32 Appendix Table B1 records and distinguishes evaluable from unresolved laws', () => {
