@@ -531,3 +531,26 @@ export type {
   MarsHo2UpperLimitPoint,
   MarsHo2ModelledRange
 } from './marsAtmosphericChemistry';
+
+
+// Stage 4.2: MAVEN IUVS published retrieval evidence and NGIMS L2 profile reader.
+export {
+  MAVEN_NGIMS_PDS_SIS_PROVENANCE,
+  MAVEN_NGIMS_PDS_ARCHIVE,
+  validateMavenNgimsL2NeutralRow,
+  buildMavenNgimsNeutralProfile,
+  parseMavenNgimsL2NeutralCsvRow,
+  MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
+  MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS
+} from './mavenUpperAtmosphereEvidence';
+export type {
+  MavenUpperAtmosphereProvenance,
+  MavenNgimsNeutralQuality,
+  MavenNgimsFocusMode,
+  MavenNgimsL2NeutralAbundanceRow,
+  MavenNgimsNeutralMeasurement,
+  MavenNgimsValidationError,
+  MavenNgimsRowValidation,
+  MavenNgimsImportPolicy,
+  MavenNgimsProfileBuildResult
+} from './mavenUpperAtmosphereEvidence';
