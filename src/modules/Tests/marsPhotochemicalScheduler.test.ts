@@ -231,13 +231,19 @@ describe('Stage 4.2: Mars photochemical ODE through Core Scheduler', () => {
     expect(unsupported.world).toBe(world);
     expect(unsupported.diagnostics.join(' ')).toMatch(/unknown gas-phase reaction ID/i);
 
-    const invalidAltitude = run(world, {
-      altitudeKm: 0.5 as 0.5,
-      gasPhaseReactionIds: ['c4'],
-      photolysisReactionIds: ['ho2_photolysis']
-    });
-    // The TypeScript contract restricts altitude to the two reference nodes.
-    expect(invalidAltitude.status).toBe('committed');
+    const invalidAltitude = runMarsPhotochemicalSchedulerStep(
+      world,
+      {
+        reservoirId: RESERVOIR_ID,
+        altitudeKm: 12 as never,
+        gasPhaseReactionIds: ['c4'],
+        photolysisReactionIds: ['ho2_photolysis']
+      },
+      1
+    );
+    expect(invalidAltitude.status).toBe('rejected');
+    expect(invalidAltitude.world).toBe(world);
+    expect(invalidAltitude.diagnostics.join(' ')).toMatch(/0.5 or 42.67/);
   });
 
   it('rejects invalid duration before changing world time', () => {
