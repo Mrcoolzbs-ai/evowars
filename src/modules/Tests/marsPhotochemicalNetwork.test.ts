@@ -167,7 +167,7 @@ describe('Mars single-compartment source-backed photochemical network', () => {
     const missing: Record<string, number> = { ...INITIAL };
     delete missing.HO2;
     expect(() => buildMarsPhotochemicalNetworkProblem(input({
-      initialConcentrationsPerCm3: missing as MarsPhotochemicalInitialConcentrations
+      initialConcentrationsPerCm3: missing as unknown as MarsPhotochemicalInitialConcentrations
     }))).toThrowError(/missing=HO2/);
 
     expect(() => buildMarsPhotochemicalNetworkProblem(input({
