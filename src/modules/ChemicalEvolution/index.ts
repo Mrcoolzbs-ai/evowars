@@ -71,6 +71,10 @@ import type { ScientificSpecies } from '../Core/species';
 import { AVOGADRO_NUMBER_PER_MOL } from '../Core/kinetics';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from '../Core/thermoFunctions';
 import { runVerticalEddyDiffusionStep } from './verticalEddyDiffusion';
+import {
+  createMarsPhotochemicalProcessRegistry,
+  runMarsPhotochemicalSchedulerStep
+} from './marsPhotochemicalScheduler';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -150,6 +154,7 @@ export * from './kineticWorldAdapter';
 
 // Stage 4.2: explicit source-backed Mars single-compartment photochemical ODE step.
 export * from './marsPhotochemicalNetwork';
+export * from './marsPhotochemicalScheduler';
 
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
@@ -3016,5 +3021,7 @@ export default {
   resetWorldKineticExperiment,
   kineticExperimentStateProblems,
   KINETIC_EXPERIMENT_SCHEMA_VERSION,
-  KINETIC_EXPERIMENT_SPECIES
+  KINETIC_EXPERIMENT_SPECIES,
+  createMarsPhotochemicalProcessRegistry,
+  runMarsPhotochemicalSchedulerStep
 };
