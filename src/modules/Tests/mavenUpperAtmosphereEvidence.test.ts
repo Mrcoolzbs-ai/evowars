@@ -570,7 +570,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       expectedProductId: productId,
       expectedCsvFileName: fileName
     });
-    expect(imported.status).toBe('imported');
+    expect(imported.status, imported.status === 'rejected' ? imported.errors.join('; ') : '').toBe('imported');
     if (imported.status !== 'imported') throw new Error(imported.errors.join('; '));
     expect(imported.provenance).toMatchObject({
       sourceProductId: productId,
