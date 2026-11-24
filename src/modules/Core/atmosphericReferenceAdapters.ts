@@ -243,6 +243,8 @@ export const MGS_MARS_REFERENCE_BODY_MASS_PROVENANCE: DataProvenance = {
  *   Linear interpolation is the explicit Core solver policy.
  * - The caller must supply a normalized, identified composition. No
  *   composition or trace gas is invented from this profile.
+ * - PDS sigma_P and sigma_T are retained in the source data but are
+ *   NOT propagated by the deterministic hydrostatic solver.
  * - The output is a reference-column reconstruction with spherical
  *   gravity, not an exact reproduction of the MGS gravity retrieval or a
  *   general Mars atmosphere.
@@ -353,7 +355,7 @@ export function createMgsMars8028D38AHydrostaticColumnInput(
         },
         provenance: nodeProvenance,
         applicability:
-          'One MGS radio-occultation retrieval only; explicit caller-provided composition; 0.25–35.26 km above the local radius-at-surface; not a global Mars climatology.'
+          'One MGS radio-occultation retrieval only; explicit caller-provided composition; 0.25–35.26 km above the local radius-at-surface; not a global Mars climatology. PDS sigma_P/sigma_T are preserved in source data but not propagated by Core.'
       }
     ],
     requestedHeightsM: MGS_MARS_8028D38A_SAMPLES.map((sample) => sample.heightAboveLocalSurfaceM),
