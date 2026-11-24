@@ -532,6 +532,23 @@ export type {
   MarsHo2ModelledRange
 } from './marsAtmosphericChemistry';
 
+// Stage 4.2: Taysum & Palmer (2020) model-tabulated Mars photolysis frequencies.
+export {
+  MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE,
+  MARS_TAYSUM_2020_PHOTOLYSIS_CHANNELS,
+  evaluateMarsPhotolysisAtReferenceNode
+} from './marsPhotochemistryEvidence';
+export type {
+  MarsPhotolysisSpeciesId,
+  MarsPhotolysisStoichiometricTerm,
+  MarsPhotolysisReferenceNode,
+  MarsPhotolysisChannel,
+  MarsPhotolysisEvaluationInput,
+  MarsPhotolysisEvaluation,
+  MarsPhotolysisEvaluationRejection,
+  MarsPhotolysisEvaluationResult
+} from './marsPhotochemistryEvidence';
+
 
 // Stage 4.2: MAVEN IUVS published retrieval evidence and NGIMS L2 profile reader.
 export {
