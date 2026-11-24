@@ -725,7 +725,6 @@ describe('MAVEN upper-atmosphere evidence', () => {
       expectedCsvFileName: fileName
     });
     expect(imported.status, imported.status === 'rejected' ? imported.errors.join('; ') : '').toBe('imported');
-    if (imported.status !== 'imported') throw new Error(imported.errors.join('; '));
     expect(imported).toMatchObject({ forensicOnly: false, warnings: [] });
     expect(imported.provenance).toMatchObject({
       sourceProductId: productId,
@@ -753,7 +752,6 @@ describe('MAVEN upper-atmosphere evidence', () => {
       expectedCsvFileName: fileName
     });
     expect(md5Verified.status).toBe('imported');
-    if (md5Verified.status !== 'imported') throw new Error(md5Verified.errors.join('; '));
     expect(md5Verified.provenance).toMatchObject({
       csvMd5Checksum: md5Checksum,
       csvMd5ChecksumStatus: 'verified_against_detached_label',
