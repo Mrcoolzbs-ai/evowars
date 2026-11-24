@@ -423,13 +423,19 @@ export function createMarsPhotochemicalObservationSnapshot(
     ) {
       errors.push('temperatureObservation must be a measured temperature detection, not a modelled value or bound');
     }
-    const temperatureValue = (temperature as unknown as MarsPhotochemicalTemperatureObservation).temperature;
-    if (temperatureValue.status !== 'known' && temperatureValue.status !== 'estimated') {
-      errors.push('temperatureObservation.temperature must have known/estimated status');
-    } else if (!hasUsableTemperature(temperatureValue)) {
-      errors.push('temperatureObservation.temperature must be a usable temperature in K');
-    } else if (!hasIdentifiedProvenance(temperatureValue.provenance)) {
-      errors.push('temperatureObservation.temperature.provenance must identify the source stored in the reservoir');
+    const temperatureValueRaw =
+      (temperature as unknown as Record<string, unknown>).temperature;
+    if (!isPlainRecord(temperatureValueRaw)) {
+      errors.push('temperatureObservation.temperature must be a ScientificValue record');
+    } else {
+      const temperatureValue = temperatureValueRaw as unknown as ScientificValue;
+      if (temperatureValue.status !== 'known' && temperatureValue.status !== 'estimated') {
+        errors.push('temperatureObservation.temperature must have known/estimated status');
+      } else if (!hasUsableTemperature(temperatureValue)) {
+        errors.push('temperatureObservation.temperature must be a usable temperature in K');
+      } else if (!hasIdentifiedProvenance(temperatureValue.provenance)) {
+        errors.push('temperatureObservation.temperature.provenance must identify the source stored in the reservoir');
+      }
     }
     if (!hasIdentifiedProvenance(temperature.provenance)) {
       errors.push('temperatureObservation.provenance must identify its source');
@@ -446,10 +452,18 @@ export function createMarsPhotochemicalObservationSnapshot(
   if (!isPlainRecord(anchor)) {
     return { status: 'rejected', errors };
   }
+  const temperatureValueRaw: unknown = temperatureObservation.temperature;
+  if (!isPlainRecord(temperatureValueRaw)) {
+    return {
+      status: 'rejected',
+      errors: [...errors, 'temperatureObservation.temperature must be a ScientificValue record']
+    };
+  }
+  const temperatureValue = temperatureValueRaw as unknown as ScientificValue;
   if (
-    (temperatureObservation.temperature.status !== 'known' &&
-      temperatureObservation.temperature.status !== 'estimated') ||
-    !hasUsableTemperature(temperatureObservation.temperature)
+    (temperatureValue.status !== 'known' && temperatureValue.status !== 'estimated') ||
+    !hasUsableTemperature(temperatureValue) ||
+    !hasIdentifiedProvenance(temperatureValue.provenance)
   ) {
     return { status: 'rejected', errors };
   }
