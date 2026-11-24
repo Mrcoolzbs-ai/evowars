@@ -636,6 +636,38 @@ describe('MAVEN upper-atmosphere evidence', () => {
       ...args,
       detachedLabelXml: '<!DOCTYPE x [<!ENTITY e "bad">]><Product_Observational/>'
     })).status).toBe('rejected');
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args,
+      detachedLabelXml: `<Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
+        <Identification_Area><logical_identifier>${productId}</logical_identifier></Identification_Area>
+        <File_Area_Observational>
+          <File><file_name>${fileName}</file_name></File>
+          <File><file_size unit="byte">${byteLength}</file_size></File>
+        </File_Area_Observational>
+      </Product_Observational>`
+    })).status).toBe('rejected');
+
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args,
+      detachedLabelXml: `<Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
+        <Identification_Area><logical_identifier>${productId}</logical_identifier></Identification_Area>
+        <File_Area_Observational>
+          <File><file_name>${fileName}</file_name></File>
+          <file_size unit="byte">${byteLength}</file_size>
+        </File_Area_Observational>
+      </Product_Observational>`
+    })).status).toBe('rejected');
+
+    expect((await importMavenNgimsL3ResampledDensityPds4Product({
+      ...args,
+      detachedLabelXml: `<Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
+        <Identification_Area><logical_identifier>${productId}</logical_identifier></Identification_Area>
+        <File_Area_Observational><File>
+          <file_name>${fileName}</file_name><file_size unit="byte">${byteLength}</file_size>
+          <Nested><file_name>lookalike.csv</file_name></Nested>
+        </File></File_Area_Observational>
+      </Product_Observational>`
+    })).status).toBe('rejected');
   });
 
   it('requires a well-formed PDS4 root and reads namespace-prefixed elements by local name', async () => {
