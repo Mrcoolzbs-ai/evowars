@@ -164,7 +164,7 @@ describe('Mars single-compartment source-backed photochemical network', () => {
   });
 
   it('requires exact complete state, explicit provenance, selected reactions and positive CO2 for termolecular kinetics', () => {
-    const missing = { ...INITIAL } as Partial<MarsPhotochemicalInitialConcentrations>;
+    const missing: Record<string, number> = { ...INITIAL };
     delete missing.HO2;
     expect(() => buildMarsPhotochemicalNetworkProblem(input({
       initialConcentrationsPerCm3: missing as MarsPhotochemicalInitialConcentrations
