@@ -5,7 +5,11 @@ import {
   MAVEN_NGIMS_PDS_ARCHIVE,
   MAVEN_INSITU_KP_PDS_ARCHIVE,
   MAVEN_INSITU_KP_PDS_ARCHIVE_LAYOUT,
+  MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE,
   parseMavenInsituKeyParameterRecord,
+  parseMavenNgimsL3ScaleHeightTemperatureCsvRow,
+  parseMavenNgimsL3ScaleHeightTemperatureCsvText,
+  selectMavenNgimsL3ScaleHeightTemperatureRows,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
   parseMavenNgimsL2NeutralCsvRow,
@@ -70,6 +74,27 @@ function keyParameterRecord(overrides: Record<string, string> = {}): string {
     set(start, length, value);
   }
   return record;
+}
+
+function scaleHeightCsvRow(overrides: Record<string, string> = {}): Record<string, string> {
+  return {
+    t_utc: '2025-06-10T12:00:00Z',
+    t_unix: '1749556800',
+    t_sclk: '123456789',
+    t_tid: '120',
+    tid: '45678',
+    orbit: '31000',
+    exo_alt: '180',
+    mass: '44',
+    species: 'CO2',
+    scale_height: '10.5',
+    scale_height_error: '0.8',
+    temperature: '210',
+    temperature_error: '16',
+    fit_residual: '0.12',
+    quality: 'HI',
+    ...overrides
+  };
 }
 
 describe('MAVEN upper-atmosphere evidence', () => {
@@ -155,6 +180,113 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralTemperature.lpwTemperatureIsNeutralGasTemperature).toBe(false);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.sampling.geometryFromSpice).toBe(true);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/0\.5 or 42\.67 km/);
+  });
+
+  it('records the current NGIMS scale-height index revision as selection metadata only', () => {
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision).toBe('del1-42');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.lastModifiedUtc).toBe('2025-08-14T10:04:00Z');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.reportedFileSize).toBe('3.1 MB');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.htmlCompanion.reportedFileSizeBytes).toBe(62);
+    expect(MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.method).toMatch(/linear fit of altitude versus log density/);
+  });
+
+  it('parses the SIS 1.13 Table A-10 derived scale-height temperature without upgrading it to a local observation', () => {
+    const result = parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
+      scaleHeightCsvRow(),
+      'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-31000_20250610t120000'
+    );
+    expect(result.status).toBe('parsed');
+    if (result.status !== 'parsed') throw new Error(result.errors.join('; '));
+    expect(result.row).toMatchObject({
+      timeUtc: '2025-06-10T12:00:00.000Z',
+      tid: 45678,
+      orbit: 31000,
+      exobaseAltitudeKm: 180,
+      massAmu: 44,
+      species: 'CO2',
+      scaleHeightKm: 10.5,
+      scaleHeightFitErrorKm: 0.8,
+      scaleHeightTemperatureK: 210,
+      temperatureFitErrorK: 16,
+      qualityFlag: 'HI',
+      fitQuality: 'good_near_isothermic_fit',
+      evidenceKind: 'derived_scale_height_temperature',
+      eligibleAsLocalNeutralTemperatureObservation: false,
+      eligibleAsMarsPhotochemicalInitialState: false
+    });
+    expect(result.row.diagnostics.join(' ')).toMatch(/not a direct point measurement/);
+  });
+
+  it('preserves all SIS scale-height quality classes, including H0 do-not-use', () => {
+    const cases = [
+      ['HI', 'good_near_isothermic_fit'],
+      ['HW', 'structured_or_wavy_fit'],
+      ['HA', 'high_altitude_fit'],
+      ['H0', 'bad_or_negative_fit_do_not_use']
+    ] as const;
+    for (const [quality, fitQuality] of cases) {
+      const result = parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
+        scaleHeightCsvRow({ quality }),
+        'maven-ngims-l3-scale-height-test-product'
+      );
+      expect(result.status).toBe('parsed');
+      if (result.status === 'parsed') expect(result.row.fitQuality).toBe(fitQuality);
+    }
+  });
+
+  it('imports the full Table A-10 CSV schema and selects only an exact species/TID/orbit/quality group', () => {
+    const headers = [
+      't_utc', 't_unix', 't_sclk', 't_tid', 'tid', 'orbit', 'exo_alt', 'mass',
+      'species', 'scale_height', 'Scale_height_error', 'temperature',
+      'temperature_error', 'Fit_residual', 'Quality'
+    ];
+    const serialize = (row: Record<string, string>): string =>
+      headers.map((header) => row[header.toLowerCase()] ?? '').join(',');
+    const csv = [
+      headers.join(','),
+      serialize(scaleHeightCsvRow()),
+      serialize(scaleHeightCsvRow({ t_utc: '2025-06-10T12:00:01Z', species: 'O', mass: '16' })),
+      serialize(scaleHeightCsvRow({ t_utc: '2025-06-10T12:00:02Z', quality: 'HW' })),
+      serialize(scaleHeightCsvRow({ t_utc: '2025-06-10T12:00:03Z', tid: '45679' }))
+    ].join('\\r\\n');
+    const imported = parseMavenNgimsL3ScaleHeightTemperatureCsvText(
+      '\\uFEFF' + csv,
+      'maven-ngims-l3-scale-height-test-product'
+    );
+    expect(imported.status).toBe('parsed');
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+    expect(imported.parsedRowCount).toBe(4);
+    expect(imported.goodFitCount).toBe(3);
+    const selected = selectMavenNgimsL3ScaleHeightTemperatureRows(imported, {
+      tid: 45678, orbit: 31000, species: 'CO2', qualityFlag: 'HI'
+    });
+    expect(selected.status).toBe('completed');
+    if (selected.status !== 'completed') throw new Error(selected.errors.join('; '));
+    expect(selected.rows).toHaveLength(1);
+    expect(selected.rows[0].species).toBe('CO2');
+    expect(selectMavenNgimsL3ScaleHeightTemperatureRows(imported, {
+      tid: 45678, orbit: 31000, species: 'O', qualityFlag: 'HI'
+    }).status).toBe('rejected');
+  });
+
+  it('rejects invalid UTC dates, unsupported H mass, negative fit errors and malformed L3 CSV headers', () => {
+    expect(parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
+      scaleHeightCsvRow({ t_utc: '2025-02-30T12:00:00Z' }),
+      'product'
+    ).status).toBe('rejected');
+    expect(parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
+      scaleHeightCsvRow({ species: 'H', mass: '1' }),
+      'product'
+    ).status).toBe('rejected');
+    expect(parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
+      scaleHeightCsvRow({ temperature_error: '-1' }),
+      'product'
+    ).status).toBe('rejected');
+    const incomplete = parseMavenNgimsL3ScaleHeightTemperatureCsvText(
+      't_utc,tid,orbit\\n2025-06-10T12:00:00Z,1,1',
+      'product'
+    );
+    expect(incomplete.status).toBe('invalid_csv');
   });
 
   it('parses one SIS 5.2 fixed-width row and preserves the three neutral detection values', () => {
