@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 // and an independent MD5 oracle for the optional PDS4 fixity field.
 // @ts-expect-error Node built-ins are used only as test oracles in jsdom.
 import { createHash, webcrypto } from 'node:crypto';
+// @ts-expect-error Node file reads are used only for committed public PDS science fixtures.
+import { readFileSync } from 'node:fs';
 import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
@@ -528,7 +530,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(selected.measurements.map((measurement) => measurement.altitudeKm)).toEqual([150, 160, 170]);
     expect(selected.measurements.map((measurement) => measurement.densityBinsPerCm3))
       .toEqual([1.2e7, 8e6, 5e6]);
-    expect(selected.measurements[0].densityBinsPerM3).toBe(1.2e13);
+    expect(selected.measurements[0].reportedDensityBinValue).toBe(1.2e7);
+    expect(selected.measurements[0].densityBinsPerCm3).toBeNull();
+    expect(selected.measurements[0].densityBinsPerM3).toBeNull();
+    expect(selected.measurements[0].densityBinInterpretationStatus)
+      .toBe('unresolved_log_bin_vs_part_cm3_contract');
     expect(selected.measurements[0].reportedSigmaPerCm3).toBeNull();
     expect(selected.measurements.every((measurement) =>
       measurement.densityBasis === 'equal_pressure_altitude_constant_log_density_bins' &&
@@ -543,11 +549,138 @@ describe('MAVEN upper-atmosphere evidence', () => {
       differentFocusMode: 1,
       differentSpecies: 1,
       differentQuality: 1,
+      unrecognizedQualityFlag: 0,
       unavailableOrNonPositive: 2,
       outsideUtcWindow: 1
     });
   });
 
+
+  it('imports the frozen real TID 14282 archive as forensic-only and preserves raw density bins and quality flags', async () => {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
+    const csvText = readFileSync(new URL('../../Data/mavenNgimsArchive/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv', import.meta.url), 'utf8');
+    const detachedLabelXml = readFileSync(new URL('../../Data/mavenNgimsArchive/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml', import.meta.url), 'utf8');
+    const productId = 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406';
+    const fileName = 'mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv';
+
+    const strict = await importMavenNgimsL3ResampledDensityPds4Product({
+      csvText, detachedLabelXml, expectedProductId: productId, expectedCsvFileName: fileName
+    });
+    expect(strict.status).toBe('rejected');
+    if (strict.status === 'rejected') {
+      expect(strict.errors.join(' ')).toMatch(/forensic opt-in is required/);
+    }
+
+    const forensic = await importMavenNgimsL3ResampledDensityPds4Product({
+      csvText,
+      detachedLabelXml,
+      expectedProductId: productId,
+      expectedCsvFileName: fileName,
+      allowLabelSizeMismatchForensicAnalysis: true
+    });
+    expect(forensic.status).toBe('imported_forensic_only');
+    if (forensic.status !== 'imported_forensic_only') {
+      throw new Error(forensic.status === 'rejected' ? forensic.errors.join('; ') : 'unexpected non-forensic result');
+    }
+    expect(forensic).toMatchObject({ forensicOnly: true });
+    expect(forensic.provenance).toMatchObject({
+      csvByteLength: 23658,
+      labelDeclaredFileSizeBytes: 23743,
+      csvSizeConsistencyStatus: 'mismatch_explicitly_accepted_for_forensic_analysis',
+      labelHeaderObjectLengthBytes: 85,
+      labelTableOffsetBytes: 85,
+      labelTableObjectLengthBytes: 23658,
+      labelFileLayoutDiagnosis: 'possible_header_double_count_in_label',
+      csvMd5Checksum: null,
+      csvMd5ChecksumStatus: 'not_present_in_detached_label',
+      csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
+      detachedLabelAuthenticity: 'not_independently_authenticated'
+    });
+    expect(forensic.warnings.join(' ')).toMatch(/file_size is inconsistent/);
+
+    const imported = forensic.imported;
+    expect(imported.parsedRowCount).toBe(208);
+    expect(imported.rejectedRowCount).toBe(0);
+    expect(imported.duplicatedUtcHeader).toBe(false);
+    expect(imported.evidenceStatusCounts).toEqual({
+      verified_resampled_value: 44,
+      uncertain_resampled_value: 110,
+      unreliable: 0,
+      not_available: 0,
+      non_positive: 0,
+      unclassified_quality: 54
+    });
+
+    const parsedRows = imported.rows.flatMap((entry) =>
+      entry.validation.status === 'parsed' ? [entry.validation.row] : []
+    );
+    expect(parsedRows.every((entry) => entry.timeUtc.endsWith('Z'))).toBe(true);
+    expect(parsedRows[0]).toMatchObject({
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      densityBinsPerCm3: null,
+      densityBinsPerM3: null,
+      densityBinInterpretationStatus: 'unresolved_log_bin_vs_part_cm3_contract',
+      eligibleAsSchedulerInitialAbundance: false,
+      eligibleAsMarsPhotochemicalInitialState: false
+    });
+
+    const co2 = selectMavenNgimsL3ResampledDensityPds4Profile(forensic, {
+      sourceProductId: productId,
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'CO2',
+      quality: 'uncertain',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(co2.status).toBe('completed');
+    if (co2.status !== 'completed') throw new Error(co2.errors.join('; '));
+    expect(co2.measurements).toHaveLength(69);
+    expect(co2.forensicOnly).toBe(true);
+    expect(co2.csvSizeConsistencyStatus).toBe('mismatch_explicitly_accepted_for_forensic_analysis');
+    expect(co2.measurements.every((entry) =>
+      entry.qualityFlag === 'IU' &&
+      entry.evidenceStatus === 'uncertain_resampled_value' &&
+      entry.reportedDensityBinValue !== null &&
+      entry.densityBinsPerCm3 === null &&
+      entry.densityBinsPerM3 === null
+    )).toBe(true);
+    expect(co2.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+
+    const argon = selectMavenNgimsL3ResampledDensityPds4Profile(forensic, {
+      sourceProductId: productId,
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'Ar',
+      quality: 'verified',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(argon.status).toBe('completed');
+    if (argon.status !== 'completed') throw new Error(argon.errors.join('; '));
+    expect(argon.measurements).toHaveLength(44);
+    expect(argon.measurements.every((entry) => entry.qualityFlag === 'IV')).toBe(true);
+
+    const n2 = selectMavenNgimsL3ResampledDensityProfile(imported, {
+      sourceProductId: productId,
+      tid: 14282,
+      orbit: 391,
+      focusMode: 'csn',
+      species: 'N2',
+      quality: 'verified',
+      timeStartUtc: '2014-12-11T15:45:25Z',
+      timeStopUtc: '2014-12-11T17:29:43Z'
+    });
+    expect(n2.status).toBe('rejected');
+    if (n2.status === 'rejected') {
+      expect(n2.excludedRows?.unrecognizedQualityFlag).toBe(54);
+    }
+    expect(parsedRows.filter((entry) => entry.qualityFlagRaw === 'I0')).toHaveLength(54);
+  });
 
   it('binds res-den CSV bytes to a detached PDS4 label and carries SHA-256 into the selected profile', async () => {
     // jsdom omits SubtleCrypto; use Node's real WebCrypto implementation for this test.
@@ -589,7 +722,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
     });
     expect(imported.status, imported.status === 'rejected' ? imported.errors.join('; ') : '').toBe('imported');
     if (imported.status !== 'imported') throw new Error(imported.errors.join('; '));
+    expect(imported).toMatchObject({ forensicOnly: false, warnings: [] });
     expect(imported.provenance).toMatchObject({
+      csvSizeConsistencyStatus: 'matches_detached_label_file_size',
+      labelFileLayoutDiagnosis: 'not_diagnosable'
+    });
       sourceProductId: productId,
       csvFileName: fileName,
       csvByteLength: byteLength,
