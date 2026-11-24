@@ -366,3 +366,8 @@ npm run build
 - [Инженерный пилот Rust/WASM](docs/rust/RUST_WASM_PILOT.md) — статус экспериментального переноса вычислений.
 
 При расхождении краткого описания с кодом и тестами приоритет имеют фактические контракты исходников и тестов. При расхождении с roadmap статус реализации должен быть уточнён, а не выведен из названия или наличия модуля.
+
+
+### 6.12 MAVEN NGIMS archive coverage and selector metadata
+
+The current PDS NGIMS landing page states that the data archive currently extends through 2025-02-15 (Ls 44.2, MY 38, ongoing). The annual 2025 archive listing reports 308 MB of abundance products. The current Single-Species selector is `MAVEN_NGIMS_Single-Species_del1-43.csv`, listed at 6.6 MB with file modification date 2025-12-19; this is a selector revision timestamp, not the last observation date. Its listed `.htm` companion is only 62 bytes and is not a readable HTML table. The actual selector CSV content and the selected per-orbit products remain unimported; exact TID/orbit observations must not be inferred from filenames or timestamps.
