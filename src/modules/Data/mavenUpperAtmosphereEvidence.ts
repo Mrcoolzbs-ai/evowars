@@ -1480,7 +1480,7 @@ function readPds4DetachedLabelElement(
   elementName: string
 ): Pds4DetachedLabelElement {
   const expression = new RegExp(
-    '<(?:(\\\\w+):)?' + elementName + '\\\\b([^>]*)>([^<]*)<\\\\/(?:\\\\1:)?' + elementName + '\\\\s*>',
+    '<(?:(\\w+):)?' + elementName + '\\b([^>]*)>([^<]*)<\\/(?:\\1:)?' + elementName + '\\s*>',
     'gi'
   );
   const matches: { value: string; attributes: string }[] = [];
