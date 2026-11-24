@@ -3,7 +3,7 @@
 > **Статус документа:** реконструкция требований и фактических контрактов по исходному коду, тестам, истории изменений и инженерным документам.
 >
 > **Срез:** 25 ноября 2026 года.  
-> **Кодовый срез:** ветка `stage-3-planetary-physics`, последний code commit для этого среза `96d1567eb14adcdddbfc348b6ec3144fbb2671ca`; тестовый и документирующий коммиты — `74d077f9896639dfdeec1335d32360a378145de0` и `00dfc1761cbb799456cf7977574b7a6332242288`.  
+> **Кодовый срез:** ветка `stage-3-planetary-physics`, последние code/test commits для этого среза — `3abd6584cbe7195d7ba5d789e83ab94ea194243a` и `6b8d64dfc8a51237c68a0d90ab2aa6cce022a2ca`; предыдущая XML parser revision: `96d1567eb14adcdddbfc348b6ec3144fbb2671ca`.  
 > **Интеграционный статус:** кодовые изменения этой ветки остаются в открытом PR [#1](https://github.com/Mrcoolzbs-ai/evowars/pull/1) в `main`; этот документ восстановлен отдельно в `main` и сам по себе не означает, что функции этапа 3 уже вошли в основную ветку.
 >
 > Документ различает **реализовано**, **частично реализовано** и **планируется**. Наличие типа, интерфейса или проектного документа само по себе не означает, что соответствующая физическая модель работает в пользовательском сценарии.
@@ -307,7 +307,7 @@ UI отображает результат и объяснения, но не я
 | Физика тела, атмосферы, орбиты, энергетики, геологии и фазовый скрининг | PR #1 / Stage 3 | Частично реализовано | Орбитальные диапазоны модельные; геология преимущественно качественная; климатической модели нет |
 | MGS Mars `8028D38A.TPS` и гидростатический Core-адаптер | PR #1 / Stage 3 | Reference-адаптер и first-order 1σ postprocessor | Один retrieval-профиль; состав задаётся явно; диагональное приближение ковариации; неопределённости состава/гравитации/тела не рассчитаны; нет автоматического подключения к Scheduler-химии |
 | SAM, ACS HO2 и OpenMARS | PR #1 / Stage 3 | Evidence records и проверки coverage | SAM — неполный near-surface состав; ACS — upper limits, не detections; OpenMARS — модельные оценки; источники не образуют общий синхронный профиль |
-| MAVEN IUVS/NGIMS | PR #1 / Stage 3 | IUVS metadata/reference layer, NGIMS L2/L3 readers/selectors и PDS4 detached-label ingestion gate | Численные IUVS NO density не оцифрованы из рисунка; TID 14282 L3 res-den CSV/XML ещё не импортированы; PDS4 label проверяется DOMParser/namespace/URN/file/size, SHA-256 вычисляется без независимого archive checksum; no automatic Scheduler initialization |
+| MAVEN IUVS/NGIMS | PR #1 / Stage 3 | IUVS metadata/reference layer, NGIMS L2/L3 readers/selectors и PDS4 detached-label ingestion gate | Численные IUVS NO density не оцифрованы из рисунка; TID 14282 L3 res-den CSV/XML ещё не импортированы; PDS4 label проверяется DOMParser/namespace, root и scoped Identification_Area/File_Area/File, URN/filename/size; SHA-256 вычисляется без независимого archive checksum; no automatic Scheduler initialization |
 | Типизированные научные величины, provenance, резервуары, потоки, журналы и состояние мира | PR #1 / Stage 3 | Инфраструктура реализована | Наличие контрактов и инвариантов не означает наличие решателя для каждого физического процесса |
 | Часы, Scheduler, события, splitting и аудит | PR #1 / Stage 3 | Инфраструктура реализована | Полная автоматизация всех физических процессов не завершена |
 | Термодинамический каталог и NASA-7 функции | PR #1 / Stage 3 | Частично реализовано | Покрытие веществ, фаз и диапазонов ограничено |
