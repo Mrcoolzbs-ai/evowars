@@ -37,6 +37,32 @@ describe('Mars Taysum & Palmer 2020 gas-phase kinetics evidence', () => {
     }
   });
 
+  it('reproduces all 24 bimolecular Table B1 rates at the independently tabulated 298 K', () => {
+    const bimolecularRows = MARS_TAYSUM_2020_GAS_PHASE_REACTIONS.filter(
+      (reaction) =>
+        reaction.thirdBody === null &&
+        reaction.rateExpression.kind === 'arrhenius'
+    );
+    expect(bimolecularRows).toHaveLength(24);
+
+    for (const reaction of bimolecularRows) {
+      if (reaction.rateExpression.kind !== 'arrhenius') {
+        throw new Error('expected an Arrhenius expression for ' + reaction.id);
+      }
+      if (reaction.publishedRateAt298 === undefined) {
+        throw new Error('missing independent 298 K rate for ' + reaction.id);
+      }
+      const expression = reaction.rateExpression;
+      const calculated =
+        expression.preExponentialA *
+        Math.pow(298 / expression.temperatureScaleK, expression.temperatureExponentN) *
+        Math.exp(expression.exponentialTemperatureK / 298);
+      const relativeDifference =
+        Math.abs(calculated - reaction.publishedRateAt298) / reaction.publishedRateAt298;
+      expect(relativeDifference, reaction.id).toBeLessThanOrEqual(0.01);
+    }
+  });
+
   it('evaluates a bimolecular Arrhenius law and the concentration-based event rate', () => {
     const result = evaluateMarsGasPhaseReaction({
       reactionId: 'a3',
