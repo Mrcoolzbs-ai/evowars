@@ -1156,3 +1156,19 @@
 > для отсутствующего/совпадающего/несовпадающего/некорректного MD5.
 > Этап 4.2 остаётся OPEN / NOT_READY: данные CSV/XML пока не загружены
 > в репозиторий, а профиль не допускается как Scheduler initial state.
+
+
+> **Верификация PDS4 fixity gate (25.11.2026, CI #1020):** успешный
+> GitHub Actions run `45509764819` на commit
+> `7b5da82e0158d1af822bb2d73ca3d355041665b1`.
+> TypeScript check, все тесты, lint и production build — success.
+> Vitest: 98 файлов passed, 2 skipped; 3327 тестов passed, 53 skipped
+> (3380 всего). В наборе MAVEN — 35 тестов, включая PDS4 импорт:
+> отсутствующий MD5, совпадающий MD5, mismatch и некорректное значение.
+> Один regression фикстуры (XML declaration после ведущего whitespace)
+> исправлен: тестовая XML-метка теперь well-formed. CI проверил код и
+> тесты на commit `7b5da82`; последующий commit `5545e45` меняет только
+> комментарий CI workflow. Статус этапа 4.2 остаётся **OPEN / NOT_READY**:
+> реальный CSV/XML payload TID 14282 не импортирован и полный синхронный
+> химический профиль/интеграция Scheduler не получены.
+> Run: https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45509764819.
