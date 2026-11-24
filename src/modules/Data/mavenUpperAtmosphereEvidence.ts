@@ -1270,6 +1270,11 @@ export function parseMavenNgimsL3ResampledDensityCsvRow(
       numeric[field] = null;
       continue;
     }
+    if (raw === '') {
+      errors.push(field + ' is a required numeric field and cannot be blank');
+      numeric[field] = null;
+      continue;
+    }
     const value = Number(raw);
     if (!Number.isFinite(value)) {
       errors.push(field + ' must be a finite numeric value' +
