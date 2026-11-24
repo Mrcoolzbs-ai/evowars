@@ -248,9 +248,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       serialize(scaleHeightCsvRow({ t_utc: '2025-06-10T12:00:01Z', species: 'O', mass: '16' })),
       serialize(scaleHeightCsvRow({ t_utc: '2025-06-10T12:00:02Z', quality: 'HW' })),
       serialize(scaleHeightCsvRow({ t_utc: '2025-06-10T12:00:03Z', tid: '45679' }))
-    ].join('\\r\\n');
+    ].join('\r\n');
     const imported = parseMavenNgimsL3ScaleHeightTemperatureCsvText(
-      '\\uFEFF' + csv,
+      '\uFEFF' + csv,
       'maven-ngims-l3-scale-height-test-product'
     );
     expect(imported.status).toBe('parsed');
@@ -283,7 +283,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       'product'
     ).status).toBe('rejected');
     const incomplete = parseMavenNgimsL3ScaleHeightTemperatureCsvText(
-      't_utc,tid,orbit\\n2025-06-10T12:00:00Z,1,1',
+      't_utc,tid,orbit\n2025-06-10T12:00:00Z,1,1',
       'product'
     );
     expect(incomplete.status).toBe('invalid_csv');
