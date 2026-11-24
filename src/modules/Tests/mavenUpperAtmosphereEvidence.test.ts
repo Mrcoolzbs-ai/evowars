@@ -57,7 +57,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.neutralSpeciesOfInterest).toContain('NO');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveCoverage.latestAnnualCollectionYearListed).toBe(2025);
     expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveCoverage.annual2025AbundancesSize).toBe('308 MB');
-    expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveCoverage.exactLatestMeasurementUtc).toBeNull();
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveCoverage.exactLatestMeasurementUtc).toBe('2025-02-15');
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveCoverage.latestSolarLongitudeDeg).toBe(44.2);
+    expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveCoverage.latestMartianYear).toBe(38);
     expect(MAVEN_NGIMS_PDS_ARCHIVE.archiveIndexFiles[0].fileName).toBe('MAVEN_NGIMS_l2_del1-35.csv');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.selectionIndexFiles[0].fileName).toBe('MAVEN_NGIMS_Single-Species_del1-43.csv');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.selectionIndexFiles[0].revision).toBe('del1-43');
