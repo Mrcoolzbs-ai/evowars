@@ -277,7 +277,7 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         sourceName: 'MAVEN NGIMS TID 14282 L3 resampled-density product',
         sourceId: MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct.productId,
         classification: 'PDS4 L3 res-den product, SIS Rev. 1.13 Table A-9, same orbit/TID as L2 csn-abund',
-        reasonNotEligibleAsInitialPointValue: 'The 23 KB CSV payload is present in the PDS4 directory but is not imported. Table A-9 density_bins are interpolated to equal-pressure altitude and averaged on constant log-density bins (0.2 steps), lack per-row precision and SZA/latitude/longitude, and are not raw L2 point measurements. Species coverage for this event is unknown until the actual CSV is parsed.'
+        reasonNotEligibleAsInitialPointValue: 'The 23 KB CSV payload is present in the PDS4 directory but is not imported in this repository. The ingestion API now requires the detached PDS4 label logical_identifier, file_name and byte file_size to match the expected archive identity and exact CSV UTF-8 byte length, and records a SHA-256 digest; the label is not independently authenticated and the digest is not compared with a signed archive checksum. Table A-9 density_bins are interpolated to equal-pressure altitude and averaged on constant log-density bins (0.2 steps), lack per-row precision and SZA/latitude/longitude, and are not raw L2 point measurements. Species coverage for this event is unknown until the actual CSV is parsed.'
       },
       {
         sourceName: MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.sourceName,
