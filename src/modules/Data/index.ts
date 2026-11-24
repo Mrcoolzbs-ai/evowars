@@ -549,22 +549,6 @@ export type {
   MarsPhotolysisEvaluationResult
 } from './marsPhotochemistryEvidence';
 
-// Stage 4.2: Taysum & Palmer (2020) B1 source-backed inorganic bimolecular rates.
-export {
-  MARS_TAYSUM_2020_INORGANIC_BIMOLECULAR_REACTIONS,
-  MARS_TAYSUM_2020_INORGANIC_EXCLUDED_REACTIONS,
-  evaluateMarsInorganicBimolecularReaction
-} from './marsInorganicGasPhaseEvidence';
-export type {
-  MarsInorganicSpeciesId,
-  MarsInorganicStoichiometricTerm,
-  MarsInorganicArrheniusRate,
-  MarsInorganicBimolecularReaction,
-  MarsInorganicReactionEvaluationInput,
-  MarsInorganicReactionEvaluation,
-  MarsInorganicReactionEvaluationRejection,
-  MarsInorganicReactionEvaluationResult
-} from './marsInorganicGasPhaseEvidence';
 
 
 // Stage 4.2: source-backed gas-phase Mars photochemistry rates (Taysum & Palmer, 2020).
