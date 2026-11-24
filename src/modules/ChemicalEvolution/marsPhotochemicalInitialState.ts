@@ -35,7 +35,8 @@ import {
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS,
   MAVEN_NGIMS_PDS_ARCHIVE,
   MAVEN_INSITU_KP_PDS_ARCHIVE,
-  MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE
+  MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE,
+  MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE
 } from '../Data/mavenUpperAtmosphereEvidence';
 import { MARS_TAYSUM_2020_PHOTOLYSIS_PROVENANCE } from '../Data/marsPhotochemistryEvidence';
 import type { DataProvenance, ScientificValue } from '../Core/scientificValue';
@@ -192,14 +193,20 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
         MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS.evidenceKind +
         ' at ' + MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS.altitudeKm +
         ' km, not a direct number-density observation at 0.5 or 42.67 km.',
-      'MAVEN NGIMS readers and selection contracts exist, but no selected L2 measurement rows/orbit snapshot are frozen in Data. NGIMS also has a 2–150 Da mass range; atomic H (1 Da) is outside its coverage.',
+      'A concrete MAVEN NGIMS L2/L3 index cross-link is now identified for TID ' +
+        MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.tid + ' (' +
+        MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.timeStartUtc + ' to ' +
+        MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.timeStopUtc +
+        '): the PDS4 L2 csn-abund product and L3 res-sht index share the same TID and exact event window. Their numerical CSV payloads are not imported, so this confirms event identity only, not measured concentrations or fit temperature.',
+      'The selected PDS4 L2 product is closed-source neutral abundance (Ar, CO2, He, N2), not a full open-source neutral suite; only CO2 overlaps the 16-species network. NGIMS also has a 2–150 Da mass range; atomic H (1 Da) is outside its coverage.',
       'The PDS MAVEN Insitu Key Parameters bundle v' + MAVEN_INSITU_KP_PDS_ARCHIVE.bundle.version +
         ' covers ' + MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.start + ' through ' +
         MAVEN_INSITU_KP_PDS_ARCHIVE.coverageUtc.stop + ', but its inspected NGIMS key-parameter table directly overlaps only ' +
         MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount + '/16 network species (O, CO, CO2). The -1 precision sentinel means upper limits; the PDS Key Parameter SIS Rev. 5.2 says the NO density/precision/quality columns were removed by NGIMS and all values set to NaN. A product-label field definition is not a detection, and the actual .tab rows are not imported.',
       'The inspected MAVEN key-parameter schema has LPW electron temperature rather than neutral-gas temperature; the separate NGIMS scale-height/temperature selection index is ' +
         MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision +
-        ', but no selected TID or numerical temperature product is imported/co-registered. Its Table A-10 temperature is computed from a species-specific log-density scale-height fit over the exobase-to-homopause interval, with exo_alt rather than a local sample altitude; it is not a pointwise neutral-temperature detection. MAVEN/NGIMS is an upper-atmosphere orbital measurement and cannot supply the Taysum Table B2 nodes at 0.5 or 42.67 km.',
+        ', and TID ' + MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.tid +
+        ' is index-linked, but its numerical L3 CSV temperature row is not imported. Table A-10 temperature is computed from a species-specific log-density scale-height fit over the exobase-to-homopause interval, with exo_alt rather than a local sample altitude; it is not a pointwise neutral-temperature detection. MAVEN/NGIMS is an upper-atmosphere orbital measurement and cannot supply the Taysum Table B2 nodes at 0.5 or 42.67 km.',
       'Taysum Table B2 requires SZA=0 deg, Ls=251 deg and exact altitude nodes 0.5/42.67 km. Its compact table does not publish all TUV inputs (temperature, O3 and total columns, Sun–Mars distance, opacity/dust), so the matching context alone does not close radiation-forcing uncertainty.',
       'The co-registration policy must be justified per imported dataset. Tolerances cannot be widened to disguise a mismatch between instruments, seasons, altitudes or retrieval methods.'
     ],
@@ -249,8 +256,15 @@ export function assessMarsPhotochemicalEvidenceReadiness(): MarsPhotochemicalEvi
       {
         sourceName: 'MAVEN NGIMS scale heights and temperatures product-selection index',
         sourceId: MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.url,
-        classification: 'index for a separate derived temperature/scale-height product',
-        reasonNotEligibleAsInitialPointValue: 'This is selection metadata only; no TID-specific product or numerical neutral-temperature profile is imported, and temporal/altitude co-registration with a selected Key Parameters row has not been demonstrated.'
+        classification: 'current del1-42 per-orbit selection index; full HTML index searchable, CSV payload not imported',
+        reasonNotEligibleAsInitialPointValue: 'TID 14282 is cross-linked to an L2 product with the same exact event window, but the index row is not a numerical temperature measurement and its L3 CSV payload is not imported.'
+      },
+      {
+        sourceName: 'MAVEN NGIMS selected TID 14282 cross-index candidate',
+        sourceId: MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l2AbundanceProduct.productId +
+          ' | ' + MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.scaleHeightIndex.productId,
+        classification: 'exact TID + identical UTC observation-window cross-link between PDS4 L2 csn-abund and L3 res-sht index',
+        reasonNotEligibleAsInitialPointValue: 'The cross-link proves both archive products refer to one event, not that numeric CSV rows were imported or quality-validated. Closed-source csn abundance covers Ar, CO2, He and N2 only; L3 temperature is derived over a scale-height fit interval, not local.'
       },
       {
         sourceName: MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE.sourceName,
