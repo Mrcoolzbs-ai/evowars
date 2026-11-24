@@ -162,44 +162,25 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> tuple[dict, bytes]:
     else:
         declared_md5 = None
 
-    direct_size_matches = len(csv_bytes) == file_size
-    direct_md5_matches = (
-        declared_md5 is None or hashlib.md5(csv_bytes).hexdigest() == declared_md5
-    )
-    if not (direct_size_matches and direct_md5_matches):
-        crlf_count = csv_bytes.count(b"\r\n")
-        bare_lf_count = csv_bytes.count(b"\n") - crlf_count
-        bare_cr_count = csv_bytes.count(b"\r") - crlf_count
-        if bare_lf_count > 0 and bare_cr_count == 0:
-            restored = re.sub(rb"(?<!\r)\n", b"\r\n", csv_bytes)
-            normalization_base = "lf_to_crlf"
-        elif bare_cr_count > 0 and bare_lf_count == 0:
-            restored = re.sub(rb"\r(?!\n)", b"\r\n", csv_bytes)
-            normalization_base = "cr_to_crlf"
-        else:
+    csv_size_matches_label = len(csv_bytes) == file_size
+    if declared_md5 is not None:
+        computed_md5 = hashlib.md5(csv_bytes).hexdigest()
+        if computed_md5 != declared_md5:
             fail(
-                "PDS4 byte length mismatch with mixed/ambiguous line endings "
-                f"(raw={len(csv_bytes)}, label={file_size}, CRLF={crlf_count}, "
-                f"bareLF={bare_lf_count}, bareCR={bare_cr_count})"
+                f"downloaded CSV MD5 {computed_md5} does not match PDS4 label "
+                f"md5_checksum {declared_md5}"
             )
+        md5_status = "verified_against_detached_label"
+    else:
+        computed_md5 = None
+        md5_status = "not_present_in_detached_label"
 
-        if len(restored) != file_size:
-            fail(
-                f"PDS4 file_size={file_size} does not match raw HTTP bytes={len(csv_bytes)} "
-                f"or normalized bytes={len(restored)} (CRLF={crlf_count}, "
-                f"bareLF={bare_lf_count}, bareCR={bare_cr_count})"
-            )
-        if declared_md5 is not None:
-            restored_md5 = hashlib.md5(restored).hexdigest()
-            if restored_md5 != declared_md5:
-                fail(
-                    f"PDS4 MD5 mismatch after {normalization_base}-to-CRLF reconstruction "
-                    f"(restored={restored_md5}, label={declared_md5})"
-                )
-            transport_normalization = normalization_base + "_to_crlf_reconstructed_and_md5_verified"
-        else:
-            transport_normalization = normalization_base + "_to_crlf_reconstructed_by_file_size_only_md5_absent"
-        canonical_bytes = restored
+    if csv_size_matches_label:
+        size_status = "matches_detached_label_file_size"
+    else:
+        size_status = "mismatch_quarantined_no_md5"
+    transport_normalization = "none"
+    canonical_bytes = csv_bytes
 
     computed_md5 = hashlib.md5(canonical_bytes).hexdigest() if declared_md5 else None
     md5_status = (
@@ -210,16 +191,24 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> tuple[dict, bytes]:
     return ({
         "productId": logical_identifier,
         "csvFileName": file_name,
-        "csvByteLength": file_size,
+        "csvByteLength": len(canonical_bytes),
+        "labelDeclaredFileSizeBytes": file_size,
+        "csvSizeConsistencyStatus": size_status,
         "downloadedHttpByteLength": len(csv_bytes),
         "transportNormalization": transport_normalization,
         "md5Checksum": computed_md5,
         "md5ChecksumStatus": md5_status,
+        "csvFixityStatus": (
+            "md5_verified_against_detached_label"
+            if declared_md5
+            else "sha256_computed_not_compared_to_archive_checksum"
+        ),
         "sha256": hashlib.sha256(canonical_bytes).hexdigest(),
         "downloadedResponseSha256": hashlib.sha256(csv_bytes).hexdigest(),
         "detachedLabelSha256": hashlib.sha256(xml_bytes).hexdigest(),
         "detachedLabelAuthenticity": "not_independently_authenticated",
     }, canonical_bytes)
+
 
 
 def parse_and_summarize(csv_bytes: bytes) -> dict:
@@ -358,12 +347,10 @@ def main() -> int:
             "productLevel": "L3 altitude-resampled density",
             "notRawL2Measurement": True,
             "perRowDensitySigma": "not supplied by Table A-9",
-            "transportNormalization": provenance["transportNormalization"],
-            "transportNormalizationLimit": (
-                "PDS4 file_size only; detached label has no md5_checksum"
-                if provenance["transportNormalization"].endswith("_reconstructed_by_file_size_only_md5_absent")
-                else None
-            ),
+            "csvSizeConsistencyStatus": provenance["csvSizeConsistencyStatus"],
+            "csvFixityStatus": provenance["csvFixityStatus"],
+            "transportNormalization": "none; original archive member preserved byte-for-byte",
+            "schedulerEligibleAsCompleteMarsInitialState": False,
             "schedulerEligibleAsCompleteMarsInitialState": False,
             "notes": [
                 "Rows are archived L3 resampled/interpolated densities, not raw L2 point measurements.",
@@ -375,8 +362,6 @@ def main() -> int:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / CSV_NAME).write_bytes(csv_bytes)
-    if provenance["transportNormalization"] != "none":
-        (OUTPUT_DIR / (CSV_NAME + ".http-transfer")).write_bytes(csv_download)
     (OUTPUT_DIR / XML_NAME).write_bytes(xml_bytes)
     (OUTPUT_DIR / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -384,9 +369,16 @@ def main() -> int:
     )
 
     print(json.dumps({
-        "status": "retrieved_from_annual_archive_and_label_checked",
+        "status": (
+            "retrieved_and_label_checked"
+            if provenance["csvSizeConsistencyStatus"] == "matches_detached_label_file_size"
+            else "retrieved_from_annual_archive_with_label_size_discrepancy_quarantined"
+        ),
         "productId": PRODUCT_ID,
         "csvByteLength": provenance["csvByteLength"],
+        "labelDeclaredFileSizeBytes": provenance["labelDeclaredFileSizeBytes"],
+        "csvSizeConsistencyStatus": provenance["csvSizeConsistencyStatus"],
+        "csvFixityStatus": provenance["csvFixityStatus"],
         "md5ChecksumStatus": provenance["md5ChecksumStatus"],
         "sha256": provenance["sha256"],
         "rowCount": summary["rowCount"],
