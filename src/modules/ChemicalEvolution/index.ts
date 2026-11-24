@@ -75,6 +75,10 @@ import {
   createMarsPhotochemicalProcessRegistry,
   runMarsPhotochemicalSchedulerStep
 } from './marsPhotochemicalScheduler';
+import {
+  assessMarsPhotochemicalEvidenceReadiness,
+  createMarsPhotochemicalObservationSnapshot
+} from './marsPhotochemicalInitialState';
 
 // Stage 4.5.5 (первый реализационный срез, 2026-11-10): концентрационный
 // кинетический механизм ограниченного состава (записи каталога №89/№106,
@@ -155,6 +159,7 @@ export * from './kineticWorldAdapter';
 // Stage 4.2: explicit source-backed Mars single-compartment photochemical ODE step.
 export * from './marsPhotochemicalNetwork';
 export * from './marsPhotochemicalScheduler';
+export * from './marsPhotochemicalInitialState';
 
 // ============================================
 // 1. ЭЛЕМЕНТНЫЙ БАЛАНС РЕАКЦИЙ
@@ -3023,5 +3028,7 @@ export default {
   KINETIC_EXPERIMENT_SCHEMA_VERSION,
   KINETIC_EXPERIMENT_SPECIES,
   createMarsPhotochemicalProcessRegistry,
-  runMarsPhotochemicalSchedulerStep
+  runMarsPhotochemicalSchedulerStep,
+  assessMarsPhotochemicalEvidenceReadiness,
+  createMarsPhotochemicalObservationSnapshot
 };
