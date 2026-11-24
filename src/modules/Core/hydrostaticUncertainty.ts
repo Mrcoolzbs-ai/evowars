@@ -20,11 +20,10 @@
 // composition, gravity coefficients, or kinetic rates.
 
 import type { DataProvenance } from './scientificValue';
-import {
-  temperatureAtGeometricHeight,
-  type HydrostaticColumnCompleted,
-  type HydrostaticColumnInput,
-  type HydrostaticProfilePoint
+import type {
+  HydrostaticColumnCompleted,
+  HydrostaticColumnInput,
+  HydrostaticProfilePoint
 } from './hydrostaticAtmosphere';
 import { G } from '../Units';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from './thermoFunctions';
