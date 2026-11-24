@@ -28,11 +28,26 @@ import type {
 import { G } from '../Units';
 import { UNIVERSAL_GAS_CONSTANT_J_PER_MOL_K } from './thermoFunctions';
 
+export interface HydrostaticPhysicalParameterUncertainty {
+  /** Optional one-sigma uncertainty of body mass, kg. */
+  readonly bodyMassSigmaKg?: number;
+  /** Optional one-sigma uncertainty of reference radius, m. */
+  readonly referenceRadiusSigmaM?: number;
+  /** Optional one-sigma uncertainty of mixture mean molar mass, kg/mol. */
+  readonly meanMolarMassSigmaKgPerMol?: number;
+  /** Explicit approximation; correlations are never inferred. */
+  readonly covariance: 'independent_diagonal';
+  /** Source/method for the supplied uncertainty parameters. */
+  readonly provenance: DataProvenance;
+}
+
 export interface MeasuredNodeUncertaintyInput {
   /** One-standard-deviation uncertainty of the pressure boundary, Pa. */
   readonly surfacePressureSigmaPa: number;
   /** One-standard-deviation temperature uncertainty for every measured node, K. */
   readonly temperatureNodeSigmaK: readonly number[];
+  /** Optional sourced uncertainties of physical column parameters. */
+  readonly physicalParameters?: HydrostaticPhysicalParameterUncertainty;
 }
 
 export interface HydrostaticPointUncertainty {
@@ -176,6 +191,54 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
 
   const pressurePa = input.surface?.surfacePressurePa;
   const pressureSigmaPa = uncertainty.surfacePressureSigmaPa;
+  const physicalParameters = uncertainty.physicalParameters;
+  if (physicalParameters !== undefined) {
+    const suppliedSigmas = [
+      physicalParameters.bodyMassSigmaKg,
+      physicalParameters.referenceRadiusSigmaM,
+      physicalParameters.meanMolarMassSigmaKgPerMol
+    ];
+    if (suppliedSigmas.every((value) => value === undefined)) {
+      errors.push('physicalParameters: требуется хотя бы одна явно заданная стандартная неопределённость');
+    }
+    if (physicalParameters.covariance !== 'independent_diagonal') {
+      errors.push('physicalParameters.covariance: требуется явное independent_diagonal');
+    }
+    const source = physicalParameters.provenance;
+    const hasSourceIdentity =
+      (typeof source?.sourceName === 'string' && source.sourceName.trim().length > 0) ||
+      (typeof source?.sourceId === 'string' && source.sourceId.trim().length > 0) ||
+      (typeof source?.datasetId === 'string' && source.datasetId.trim().length > 0) ||
+      (typeof source?.reference === 'string' && source.reference.trim().length > 0);
+    if (!hasSourceIdentity) {
+      errors.push('physicalParameters.provenance: требуется sourceName, sourceId, datasetId или reference');
+    }
+    const checkSigma = (value: number | undefined, name: string): void => {
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        errors.push(name + ': требуется конечное неотрицательное значение');
+      }
+    };
+    checkSigma(physicalParameters.bodyMassSigmaKg, 'physicalParameters.bodyMassSigmaKg');
+    checkSigma(physicalParameters.referenceRadiusSigmaM, 'physicalParameters.referenceRadiusSigmaM');
+    checkSigma(
+      physicalParameters.meanMolarMassSigmaKgPerMol,
+      'physicalParameters.meanMolarMassSigmaKgPerMol'
+    );
+    if (
+      physicalParameters.bodyMassSigmaKg !== undefined &&
+      Number.isFinite(input.body?.bodyMassKg) &&
+      physicalParameters.bodyMassSigmaKg >= input.body.bodyMassKg
+    ) {
+      errors.push('physicalParameters.bodyMassSigmaKg: lower one-sigma mass bound must remain positive');
+    }
+    if (
+      physicalParameters.referenceRadiusSigmaM !== undefined &&
+      Number.isFinite(input.body?.referenceRadiusM) &&
+      physicalParameters.referenceRadiusSigmaM >= input.body.referenceRadiusM
+    ) {
+      errors.push('physicalParameters.referenceRadiusSigmaM: lower one-sigma radius bound must remain positive');
+    }
+  }
   if (!Number.isFinite(pressureSigmaPa) || pressureSigmaPa < 0) {
     errors.push('surfacePressureSigmaPa: требуется конечное неотрицательное стандартное отклонение');
   } else if (Number.isFinite(pressurePa) && pressureSigmaPa >= pressurePa) {
@@ -224,6 +287,12 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
   if (!Number.isFinite(meanMolarMassKgPerMol) || meanMolarMassKgPerMol <= 0) {
     return invalid('mean molar mass: в результате отсутствует конечная положительная молярная масса смеси');
   }
+  if (
+    physicalParameters?.meanMolarMassSigmaKgPerMol !== undefined &&
+    physicalParameters.meanMolarMassSigmaKgPerMol >= meanMolarMassKgPerMol
+  ) {
+    return invalid('physicalParameters.meanMolarMassSigmaKgPerMol: lower one-sigma molar-mass bound must remain positive');
+  }
   if (sourceProfile.some((point) =>
     Math.abs(point.meanMolarMassKgPerMol - meanMolarMassKgPerMol) >
     Math.max(1e-14, meanMolarMassKgPerMol * 1e-10)
@@ -252,10 +321,15 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
     readonly pressureExponent: number;
     readonly lowerTemperatureSensitivity: number;
     readonly upperTemperatureSensitivity: number;
+    readonly referenceRadiusSensitivity: number;
   }
   interface IntegratedSensitivityState {
     readonly pressureTemperatureSensitivities: readonly number[];
     readonly columnMassTemperatureSensitivities: readonly number[];
+    readonly pressureReferenceRadiusSensitivity: number;
+    readonly columnMassBodyMassSensitivity: number;
+    readonly columnMassReferenceRadiusSensitivity: number;
+    readonly columnMassMeanMolarMassSensitivity: number;
     readonly reconstructedColumnMassKgPerM2: number;
     readonly reconstructedPressurePa: number;
   }
@@ -276,6 +350,10 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
   const integratedSensitivityByHeight = new Map<number, IntegratedSensitivityState>();
   const pressureTemperatureSensitivities = new Array<number>(nodes.length).fill(0);
   const columnMassTemperatureSensitivities = new Array<number>(nodes.length).fill(0);
+  let pressureReferenceRadiusSensitivity = 0;
+  let columnMassBodyMassSensitivity = 0;
+  let columnMassReferenceRadiusSensitivity = 0;
+  let columnMassMeanMolarMassSensitivity = 0;
   let reconstructedColumnMassKgPerM2 = 0;
   let logPressureAtCurrentHeight = Math.log(pressurePa);
   let sourceSegmentIndex = 0;
@@ -288,6 +366,10 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
   integratedSensitivityByHeight.set(integrationHeights[0], {
     pressureTemperatureSensitivities: [...pressureTemperatureSensitivities],
     columnMassTemperatureSensitivities: [...columnMassTemperatureSensitivities],
+    pressureReferenceRadiusSensitivity: 0,
+    columnMassBodyMassSensitivity: 0,
+    columnMassReferenceRadiusSensitivity: 0,
+    columnMassMeanMolarMassSensitivity: 0,
     reconstructedColumnMassKgPerM2: 0,
     reconstructedPressurePa: pressurePa
   });
@@ -322,6 +404,7 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       let pressureExponent = 0;
       let lowerTemperatureSensitivity = 0;
       let upperTemperatureSensitivity = 0;
+      let referenceRadiusSensitivity = 0;
 
       for (let q = 0; q < GAUSS_LEGENDRE_5_NODES.length; q += 1) {
         const z = midpointM + halfWidthM * GAUSS_LEGENDRE_5_NODES[q];
@@ -333,21 +416,29 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
           gravityMs2 * meanMolarMassKgPerMol /
           (gasConstant * temperatureK);
         const weightedTemperatureSensitivity = weightedBase / temperatureK;
+        const radiusDenominator = bodyRadiusM + (
+          completed.gravitationMode === 'constant-gravity' ? bottomHeightM : z
+        );
 
         pressureExponent += weightedBase;
         lowerTemperatureSensitivity += weightedTemperatureSensitivity * (1 - fraction);
         upperTemperatureSensitivity += weightedTemperatureSensitivity * fraction;
+        referenceRadiusSensitivity += 2 * weightedBase / radiusDenominator;
       }
 
       return {
         pressureExponent,
         lowerTemperatureSensitivity,
-        upperTemperatureSensitivity
+        upperTemperatureSensitivity,
+        referenceRadiusSensitivity
       };
     };
 
     const fullIntervalIntegral = integratePartial(intervalTopM);
     const intervalMassSensitivity = new Array<number>(nodes.length).fill(0);
+    let intervalMassBodyMassSensitivity = 0;
+    let intervalMassReferenceRadiusSensitivity = 0;
+    let intervalMassMeanMolarMassSensitivity = 0;
     let intervalMassKgPerM2 = 0;
     const outerHalfWidthM = (intervalTopM - intervalBottomM) / 2;
     const outerMidpointM = (intervalTopM + intervalBottomM) / 2;
@@ -364,6 +455,16 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       const densityAtQuadratureKgPerM3 =
         pressureAtQuadraturePa * meanMolarMassKgPerMol /
         (gasConstant * temperatureK);
+      const pressureExponentAtQuadrature =
+        Math.log(pressurePa) - logPressureAtQuadrature;
+      const pressureBodyMassSensitivity =
+        -pressureExponentAtQuadrature / bodyMassKg;
+      const pressureMeanMolarMassSensitivity =
+        -pressureExponentAtQuadrature / meanMolarMassKgPerMol;
+      const pressureRadiusSensitivity =
+        pressureReferenceRadiusSensitivity + partial.referenceRadiusSensitivity;
+      const densityMeanMolarMassSensitivity =
+        pressureMeanMolarMassSensitivity + 1 / meanMolarMassKgPerMol;
 
       if (
         !Number.isFinite(pressureAtQuadraturePa) ||
@@ -375,6 +476,12 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       }
 
       intervalMassKgPerM2 += outerWeightM * densityAtQuadratureKgPerM3;
+      intervalMassBodyMassSensitivity +=
+        outerWeightM * densityAtQuadratureKgPerM3 * pressureBodyMassSensitivity;
+      intervalMassReferenceRadiusSensitivity +=
+        outerWeightM * densityAtQuadratureKgPerM3 * pressureRadiusSensitivity;
+      intervalMassMeanMolarMassSensitivity +=
+        outerWeightM * densityAtQuadratureKgPerM3 * densityMeanMolarMassSensitivity;
       for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
         const partialPressureSensitivity =
           nodeIndex === sourceSegmentIndex
@@ -406,6 +513,10 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
     for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
       columnMassTemperatureSensitivities[nodeIndex] += intervalMassSensitivity[nodeIndex];
     }
+    columnMassBodyMassSensitivity += intervalMassBodyMassSensitivity;
+    columnMassReferenceRadiusSensitivity += intervalMassReferenceRadiusSensitivity;
+    columnMassMeanMolarMassSensitivity += intervalMassMeanMolarMassSensitivity;
+    pressureReferenceRadiusSensitivity += fullIntervalIntegral.referenceRadiusSensitivity;
 
     const outputPoint = outputPointByHeight.get(intervalTopM);
     if (outputPoint !== undefined) {
@@ -437,6 +548,10 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       integratedSensitivityByHeight.set(intervalTopM, {
         pressureTemperatureSensitivities: [...pressureTemperatureSensitivities],
         columnMassTemperatureSensitivities: [...columnMassTemperatureSensitivities],
+        pressureReferenceRadiusSensitivity,
+        columnMassBodyMassSensitivity,
+        columnMassReferenceRadiusSensitivity,
+        columnMassMeanMolarMassSensitivity,
         reconstructedColumnMassKgPerM2,
         reconstructedPressurePa
       });
@@ -469,6 +584,8 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
     let densityRelativeVariance = pressureRelativeVariance;
     let columnMassVariance =
       (point.columnMassKgPerM2 / pressurePa * pressureSigmaPa) ** 2;
+    let columnMolesVariance =
+      (point.columnMolesPerM2 / pressurePa * pressureSigmaPa) ** 2;
 
     for (let i = 0; i < nodes.length; i += 1) {
       const sigmaSquared = uncertainty.temperatureNodeSigmaK[i] ** 2;
@@ -481,6 +598,56 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       densityRelativeVariance += densitySensitivity * densitySensitivity * sigmaSquared;
       const columnMassSensitivity = integrated.columnMassTemperatureSensitivities[i];
       columnMassVariance += columnMassSensitivity * columnMassSensitivity * sigmaSquared;
+      const columnMolesTemperatureSensitivity =
+        columnMassSensitivity / meanMolarMassKgPerMol;
+      columnMolesVariance +=
+        columnMolesTemperatureSensitivity * columnMolesTemperatureSensitivity * sigmaSquared;
+    }
+
+    if (physicalParameters !== undefined) {
+      const massSigmaKg = physicalParameters.bodyMassSigmaKg ?? 0;
+      const radiusSigmaM = physicalParameters.referenceRadiusSigmaM ?? 0;
+      const molarMassSigmaKgPerMol =
+        physicalParameters.meanMolarMassSigmaKgPerMol ?? 0;
+      const pressureExponentAtPoint = Math.log(pressurePa / point.pressurePa);
+      const pressureBodyMassSensitivity = -pressureExponentAtPoint / bodyMassKg;
+      const pressureMeanMolarMassSensitivity =
+        -pressureExponentAtPoint / meanMolarMassKgPerMol;
+      const pressureRadiusSensitivity =
+        integrated.pressureReferenceRadiusSensitivity;
+      const massVarianceContribution =
+        (pressureBodyMassSensitivity * massSigmaKg) ** 2;
+      const radiusVarianceContribution =
+        (pressureRadiusSensitivity * radiusSigmaM) ** 2;
+      const molarMassPressureVarianceContribution =
+        (pressureMeanMolarMassSensitivity * molarMassSigmaKgPerMol) ** 2;
+
+      pressureRelativeVariance +=
+        massVarianceContribution +
+        radiusVarianceContribution +
+        molarMassPressureVarianceContribution;
+      densityRelativeVariance +=
+        massVarianceContribution +
+        radiusVarianceContribution +
+        ((pressureMeanMolarMassSensitivity + 1 / meanMolarMassKgPerMol) *
+          molarMassSigmaKgPerMol) ** 2;
+
+      columnMassVariance +=
+        (integrated.columnMassBodyMassSensitivity * massSigmaKg) ** 2 +
+        (integrated.columnMassReferenceRadiusSensitivity * radiusSigmaM) ** 2 +
+        (integrated.columnMassMeanMolarMassSensitivity * molarMassSigmaKgPerMol) ** 2;
+
+      const columnMolesBodyMassSensitivity =
+        integrated.columnMassBodyMassSensitivity / meanMolarMassKgPerMol;
+      const columnMolesReferenceRadiusSensitivity =
+        integrated.columnMassReferenceRadiusSensitivity / meanMolarMassKgPerMol;
+      const columnMolesMeanMolarMassSensitivity =
+        integrated.columnMassMeanMolarMassSensitivity / meanMolarMassKgPerMol -
+        point.columnMassKgPerM2 / (meanMolarMassKgPerMol * meanMolarMassKgPerMol);
+      columnMolesVariance +=
+        (columnMolesBodyMassSensitivity * massSigmaKg) ** 2 +
+        (columnMolesReferenceRadiusSensitivity * radiusSigmaM) ** 2 +
+        (columnMolesMeanMolarMassSensitivity * molarMassSigmaKgPerMol) ** 2;
     }
 
     const pressureRelativeSigma = Math.sqrt(pressureRelativeVariance);
@@ -492,11 +659,9 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
       ? columnMassSigmaKgPerM2 / point.columnMassKgPerM2
       : null;
 
-    // One fixed-composition layer is required above, so Mbar is constant
-    // and Nmol(z) = Sigma(z) / Mbar exactly. Its relative uncertainty is
-    // therefore identical; its absolute uncertainty is scaled by 1/Mbar.
-    const columnMolesSigmaPerM2 =
-      columnMassSigmaKgPerM2 / meanMolarMassKgPerMol;
+    // Nmol(z) = Sigma(z) / Mbar. When Mbar uncertainty is supplied,
+    // its denominator sensitivity is propagated separately above.
+    const columnMolesSigmaPerM2 = Math.sqrt(columnMolesVariance);
     const columnMolesRelativeSigma = point.columnMolesPerM2 > 0
       ? columnMolesSigmaPerM2 / point.columnMolesPerM2
       : null;
@@ -531,13 +696,29 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
     });
   }
 
+  const suppliedPhysicalParameters = [
+    physicalParameters?.bodyMassSigmaKg !== undefined ? 'body mass' : null,
+    physicalParameters?.referenceRadiusSigmaM !== undefined ? 'reference radius' : null,
+    physicalParameters?.meanMolarMassSigmaKgPerMol !== undefined ? 'mean molar mass' : null
+  ].filter((value): value is string => value !== null);
+  const fixedPhysicalParameters = [
+    physicalParameters?.bodyMassSigmaKg === undefined ? 'body mass' : null,
+    physicalParameters?.referenceRadiusSigmaM === undefined ? 'reference radius' : null,
+    physicalParameters?.meanMolarMassSigmaKgPerMol === undefined ? 'mean molar mass/composition' : null
+  ].filter((value): value is string => value !== null);
   const provenance: DataProvenance = {
     sourceName: 'First-order propagation of measured atmospheric profile uncertainties',
     method:
-      'First-order hydrostatic sensitivities and integrated mass-column sensitivities evaluated with nested 5-point Gauss-Legendre quadrature over the piecewise-linear measured temperature profile; molar-column uncertainty follows from fixed mean molar mass',
-    applicability: 'Single measuredNodes layer with fixed body mass, radius and composition; original or adaptively subdivided hydrostatic result',
+      'First-order hydrostatic sensitivities and integrated mass/molar-column sensitivities evaluated with nested 5-point Gauss-Legendre quadrature over the piecewise-linear measured temperature profile; optional body mass, radius and mean-molar-mass derivatives are included only when explicitly supplied',
+    applicability: 'Single measuredNodes layer; original or adaptively subdivided hydrostatic result',
+    rawInput: {
+      physicalParameterCovariance: physicalParameters?.covariance ?? 'not_supplied',
+      bodyMassSigmaKg: physicalParameters?.bodyMassSigmaKg ?? null,
+      referenceRadiusSigmaM: physicalParameters?.referenceRadiusSigmaM ?? null,
+      meanMolarMassSigmaKgPerMol: physicalParameters?.meanMolarMassSigmaKgPerMol ?? null
+    },
     limitations:
-      'Diagonal covariance approximation: pressure-boundary and temperature-node one-sigma errors are treated as mutually independent because their covariance matrix is unavailable. Density and integrated-column uncertainties include the direct local temperature contribution and its covariance with pressure through the shared temperature nodes. Nonlinear higher-order effects, composition, gravity-field, radius, mass and kinetic-rate uncertainties are not propagated.',
+      'Pressure-boundary and temperature-node errors are treated as mutually independent because their covariance matrix is unavailable. Optional physical-parameter errors use the caller-declared independent_diagonal approximation; correlations between mass, radius, composition, pressure and temperature are not inferred. Omitted parameter sigmas remain fixed/unknown, not known to be exact. Gravity harmonics, EOS model discrepancy and kinetic-rate uncertainty are not propagated.',
     note: 'Output intervals are linearized ±1σ estimates, not guaranteed physical bounds or a confidence interval with asserted coverage probability.'
   };
 
@@ -546,19 +727,21 @@ export function propagateMeasuredNodeHydrostaticUncertainty(
     method: 'first_order_linearized_diagonal_covariance',
     uncertaintyLevel: 'one_sigma',
     covarianceAssumption:
-      'Pressure-boundary error and every temperature-node error are treated as independent, zero-mean inputs; temperature errors between measured nodes use the same diagonal covariance assumption.',
+      'Pressure-boundary and measured-temperature-node errors are treated as independent, zero-mean inputs. If physicalParameters is supplied, its body mass, reference radius and mean molar mass errors are additionally treated as independent diagonal inputs; no correlations are inferred.',
     conditionalOn: [
-      'body mass and reference radius fixed',
-      'atmospheric composition and mean molar mass fixed',
+      ...fixedPhysicalParameters.map((name) => name + ' held fixed because no explicit sigma was supplied'),
+      suppliedPhysicalParameters.length > 0
+        ? 'explicit one-sigma uncertainties included for ' + suppliedPhysicalParameters.join(', ')
+        : 'body mass, reference radius and mean molar mass held fixed',
       'gravity model fixed to the selected hydrostatic solver mode',
       'piecewise-linear interpolation between measured temperature nodes',
-      'single layer with fixed mean molar mass for Nmol = Sigma / Mbar'
+      'single layer with fixed composition and mean molar mass parameter'
     ],
     limitations: [
       'No published cross-node or pressure-temperature covariance matrix is supplied to this propagation step.',
-      'Integrated mass and molar column inventories are propagated by differentiating rho(z) and integrating its first-order sensitivities over height.',
-      'Molar-column uncertainty assumes one layer with fixed mean molar mass; multilayer composition covariance is not supported.',
-      'No uncertainty is assigned to body mass, local radius, gravity harmonics, composition or ideal-gas EOS applicability.',
+      'Integrated mass and molar column inventories are propagated by differentiating rho(z) and integrating their first-order sensitivities over height.',
+      'Optional mass/radius/mean-molar-mass errors assume independent diagonal covariance; multi-layer composition covariance is not supported.',
+      'Gravity harmonics, EOS model discrepancy and kinetic-rate uncertainty are not propagated.',
       'First-order linearization is not a nonlinear ensemble and does not provide guaranteed bounds.'
     ],
     columnIntegralConsistencyMaxRelativeDeviation,
