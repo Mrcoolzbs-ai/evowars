@@ -403,9 +403,12 @@ export function createMarsPhotochemicalObservationSnapshot(
   } else if (observationsArray.length !== MARS_PHOTOCHEMICAL_SPECIES_ORDER.length) {
     errors.push('exactly 16 species observations are required; received ' + observationsArray.length);
   }
-  errors.push(...validateCoRegistrationPolicy(input.coRegistration));
+  const coRegistrationIssues = validateCoRegistrationPolicy(input.coRegistration);
+  errors.push(...coRegistrationIssues);
 
-  if (errors.length > 0) return { status: 'rejected', errors };
+  if (coRegistrationIssues.length > 0 || !Array.isArray(input.observations)) {
+    return { status: 'rejected', errors };
+  }
 
   const temperature = input.temperatureObservation;
   if (!isPlainRecord(temperature)) {
