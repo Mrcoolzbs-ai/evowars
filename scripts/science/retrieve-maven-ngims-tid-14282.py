@@ -137,26 +137,28 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes) -> tuple[dict, bytes]:
         declared_md5 is None or hashlib.md5(csv_bytes).hexdigest() == declared_md5
     )
     if not (direct_size_matches and direct_md5_matches):
-        # Some HTTP layers canonicalize ASCII text newlines from CRLF to LF.
-        # Reconstruct the archive bytes only when the detached label's MD5
-        # independently confirms the exact reconstructed byte sequence.
-        if declared_md5 is None:
+        # A text-serving HTTP layer can canonicalize CRLF to LF. Reconstruct
+        # only if the downloaded body contains LF but no CR and the restored
+        # byte length equals the exact PDS4 file_size. If the label publishes
+        # MD5, the reconstructed bytes must also match that checksum.
+        can_restore_crlf = b"\r" not in csv_bytes and b"\n" in csv_bytes
+        restored = csv_bytes.replace(b"\n", b"\r\n") if can_restore_crlf else csv_bytes
+        if len(restored) != file_size:
             fail(
-                f"PDS4 file_size={file_size} does not match downloaded bytes="
-                f"{len(csv_bytes)} and no MD5 is available to verify reconstruction"
+                f"PDS4 file_size={file_size} does not match raw HTTP bytes={len(csv_bytes)} "
+                f"or strict LF-to-CRLF reconstruction={len(restored)}"
             )
-        can_restore_crlf = b"\\r\\n" not in csv_bytes and b"\\n" in csv_bytes
-        restored = csv_bytes.replace(b"\\n", b"\\r\\n") if can_restore_crlf else csv_bytes
-        restored_md5 = hashlib.md5(restored).hexdigest()
-        if len(restored) != file_size or restored_md5 != declared_md5:
-            fail(
-                "PDS4 fixity mismatch: raw bytes do not match and strict LF-to-CRLF "
-                f"reconstruction failed (raw={len(csv_bytes)} bytes, restored={len(restored)}, "
-                f"label={file_size}, MD5 raw={hashlib.md5(csv_bytes).hexdigest()}, "
-                f"restored={restored_md5}, label MD5={declared_md5})"
-            )
+        if declared_md5 is not None:
+            restored_md5 = hashlib.md5(restored).hexdigest()
+            if restored_md5 != declared_md5:
+                fail(
+                    "PDS4 MD5 mismatch after strict LF-to-CRLF reconstruction "
+                    f"(restored={restored_md5}, label={declared_md5})"
+                )
+            transport_normalization = "lf_to_crlf_reconstructed_and_md5_verified"
+        else:
+            transport_normalization = "lf_to_crlf_reconstructed_by_file_size_only_md5_absent"
         canonical_bytes = restored
-        transport_normalization = "lf_to_crlf_reconstructed_and_md5_verified"
 
     computed_md5 = hashlib.md5(canonical_bytes).hexdigest() if declared_md5 else None
     md5_status = (
@@ -300,6 +302,12 @@ def main() -> int:
             "productLevel": "L3 altitude-resampled density",
             "notRawL2Measurement": True,
             "perRowDensitySigma": "not supplied by Table A-9",
+            "transportNormalization": provenance["transportNormalization"],
+            "transportNormalizationLimit": (
+                "PDS4 file_size only; detached label has no md5_checksum"
+                if provenance["transportNormalization"] == "lf_to_crlf_reconstructed_by_file_size_only_md5_absent"
+                else None
+            ),
             "schedulerEligibleAsCompleteMarsInitialState": False,
             "notes": [
                 "Rows are archived L3 resampled/interpolated densities, not raw L2 point measurements.",
@@ -311,6 +319,8 @@ def main() -> int:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / CSV_NAME).write_bytes(csv_bytes)
+    if provenance["transportNormalization"] != "none":
+        (OUTPUT_DIR / (CSV_NAME + ".http-transfer")).write_bytes(csv_download)
     (OUTPUT_DIR / XML_NAME).write_bytes(xml_bytes)
     (OUTPUT_DIR / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
