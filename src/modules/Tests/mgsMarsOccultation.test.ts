@@ -12,10 +12,16 @@ import {
   MGS_MARS_8028D38A_METADATA,
   MGS_MARS_8028D38A_SAMPLES
 } from '../Data/mgsMarsOccultation1998';
-import { createMgsMars8028D38AHydrostaticColumnInput } from '../Core/atmosphericReferenceAdapters';
+import {
+  computeAdaptivelyRefinedMgsMars8028D38AHydrostaticColumnWithUncertainty,
+  computeMgsMars8028D38AHydrostaticColumnWithUncertainty,
+  createMgsMars8028D38AHydrostaticColumnInput
+} from '../Core/atmosphericReferenceAdapters';
+import { propagateMeasuredNodeHydrostaticUncertainty } from '../Core/hydrostaticUncertainty';
 import {
   computeHydrostaticColumn,
-  type HydrostaticColumnCompleted
+  type HydrostaticColumnCompleted,
+  type HydrostaticColumnInput
 } from '../Core/hydrostaticAtmosphere';
 
 const TEST_ONLY_COMPOSITION = {
@@ -163,5 +169,165 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
         provenance: { sourceName: 'deliberately incomplete test composition' }
       })
     ).toThrow(/автоматическая нормировка запрещена/);
+  });
+
+  it('propagates PDS one-sigma boundary-pressure and temperature errors to P(z) and density', () => {
+    const result = computeMgsMars8028D38AHydrostaticColumnWithUncertainty(TEST_ONLY_COMPOSITION);
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error(
+        result.status === 'hydrostatic_failed'
+          ? 'hydrostatic failed: ' + result.result.status
+          : 'uncertainty failed: ' + result.errors.join('; ')
+      );
+    }
+
+    expect(result.column.requestedHeightPoints).toHaveLength(74);
+    expect(result.uncertainty.status).toBe('estimated');
+    expect(result.uncertainty.method).toBe('first_order_linearized_diagonal_covariance');
+    expect(result.uncertainty.uncertaintyLevel).toBe('one_sigma');
+    expect(result.uncertainty.covarianceAssumption).toMatch(/independent/);
+    expect(result.uncertainty.points).toHaveLength(74);
+
+    const first = result.uncertainty.points[0];
+    const last = result.uncertainty.points[result.uncertainty.points.length - 1];
+    expect(first.heightM).toBe(MGS_MARS_8028D38A_SAMPLES[0].heightAboveLocalSurfaceM);
+    expect(first.pressureSigmaPa).toBeCloseTo(
+      MGS_MARS_8028D38A_SAMPLES[0].pressureSigmaPa,
+      10
+    );
+    expect(first.temperatureSigmaK).toBeCloseTo(
+      MGS_MARS_8028D38A_SAMPLES[0].temperatureSigmaK,
+      10
+    );
+    expect(last.heightM).toBe(MGS_MARS_8028D38A_SAMPLES[73].heightAboveLocalSurfaceM);
+    expect(last.pressureRelativeSigma).toBeGreaterThan(first.pressureRelativeSigma);
+    expect(last.pressureSigmaPa).toBeGreaterThan(0);
+    expect(last.densitySigmaKgPerM3).toBeGreaterThan(0);
+    expect(last.densityRelativeSigma).toBeGreaterThan(0);
+
+    for (const point of result.uncertainty.points) {
+      expect(Number.isFinite(point.pressureSigmaPa)).toBe(true);
+      expect(Number.isFinite(point.densitySigmaKgPerM3)).toBe(true);
+      expect(point.pressureLowerOneSigmaPa).toBeGreaterThanOrEqual(0);
+      expect(point.pressureUpperOneSigmaPa).toBeGreaterThan(point.pressureLowerOneSigmaPa);
+      expect(point.densityLowerOneSigmaKgPerM3).toBeGreaterThanOrEqual(0);
+      expect(point.densityUpperOneSigmaKgPerM3).toBeGreaterThan(point.densityLowerOneSigmaKgPerM3);
+    }
+    expect(result.uncertainty.limitations.join(' ')).toMatch(/covariance matrix/i);
+  });
+
+  it('matches an independent finite-difference sensitivity for one temperature node', () => {
+    const input = createMgsMars8028D38AHydrostaticColumnInput(TEST_ONLY_COMPOSITION);
+    const layer = input.layers[0];
+    const model = layer.temperature;
+    if (model.kind !== 'measuredNodes') {
+      throw new Error('finite-difference test requires measuredNodes');
+    }
+
+    const selectedNode = 35;
+    const perturbationK = 1e-3;
+    const sigmaK = 0.25;
+    const buildPerturbedInput = (deltaK: number): HydrostaticColumnInput => ({
+      ...input,
+      layers: [{
+        ...layer,
+        temperature: {
+          kind: 'measuredNodes',
+          interpolation: 'linear',
+          nodes: model.nodes.map((node, index) => ({
+            ...node,
+            temperatureK: node.temperatureK + (index === selectedNode ? deltaK : 0)
+          }))
+        }
+      }]
+    });
+
+    const base = computeHydrostaticColumn(input);
+    const plus = computeHydrostaticColumn(buildPerturbedInput(perturbationK));
+    const minus = computeHydrostaticColumn(buildPerturbedInput(-perturbationK));
+    expect(base.status).toBe('completed');
+    expect(plus.status).toBe('completed');
+    expect(minus.status).toBe('completed');
+    if (base.status !== 'completed' || plus.status !== 'completed' || minus.status !== 'completed') {
+      throw new Error('finite-difference hydrostatic solve failed');
+    }
+
+    const sigmas = new Array<number>(model.nodes.length).fill(0);
+    sigmas[selectedNode] = sigmaK;
+    const uncertainty = propagateMeasuredNodeHydrostaticUncertainty(input, base, {
+      surfacePressureSigmaPa: 0,
+      temperatureNodeSigmaK: sigmas
+    });
+    expect(uncertainty.status).toBe('estimated');
+    if (uncertainty.status !== 'estimated') {
+      throw new Error(uncertainty.errors.join('; '));
+    }
+
+    const basePressure = base.requestedHeightPoints[73].pressurePa;
+    const plusPressure = plus.requestedHeightPoints[73].pressurePa;
+    const minusPressure = minus.requestedHeightPoints[73].pressurePa;
+    const finiteDifferenceLogSensitivity =
+      (Math.log(plusPressure) - Math.log(minusPressure)) / (2 * perturbationK);
+    const expectedSigmaPa = basePressure * Math.abs(finiteDifferenceLogSensitivity) * sigmaK;
+    const propagatedSigmaPa =
+      uncertainty.points[uncertainty.points.length - 1].pressureSigmaPa;
+    expect(propagatedSigmaPa).toBeCloseTo(expectedSigmaPa, 4);
+  });
+
+  it('propagates original PDS node errors onto the adaptively refined hydrostatic mesh', () => {
+    const result =
+      computeAdaptivelyRefinedMgsMars8028D38AHydrostaticColumnWithUncertainty(
+        TEST_ONLY_COMPOSITION
+      );
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error(
+        result.status === 'adaptive_rejected'
+          ? result.result.reason + ': ' + result.result.diagnostics.join('; ')
+          : result.errors.join('; ')
+      );
+    }
+
+    expect(result.adaptive.refinements).toHaveLength(1);
+    expect(result.adaptive.refinements[0].subdivisions).toBeGreaterThan(1);
+    expect(result.uncertainty.points.length).toBeGreaterThan(2);
+    expect(result.uncertainty.points[0].heightM).toBe(
+      MGS_MARS_8028D38A_SAMPLES[0].heightAboveLocalSurfaceM
+    );
+    expect(result.uncertainty.points[result.uncertainty.points.length - 1].heightM).toBe(
+      MGS_MARS_8028D38A_SAMPLES[73].heightAboveLocalSurfaceM
+    );
+    for (let i = 1; i < result.uncertainty.points.length; i += 1) {
+      expect(result.uncertainty.points[i].heightM).toBeGreaterThan(
+        result.uncertainty.points[i - 1].heightM
+      );
+    }
+  });
+
+  it('rejects missing, negative or dimensionally mismatched uncertainty inputs', () => {
+    const input = createMgsMars8028D38AHydrostaticColumnInput(TEST_ONLY_COMPOSITION);
+    const solved = computeHydrostaticColumn(input);
+    expect(solved.status).toBe('completed');
+    if (solved.status !== 'completed') throw new Error('hydrostatic solve failed');
+
+    const validSigmas = MGS_MARS_8028D38A_SAMPLES.map((sample) => sample.temperatureSigmaK);
+    const missing = propagateMeasuredNodeHydrostaticUncertainty(input, solved, {
+      surfacePressureSigmaPa: 7.16,
+      temperatureNodeSigmaK: []
+    });
+    expect(missing.status).toBe('invalid_input');
+
+    const negative = propagateMeasuredNodeHydrostaticUncertainty(input, solved, {
+      surfacePressureSigmaPa: 7.16,
+      temperatureNodeSigmaK: validSigmas.map((sigma, index) => index === 5 ? -sigma : sigma)
+    });
+    expect(negative.status).toBe('invalid_input');
+
+    const invalidBoundary = propagateMeasuredNodeHydrostaticUncertainty(input, solved, {
+      surfacePressureSigmaPa: 600,
+      temperatureNodeSigmaK: validSigmas
+    });
+    expect(invalidBoundary.status).toBe('invalid_input');
   });
 });
