@@ -212,6 +212,12 @@ This is a single homogeneous compartment only. It is not connected to Scheduler/
 
 `Data/marsPhotochemistryEvidence.ts` preserves the nine visible Table B2 photolysis channels at exactly 0.50 km and 42.67 km, for the stated reference scenario SZA=0° and Ls=251°. `ChemicalEvolution/marsPhotochemicalNetwork.ts` builds and integrates an explicitly selected subset in a 16-species single-compartment ODE using analytical Jacobian, C/H/O invariants, non-negativity checks and Radau IIA. It requires caller-supplied temperature, all 16 initial local number densities and provenance. The gas-phase model can use up to 30 executable rows (29 Arrhenius plus e1 at 298 K) with the nine tabulated photolysis channels; c11/c17 remain blocked. No vertical interpolation of J, time-varying radiation, vertical transport, surface coupling, column-to-volume conversion, or Scheduler/GeneratedWorld mutation is performed. This is a reference chemistry component, not a complete observation-constrained Mars atmosphere.
 
+### 6.11 Generator MGS 1998 Mars temperature reference
+
+The Generator can explicitly attach `mgs_mars_1998_8028d38a` only with the `mars` atmosphere preset and a planetary body. `Core/atmosphericReferenceAdapters.ts` converts the 74 MGS PDS temperature nodes into 73 contiguous finite-altitude intervals, each with a representative midpoint temperature estimated by linear interpolation between adjacent measured nodes. The profile status is `partial_profile`, its provenance keeps the two source row IDs and endpoint σT values, and no interpolation is done outside the observed range (~0.25–35.26 km). The node errors are not collapsed into layer uncertainties because their covariance is not available.
+
+The MGS selection is a temperature-only reference attachment. It does not replace generated body mass/radius/gravity or the separate Mars preset composition/pressure; it does not invent a full pressure/composition profile, radical inventories, reaction selection or `physicalKinetics`. The existing strict `importSourcedAtmosphericTemperatureProfileForKinetics()` can convert the 73 temperature/geometry intervals into kinetic-layer seeds, but species inventories and reactions remain caller-supplied. One occultation is not global/seasonal Mars climatology.
+
 ## 7. Химия и эволюция
 
 ### 7.1 Инвентари и стехиометрия
@@ -342,6 +348,7 @@ npm run build
 | `src/modules/WorldModel/` | Производные характеристики и человекочитаемые описания |
 | `src/modules/Atmosphere/` | Атмосферные пресеты, состав и физика столба |
 | `src/modules/Data/mgsMarsOccultation1998.ts` | 74 строки source-backed MGS Mars PDS-профиля с неопределённостями и событием наблюдения |
+| `src/modules/Generator/generator.ts` | Explicit USSA Earth or MGS Mars partial thermal-reference profile attachment, gated by matching atmosphere preset/body type |
 | `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater annual means, ACS/TGO HO2 upper limits и OpenMARS HO2 model estimates с раздельным provenance |
 | `src/modules/Data/mavenUpperAtmosphereEvidence.ts` | MAVEN IUVS NO/O references, NGIMS L2 quality-aware CSV row parser and single-orbit profile builder |
 | `src/modules/Data/marsPhotochemistryEvidence.ts` | Taysum & Palmer (2020) Mars photolysis J values at two model-reference altitudes, with provenance-gated J×n evaluator |
