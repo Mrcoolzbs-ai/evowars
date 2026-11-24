@@ -38,8 +38,10 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
   archiveCoverage: {
     latestAnnualCollectionYearListed: 2025,
     annual2025AbundancesSize: '308 MB',
-    exactLatestMeasurementUtc: null,
-    note: 'The PDS landing page lists an annual 2025 abundance collection. The exact last measurement timestamp has not been established from the inaccessible selection-index contents; the index file modification timestamp is not substituted for the observation end time.',
+    exactLatestMeasurementUtc: '2025-02-15',
+    latestSolarLongitudeDeg: 44.2,
+    latestMartianYear: 38,
+    note: 'The PDS NGIMS landing page explicitly states that currently available data extend through 2025-02-15 (Ls 44.2, MY 38). The annual 2025 abundance collection size is 308 MB. The Single-Species selector modification date (2025-12-19) is a product-index revision timestamp, not the observation end date.',
     source: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html'
   },
   archiveIndexFiles: [
