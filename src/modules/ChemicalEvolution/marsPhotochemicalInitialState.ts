@@ -425,6 +425,8 @@ export function createMarsPhotochemicalObservationSnapshot(
     }
     if (!hasUsableTemperature(temperature.temperature)) {
       errors.push('temperatureObservation.temperature must be a usable known/estimated temperature in K');
+    } else if (!hasIdentifiedProvenance(temperature.temperature.provenance)) {
+      errors.push('temperatureObservation.temperature.provenance must identify the source stored in the reservoir');
     }
     if (!hasIdentifiedProvenance(temperature.provenance)) {
       errors.push('temperatureObservation.provenance must identify its source');
