@@ -1280,7 +1280,7 @@ const REQUIRED_NGIMS_L3_SCALE_HEIGHT_COLUMNS = [
 ] as const;
 
 function strictNgimsUtcTimestamp(value: string): string | null {
-  const match = value.match(/^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})(?:\\.\\d{1,9})?Z$/);
+  const match = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,9})?Z$/);
   if (!match) return null;
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 19) !== match[1]) {
@@ -1399,7 +1399,7 @@ export function parseMavenNgimsL3ScaleHeightTemperatureCsvText(
   if (typeof sourceProductId !== 'string' || sourceProductId.trim() === '') {
     return { status: 'invalid_csv', errors: ['sourceProductId must identify the exact NGIMS L3 product'] };
   }
-  const parsed = parseNgimsCsvRecords(csvText.replace(/^\\uFEFF/, ''));
+  const parsed = parseNgimsCsvRecords(csvText.replace(/^\uFEFF/, ''));
   if (parsed.error) return { status: 'invalid_csv', errors: [parsed.error] };
   if (parsed.records.length < 2) {
     return { status: 'invalid_csv', errors: ['CSV must contain a header and at least one data record'] };
