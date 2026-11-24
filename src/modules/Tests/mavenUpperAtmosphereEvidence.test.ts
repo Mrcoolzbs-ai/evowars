@@ -88,11 +88,13 @@ describe('MAVEN upper-atmosphere evidence', () => {
       'He', 'O', 'CO', 'N2', 'NO', 'Ar', 'CO2'
     ]);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralDensityFields.find((field) => field.species === 'NO')?.status)
-      .toBe('removed_all_values_nan');
+      .toBe('field_present_values_not_verified');
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.precision.upperLimitSentinel).toBe(-1);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directlyRepresentedSpecies)
       .toEqual(['O', 'CO', 'CO2']);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.directSpeciesCount).toBe(3);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.note).toMatch(/actual NO row values are unverified/);
+    expect(MAVEN_INSITU_KP_PDS_ARCHIVE.limitations.join(' ')).toMatch(/current NO values.*unverified/i);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.photochemicalNetworkCoverage.totalNetworkSpeciesCount).toBe(16);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.neutralTemperature.lpwTemperatureIsNeutralGasTemperature).toBe(false);
     expect(MAVEN_INSITU_KP_PDS_ARCHIVE.sampling.geometryFromSpice).toBe(true);
