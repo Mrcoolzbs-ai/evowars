@@ -196,13 +196,6 @@ export function generateWorld(settings: GenerationSettings): GeneratedWorld {
       : requestedAtmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
         ? 'MGS 1998 PDS 8028D38A'
         : null;
-  const selectedReferenceApplicability =
-    requestedAtmosphericReferenceProfile === 'ussa_1976_earth'
-      ? settings.atmospherePreset === 'earth'
-      : requestedAtmosphericReferenceProfile === 'mgs_mars_1998_8028d38a'
-        ? settings.atmospherePreset === 'mars'
-        : false;
-
   const atmosphericReferenceProfileWarning: GenerationWarning | null =
     requestedAtmosphericReferenceProfile === undefined
       ? null
