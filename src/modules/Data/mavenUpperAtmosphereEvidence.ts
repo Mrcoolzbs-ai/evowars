@@ -38,13 +38,41 @@ export const MAVEN_NGIMS_PDS_ARCHIVE = {
   dataAvailableThroughUtc: '2025-02-15',
   archiveIndexFiles: [
     {
-      product: 'L2 neutral single-species abundance index',
+      product: 'Legacy L2 neutral single-species abundance index locator',
       fileName: 'MAVEN_NGIMS_l2_del1-35.csv',
       revision: 'del1-35',
       lastModifiedUtc: '2023-11-15',
-      url: 'https://pdsatmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_l2_del1-35.csv'
+      url: 'https://pdsatmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_l2_del1-35.csv',
+      note: 'Historical locator retained for provenance; it is not the current index linked by the PDS NGIMS archive page.'
     }
   ] as const,
+  selectionIndexFiles: [
+    {
+      product: 'PDS Single species abundance product-selection index',
+      fileName: 'MAVEN_NGIMS_Single-Species_del1-43.csv',
+      revision: 'del1-43',
+      url: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Single-Species_del1-43.csv',
+      role: 'Selection metadata and product identifiers/URNs; not an L2 measurement table and not valid input to parseMavenNgimsL2NeutralCsvText().',
+      linkedFrom: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html'
+    }
+  ] as const,
+  dataProductArchiveFormat: 'ASCII tables with detached XML labels',
+  orbitProductScope: {
+    description: 'One or two science-product files span one MAVEN orbit',
+    maximumSpacecraftAltitudeKm: 500,
+    source: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims_data_search.html'
+  },
+  l3AltitudeResamplingAvailability: {
+    generalAvailabilityEndsUtc: '2020-07',
+    exception: 'Occasional products may still be generated when periapsis dips below 190 km and atmosphere/density profiles permit.',
+    implication: 'For later MAVEN years, do not require L3 altitude-resampled abundance; select the orbit-specific L2 single-species products instead.',
+    source: 'https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html'
+  },
+  retrievalMethods: [
+    'Download the relevant product index, select product URNs, and submit the revised URN list.',
+    'Use the PDS parameter/time-range selector to request limited product files.'
+  ] as const,
+  selectionIndexContentRetrieved: false,
   availableProducts: ['L1A raw', 'L1B calibrated', 'L2 single-species abundance', 'L3 altitude-resampled abundance', 'L3 scale heights and temperatures'] as const,
   neutralSpeciesOfInterest: ['O', 'NO', 'CO2', 'N2', 'CO', 'O2', 'Ar', 'N', 'He'] as const,
   l2NeutralColumns: [
