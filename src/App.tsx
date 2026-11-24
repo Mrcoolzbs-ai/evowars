@@ -227,11 +227,11 @@ function GeneratorPanel(props: {
               <select
                 value={localSettings.atmosphericReferenceProfile || ''}
                 onChange={(e) => {
-                  const selectedProfile =
+                  const selectedProfile: GenerationSettings['atmosphericReferenceProfile'] =
                     localSettings.atmospherePreset === 'earth' && e.target.value === 'ussa_1976_earth'
-                      ? 'ussa_1976_earth' as const
+                      ? 'ussa_1976_earth'
                       : localSettings.atmospherePreset === 'mars' && e.target.value === 'mgs_mars_1998_8028d38a'
-                        ? 'mgs_mars_1998_8028d38a' as const
+                        ? 'mgs_mars_1998_8028d38a'
                         : undefined;
                   const newSettings = {
                     ...localSettings,
