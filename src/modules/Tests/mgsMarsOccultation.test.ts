@@ -145,7 +145,7 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
     }
 
     expect(
-      completed.assumptions.some((assumption) => /ideal gas/i.test(assumption))
+      completed.assumptions.some((assumption) => /идеальный газ/i.test(assumption))
     ).toBe(true);
   });
 
