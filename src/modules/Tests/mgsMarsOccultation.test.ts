@@ -19,6 +19,7 @@ import {
   createMgsMars8028D38AAtmosphericTemperatureProfile
 } from '../Core/atmosphericReferenceAdapters';
 import { propagateMeasuredNodeHydrostaticUncertainty } from '../Core/hydrostaticUncertainty';
+import { importSourcedAtmosphericTemperatureProfileForKinetics } from '../ChemicalEvolution/thermalProfileImport';
 import {
   computeHydrostaticColumn,
   type HydrostaticColumnCompleted,
@@ -123,6 +124,26 @@ describe('MGS Mars radio-occultation profile 8028D38A.TPS', () => {
         expect(layer.altitudeRangeM!.min).toBe(profile.layers[index - 1]!.altitudeRangeM!.max);
       }
     }
+  });
+
+  it('passes the MGS temperature-only profile through the strict kinetic-layer importer without adding chemistry', () => {
+    const profile = createMgsMars8028D38AAtmosphericTemperatureProfile();
+    const imported = importSourcedAtmosphericTemperatureProfileForKinetics(profile);
+
+    expect(imported.status).toBe('imported');
+    if (imported.status !== 'imported') {
+      throw new Error(imported.diagnostics.join('; '));
+    }
+    expect(imported.layers).toHaveLength(73);
+    expect(imported.layers[0].bottomAltitudeM).toBe(
+      MGS_MARS_8028D38A_SAMPLES[0]!.heightAboveLocalSurfaceM
+    );
+    expect(imported.layers[72].topAltitudeM).toBe(
+      MGS_MARS_8028D38A_SAMPLES[73]!.heightAboveLocalSurfaceM
+    );
+    expect(imported.layers[0].temperatureProvenance.sourceId).toBe('PDS product 8028D38A.TPS');
+    expect(imported.layers[0].altitudeProvenance.sourceId).toBe('PDS product 8028D38A.TPS');
+    expect(imported.diagnostics.join(' ')).toMatch(/реакции.*запасы.*скорости не выведены/);
   });
 
   it('anchors at the lowest measured row, not the extrapolated surface pressure', () => {
