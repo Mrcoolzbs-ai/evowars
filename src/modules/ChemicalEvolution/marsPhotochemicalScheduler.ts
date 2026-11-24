@@ -185,10 +185,15 @@ function getPhotochemicalReservoir(
       missing.join(',') + '; unknown=' + unknown.join(',')
     );
   }
-  if (!hasUsableTemperature(reservoir.reservoirTemperature)) {
+  const reservoirTemperature = reservoir.reservoirTemperature;
+  if (
+    reservoirTemperature === undefined ||
+    (reservoirTemperature.status !== 'known' && reservoirTemperature.status !== 'estimated') ||
+    !hasUsableTemperature(reservoirTemperature)
+  ) {
     throw new Error('резервуар требует числовую reservoirTemperature со статусом known/estimated и единицей K');
   }
-  if (!hasIdentifiedProvenance(reservoir.reservoirTemperature.provenance)) {
+  if (!hasIdentifiedProvenance(reservoirTemperature.provenance)) {
     throw new Error('reservoirTemperature требует идентифицируемый provenance');
   }
   return reservoir;
@@ -264,7 +269,7 @@ function applyMarsPhotochemicalInterval(
   };
   const result = runMarsPhotochemicalConcentrationStep(networkInput);
   const nextEntries = concentrationsToInventory(result.finalConcentrationsPerCm3);
-  const materialProvenance: DataProvenance = {
+  const outputProvenance: DataProvenance = {
     sourceName: 'Evolution Wars Mars single-compartment photochemical ODE output',
     sourceId: 'evowars/core/mars-single-compartment-ode',
     method: 'Radau IIA integration of the selected Taysum & Palmer (2020) Table B1 gas-phase and Table B2 photolysis channels',
@@ -292,7 +297,7 @@ function applyMarsPhotochemicalInterval(
     ].join('; ')
   };
   const updatedReservoir = setMaterialInventory(
-    { ...reservoir, materialProvenance },
+    { ...reservoir, materialProvenance: outputProvenance },
     'molar_concentration',
     nextEntries
   );
