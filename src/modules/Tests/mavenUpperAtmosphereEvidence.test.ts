@@ -148,7 +148,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.revision).toBe('del1-42');
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.role).toMatch(/not itself a temperature measurement file/);
     expect(MAVEN_NGIMS_PDS_ARCHIVE.temperatureSelectionIndex.retrievalStatus)
-      .toBe('index_contents_not_retrieved_and_no_TID_selected');
+      .toBe('html_index_rows_searchable_csv_payload_not_imported');
   });
 
   it('records the newer PDS v41.0 Key Parameters coverage without promoting schema fields to observations', () => {
