@@ -1,3 +1,5 @@
+import type { DataProvenance } from '../Core/scientificValue';
+
 // ============================================
 // MGS MARS RADIO-OCCULTATION PROFILE: 8028D38A.TPS
 // ============================================
@@ -62,8 +64,6 @@ export const MGS_MARS_8028D38A_METADATA = {
   rowCount: 74
 } as const;
 
-import type { DataProvenance } from '../Core/scientificValue';
-
 export const MGS_MARS_8028D38A_PROVENANCE: DataProvenance = {
   sourceName: 'Mars Global Surveyor Radio Science Team, reduced radio-occultation T-P profile',
   sourceId: 'PDS product 8028D38A.TPS',
@@ -95,11 +95,11 @@ type RawMgsRow = readonly [
   numberDensitySigmaPerM3: number
 ];
 
-// Columns follow the product label: RADIUS, LATITUDE, LONGITUDE,
-// GEOPOTENTIAL, PRESSURE, SIGMA PRESSURE, TEMPERATURE,
-// SIGMA TEMPERATURE, NUMBER DENSITY, SIGMA NUMBER DENSITY.
-// Latitude/longitude are included in the header metadata; the four
-// measurement columns plus radius/geopotential are stored here.
+// The table has 10 PDS columns. This compact source snapshot retains
+// radius, geopotential, pressure, sigma-pressure, temperature,
+// sigma-temperature, number density and sigma-number-density.
+// Per-row latitude/longitude are omitted; the header occultation
+// coordinates are retained in MGS_MARS_8028D38A_METADATA.
 const RAW_MGS_ROWS: readonly RawMgsRow[] = [
   [3392456.6, 1285, 5.79820e2, 7.16, 1.98138e2, 1.85, 2.11953e23, 6.64e20],
   [3392762.0, 2392, 5.63307e2, 7.11, 2.02402e2, 1.91, 2.01578e23, 6.64e20],
