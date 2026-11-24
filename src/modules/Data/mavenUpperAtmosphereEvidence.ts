@@ -1445,7 +1445,7 @@ export function selectMavenNgimsL3ResampledDensityProfile(
   else if (Date.parse(startUtc) >= Date.parse(stopUtc)) errors.push('UTC stop must be later than start');
   if (errors.length > 0) return { status: 'rejected', errors };
 
-  const excluded: MavenNgimsL3ResampledDensityExcludedRowCounts = {
+  const excluded: { -readonly [Key in keyof MavenNgimsL3ResampledDensityExcludedRowCounts]: number } = {
     rejectedByRowValidation: 0,
     differentTid: 0,
     differentOrbit: 0,
