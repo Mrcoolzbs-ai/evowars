@@ -9,6 +9,12 @@ import type {
   MarsPhotochemicalInitialConcentrations,
   MarsPhotochemicalNetworkInput
 } from '../ChemicalEvolution/marsPhotochemicalNetwork';
+import {
+  MARS_TAYSUM_2020_GAS_PHASE_REACTIONS
+} from '../Data/marsGasPhaseKinetics';
+import {
+  MARS_TAYSUM_2020_PHOTOLYSIS_CHANNELS
+} from '../Data/marsPhotochemistryEvidence';
 import type { MarsGasSpeciesId } from '../Data/marsGasPhaseKinetics';
 import type { DataProvenance } from '../Core/scientificValue';
 
@@ -132,6 +138,50 @@ describe('Mars single-compartment source-backed photochemical network', () => {
     expect(result.finalConcentrationsPerCm3.HO2).toBeLessThan(start.HO2);
     expect(result.finalConcentrationsPerCm3.O).toBeGreaterThan(start.O);
     expect(result.finalConcentrationsPerCm3.CO2).toBeCloseTo(start.CO2, 6);
+  });
+
+  it('builds and integrates every explicitly evaluable B1 and B2 channel in the source-backed subset', () => {
+    const gasPhaseReactionIds = MARS_TAYSUM_2020_GAS_PHASE_REACTIONS
+      .filter((reaction) => reaction.rateExpression.kind !== 'falloff_not_evaluated')
+      .map((reaction) => reaction.id);
+    const photolysisReactionIds = MARS_TAYSUM_2020_PHOTOLYSIS_CHANNELS.map(
+      (reaction) => reaction.id
+    );
+    const completeFixture = Object.fromEntries(
+      MARS_PHOTOCHEMICAL_SPECIES_ORDER.map((species) => [species, 1e3])
+    ) as MarsPhotochemicalInitialConcentrations;
+
+    const built = buildMarsPhotochemicalNetworkProblem(input({
+      temperatureK: 298,
+      altitudeKm: 0.5,
+      gasPhaseReactionIds,
+      photolysisReactionIds,
+      dtSeconds: 1,
+      initialConcentrationsPerCm3: completeFixture
+    }));
+    expect(gasPhaseReactionIds).toHaveLength(30);
+    expect(photolysisReactionIds).toHaveLength(9);
+    expect(built.reactions).toHaveLength(39);
+    expect(built.problem.stateDimension).toBe(16);
+
+    const result = runMarsPhotochemicalConcentrationStep(input({
+      temperatureK: 298,
+      altitudeKm: 0.5,
+      gasPhaseReactionIds,
+      photolysisReactionIds,
+      dtSeconds: 1,
+      initialConcentrationsPerCm3: completeFixture
+    }));
+    expect(result.reactions).toHaveLength(39);
+    for (const species of MARS_PHOTOCHEMICAL_SPECIES_ORDER) {
+      expect(Number.isFinite(result.finalConcentrationsPerCm3[species])).toBe(true);
+      expect(result.finalConcentrationsPerCm3[species]).toBeGreaterThanOrEqual(0);
+    }
+    for (const element of ['C', 'H', 'O'] as const) {
+      expect(
+        totalElement(result.finalConcentrationsPerCm3, element)
+      ).toBeCloseTo(totalElement(completeFixture, element), 7);
+    }
   });
 
   it('uses the dynamic CO2 state as the explicit third body for selected termolecular reactions', () => {
