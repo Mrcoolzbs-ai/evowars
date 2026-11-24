@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Fetch and freeze one public MAVEN NGIMS PDS4 L3 res-den product.
 
-This is an explicit, one-shot archive retrieval helper. It preserves the exact
+This is an explicit, one-shot archive retrieval helper. Trigger it with a commit
+subject containing [import-ngims-tid-14282]. It preserves the exact
 CSV/XML bytes, verifies the detached PDS4 label structure, compares file_size
 and (when supplied) md5_checksum, and writes a small machine-readable manifest.
 It does not convert this L3 resampled product into L2 point measurements.
