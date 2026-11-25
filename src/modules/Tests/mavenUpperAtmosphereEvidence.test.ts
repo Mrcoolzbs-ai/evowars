@@ -1241,6 +1241,109 @@ describe('MAVEN upper-atmosphere evidence', () => {
   });
 
 
+  it('parses the archived real NGIMS L2 csn-abund TID 14282 product and builds isolated evidence columns', () => {
+    const csvText = readFileSync(
+      'src/modules/Data/mavenNgimsL2Archive/mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv',
+      'utf8'
+    );
+    const manifest = JSON.parse(readFileSync(
+      'src/modules/Data/mavenNgimsL2Archive/manifest.json',
+      'utf8'
+    )) as {
+      products: Array<{
+        csv: {
+          productId: string;
+          csvByteLength: number;
+          labelDeclaredFileSizeBytes: number;
+          csvSizeConsistencyStatus: string;
+          csvMd5Checksum: string | null;
+        };
+        csvSummary: {
+          sourceCsvHeaders: string[];
+          sourceHeaderAliasesApplied: Record<string, string>;
+          speciesRowCounts: Record<string, number>;
+          qualityFlagCounts: Record<string, number>;
+        };
+      }>;
+    };
+    expect(manifest.products).toHaveLength(1);
+    const product = manifest.products[0];
+    expect(product.csv.productId).toBe(
+      'urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406'
+    );
+    expect(product.csv).toMatchObject({
+      csvByteLength: 538939,
+      labelDeclaredFileSizeBytes: 539063,
+      csvSizeConsistencyStatus: 'mismatch_quarantined_no_md5',
+      csvMd5Checksum: null
+    });
+    expect(product.csvSummary.sourceHeaderAliasesApplied).toEqual({
+      cps_dt_bkd: 'cps_dt_bkgd',
+      t_sclk_cor: 't_sclk'
+    });
+    expect(product.csvSummary.speciesRowCounts).toEqual({
+      Ar: 372, CO2: 352, He: 481, N2: 359
+    });
+    expect(product.csvSummary.qualityFlagCounts).toMatchObject({
+      IU: 175, IV: 389, OU: 213, OV: 210, UR: 423, 'unrecognized:I0': 154
+    });
+    expect(product.csvSummary.sourceCsvHeaders).toContain('t_sclk_cor');
+    expect(product.csvSummary.sourceCsvHeaders).toContain('cps_dt_bkd');
+
+    const strict = parseMavenNgimsL2NeutralCsvText(csvText);
+    expect(strict.status).toBe('parsed');
+    if (strict.status !== 'parsed') throw new Error(strict.errors.join('; '));
+    expect(strict.headers).toContain('t_sclk_cor');
+    expect(strict.headers).toContain('cps_dt_bkd');
+    expect(strict.rows).toHaveLength(2796);
+    expect(strict.rows.filter(entry => entry.rawRecord.quality === 'I0')).toHaveLength(154);
+    expect(strict.rows.filter(entry => entry.rawRecord.quality === 'UR')).toHaveLength(423);
+    expect(strict.rows.every(entry =>
+      entry.validation.status === 'rejected' ||
+      entry.validation.measurement.timeUtc.endsWith('Z')
+    )).toBe(true);
+
+    const helium = buildMavenNgimsNeutralProfileFromCsvImport(strict, {
+      species: 'He',
+      orbit: 391,
+      tid: 14282,
+      direction: 'inbound',
+      quality: 'verified'
+    });
+    expect(helium.status).toBe('completed');
+    if (helium.status !== 'completed') throw new Error(helium.errors?.join('; ') ?? 'He profile rejected');
+    expect(helium.measurements).toHaveLength(346);
+    expect(helium.measurements.every(measurement =>
+      measurement.qualityFlag === 'IV' &&
+      measurement.numberDensityPerM3 > 0 &&
+      measurement.eligibleAsSchedulerInitialAbundance === false
+    )).toBe(true);
+    expect(new Set(helium.measurements.map(measurement => measurement.altitudeM)).size)
+      .toBe(helium.measurements.length);
+    expect(helium.measurements[0].timeUtc).toBe('2014-12-11T17:11:37.000Z');
+
+    const sensitivity = parseMavenNgimsL2NeutralCsvText(csvText, { allowUncertain: true });
+    expect(sensitivity.status).toBe('parsed');
+    if (sensitivity.status !== 'parsed') throw new Error(sensitivity.errors.join('; '));
+    const co2 = buildMavenNgimsNeutralProfileFromCsvImport(sensitivity, {
+      species: 'CO2',
+      orbit: 391,
+      tid: 14282,
+      direction: 'inbound',
+      quality: 'uncertain'
+    });
+    expect(co2.status).toBe('completed');
+    if (co2.status !== 'completed') throw new Error(co2.errors?.join('; ') ?? 'CO2 sensitivity profile rejected');
+    expect(co2.measurements).toHaveLength(134);
+    expect(co2.measurements.every(measurement =>
+      measurement.qualityFlag === 'IU' &&
+      measurement.quality === 'uncertain' &&
+      measurement.relativeSigmaFraction >= 0 &&
+      measurement.relativeSigmaFraction <= 1
+    )).toBe(true);
+    expect(co2.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+  });
+
   it('parses a complete quoted CRLF NGIMS L2 CSV and retains per-row quality results', () => {
     const csv = [
       't_utc,tid,orbit,focusmode,alt,lst,long,lat,sza,mass,species,abundance,precision,quality',
