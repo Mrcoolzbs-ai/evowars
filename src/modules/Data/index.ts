@@ -674,3 +674,17 @@ export type {
   MavenNgimsL1bSignalSelection,
   MavenNgimsL1bSignalSelectionResult
 } from './mavenNgimsL1bEvidence';
+
+
+// Stage 4.2: MAVEN NGIMS L1B cal-mkr event markers and SCLK phase intervals.
+export {
+  MAVEN_NGIMS_L1B_MARKER_PROVENANCE,
+  MAVEN_NGIMS_L1B_MARKER_LIMITATIONS,
+  parseMavenNgimsL1bMarkerCsvText
+} from './mavenNgimsL1bMarkerEvidence';
+export type {
+  MavenNgimsL1bMarkerRecord,
+  MavenNgimsL1bPhaseInterval,
+  MavenNgimsL1bMarkerEventBounds,
+  MavenNgimsL1bMarkerCsvImportResult
+} from './mavenNgimsL1bMarkerEvidence';
