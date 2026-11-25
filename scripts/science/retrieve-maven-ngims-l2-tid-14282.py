@@ -306,7 +306,11 @@ def main() -> int:
             csv_bytes = extract_member(archive, csv_member)
             xml_bytes = extract_member(archive, xml_member)
             product_prov = audit_label(xml_bytes, csv_bytes, Path(csv_member.name).name)
-            if "_14282_" not in product_prov["productId"] or "20141211t154406" not in product_prov["productId"].lower():
+            if (
+                "mvn_ngi_l2_" not in product_prov["productId"] or
+                "-14282_" not in product_prov["productId"] or
+                "20141211t154406" not in product_prov["productId"].lower()
+            ):
                 fail(f"label URN is not the requested event: {product_prov['productId']}")
             summary = parse_csv(csv_bytes)
             basename = Path(csv_member.name).name
