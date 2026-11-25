@@ -1,0 +1,191 @@
+{
+  "schemaVersion": "1.0.0",
+  "document": {
+    "title": "MAVEN NGIMS PDS Software Interface Specification",
+    "revision": "1.13",
+    "date": "2022-10-30",
+    "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/document/ngims_pds_sis_v03_r01.pdf"
+  },
+  "groundClosedSourceSensitivity": [
+    {
+      "filament": 1,
+      "emissionMicroamps": 250,
+      "cem": 1,
+      "species": "40Ar",
+      "massToCharge": 40,
+      "ionizationCrossSectionAngstromSquared": 2.52,
+      "absoluteSensitivity": 0.0284,
+      "normalizedSensitivity": 0.0113
+    },
+    {
+      "filament": 1,
+      "emissionMicroamps": 50,
+      "cem": 1,
+      "species": "40Ar",
+      "massToCharge": 40,
+      "ionizationCrossSectionAngstromSquared": 2.52,
+      "absoluteSensitivity": 0.00183,
+      "normalizedSensitivity": 0.000726
+    },
+    {
+      "filament": 1,
+      "emissionMicroamps": 250,
+      "cem": 1,
+      "species": "84Kr",
+      "massToCharge": 84,
+      "ionizationCrossSectionAngstromSquared": 3.45,
+      "absoluteSensitivity": 0.0203,
+      "normalizedSensitivity": 0.00589
+    },
+    {
+      "filament": 1,
+      "emissionMicroamps": 50,
+      "cem": 1,
+      "species": "84Kr",
+      "massToCharge": 84,
+      "ionizationCrossSectionAngstromSquared": 3.45,
+      "absoluteSensitivity": 0.00138,
+      "normalizedSensitivity": 0.0004
+    },
+    {
+      "filament": 2,
+      "emissionMicroamps": 250,
+      "cem": 2,
+      "species": "40Ar",
+      "massToCharge": 40,
+      "ionizationCrossSectionAngstromSquared": 2.52,
+      "absoluteSensitivity": 0.0303,
+      "normalizedSensitivity": 0.012
+    },
+    {
+      "filament": 2,
+      "emissionMicroamps": 50,
+      "cem": 2,
+      "species": "40Ar",
+      "massToCharge": 40,
+      "ionizationCrossSectionAngstromSquared": 2.52,
+      "absoluteSensitivity": 0.00236,
+      "normalizedSensitivity": 0.000936
+    },
+    {
+      "filament": 2,
+      "emissionMicroamps": 250,
+      "cem": 2,
+      "species": "84Kr",
+      "massToCharge": 84,
+      "ionizationCrossSectionAngstromSquared": 3.45,
+      "absoluteSensitivity": 0.0227,
+      "normalizedSensitivity": 0.00657
+    },
+    {
+      "filament": 2,
+      "emissionMicroamps": 50,
+      "cem": 2,
+      "species": "84Kr",
+      "massToCharge": 84,
+      "ionizationCrossSectionAngstromSquared": 3.45,
+      "absoluteSensitivity": 0.0019,
+      "normalizedSensitivity": 0.000551
+    }
+  ],
+  "rfCorrection": {
+    "massToChargeThreshold": 20.5,
+    "lessThanOrEqual": 0.71,
+    "greaterThan": 1,
+    "formula": "Sa = Sn * C_RF * sigma_s"
+  },
+  "deadTime": {
+    "sisRev113": {
+      "formula": "tau = A * ln(m) + B",
+      "cem1": {
+        "aSeconds": 1.5738e-8,
+        "bSeconds": -2.3125e-7
+      },
+      "cem2": {
+        "aSeconds": null,
+        "bSeconds": null
+      },
+      "note": "SIS Table 2: CEM 2 coefficients are not available."
+    },
+    "stone2018": {
+      "formula": "tau = max(A * ln(m) + B, 0)",
+      "aSeconds": 9.49e-9,
+      "bSeconds": -1.39e-7,
+      "note": "Study-specific analysis model, not universal calibration."
+    },
+    "l1bColumns": {
+      "cpsDtAlreadyDeadTimeCorrected": true,
+      "cpsDtBkgdAlreadyDeadTimeCorrected": true,
+      "additionalCorrectionPermitted": false
+    }
+  },
+  "inFlightN2Fragmentation": {
+    "mass28To14FragmentFraction": 0.0347,
+    "oneSigma": 0.0042,
+    "calibrationGasRuns": 6,
+    "scope": "N2 only; use of m/z14 and m/z28, not a global fragmentation matrix."
+  },
+  "gainStabilization": {
+    "densityDivideFactor": 1.5331,
+    "appliesOnlyToOrbitsAbove": 748,
+    "eventOrbit": 391,
+    "appliesToEvent": false
+  },
+  "earlyMission": {
+    "period": "October-December 2014",
+    "initialSettingV": 125,
+    "laterSettingV": 25,
+    "reason": "early-December contamination in m/z19 and m/z16 with loss of signal; several settings changed",
+    "pipelineDifference": "2014 data used different calibration and computation methods from February 2015 onward",
+    "tid": 14282,
+    "date": "2014-12-11",
+    "orbit": 391,
+    "reviewRequired": true,
+    "actualTelemetry": {
+      "MT_MU1_VCTL_V": -45,
+      "MT_MU2_VCTL_V": -2437.6,
+      "multiplier2CommandLogged": 2462
+    },
+    "actualTelemetryInterpretation": "PDS SIS defines MT_MU1/2 as actual negative multiplier electrode voltages. The published 125/25 V setting is not mapped to these exact PDS channels."
+  },
+  "openSource": {
+    "formula": "Oa = [Sa(m_ref) * n_c(m_ref) / n_o(m_ref)] * C_EN(m_s)",
+    "cEn": null,
+    "computedForTid14282": false,
+    "requiredEvidence": [
+      "same reference gas measured in CS and OS",
+      "dead-time-corrected count rates",
+      "applicable closed-source sensitivity",
+      "validated C_EN",
+      "fragmentation/background model"
+    ]
+  },
+  "preflightCalibrationCollection": {
+    "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/",
+    "sisListedTids": [
+      10191,
+      10194,
+      10197,
+      10198,
+      10199,
+      10201,
+      10202,
+      10205,
+      10207,
+      10216,
+      10217
+    ],
+    "tid10191Conflict": {
+      "sisDesignation": "Argon calibration",
+      "messageLogDirectory": "2012-09-23-08.19.45-10191-KrCalibration/",
+      "status": "must be resolved from raw spectrum before gas identity assignment"
+    }
+  },
+  "legacyL2EventProduct": {
+    "file": "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv",
+    "focusMode": "csn",
+    "exists": true,
+    "matchingCsoAbundInOfficial2014AnnualArchive": false,
+    "role": "legacy derived data, not independent calibration evidence"
+  }
+}

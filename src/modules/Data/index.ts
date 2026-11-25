@@ -720,3 +720,27 @@ export type {
   MavenNgimsL1bOperationalPhaseDiagnostic,
   MavenNgimsL1bOperationalPhaseDiagnosticsResult
 } from './mavenNgimsL1bOperationalPhaseEvidence';
+
+
+// Stage 4.2: NGIMS pre-flight calibration references and conservative applicability gates.
+export {
+  MAVEN_NGIMS_CALIBRATION_REFERENCE_DOCUMENT,
+  MAVEN_NGIMS_GROUND_CLOSED_SOURCE_SENSITIVITIES,
+  MAVEN_NGIMS_RF_CORRECTION,
+  MAVEN_NGIMS_DEAD_TIME_REFERENCE,
+  MAVEN_NGIMS_IN_FLIGHT_N2_FRAGMENTATION,
+  MAVEN_NGIMS_GAIN_STABILIZATION,
+  MAVEN_NGIMS_EARLY_MISSION_CONFIGURATION_CAVEAT,
+  MAVEN_NGIMS_OPEN_SOURCE_CALIBRATION,
+  MAVEN_NGIMS_CALIBRATION_APPLICABILITY,
+  MAVEN_NGIMS_PREFLIGHT_CALIBRATION_TIDS,
+  MAVEN_NGIMS_CALIBRATION_COLLECTION,
+  getMavenNgimsRfCorrectionFactor,
+  findMavenNgimsGroundClosedSourceSensitivity,
+  calculateMavenNgimsGroundReferenceSensitivity
+} from './mavenNgimsL1bCalibrationReference';
+export type {
+  MavenNgimsGroundSpecies,
+  MavenNgimsGroundClosedSourceSensitivity,
+  MavenNgimsGroundSensitivityCalculation
+} from './mavenNgimsL1bCalibrationReference';

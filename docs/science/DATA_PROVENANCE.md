@@ -1064,3 +1064,107 @@ Sources: Mahaffy et al., NGIMS instrument paper
 (https://lasp.colorado.edu/maven/files/2014/10/MAVEN_NGIMS.pdf);
 NGIMS PDS SIS Rev. 1.3
 (https://lasp.colorado.edu/galaxy/download/attachments/26250002/NGIMS%20PDS%20SIS%20rev%201.3_MKE.pdf).
+
+
+## MAVEN NGIMS calibration evidence and applicability (Stage 4.2)
+
+### Closed-source ground reference is not flight validation
+
+The current controlled PDS SIS is Rev. 1.13 (2022-10-30). Table 3 gives
+pre-flight ground sensitivities for 40Ar and 84Kr at 50 and 250 microampere
+emission settings for both filament/CEM pairs. The table footnote explicitly
+says the sensitivities were to be updated following the first in-flight
+calibration. The eight values are preserved in
+`src/modules/Data/mavenNgimsL1bCalibrationReference.ts` and the machine-readable
+reference copy `mavenNgimsL1bCalibrationReference.json`; they are labelled
+`preflight_ground_reference`, not flight-calibrated coefficients.
+
+The closed-source equation is
+`S_a = S_n * C_RF(m_s) * sigma_s`, with `C_RF = 0.71` for mass-to-charge
+at or below 20.5 and 1.0 above 20.5. The module provides this equation only as
+a labelled ground-reference calculation. It has no CPS-to-density operation.
+
+### Dead time and detector identity
+
+SIS Rev. 1.13 Table 2 provides dead-time coefficients for CEM 1, but not CEM 2.
+Stone et al. (2018) also publish a study-specific model. Neither model is
+automatically applied to TID 14282. L1B `CPS_DT` is already dead-time corrected,
+and `CPS_DT_BKGD` is both background-subtracted and dead-time corrected; SIS
+recommends the latter for science computations. Applying another dead-time
+correction to those L1B fields would double-correct the data.
+
+### Flight evidence that is useful but narrow
+
+Stone et al. (2018) report an in-flight known-composition calibration-gas
+fragmentation ratio for nitrogen, m/z 14 relative to m/z 28, of
+3.47 ± 0.42% from six calibration-gas measurements. It is retained as a
+nitrogen-specific response result, not a general fragmentation matrix.
+The same study applies a detector gain-stabilization density factor of 1.5331
+to orbits after 748; TID 14282 is orbit 391, so this correction is not applied.
+
+The PDS SIS states that the internal calibration reservoir is opened near
+apoapsis at intervals of several weeks, introducing a restricted capillary
+flow into the open source. The open-source sensitivity equation still requires
+paired dead-time-corrected reference-gas count rates from both sources and
+the energy correction factor `C_EN`. No numerical `C_EN` was found in the
+retrieved SIS or cited public analysis sources, so it remains null.
+
+### TID 14282: early-mission applicability guard
+
+A 2017 NGIMS analysis reports that October-December 2014 used different
+operating settings than the February 2015 onward period. It describes an
+early-December contamination issue at m/z 19 and 16 and subsequent setting
+changes, including a reported multiplier setting change from 125 V to 25 V.
+TID 14282 is 2014-12-11, orbit 391, and therefore requires manual
+configuration review before applying any generic post-February-2015
+calibration.
+
+The event HK product records actual scientific readbacks
+`QMS:MT_MU1_VCTL = -45.0 V` and `QMS:MT_MU2_VCTL = -2437.6 V` in 23
+sparse observations of each field. SIS identifies these as the negative
+electrode voltages for Multiplier 1 and Multiplier 2. The event message log
+records Multiplier 2 being turned on with command value 2462. These
+observations establish the reported electrode settings and active channel;
+the retrieved sources do not map the paper's 125/25 V setting to these exact
+PDS channels. The two voltage descriptions are therefore not equated.
+
+### Raw pre-flight calibration collection
+
+SIS Appendix 8.4 lists pre-flight calibration TIDs 10191 (Argon), 10194,
+10197, 10198 and 10199 (Krypton), 10201 and 10202 (Xenon), 10205 and 10207
+(Helium), and 10216/10217 (CS/OS switching tests). The official PDS calibration
+collection is
+[calibration/](https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/).
+A reproducible workflow retrieves the raw `gnd-sci`, `gnd-mkr` and
+`gnd-msg` files for the first Argon/Krypton calibration TIDs, hashes the
+payloads, validates their detached labels, and streams the mass-channel
+spectra into a compact evidence report. It deliberately does not derive
+absolute sensitivity until the large `gnd-hk` pressure context and reference
+gas density are validated.
+
+There is a source conflict for TID 10191: SIS labels it Argon calibration,
+but the first line of its PDS message log names the data directory
+`2012-09-23-08.19.45-10191-KrCalibration/`. The gas identity remains
+unassigned until the raw spectrum and pressure/reference-gas records resolve
+the discrepancy. The analyzer stores this conflict rather than silently
+choosing one label.
+
+### Existing L2 product is not an independent calibration
+
+The official 2014 annual L2 archive contains a CSN abundance product for
+TID 14282, but no matching CSO abundance product in that annual archive.
+The CSN L2 product is a legacy derived product, not an independent
+calibration measurement and cannot provide `C_EN` or validate the
+ground-sensitivity table. Its quality flags and label/payload integrity
+caveats remain attached to its existing manifest.
+
+**Current calibration readiness:** ground reference values are imported;
+an in-flight N2 fragmentation result is recorded with its narrow scope;
+CEM 2 dead-time coefficients, event-specific flight sensitivity, a complete
+fragmentation matrix, and numerical `C_EN` remain unresolved. TID 14282 is
+not eligible for a new CPS-to-density conversion from these references.
+
+Sources: [NGIMS SIS Rev. 1.13](https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/document/ngims_pds_sis_v03_r01.pdf);
+[Mahaffy et al. (2014)](https://lasp.colorado.edu/maven/files/2014/10/MAVEN_NGIMS.pdf);
+[Terada et al. (2017)](https://doi.org/10.1002/2016JA023476);
+[Stone et al. (2018)](https://doi.org/10.1029/2018JE005552).

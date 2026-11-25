@@ -1261,3 +1261,14 @@ the frozen 88,639-row HK CSV and writes
 These telemetry records are operational context only. They are not a
 validated sensitivity function, energy correction factor, neutral abundance
 or complete photochemical initial condition. Stage 4.2 remains OPEN / NOT_READY.
+
+
+### MAVEN NGIMS calibration evidence gate (Stage 4.2)
+
+- Pre-flight ground sensitivities for 40Ar/84Kr and both filament/CEM paths are imported from SIS Table 3 with explicit pre-flight-only scope.
+- SIS C_RF piecewise correction and detector dead-time reference values are recorded. No generic dead-time correction is run on L1B CPS_DT/CPS_DT_BKGD, and CEM 2 SIS dead-time parameters remain unavailable.
+- The six-run in-flight N2 m/z14/m/z28 fragmentation result and the orbit>748 gain-stabilization factor are recorded with their narrow applicability.
+- The TID 14282 event is marked manual-review-required because it falls in the 2014 early-mission setting epoch; actual MT_MU1/2 negative-electrode readbacks are recorded but are not conflated with the published 125/25 V setting description.
+- The raw pre-flight calibration collection is being indexed; TID 10191 has a SIS-vs-message-log gas-name conflict that must be resolved from its spectrum and pressure/reference-gas evidence.
+- `C_EN`, flight-specific closed-source sensitivity for this event, CEM 2 dead-time coefficients, and a complete fragmentation response matrix are not validated. Stage 4.2 remains OPEN / NOT_READY for any new NGIMS CPS-to-density calibration path.
+

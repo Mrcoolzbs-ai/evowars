@@ -12,6 +12,7 @@ MKR=HK_DIR/'mvn_ngi_l1b_cal-mkr-014282_20141211T154406_v01_r02.csv'
 HK_MANIFEST=HK_DIR/'manifest.json'
 PHASES=HK_DIR/'phase-associations.json'
 L1B_MANIFEST=ROOT/'src/modules/Data/mavenNgimsL1bArchive/l1b-osnb-tid-14282-manifest.json'
+CALIBRATION_REF=ROOT/'src/modules/Data/mavenNgimsL1bCalibrationReference.json'
 OUT=HK_DIR/'operational-phase-diagnostics.json'
 FIELDS=[
  'CDH:OS_FIL1_VMON','CDH:OS_FIL2_VMON','CDH:OS_FIL_EMON','CDH:OS_FIL1_IMON','CDH:OS_FIL2_IMON',
@@ -117,9 +118,9 @@ Vector
  assert parsed['runtimeStartMarkerIds']==[2001,2103] and parsed['runtimeEndMarkerIds']==[2002,2104]
  assert parsed['multiplierTwoEnableLogCount']==1
 def analyse()->dict[str,Any]:
- for p in (MSG,MKR,HK_MANIFEST,PHASES,L1B_MANIFEST):
+ for p in (MSG,MKR,HK_MANIFEST,PHASES,L1B_MANIFEST,CALIBRATION_REF):
   if not p.is_file():raise FileNotFoundError(p)
- manifest=json.loads(HK_MANIFEST.read_text());phase_doc=json.loads(PHASES.read_text());l1b=json.loads(L1B_MANIFEST.read_text())
+ manifest=json.loads(HK_MANIFEST.read_text());phase_doc=json.loads(PHASES.read_text());l1b=json.loads(L1B_MANIFEST.read_text());calref=json.loads(CALIBRATION_REF.read_text())
  products=manifest['products']
  for key,path in (('cal-msg',MSG),('cal-mkr',MKR)):
   if sha(path)!=products[key]['payload']['sha256']:raise ValueError(f'{key} SHA-256 mismatch')
@@ -180,6 +181,12 @@ def analyse()->dict[str,Any]:
    'QMS_MT_MU1_VCTL':aggregate('QMS:MT_MU1_VCTL'),'QMS_MT_MU2_VCTL':aggregate('QMS:MT_MU2_VCTL')},
   'eventWideL1bSignalContext_notSensitivity':{'description':'CSN/OSNB m/z 40 channel summaries; no species identity or phase/time/altitude match is asserted.',
    'modes':signal,'ratioOrSensitivityDerived':False},
+  'calibrationReference':{'path':'src/modules/Data/mavenNgimsL1bCalibrationReference.json',
+   'schemaVersion':calref['schemaVersion'],'groundClosedSourceSensitivityRowCount':len(calref['groundClosedSourceSensitivity']),
+   'rfCorrection':calref['rfCorrection'],'deadTimeReference':calref['deadTime'],
+   'inFlightN2Fragmentation':calref['inFlightN2Fragmentation'],'gainStabilization':calref['gainStabilization'],
+   'earlyMissionConfiguration':calref['earlyMission'],'openSourceReference':calref['openSource'],
+   'preflightCalibrationCollection':calref['preflightCalibrationCollection']},
   'calibrationAssessment':{'closedSourceAbsoluteSensitivity':'not_derived','openSourceSensitivity':'not_derived','C_EN':None,
    'numericalCenValueFoundInEventCalHkMkrMsgOrCitedSISPaper':False,
    'closedSourceMethod':'S_a = S_n × C_RF(m_s) × σ_s; event-specific reference-gas calibration is required.',
