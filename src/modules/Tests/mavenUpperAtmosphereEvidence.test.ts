@@ -1296,8 +1296,13 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(strict.headers).toContain('t_sclk_cor');
     expect(strict.headers).toContain('cps_dt_bkd');
     expect(strict.rows).toHaveLength(2796);
-    expect(strict.rows.filter(entry => entry.rawRecord.quality === 'I0')).toHaveLength(154);
-    expect(strict.rows.filter(entry => entry.rawRecord.quality === 'UR')).toHaveLength(423);
+    // Raw source flag counts include rows later rejected for zero abundance,
+    // sentinel precision, or other numeric limitations.
+    expect(strict.rows.filter(entry => entry.rawRecord.quality === 'I0')).toHaveLength(346);
+    expect(strict.rows.filter(entry => entry.rawRecord.quality === 'UR')).toHaveLength(706);
+    expect(product.csvSummary.qualityFlagCounts).toMatchObject({
+      IU: 175, IV: 389, OU: 213, OV: 210, UR: 423, 'unrecognized:I0': 154
+    });
     expect(strict.rows.every(entry =>
       entry.validation.status === 'rejected' ||
       entry.validation.measurement.timeUtc.endsWith('Z')
