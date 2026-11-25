@@ -18,6 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Validate selector parser offline
+        run: |
+          python -m py_compile scripts/science/query-maven-ngims-all-neutral-index.py
+          python scripts/science/query-maven-ngims-all-neutral-index.py --self-test
       - name: Query official all-neutral NGIMS product selector
         run: python scripts/science/query-maven-ngims-all-neutral-index.py
       - name: Commit retrieved all-neutral event index
