@@ -207,7 +207,7 @@ def parse_csv(csv_bytes: bytes) -> dict:
     focus_counts: Counter[str] = Counter()
     orbit_counts: Counter[str] = Counter()
     tid_counts: Counter[str] = Counter()
-    profiles: dict[tuple[str, str, str], list[tuple[float, float, float, str]]] = defaultdict(list)
+    profiles: dict[tuple[str, str, str, str], list[tuple[float, float, float, str]]] = defaultdict(list)
     timestamps: list[datetime] = []
     row_count = 0
     rejected_rows = 0
@@ -267,13 +267,15 @@ def parse_csv(csv_bytes: bytes) -> dict:
             no_rows += 1
         if quality in {"IV", "OV", "IU", "OU"}:
             cls = "verified" if quality in {"IV", "OV"} else "uncertain"
-            profiles[(species, focus, cls)].append((altitude, abundance, precision, quality))
+            direction = "inbound" if quality in {"IV", "IU"} else "outbound"
+            profiles[(species, focus, direction, cls)].append((altitude, abundance, precision, quality))
     candidates = []
-    for (species, focus, quality), rows in sorted(profiles.items()):
+    for (species, focus, direction, quality), rows in sorted(profiles.items()):
         unique_altitudes = len({r[0] for r in rows})
         candidates.append({
             "species": species,
             "focusMode": focus,
+            "direction": direction,
             "quality": quality,
             "rowCount": len(rows),
             "uniqueAltitudeCount": unique_altitudes,
@@ -371,7 +373,7 @@ def main() -> int:
             "productIdEvent": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406",
             "orbit": ORBIT,
             "tid": TID,
-            "note": "The official index can expose multiple product modes/versions for the same TID; all matching L2 abundance products in the annual archive are retained separately."
+            "note": "Only the csn-abund TID 14282 product is present in the 2014 annual L2 archive; no cso-abund product for this TID/event was found in that archive. The official single-species index lists this event as csn-abund."
         },
         "retrievalMethod": "exact original archive members extracted byte-for-byte; no line-ending rewriting",
         "products": products,
