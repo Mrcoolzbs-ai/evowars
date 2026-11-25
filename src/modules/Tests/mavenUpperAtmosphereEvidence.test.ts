@@ -1299,7 +1299,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       zeroAbundanceRows: 327,
       precisionSentinelMinus999Rows: 687,
       numericRejectionReasonCounts: {
-        abundance_sentinel_-999: 905,
+        'abundance_sentinel_-999': 905,
         nonpositive_abundance: 327
       },
       profileCandidateRows: 987
