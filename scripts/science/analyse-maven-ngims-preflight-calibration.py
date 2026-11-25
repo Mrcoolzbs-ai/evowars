@@ -379,7 +379,8 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         time_column = find_column(headers, ("TIME", "T_SCLK", "SCLK", "TIME_SCLK"))
         marker_column = find_column(headers, ("MKID", "MARKER_ID", "MARKERID"))
         selected = [
-            catalog[name] for name in headers
+            {**catalog[name], "role": housekeeping_field_role(catalog[name])}
+            for name in headers
             if name in catalog and housekeeping_field_role(catalog[name]) is not None
         ]
         stats = {item["name"]: new_housekeeping_stats(item) for item in selected}
