@@ -1022,6 +1022,166 @@ export function coRegisterMavenNgimsNeutralProfiles(
   };
 }
 
+export interface MavenNgimsMultiSpeciesCoRegisteredRow {
+  readonly timeUtc: string;
+  readonly altitudeM: number;
+  /** Source measurements remain separate; each keeps its own quality and 1-sigma precision. */
+  readonly measurements: readonly MavenNgimsNeutralMeasurement[];
+}
+
+export interface MavenNgimsMultiSpeciesCoRegistrationResult {
+  readonly status: 'completed' | 'rejected';
+  readonly species?: readonly string[];
+  readonly orbit?: number;
+  readonly tid?: number;
+  readonly focusMode?: MavenNgimsFocusMode;
+  readonly direction?: 'inbound' | 'outbound';
+  readonly rows?: readonly MavenNgimsMultiSpeciesCoRegisteredRow[];
+  readonly unmatchedCountBySpecies?: Readonly<Record<string, number>>;
+  readonly errors?: readonly string[];
+  readonly eligibleAsMarsPhotochemicalInitialState: false;
+  readonly eligibleAsSchedulerInitialAbundance: false;
+  readonly limitations: readonly string[];
+}
+
+/**
+ * Exact intersection join for two or more already validated NGIMS species profiles.
+ * No interpolation, nearest-neighbour matching, tolerance, row averaging or
+ * quality promotion is performed.
+ */
+export function coRegisterMavenNgimsNeutralProfileSet(
+  profiles: readonly MavenNgimsProfileBuildResult[]
+): MavenNgimsMultiSpeciesCoRegistrationResult {
+  const limitations = [
+    'Exact intersection on normalized UTC timestamp and altitude only; no interpolation, nearest-neighbour matching or tolerance is applied.',
+    'Every source profile must share one MAVEN orbit, NGIMS TID, focus mode and inbound/outbound branch.',
+    'Each species retains its own quality flag and relative 1-sigma abundance precision; uncertain measurements are not upgraded.',
+    'A co-registered subset of neutral species is not a complete 16-species snapshot, pressure/temperature profile or Scheduler initial state.'
+  ];
+  if (!Array.isArray(profiles) || profiles.length < 2) {
+    return {
+      status: 'rejected',
+      errors: ['at least two completed species profiles are required for multi-species co-registration'],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+  const invalidIndex = profiles.findIndex(
+    profile => !profile || profile.status !== 'completed' || !profile.measurements || profile.measurements.length < 2
+  );
+  if (invalidIndex >= 0) {
+    return {
+      status: 'rejected',
+      errors: ['profile ' + invalidIndex + ' must be completed and contain at least two measurements'],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+
+  const completed = profiles as readonly (MavenNgimsProfileBuildResult & {
+    readonly status: 'completed';
+    readonly measurements: readonly MavenNgimsNeutralMeasurement[];
+  })[];
+  const species = completed.map(profile => profile.species?.trim() ?? '');
+  const identityErrors: string[] = [];
+  if (species.some(value => value === '')) identityErrors.push('every profile must declare its species');
+  if (new Set(species.map(value => value.toUpperCase())).size !== species.length) {
+    identityErrors.push('multi-species co-registration requires distinct species; duplicate species profiles are not allowed');
+  }
+  const first = completed[0];
+  for (let index = 1; index < completed.length; index += 1) {
+    const current = completed[index];
+    if (current.orbit !== first.orbit) identityErrors.push('co-registration cannot combine different MAVEN orbits');
+    if (current.tid !== first.tid) identityErrors.push('co-registration cannot combine different NGIMS TIDs');
+    if (current.focusMode !== first.focusMode) identityErrors.push('co-registration cannot combine different NGIMS focus modes');
+    if (current.direction !== first.direction) identityErrors.push('co-registration cannot combine inbound and outbound profiles');
+  }
+  if (identityErrors.length > 0) {
+    return {
+      status: 'rejected',
+      errors: [...new Set(identityErrors)],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+
+  const keyOf = (measurement: MavenNgimsNeutralMeasurement): string =>
+    measurement.timeUtc + '|' + measurement.altitudeM.toString();
+  const indices = completed.map((profile, profileIndex) => {
+    const index = new Map<string, MavenNgimsNeutralMeasurement>();
+    for (const measurement of profile.measurements) {
+      if (
+        !measurement ||
+        measurement.species.trim().toUpperCase() !== species[profileIndex].toUpperCase() ||
+        measurement.orbit !== first.orbit ||
+        measurement.tid !== first.tid ||
+        measurement.focusMode !== first.focusMode ||
+        measurement.direction !== first.direction ||
+        measurement.quality !== profile.quality ||
+        measurement.eligibleAsSchedulerInitialAbundance !== false
+      ) {
+        identityErrors.push('profile ' + profileIndex + ' contains a measurement inconsistent with its declared identity or quality');
+        continue;
+      }
+      const key = keyOf(measurement);
+      if (index.has(key)) {
+        identityErrors.push('profile ' + profileIndex + ' contains duplicate exact time/altitude keys; no averaging is allowed');
+        continue;
+      }
+      index.set(key, measurement);
+    }
+    return index;
+  });
+  if (identityErrors.length > 0) {
+    return {
+      status: 'rejected',
+      errors: [...new Set(identityErrors)],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+
+  const rows: MavenNgimsMultiSpeciesCoRegisteredRow[] = [];
+  for (const [key, firstMeasurement] of indices[0]) {
+    const matches = indices.map(index => index.get(key));
+    if (matches.some(measurement => measurement === undefined)) continue;
+    rows.push({
+      timeUtc: firstMeasurement.timeUtc,
+      altitudeM: firstMeasurement.altitudeM,
+      measurements: matches as MavenNgimsNeutralMeasurement[]
+    });
+  }
+  if (rows.length < 2) {
+    return {
+      status: 'rejected',
+      errors: ['fewer than two exact UTC/altitude rows are shared by every requested species profile'],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+  rows.sort((a, b) => a.altitudeM - b.altitudeM || a.timeUtc.localeCompare(b.timeUtc));
+  return {
+    status: 'completed',
+    species,
+    orbit: first.orbit,
+    tid: first.tid,
+    focusMode: first.focusMode,
+    direction: first.direction,
+    rows,
+    unmatchedCountBySpecies: Object.fromEntries(
+      species.map((name, index) => [name, indices[index].size - rows.length])
+    ),
+    eligibleAsMarsPhotochemicalInitialState: false,
+    eligibleAsSchedulerInitialAbundance: false,
+    limitations
+  };
+}
+
 function parseFiniteField(
   row: Readonly<Record<string, string | undefined>>,
   field: string,
