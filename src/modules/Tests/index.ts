@@ -47,3 +47,7 @@ export * from './kineticWorldAdapter.test';
 
 // --- MGS Mars radio-occultation profile → hydrostatic Core bridge (Stage 4.2) ---
 export * from './mgsMarsOccultation.test';
+
+
+// --- MAVEN NGIMS L1B cal-mkr parser and SCLK-only phase windows (Stage 4.2) ---
+export * from './mavenNgimsL1bMarkerEvidence.test';
