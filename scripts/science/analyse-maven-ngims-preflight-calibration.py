@@ -26,6 +26,7 @@ BASES = (
 )
 PDS_NS = "http://pds.nasa.gov/pds4/pds/v1"
 OUTPUT = Path("src/modules/Data/mavenNgimsL1bCalibrationArchive/preflight-calibration-products.json")
+COMPACT_OUTPUT = Path("src/modules/Data/mavenNgimsL1bCalibrationArchive/preflight-calibration-housekeeping-summary.json")
 USER_AGENT = "EvoWars-NGIMS-Preflight-Calibration-Audit/1.0"
 MAX_BYTES = 500_000_000
 TIDS = (
@@ -666,6 +667,122 @@ def self_test() -> None:
         raise SystemExit(1)
 
 
+
+def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    compact_products = []
+    for product in results:
+        products = product["products"]
+        hk_product = products.get("gnd-hk", {})
+        hk = hk_product.get("housekeepingSummary", {})
+        marker_groups = hk.get("pressureAndValveStatisticsByMarkerId", {})
+        compact_marker_groups: dict[str, Any] = {}
+        for marker_id, group in marker_groups.items():
+            compact_channels = {}
+            for name, channel in group.get("channels", {}).items():
+                compact_channels[name] = {
+                    "observed": channel.get("observedValueCount", 0),
+                    "empty": channel.get("emptyValueCount", 0),
+                    "nonNumeric": channel.get("nonNumericValueCount", 0),
+                    "min": channel.get("minObservedValue"),
+                    "max": channel.get("maxObservedValue"),
+                    "first": channel.get("firstObservedRawValue"),
+                    "last": channel.get("lastObservedRawValue"),
+                }
+            compact_marker_groups[marker_id] = {
+                "rows": group.get("rowCount"),
+                "firstTimeRaw": group.get("firstTimeRaw"),
+                "lastTimeRaw": group.get("lastTimeRaw"),
+                "channels": compact_channels,
+            }
+
+        channel_stats = []
+        for channel in hk.get("channelStatistics", []):
+            channel_stats.append({
+                "name": channel.get("name"),
+                "fieldNumber": channel.get("fieldNumber"),
+                "unit": channel.get("unit"),
+                "role": channel.get("role"),
+                "description": channel.get("description"),
+                "observed": channel.get("observedValueCount"),
+                "empty": channel.get("emptyValueCount"),
+                "nonNumeric": channel.get("nonNumericValueCount"),
+                "min": channel.get("minObservedValue"),
+                "max": channel.get("maxObservedValue"),
+                "mean": channel.get("meanObservedValue"),
+                "first": channel.get("firstObservedRawValue"),
+                "last": channel.get("lastObservedRawValue"),
+            })
+
+        science = products.get("gnd-sci", {}).get("scienceSummary", {})
+        science_focus = {}
+        for tuning, section in science.get("focusModeOrTuningSummaries", {}).items():
+            science_focus[tuning] = {
+                "massBinCount": section.get("massBinCount"),
+                "targetMassEvidence": section.get("targetMassEvidence"),
+                "topMassBinsByIntegratedRawCounts": section.get("topMassBinsByIntegratedRawCounts", [])[:12],
+            }
+
+        message = products.get("gnd-msg", {}).get("messageSummary", {})
+        markers = products.get("gnd-mkr", {}).get("markerSummary", {})
+        compact_products.append({
+            "tid": product.get("tid"),
+            "date": product.get("date"),
+            "sisDesignation": product.get("sisDesignation"),
+            "messageLogDirectoryName": product.get("messageLogDirectoryName"),
+            "sisDesignationConflictsWithMessageDirectory": product.get("sisDesignationConflictsWithMessageDirectory"),
+            "housekeeping": {
+                "fileName": hk_product.get("payloadFileName"),
+                "bytes": hk_product.get("payloadDownload", {}).get("byteLength"),
+                "sha256": hk_product.get("payloadSha256"),
+                "payloadSizeMatchesLabel": hk_product.get("payloadSizeMatchesLabel"),
+                "declaredRecords": hk_product.get("labelDeclaredRecordCount"),
+                "actualRecords": hk.get("rowCount"),
+                "recordCountStatus": hk.get("recordCountStatus"),
+                "columnCount": hk.get("columnCount"),
+                "timeColumn": hk.get("timeColumn"),
+                "markerColumn": hk.get("markerColumn"),
+                "firstTimeRaw": hk.get("firstTimeRaw"),
+                "lastTimeRaw": hk.get("lastTimeRaw"),
+                "timeMonotonicityDiagnostic": hk.get("timeMonotonicityDiagnostic"),
+                "blankMarkerIdRows": hk.get("blankMarkerIdRowCount"),
+                "markerCounts": hk.get("markerCounts"),
+                "pressureValveChannels": hk.get("pressureValveChannels"),
+                "selectedChannelCount": hk.get("selectedChannelCount"),
+                "channelStatistics": channel_stats,
+                "pressureValveStatisticsByMarkerId": compact_marker_groups,
+                "interpretation": hk.get("interpretation"),
+            },
+            "messageLog": {
+                "firstLines": message.get("firstLines"),
+                "pressureRelevantLines": message.get("pressureRelevantLogLines"),
+                "multiplierOnCommands": message.get("multiplierOnCommands"),
+                "filamentOnCommands": message.get("filamentOnCommands"),
+            },
+            "markerProduct": {
+                "rowCount": markers.get("rowCount"),
+                "descriptionCounts": markers.get("descriptionCounts"),
+                "markerRowsBoundedSample": markers.get("markerRowsBoundedSample", [])[:100],
+            },
+            "science": {
+                "rowCount": science.get("rowCount"),
+                "detectedColumns": science.get("detectedColumns"),
+                "focusModeOrTuningSummaries": science_focus,
+            },
+        })
+
+    return {
+        "schemaVersion": "1.0.0",
+        "status": "raw_housekeeping_evidence_compacted_no_pressure_or_sensitivity_conversion",
+        "sourceCollection": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/",
+        "products": compact_products,
+        "interpretationLimits": [
+            "Pressure-monitor values retain the exact PDS engineering unit. A voltage readback is not a pressure until its sensor calibration and range are established.",
+            "No missing telemetry is carried forward, interpolated, or joined by an unvalidated clock transform.",
+            "Mass peaks are raw spectral evidence, not an automatic gas identity assignment.",
+            "No reference gas number density, absolute sensitivity, or C_EN is derived by this summary."
+        ]
+    }
+
 def main() -> None:
     if "--self-test" in sys.argv:
         self_test()
@@ -704,7 +821,11 @@ def main() -> None:
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    compact = build_compact_summary(results)
+    COMPACT_OUTPUT.write_text(json.dumps(compact, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
     print("Wrote " + str(OUTPUT) + " with " + str(len(results)) + " preflight calibration TIDs")
+    print("Wrote " + str(COMPACT_OUTPUT) + " (" + str(COMPACT_OUTPUT.stat().st_size) + " bytes)")
+    print("NGIMS-HK-COMPACT " + json.dumps(compact, separators=(",", ":"), sort_keys=True)[:12000])
 
 
 if __name__ == "__main__":
