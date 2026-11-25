@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Inspect the official PDS Atmospheres NGIMS selection form (no data download).
+Stage 4.2 recheck after legacy selector endpoints began returning HTTP 404.
 Trigger the one-shot workflow with [inspect-ngims-retrieval-form] in a commit subject.
 
 Trigger this diagnostic once with [inspect-ngims-retrieval-form] in a commit
