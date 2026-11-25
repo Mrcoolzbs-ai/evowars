@@ -196,6 +196,53 @@ def next_year_bounds(year: int) -> tuple[date, date]:
     return start, stop
 
 
+
+def build_source_metadata(form_provenance: dict) -> dict:
+    """Return reproducible selector provenance without guessing the winning endpoint."""
+    return {
+        "formPage": FORM_PAGE,
+        "formActionCandidates": FORM_ACTIONS,
+        "formMethod": "POST",
+        "formFields": {
+            "productTypeField": "Product type4",
+            "productTypeValue": "cso-abund",
+            "startTimeField": "Start Time",
+            "stopTimeField": "Stop Time",
+            "pagination": {"slice_start": "0-based offset", "slice_size": PAGE_SIZE},
+        },
+        "formFetch": form_provenance,
+        "queryDateRange": {
+            "startInclusive": START_DATE.isoformat(),
+            "stopInclusive": STOP_DATE.isoformat(),
+        },
+        "retrievalDate": date.today().isoformat(),
+    }
+
+
+def run_self_tests() -> None:
+    """Small offline contract checks; this must not contact the PDS selector."""
+    sample_html = """<!doctype html>
+    <table><tr><th>Product</th></tr>
+    <tr><td><a href="https://example.invalid/urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_cso-abund-14282_20141211t154406">
+    mvn_ngi_l2_cso-abund-14282_20141211T154406_v08_r01</a></td></tr></table>
+    <a href="?slice_start=500">Next</a>"""
+    parser = ResultParser()
+    parser.feed(sample_html)
+    urns = sorted(set(URN_RE.findall(sample_html)), key=str.lower)
+    names = sorted(set(PRODUCT_RE.findall(sample_html)), key=str.lower)
+    assert len(parser.rows) == 2, f"expected header + one result row, got {len(parser.rows)}"
+    assert len(urns) == 1 and "14282" in urns[0], f"unexpected URNs: {urns!r}"
+    assert len(names) == 1 and "14282" in names[0], f"unexpected product names: {names!r}"
+    assert any("slice_start" in link["href"] for link in parser.links), "next-page link was not captured"
+    assert next_year_bounds(2014) == (date(2014, 10, 18), date(2014, 12, 31))
+    assert next_year_bounds(2025) == (date(2025, 1, 1), date(2025, 2, 15))
+    source = build_source_metadata({"httpStatus": 200, "sha256": "fixture"})
+    assert source["formActionCandidates"] == FORM_ACTIONS
+    assert source["formMethod"] == "POST"
+    assert source["queryDateRange"]["stopInclusive"] == STOP_DATE.isoformat()
+    json.dumps(source)
+    print("NGIMS all-neutral selector self-test: PASS (HTML parsing, identifiers, pagination link, date bounds, provenance)")
+
 def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     form = fetch_search_form()
@@ -297,24 +344,7 @@ def main() -> int:
         ),
     )
     manifest = {
-        "source": {
-            "formPage": FORM_PAGE,
-            "formAction": FORM_ACTION,
-            "formMethod": "POST",
-            "formFields": {
-                "productTypeField": "Product type4",
-                "productTypeValue": "cso-abund",
-                "startTimeField": "Start Time",
-                "stopTimeField": "Stop Time",
-                "pagination": {"slice_start": "0-based offset", "slice_size": PAGE_SIZE},
-            },
-            "formFetch": form_provenance,
-            "queryDateRange": {
-                "startInclusive": START_DATE.isoformat(),
-                "stopInclusive": STOP_DATE.isoformat(),
-            },
-            "retrievalDate": "2026-11-25",
-        },
+        "source": build_source_metadata(form_provenance),
         "summary": {
             "queriedYears": query_years,
             "httpResponsePages": len(page_audit),
@@ -358,6 +388,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv[1:]:
+        try:
+            run_self_tests()
+            raise SystemExit(0)
+        except Exception as error:
+            print(f"SELF-TEST FAILED: {error}", file=sys.stderr)
+            raise SystemExit(1)
     try:
         raise SystemExit(main())
     except Exception as error:
