@@ -203,7 +203,7 @@ def role(record: dict[str, Any]) -> str | None:
 
 
 def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Join only exact TID + URN-time keys. Duplicates are rejected."""
+    """Join exact event keys; collapse repeated identical URNs across indexes only."""
     empty_group = lambda: {
         "l2_csn": [], "l2_cso": [], "l3_res_den": [], "l3_res_sht": []
     }
@@ -213,22 +213,95 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
         if event_role:
             groups[(record["tid"], record["productTime"])][event_role].append(record)
 
+    comparable_fields = (
+        "level",
+        "productType",
+        "tid",
+        "productTime",
+        "startTimeUtc",
+        "stopTimeUtc",
+        "closestApproachTimeUtc",
+        "altitudeKm",
+        "solarLongitudeDeg",
+        "martianYear",
+    )
+
     exact_events: list[dict[str, Any]] = []
     complete_triples: list[dict[str, Any]] = []
-    duplicates: list[dict[str, Any]] = []
+    rejected_keys: list[dict[str, Any]] = []
+    catalog_duplicate_details: list[dict[str, Any]] = []
+    collapsed_catalog_references = 0
     partial_pairs: Counter[str] = Counter()
 
     for (tid, product_time), group in sorted(groups.items()):
-        multiplicities = {name: len(items) for name, items in group.items()}
-        if any(count > 1 for count in multiplicities.values()):
-            duplicates.append({
+        unique_group: dict[str, list[dict[str, Any]]] = {}
+        identity_conflicts: list[dict[str, Any]] = []
+
+        for event_role, items in group.items():
+            by_urn: dict[str, dict[str, Any]] = {}
+            for item in items:
+                urn_key = item["urn"].casefold()
+                existing = by_urn.get(urn_key)
+                if existing is None:
+                    normalized = dict(item)
+                    normalized["sourceIndexes"] = [item["sourceIndex"]]
+                    by_urn[urn_key] = normalized
+                    continue
+
+                existing_signature = tuple(existing.get(field) for field in comparable_fields)
+                incoming_signature = tuple(item.get(field) for field in comparable_fields)
+                if existing_signature != incoming_signature:
+                    identity_conflicts.append({
+                        "role": event_role,
+                        "urn": item["urn"],
+                        "existingSourceIndex": existing["sourceIndex"],
+                        "duplicateSourceIndex": item["sourceIndex"],
+                        "reason": "same_urn_has_conflicting_catalog_metadata",
+                    })
+                    continue
+
+                collapsed_catalog_references += 1
+                if item["sourceIndex"] not in existing["sourceIndexes"]:
+                    existing["sourceIndexes"].append(item["sourceIndex"])
+                catalog_duplicate_details.append({
+                    "tid": tid,
+                    "productTime": product_time,
+                    "role": event_role,
+                    "urn": item["urn"],
+                    "sourceIndexes": sorted(existing["sourceIndexes"]),
+                    "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+                })
+
+            unique_group[event_role] = sorted(
+                by_urn.values(), key=lambda value: value["urn"].casefold()
+            )
+
+        multiplicities = {
+            event_role: len(items) for event_role, items in unique_group.items()
+        }
+        ambiguous_roles = {
+            event_role: [item["urn"] for item in items]
+            for event_role, items in unique_group.items()
+            if len(items) > 1
+        }
+        if ambiguous_roles or identity_conflicts:
+            rejected_keys.append({
                 "tid": tid,
                 "productTime": product_time,
+                "reason": (
+                    "same_urn_metadata_conflict"
+                    if identity_conflicts
+                    else "multiple_distinct_urns_for_same_role"
+                ),
                 "multiplicities": multiplicities,
+                "ambiguousRoles": ambiguous_roles,
+                "identityConflicts": identity_conflicts,
             })
             continue
 
-        present = {name for name, count in multiplicities.items() if count == 1}
+        present = {
+            event_role for event_role, count in multiplicities.items() if count == 1
+        }
         if present:
             exact_events.append({
                 "tid": tid,
@@ -238,7 +311,10 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
 
         required = {"l2_csn", "l3_res_den", "l3_res_sht"}
         if required.issubset(present):
-            products = {name: group[name][0] for name in sorted(required)}
+            products = {
+                event_role: unique_group[event_role][0]
+                for event_role in sorted(required)
+            }
             windows = [
                 (item["startTimeUtc"], item["stopTimeUtc"])
                 for item in products.values()
@@ -249,9 +325,10 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "tid": tid,
                 "productTime": product_time,
                 "products": {
-                    name: {
+                    event_role: {
                         "urn": item["urn"],
                         "sourceIndex": item["sourceIndex"],
+                        "sourceIndexes": sorted(item["sourceIndexes"]),
                         "startTimeUtc": item["startTimeUtc"],
                         "stopTimeUtc": item["stopTimeUtc"],
                         "closestApproachTimeUtc": item["closestApproachTimeUtc"],
@@ -259,7 +336,7 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
                         "solarLongitudeDeg": item["solarLongitudeDeg"],
                         "martianYear": item["martianYear"],
                     }
-                    for name, item in products.items()
+                    for event_role, item in products.items()
                 },
                 "timeWindowStatus": (
                     "agree" if window_agreement
@@ -286,7 +363,9 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
             item["timeWindowStatus"] == "agree" for item in complete_triples
         ),
         "partialPairCounts": dict(sorted(partial_pairs.items())),
-        "duplicateJoinKeysRejected": duplicates,
+        "duplicateCatalogReferencesCollapsed": collapsed_catalog_references,
+        "duplicateCatalogReferenceDetails": catalog_duplicate_details[:100],
+        "duplicateJoinKeysRejected": rejected_keys,
         "completeTriples": complete_triples,
     }
 
@@ -312,8 +391,10 @@ def run_self_tests() -> None:
         ),
     }
     records: list[dict[str, Any]] = []
+    parsed_by_source: dict[str, list[dict[str, Any]]] = {}
     for key, source in sources.items():
         _, parsed = parse_index(source, samples[key].encode("utf-8"))
+        parsed_by_source[key] = parsed
         records.extend(parsed)
 
     joined = build_exact_event_join(records)
@@ -323,12 +404,35 @@ def run_self_tests() -> None:
     assert joined["completeTriples"][0]["timeWindowStatus"] == "agree", joined
     assert not any(item["tid"] == 20902 for item in joined["completeTriples"])
 
-    duplicate_join = build_exact_event_join(records + [dict(records[0])])
-    assert duplicate_join["completeTripleCount"] == 0, duplicate_join
-    assert duplicate_join["duplicateJoinKeysRejected"], duplicate_join
+    # Same exact PDS URN + same metadata in two official indexes is one product,
+    # not two competing measurements.
+    repeated_resden = dict(parsed_by_source["l3_resampled"][0])
+    repeated_resden["sourceIndex"] = "l3_scale_height"
+    collapsed = build_exact_event_join(records + [repeated_resden])
+    assert collapsed["completeTripleCount"] == 1, collapsed
+    assert collapsed["duplicateCatalogReferencesCollapsed"] == 1, collapsed
+    resden = collapsed["completeTriples"][0]["products"]["l3_res_den"]
+    assert resden["sourceIndexes"] == ["l3_resampled", "l3_scale_height"], resden
+
+    # A different URN for the same key/role is genuinely ambiguous and fails closed.
+    conflicting_urn = dict(repeated_resden)
+    conflicting_urn["urn"] += "-alternate"
+    ambiguous = build_exact_event_join(records + [conflicting_urn])
+    assert ambiguous["completeTripleCount"] == 0, ambiguous
+    assert ambiguous["duplicateJoinKeysRejected"], ambiguous
+
+    # A triple can exist by exact product key while its observation windows disagree.
+    conflict_windows = [dict(item) for item in records]
+    sht = next(item for item in conflict_windows if item["productType"] == "res-sht")
+    sht["stopTimeUtc"] = "2014-12-11T17:30:00Z"
+    window_conflict = build_exact_event_join(conflict_windows)
+    assert window_conflict["completeTripleCount"] == 1, window_conflict
+    assert window_conflict["coherentTimeWindowTripleCount"] == 0, window_conflict
+    assert window_conflict["completeTriples"][0]["timeWindowStatus"] == "conflict"
+
     print(
         "NGIMS product-index self-test: PASS "
-        "(three CSV layouts, exact level/TID/time join, duplicate rejection)"
+        "(exact event joins, catalog-reference collapse, ambiguity rejection, window conflict)"
     )
 
 
