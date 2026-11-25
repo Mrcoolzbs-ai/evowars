@@ -253,7 +253,7 @@ def main() -> int:
     archive_audits = []
     all_matches: list[dict] = []
     failures = []
-    for source in SOURCES:
+    for source in selected_sources:
         try:
             body, provenance = download(source)
             if source["kind"] == "zip":
@@ -276,6 +276,7 @@ def main() -> int:
     manifest = {
         "sourceDirectory": BASE,
         "retrievalDate": "2026-11-25",
+        "scanScope": "official_single_species_selector_csv_only" if selector_only else "selector_csv_and_legacy_index_bundles",
         "archives": archive_audits,
         "summary": {
             "successfulSources": sum(1 for item in archive_audits if "error" not in item),
