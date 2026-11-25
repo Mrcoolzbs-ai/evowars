@@ -199,7 +199,7 @@ IUVS NO reference описывает девять последовательны
 
 Данные этих двух MAVEN продуктов не объединяются автоматически с MGS 1998, SAM Gale, ACS HO2 или OpenMARS в единый синхронный вертикальный профиль. Не хватает наблюдаемых O/NO/NO2/H/HO2, полного совместимого T(z)/P(z), vertical transport/diffusion и обоснованных химических граничных условий/скоростей. Ничего не загружается как Scheduler initial state. Stage 4.2 остаётся OPEN / NOT_READY.
 
-Последняя подтверждённая полная CI-база: #1047, commit `e47deceecf765e06f2c10671b8aba245e538dd59`, TypeScript/Vitest/lint/production build — success; 3 329 tests passed, 53 skipped. Run #1047 предшествует последующим L1B/marker/HK/calibration изменениям Stage 4.2; для HEAD `56b7214` проверенные status/workflow records не содержат результата CI, поэтому новые изменения не считаются подтверждёнными этим запуском.
+Последняя подтверждённая полная CI-база: #1047, commit `e47deceecf765e06f2c10671b8aba245e538dd59`, TypeScript/Vitest/lint/production build — success; 3 329 tests passed, 53 skipped. Run #1047 предшествует последующим L1B/marker/HK/calibration изменениям Stage 4.2; для текущего PR HEAD `185ca962` проверенные GitHub combined-status и PR-triggered workflow records не содержат результата CI, поэтому новые изменения не считаются подтверждёнными этим запуском.
 
 
 ### 6.9 Source-backed photolysis reference values for Mars
