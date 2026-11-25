@@ -251,11 +251,21 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
                 existing_signature = tuple(existing.get(field) for field in comparable_fields)
                 incoming_signature = tuple(item.get(field) for field in comparable_fields)
                 if existing_signature != incoming_signature:
+                    field_differences = [
+                        {
+                            "field": field,
+                            "existing": existing.get(field),
+                            "duplicate": item.get(field),
+                        }
+                        for field in comparable_fields
+                        if existing.get(field) != item.get(field)
+                    ]
                     identity_conflicts.append({
                         "role": event_role,
                         "urn": item["urn"],
                         "existingSourceIndex": existing["sourceIndex"],
                         "duplicateSourceIndex": item["sourceIndex"],
+                        "fieldDifferences": field_differences,
                         "reason": "same_urn_has_conflicting_catalog_metadata",
                     })
                     continue
@@ -420,6 +430,17 @@ def run_self_tests() -> None:
     ambiguous = build_exact_event_join(records + [conflicting_urn])
     assert ambiguous["completeTripleCount"] == 0, ambiguous
     assert ambiguous["duplicateJoinKeysRejected"], ambiguous
+
+    # Same URN but differing catalog geometry must also fail closed.
+    conflicting_metadata = dict(repeated_resden)
+    conflicting_metadata["altitudeKm"] = "999.0"
+    metadata_conflict = build_exact_event_join(records + [conflicting_metadata])
+    assert metadata_conflict["completeTripleCount"] == 0, metadata_conflict
+    conflict_details = metadata_conflict["duplicateJoinKeysRejected"][0]["identityConflicts"][0]
+    assert any(
+        item["field"] == "altitudeKm"
+        for item in conflict_details["fieldDifferences"]
+    ), conflict_details
 
     # A triple can exist by exact product key while its observation windows disagree.
     conflict_windows = [dict(item) for item in records]
