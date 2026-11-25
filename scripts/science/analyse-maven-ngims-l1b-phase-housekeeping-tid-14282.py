@@ -318,8 +318,8 @@ def analyse_housekeeping(phases: list[dict], field_catalog: dict[str, dict]) -> 
 def build_manifest() -> dict:
     frozen = verify_frozen_inputs()
     field_catalog = pds_field_catalog()
-    phases, bounds = parse_marker_phases()
-    telemetry = analyse_housekeeping(phases, field_catalog)
+    phases, bounds, known_marker_ids = parse_marker_phases()
+    telemetry = analyse_housekeeping(phases, field_catalog, known_marker_ids)
     return {
         "schemaVersion": 1,
         "status": "phase_mkid_association_complete",
