@@ -196,6 +196,50 @@ def inspect_zip(source_name: str, body: bytes, matches: list[dict]) -> dict:
     return {"memberCount": len(members), "members": members}
 
 
+
+def run_self_tests() -> None:
+    """Offline regression tests for CSV, URN, filename and TID extraction."""
+    sample = (
+        "product_id,filename,notes\n"
+        "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_cso-abund-14282_20141211t154406,"
+        "mvn_ngi_l2_cso-abund-14282_20141211T154406_v08_r01.csv,fixture\n"
+        "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406,"
+        "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv,control\n"
+    )
+    matches: list[dict] = []
+    audit = scan_text(
+        "fixture.csv",
+        "fixture.csv",
+        sample.encode("utf-8"),
+        matches,
+    )
+    assert audit["csvSchema"]["rowCount"] == 2, audit
+    assert audit["targetTid14282RowCount"] == 2, audit
+    assert audit["csoAbundLineCount"] == 1, audit
+    assert len(matches) == 1, matches
+    assert matches[0]["tid"] == 14282, matches
+    assert len(matches[0]["urns"]) == 1, matches
+    assert matches[0]["urns"][0].lower().endswith(
+        "mvn_ngi_l2_cso-abund-14282_20141211t154406"
+    ), matches
+    assert any("cso-abund-14282" in name for name in matches[0]["productFileTokens"]), matches
+    assert len(audit["uniqueUrns"]) == 2, audit
+
+    control_matches: list[dict] = []
+    control = scan_text(
+        "fixture.txt",
+        "fixture.txt",
+        b"ordinary product without an abundance marker",
+        control_matches,
+    )
+    assert control["csoAbundLineCount"] == 0
+    assert not control_matches
+    print(
+        "NGIMS index-bundle self-test: PASS "
+        "(CSV schema, TID, URN, filename token, CSO filtering)"
+    )
+
+
 def main() -> int:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     archive_audits = []
@@ -251,4 +295,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--self-test" in __import__("sys").argv[1:]:
+        run_self_tests()
+        raise SystemExit(0)
     raise SystemExit(main())
