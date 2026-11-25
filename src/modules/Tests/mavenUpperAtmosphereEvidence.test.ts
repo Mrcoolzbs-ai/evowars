@@ -25,6 +25,7 @@ import {
   selectMavenNgimsL3ResampledDensityProfile,
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
+  coRegisterMavenNgimsNeutralProfiles,
   parseMavenNgimsL2NeutralCsvRow,
   parseMavenNgimsL2NeutralCsvText,
   selectMavenNgimsL2EventWindowProfile,
@@ -1406,6 +1407,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       species: 'He',
       orbit: 391,
       tid: 14282,
+      focusMode: 'csn',
       direction: 'inbound',
       quality: 'verified'
     });
@@ -1430,6 +1432,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       species: 'CO2',
       orbit: 391,
       tid: 14282,
+      focusMode: 'csn',
       direction: 'inbound',
       quality: 'uncertain'
     });
@@ -1443,6 +1446,33 @@ describe('MAVEN upper-atmosphere evidence', () => {
       measurement.relativeSigmaFraction >= 0 &&
       measurement.relativeSigmaFraction <= 1 &&
       measurement.eligibleAsSchedulerInitialAbundance === false
+    )).toBe(true);
+
+    const coRegistered = coRegisterMavenNgimsNeutralProfiles(helium, co2);
+    expect(coRegistered.status).toBe('completed');
+    if (coRegistered.status !== 'completed') {
+      throw new Error(coRegistered.errors?.join('; ') ?? 'He/CO2 co-registration rejected');
+    }
+    expect(coRegistered).toMatchObject({
+      firstSpecies: 'He',
+      secondSpecies: 'CO2',
+      orbit: 391,
+      tid: 14282,
+      focusMode: 'csn',
+      direction: 'inbound',
+      unmatchedFirstCount: 137,
+      unmatchedSecondCount: 0,
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false
+    });
+    expect(coRegistered.pairs).toHaveLength(134);
+    expect(coRegistered.pairs?.every(pair =>
+      pair.first.species === 'He' &&
+      pair.first.qualityFlag === 'IV' &&
+      pair.second.species === 'CO2' &&
+      pair.second.qualityFlag === 'IU' &&
+      pair.first.timeUtc === pair.second.timeUtc &&
+      pair.first.altitudeM === pair.second.altitudeM
     )).toBe(true);
   });
 
@@ -1504,6 +1534,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       species: 'O',
       orbit: 14016,
       tid: 12345,
+      focusMode: 'osnb',
       direction: 'inbound',
       quality: 'verified'
     });
@@ -1527,6 +1558,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       species: 'NO',
       orbit: 14016,
       tid: 12345,
+      focusMode: 'osnb',
       direction: 'inbound',
       quality: 'verified'
     });
