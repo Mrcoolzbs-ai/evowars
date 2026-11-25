@@ -1303,9 +1303,12 @@ spectral acquisition intervals have not yet been recovered.
 
 No calibration-reservoir valve-state channel was found in the 324-column
 housekeeping products. The `OS_RES1` / `OS_RES2` telemetry mnemonics refer to
-source electrodes, not the reservoir's two microvalves. Pressure grouping is
-now by exact raw `MKID` and joins to the marker product using the same ID;
-ambiguous pressure-like mnemonics are not used as physical pressure.
+source electrodes, not the reservoir's two microvalves. Only exact BA pressure
+mnemonics are used as pressure-monitor candidates; ambiguous pressure-like
+fields remain uninterpreted. Each HK row is grouped to the latest marker event
+in raw SCLK order only when the current MKID exactly matches that event, and
+groups are keyed by marker-event record number to keep reused MKID values
+separate. Non-monotonic/incomplete marker time axes disable the join.
 
 The 10191 SIS designation (Ar) remains in conflict with its `KrCalibration`
 message-log directory, although its raw spectrum favors Ar. TID 10194 is

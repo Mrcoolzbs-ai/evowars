@@ -1174,20 +1174,30 @@ Sources: [NGIMS SIS Rev. 1.13](https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_
 
 The raw calibration collection contains large event-specific `gnd-hk` housekeeping
 products for both TID 10191 (343 MB) and TID 10194 (123 MB), each with a detached
-PDS4 XML label. The calibration audit now retrieves these products in a streaming
-workflow, validates the detached schema against the CSV header, preserves the
-complete field catalog (name, declared unit, data type and description), and
-summarizes candidate pressure, reservoir/gas, valve/flow, temperature, filament,
-multiplier and RF/QMS channels by exact observed marker ID. It also retains
-bounded first/last samples and per-channel coverage/min/max/mean values.
+PDS4 XML label. The calibration audit retrieves these products in a streaming
+workflow, validates the detached schema against the CSV header, and preserves
+the complete field catalog (name, declared unit, data type and description).
+Channel classification uses exact telemetry mnemonics rather than generic
+description words. It identifies the Bayard–Alpert pressure-monitor candidates
+`CDH:BA_PRES` and `CDH:BA_PRES_LO`, while `CDH:THPRES` and
+`FSW:THERM_PRESS` remain uninterpreted. No reservoir-valve status mnemonic
+was identified in the 324 fields. Temperature, filament, multiplier and QMS/RF
+readbacks retain their declared PDS engineering units.
 
-A field whose name or PDS description denotes a pressure monitor is still only
-a raw engineering readback. In particular, values labelled in volts are not
+The BA readbacks remain raw engineering values in volts. They are not
 converted into physical pressure without the corresponding sensor calibration
-curve and range. Blank fields remain unobserved, are never carried forward, and
-the clock/marker data are not used to invent a time correlation with another
-product. The gnd-hk payloads are streamed and summarized; the 343 MB and 123 MB
-raw CSVs are not added to the source repository.
+curve and range. Blank fields remain unobserved and are never carried forward.
+The housekeeping and marker products both contain the NGIMS SCLK time tags; the
+SIS defines `MKID` as the marker ID of the current data point and describes
+the marker file as the time-tagged record of measurement events. Accordingly,
+each HK row is associated with the latest preceding marker event in raw SCLK
+order only when its current MKID exactly matches that event's MKID. Event groups
+are keyed by marker-record number, not marker ID, so a reused ID such as 0 does
+not merge separate CSN and OSNT background intervals. No clock conversion,
+interpolation or carry-forward of the pressure channel is performed. If either
+time sequence is non-monotonic or has non-numeric event times, the interval join
+is disabled and reported as unavailable. The gnd-hk payloads are streamed and
+summarized; the 343 MB and 123 MB raw CSVs are not added to the source repository.
 
 The report now includes `housekeepingSummary` for both calibration TIDs and
 `markerSummary` for their paired `gnd-mkr` products. This gives the next
@@ -1250,11 +1260,16 @@ The analyser now uses exact telemetry mnemonics rather than searching generic
 PDS prose (which contains the phrase "no value is present" and previously
 created false-positive classifications). Pressure records are restricted to
 the BA channel pair; ambiguous `THPRES` and `THERM_PRESS` stay explicitly
-uninterpreted. The `gnd-hk` pressure monitor is summarized by its exact
-`MKID`, joined to `gnd-mkr.MKID` values and descriptions only on exact raw
-ID equality. No timestamp transformation, interpolation, or carry-forward is
-performed. Per-marker raw minima, maxima, means and population standard
-deviation remain in volts.
+uninterpreted. HK TIME and marker TIME are compared as their original numeric
+SCLK values. For each HK row, the analyser selects the latest marker event at
+or before that time and requires exact equality between the active event MKID
+and the current HK MKID. Groups are keyed by unique marker-event record number,
+so repeated MKID 0 background events remain separate. Per-event raw minima,
+maxima, means and population standard deviation remain in volts. Time values
+are used only to order/associate event intervals: there is no UTC conversion,
+clock offset, interpolation or carry-forward of a pressure measurement. The
+join is rejected if the marker time sequence is incomplete/non-monotonic or
+the HK time stream becomes non-monotonic.
 
 The SIS calls TID 10191 Argon, while its message-log directory is named
 `KrCalibration`; this discrepancy remains a manual-review flag. Raw science

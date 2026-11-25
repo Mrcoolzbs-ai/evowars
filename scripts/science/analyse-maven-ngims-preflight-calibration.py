@@ -34,10 +34,10 @@ TIDS = (
     {"tid": "010194", "timestamp": "20120923T174216", "sisDesignation": "Krypton calibration"},
 )
 PRODUCT_KINDS = {
+    "gnd-mkr": "csv",
     "gnd-hk": "csv",
     "gnd-sci": "csv",
     "gnd-msg": "txt",
-    "gnd-mkr": "csv",
 }
 TARGET_MASSES = (14, 16, 19, 28, 40, 44, 84, 86)
 
@@ -371,8 +371,33 @@ def finish_housekeeping_stats(stats: dict[str, Any]) -> dict[str, Any]:
     return stats
 
 
-def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], declared_records: int | None) -> dict[str, Any]:
+def summarize_housekeeping_csv(
+    path: Path,
+    field_catalog: list[dict[str, Any]],
+    declared_records: int | None,
+    marker_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     catalog = {item["name"]: item for item in field_catalog}
+    marker_events: list[dict[str, Any]] = []
+    for event in (marker_summary or {}).get("markerEvents", []):
+        try:
+            event_time = float(event.get("timeRaw", ""))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(event_time):
+            marker_events.append({**event, "_numericTime": event_time})
+    marker_source_diagnostics = (marker_summary or {}).get("timeMonotonicityDiagnostic", {})
+    marker_source_time_order_valid = (
+        marker_source_diagnostics.get("timeDecreaseCount", 0) == 0
+        and marker_source_diagnostics.get("nonnumericTimeRowCount", 0) == 0
+    )
+    if marker_source_time_order_valid:
+        marker_events.sort(key=lambda event: (event["_numericTime"], event["recordNumber"]))
+    else:
+        # Keep raw marker rows in the product, but disable interval joins rather
+        # than repair a non-monotonic clock by sorting or interpolation.
+        marker_events = []
+
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         if not reader.fieldnames:
@@ -381,7 +406,9 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         if len(headers) != len(set(headers)):
             raise RuntimeError("housekeeping CSV has duplicate column names: " + path.name)
         if len(headers) != len(field_catalog):
-            raise RuntimeError(f"housekeeping CSV/PDS4 schema column count mismatch: {len(headers)} != {len(field_catalog)}")
+            raise RuntimeError(
+                f"housekeeping CSV/PDS4 schema column count mismatch: {len(headers)} != {len(field_catalog)}"
+            )
         if headers != [item["name"] for item in field_catalog]:
             raise RuntimeError("housekeeping CSV column order/names differ from detached PDS4 label")
 
@@ -397,8 +424,16 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
             item["name"] for item in selected
             if item["role"] == "bayard_alpert_pressure_monitor_candidate"
         ]
+
         row_count = 0
-        marker_groups: dict[str, dict[str, Any]] = {}
+        marker_event_groups: dict[str, dict[str, Any]] = {}
+        marker_event_index = -1
+        marker_join_matched_row_count = 0
+        marker_join_id_mismatch_row_count = 0
+        marker_join_rows_before_first_event = 0
+        marker_join_rows_without_numeric_time = 0
+        marker_join_nonmonotonic_time_rows = 0
+        marker_join_time_stream_usable = True
         blank_marker_rows = 0
         nonnumeric_time_rows = 0
         previous_time: float | None = None
@@ -418,93 +453,151 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
             if not raw_marker:
                 blank_marker_rows += 1
             marker_counts[marker_key] = marker_counts.get(marker_key, 0) + 1
+
+            current_time = None
+            if raw_time:
+                try:
+                    candidate_time = float(raw_time)
+                    current_time = candidate_time if math.isfinite(candidate_time) else None
+                except ValueError:
+                    current_time = None
+            time_is_nonmonotonic = (
+                current_time is not None
+                and previous_time is not None
+                and current_time < previous_time
+            )
+
+            if current_time is None:
+                marker_join_rows_without_numeric_time += 1
+                current_event = None
+            elif time_is_nonmonotonic:
+                marker_join_nonmonotonic_time_rows += 1
+                marker_join_time_stream_usable = False
+                current_event = None
+            elif not marker_join_time_stream_usable:
+                marker_join_nonmonotonic_time_rows += 1
+                current_event = None
+            else:
+                while (
+                    marker_event_index + 1 < len(marker_events)
+                    and marker_events[marker_event_index + 1]["_numericTime"] <= current_time
+                ):
+                    marker_event_index += 1
+                current_event = (
+                    marker_events[marker_event_index]
+                    if marker_event_index >= 0 else None
+                )
+
             if raw_marker and pressure_fields:
-                group = marker_groups.setdefault(raw_marker, {
-                    "rowCount": 0,
-                    "firstTimeRaw": raw_time or None,
-                    "lastTimeRaw": raw_time or None,
-                    "channels": {
-                        name: {
-                            "observedValueCount": 0,
-                            "emptyValueCount": 0,
-                            "nonNumericValueCount": 0,
-                            "minObservedValue": None,
-                            "maxObservedValue": None,
-                            "meanObservedValue": None,
-                            "populationStdDev": None,
-                            "_mean": 0.0,
-                            "_m2": 0.0,
-                            "firstObservedRawValue": None,
-                            "lastObservedRawValue": None,
-                        }
-                        for name in pressure_fields
-                    },
-                })
-                group["rowCount"] += 1
-                if raw_time:
-                    group["lastTimeRaw"] = raw_time
-                for name in pressure_fields:
-                    bucket = group["channels"][name]
-                    raw_value = (row.get(name, "") or "").strip()
-                    if not raw_value:
-                        bucket["emptyValueCount"] += 1
-                        continue
-                    try:
-                        numeric = float(raw_value)
-                    except ValueError:
-                        bucket["nonNumericValueCount"] += 1
-                        continue
-                    if not math.isfinite(numeric):
-                        bucket["nonNumericValueCount"] += 1
-                        continue
-                    bucket["observedValueCount"] += 1
-                    bucket["minObservedValue"] = numeric if bucket["minObservedValue"] is None else min(bucket["minObservedValue"], numeric)
-                    bucket["maxObservedValue"] = numeric if bucket["maxObservedValue"] is None else max(bucket["maxObservedValue"], numeric)
-                    delta = numeric - bucket["_mean"]
-                    bucket["_mean"] += delta / bucket["observedValueCount"]
-                    bucket["_m2"] += delta * (numeric - bucket["_mean"])
-                    if bucket["firstObservedRawValue"] is None:
-                        bucket["firstObservedRawValue"] = raw_value
-                    bucket["lastObservedRawValue"] = raw_value
+                if current_event is None:
+                    if (
+                        current_time is not None
+                        and marker_join_time_stream_usable
+                        and marker_source_time_order_valid
+                        and marker_event_index < 0
+                    ):
+                        marker_join_rows_before_first_event += 1
+                elif current_event["markerId"] != raw_marker:
+                    marker_join_id_mismatch_row_count += 1
+                else:
+                    marker_join_matched_row_count += 1
+                    event_key = str(current_event["recordNumber"])
+                    group = marker_event_groups.setdefault(event_key, {
+                        "markerEventRecordNumber": current_event["recordNumber"],
+                        "markerId": current_event["markerId"],
+                        "markerDescription": current_event["description"],
+                        "markerTimeRaw": current_event["timeRaw"],
+                        "rowCount": 0,
+                        "firstTimeRaw": raw_time or None,
+                        "lastTimeRaw": raw_time or None,
+                        "channels": {
+                            name: {
+                                "observedValueCount": 0,
+                                "emptyValueCount": 0,
+                                "nonNumericValueCount": 0,
+                                "minObservedValue": None,
+                                "maxObservedValue": None,
+                                "meanObservedValue": None,
+                                "populationStdDev": None,
+                                "_mean": 0.0,
+                                "_m2": 0.0,
+                                "firstObservedRawValue": None,
+                                "lastObservedRawValue": None,
+                            }
+                            for name in pressure_fields
+                        },
+                    })
+                    group["rowCount"] += 1
+                    if raw_time:
+                        group["lastTimeRaw"] = raw_time
+                    for name in pressure_fields:
+                        bucket = group["channels"][name]
+                        raw_value = (row.get(name, "") or "").strip()
+                        if not raw_value:
+                            bucket["emptyValueCount"] += 1
+                            continue
+                        try:
+                            numeric = float(raw_value)
+                        except ValueError:
+                            bucket["nonNumericValueCount"] += 1
+                            continue
+                        if not math.isfinite(numeric):
+                            bucket["nonNumericValueCount"] += 1
+                            continue
+                        bucket["observedValueCount"] += 1
+                        bucket["minObservedValue"] = (
+                            numeric if bucket["minObservedValue"] is None
+                            else min(bucket["minObservedValue"], numeric)
+                        )
+                        bucket["maxObservedValue"] = (
+                            numeric if bucket["maxObservedValue"] is None
+                            else max(bucket["maxObservedValue"], numeric)
+                        )
+                        delta = numeric - bucket["_mean"]
+                        bucket["_mean"] += delta / bucket["observedValueCount"]
+                        bucket["_m2"] += delta * (numeric - bucket["_mean"])
+                        if bucket["firstObservedRawValue"] is None:
+                            bucket["firstObservedRawValue"] = raw_value
+                        bucket["lastObservedRawValue"] = raw_value
+
             if raw_time:
                 if first_time_raw is None:
                     first_time_raw = raw_time
                 last_time_raw = raw_time
-                try:
-                    current_time = float(raw_time)
+                if current_time is None:
+                    nonnumeric_time_rows += 1
+                else:
                     if previous_time is not None and current_time < previous_time:
                         time_decrease_count += 1
                     previous_time = current_time
-                except ValueError:
-                    nonnumeric_time_rows += 1
 
             for name, channel_stats in stats.items():
                 update_housekeeping_stats(channel_stats, row.get(name, ""), record_number)
 
+            sample = {
+                "recordNumber": record_number,
+                "timeRaw": raw_time or None,
+                "markerIdRaw": raw_marker or None,
+                "fields": {
+                    name: (row.get(name, "") or "").strip() or None
+                    for name in pressure_fields
+                },
+            }
             if row_count <= sample_cap or len(first_last_samples) < sample_cap * 2:
-                first_last_samples.append({
-                    "recordNumber": record_number,
-                    "timeRaw": raw_time or None,
-                    "markerIdRaw": raw_marker or None,
-                    "fields": {name: (row.get(name, "") or "").strip() or None for name in pressure_fields}
-                })
+                first_last_samples.append(sample)
             elif len(first_last_samples) >= sample_cap * 2:
                 first_last_samples.pop(sample_cap)
-                first_last_samples.append({
-                    "recordNumber": record_number,
-                    "timeRaw": raw_time or None,
-                    "markerIdRaw": raw_marker or None,
-                    "fields": {name: (row.get(name, "") or "").strip() or None for name in pressure_fields}
-                })
+                first_last_samples.append(sample)
 
     finished = {name: finish_housekeeping_stats(value) for name, value in stats.items()}
-    for marker_group in marker_groups.values():
+    for marker_group in marker_event_groups.values():
         for channel in marker_group["channels"].values():
             count = channel["observedValueCount"]
             mean = channel.pop("_mean")
             m2 = channel.pop("_m2")
             channel["meanObservedValue"] = mean if count else None
             channel["populationStdDev"] = math.sqrt(m2 / count) if count else None
+
     record_count_status = (
         "matches_label" if declared_records == row_count
         else "mismatch" if declared_records is not None
@@ -529,7 +622,6 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         "selectedChannelCount": len(finished),
         "channelStatistics": list(finished.values()),
         "pressureMonitorChannels": pressure_fields,
-        "pressureMonitorChannels": pressure_fields,
         "pressureRelatedUninterpretedFields": [
             item["name"] for item in selected
             if item["role"] in (
@@ -540,7 +632,20 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         "valveStatusChannels": [],
         "reservoirValveStateTelemetry": "not_identified_by_telemetry_mnemonic_in_this_product",
         "distinctNonblankMarkerIdCount": sum(1 for marker in marker_counts if marker != "__blank__"),
-        "pressureMonitorStatisticsByMarkerId": marker_groups,
+        "pressureMonitorStatisticsByMarkerEvent": marker_event_groups,
+        "markerEventJoinDiagnostics": {
+            "joinMethod": "current_MKID_equal_to_latest_marker_event_with_raw_SCLK_interval",
+            "markerEventsUsed": len(marker_events),
+            "markerEventSourceTimeDecreaseCount": marker_source_diagnostics.get("timeDecreaseCount"),
+            "markerEventSourceTimeOrderValid": marker_source_time_order_valid,
+            "matchedHousekeepingRows": marker_join_matched_row_count,
+            "markerIdTimeMismatchRows": marker_join_id_mismatch_row_count,
+            "rowsBeforeFirstMarkerEvent": marker_join_rows_before_first_event,
+            "rowsWithoutNumericTime": marker_join_rows_without_numeric_time,
+            "rowsWithNonmonotonicTimeNotJoined": marker_join_nonmonotonic_time_rows,
+            "markerEventTimesSortedNumerically": marker_source_time_order_valid,
+            "timeConversionOrInterpolationPerformed": False,
+        },
         "boundedFirstLastSamples": first_last_samples,
         "interpretation": {
             "rawTelemetryOnly": True,
@@ -549,17 +654,27 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
             "interpolationOrCarryForwardPerformed": False,
             "calibrationSensitivityDerived": False,
             "cEnDerived": False,
-            "markerClockJoinToOtherProductsPerformed": False,
+            "markerEventJoinPerformedUsingRawSclkAndCurrentMkid": bool(marker_events),
+            "timeTransformationOrPressureInterpolationPerformed": False,
         },
         "schemaFieldCatalog": field_catalog,
     }
 
+def marker_counts_from_events(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        marker_id = row.get("markerId", "")
+        counts[marker_id] = counts.get(marker_id, 0) + 1
+    return counts
+
 
 def summarize_marker_csv(path: Path) -> dict[str, Any]:
     rows = []
-    rows_by_id: dict[str, list[dict[str, Any]]] = {}
     counts: dict[str, int] = {}
     row_count = 0
+    nonnumeric_time_rows = 0
+    time_decrease_count = 0
+    previous_time: float | None = None
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         if not reader.fieldnames:
@@ -574,17 +689,44 @@ def summarize_marker_csv(path: Path) -> dict[str, Any]:
             row_count += 1
             marker_id = (row.get(id_col, "") or "").strip()
             description = (row.get(desc_col, "") or "").strip()
+            raw_time = (row.get(time_col, "") or "").strip()
             key = description.lower()
             counts[key] = counts.get(key, 0) + 1
-            item = {"recordNumber": record_number, "timeRaw": row.get(time_col),
-                     "markerId": marker_id, "description": description}
+            try:
+                current_time = float(raw_time)
+                if not math.isfinite(current_time):
+                    nonnumeric_time_rows += 1
+                else:
+                    if previous_time is not None and current_time < previous_time:
+                        time_decrease_count += 1
+                    previous_time = current_time
+            except ValueError:
+                nonnumeric_time_rows += 1
+            item = {
+                "recordNumber": record_number,
+                "timeRaw": raw_time,
+                "markerId": marker_id,
+                "description": description,
+            }
             rows.append(item)
-            rows_by_id.setdefault(marker_id, []).append(item)
     return {
         "rowCount": row_count,
         "descriptionCounts": counts,
         "markerRowsBoundedSample": rows[:300],
-        "markerRowsById": rows_by_id,
+        "markerEvents": rows,
+        "markerIdOccurrenceCounts": {
+            marker_id: count
+            for marker_id, count in marker_counts_from_events(rows).items()
+        },
+        "reusedMarkerIds": sorted(
+            marker_id
+            for marker_id, count in marker_counts_from_events(rows).items()
+            if count > 1
+        ),
+        "timeMonotonicityDiagnostic": {
+            "timeDecreaseCount": time_decrease_count,
+            "nonnumericTimeRowCount": nonnumeric_time_rows,
+        },
         "timeCoordinateNotConverted": True,
     }
 
@@ -641,10 +783,12 @@ def fetch_and_audit_tid(
         label["payloadSizeMatchesLabel"] = label["labelDeclaredFileSizeBytes"] == payload_meta["byteLength"]
         label["payloadSha256"] = payload_meta["sha256"]
         if kind == "gnd-hk":
+            marker_summary = result.get("products", {}).get("gnd-mkr", {}).get("markerSummary", {})
             label["housekeepingSummary"] = summarize_housekeeping_csv(
                 payload_path,
                 label["columnCatalogFromPdsLabel"],
                 label["labelDeclaredRecordCount"],
+                marker_summary,
             )
         elif kind == "gnd-sci":
             label["scienceSummary"] = summarize_science_csv(payload_path, label["columnNamesFromPdsLabel"])
@@ -659,16 +803,11 @@ def fetch_and_audit_tid(
         "Argon" in tid["sisDesignation"] and directory_name is not None and "Kr" in directory_name
     )
     hk_summary = result["products"].get("gnd-hk", {}).get("housekeepingSummary", {})
-    marker_lookup = result["products"].get("gnd-mkr", {}).get("markerSummary", {}).get("markerRowsById", {})
-    pressure_by_marker = hk_summary.get("pressureMonitorStatisticsByMarkerId", {})
-    for marker_id, group in pressure_by_marker.items():
-        group["markerRows"] = marker_lookup.get(marker_id, [])
-        group["markerDescriptionCount"] = len(group["markerRows"])
     result["reservoirTelemetryReview"] = {
         "pressureMonitorChannels": hk_summary.get("pressureMonitorChannels", []),
         "valveStatusChannels": hk_summary.get("valveStatusChannels", []),
         "reservoirValveStateTelemetry": hk_summary.get("reservoirValveStateTelemetry"),
-        "pressureGroupJoin": "exact_raw_MKID_match_only",
+        "pressureGroupJoin": "exact_current_MKID_and_raw_SCLK_marker_event_interval",
         "gasReservoirAssignment": "not_derived",
     }
     return result
@@ -731,21 +870,22 @@ def self_test() -> None:
                     {"name":"CDH:IS_TMP","fieldNumber":4,"dataType":"ASCII_Real","unit":"Degrees Celsius","description":"Instrument source temperature"},
                     {"name":"CDH:OS_FIL_EMON","fieldNumber":5,"dataType":"ASCII_Real","unit":"Microamperes","description":"Open source filament emission monitor"},
                 ]
-                result = summarize_housekeeping_csv(path, catalog, 3)
+                marker_summary = {"markerEvents": [
+                    {"recordNumber": 2, "timeRaw": "0.5", "markerId": "10", "description": "CSN background"},
+                    {"recordNumber": 3, "timeRaw": "2.5", "markerId": "11", "description": "OSNT background"},
+                ]}
+                result = summarize_housekeeping_csv(path, catalog, 3, marker_summary)
                 pressure = next(x for x in result["channelStatistics"] if x["name"] == "CDH:BA_PRES")
                 self.assertEqual(pressure["observedValueCount"], 2)
                 self.assertEqual(pressure["emptyValueCount"], 1)
                 self.assertEqual(pressure["unit"], "Volts")
                 self.assertEqual(result["markerCounts"], {"10":2,"11":1})
                 self.assertEqual(result["distinctNonblankMarkerIdCount"], 2)
-                self.assertEqual(
-                    result["pressureMonitorStatisticsByMarkerId"]["10"]["channels"]["CDH:BA_PRES"]["observedValueCount"],
-                    1,
-                )
-                self.assertEqual(
-                    result["pressureMonitorStatisticsByMarkerId"]["10"]["channels"]["CDH:BA_PRES"]["meanObservedValue"],
-                    1.2,
-                )
+                group = result["pressureMonitorStatisticsByMarkerEvent"]["2"]
+                self.assertEqual(group["markerDescription"], "CSN background")
+                self.assertEqual(group["channels"]["CDH:BA_PRES"]["observedValueCount"], 1)
+                self.assertEqual(group["channels"]["CDH:BA_PRES"]["meanObservedValue"], 1.2)
+                self.assertEqual(result["markerEventJoinDiagnostics"]["matchedHousekeepingRows"], 3)
                 self.assertFalse(result["interpretation"]["pressureVoltageConvertedToPhysicalPressure"])
                 self.assertEqual(result["rowCount"], 3)
 
@@ -769,6 +909,96 @@ def self_test() -> None:
             self.assertIsNone(
                 housekeeping_field_role({"name": "QMS:OS_RES1_VCTL", "description": "OS_RES1 electrode DAC setting"})
             )
+
+        def test_marker_event_intervals_disambiguate_reused_mkid_zero(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sample.csv"
+                path.write_text(
+                    "TIME,MKID,CDH:BA_PRES\n"
+                    "1,0,1.0\n"
+                    "2,0,1.2\n"
+                    "3,1,1.4\n"
+                    "4,0,1.6\n",
+                    encoding="utf-8",
+                )
+                catalog = [
+                    {"name":"TIME","fieldNumber":1,"dataType":"ASCII_Real","unit":"SECONDS","description":"SCLK"},
+                    {"name":"MKID","fieldNumber":2,"dataType":"ASCII_Integer","unit":"unitless","description":"Marker ID"},
+                    {"name":"CDH:BA_PRES","fieldNumber":3,"dataType":"ASCII_Real","unit":"Volts","description":"BA pressure monitor"},
+                ]
+                markers = {"markerEvents": [
+                    {"recordNumber":2,"timeRaw":"0.5","markerId":"0","description":"CSN Background"},
+                    {"recordNumber":3,"timeRaw":"2.5","markerId":"1","description":"focus mode"},
+                    {"recordNumber":4,"timeRaw":"3.5","markerId":"0","description":"OSNT Background"},
+                ]}
+                result = summarize_housekeeping_csv(path, catalog, 4, markers)
+                groups = result["pressureMonitorStatisticsByMarkerEvent"]
+                self.assertEqual(groups["2"]["markerDescription"], "CSN Background")
+                self.assertEqual(groups["2"]["rowCount"], 2)
+                self.assertEqual(groups["3"]["markerDescription"], "focus mode")
+                self.assertEqual(groups["4"]["markerDescription"], "OSNT Background")
+                self.assertEqual(groups["4"]["rowCount"], 1)
+                self.assertEqual(result["markerEventJoinDiagnostics"]["markerIdTimeMismatchRows"], 0)
+
+        def test_nonmonotonic_marker_clock_disables_event_join(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sample.csv"
+                path.write_text(
+                    "TIME,MKID,CDH:BA_PRES\n1,0,1.0\n2,0,1.2\n",
+                    encoding="utf-8",
+                )
+                catalog = [
+                    {"name":"TIME","fieldNumber":1,"dataType":"ASCII_Real","unit":"SECONDS","description":"SCLK"},
+                    {"name":"MKID","fieldNumber":2,"dataType":"ASCII_Integer","unit":"unitless","description":"Marker ID"},
+                    {"name":"CDH:BA_PRES","fieldNumber":3,"dataType":"ASCII_Real","unit":"Volts","description":"BA pressure monitor"},
+                ]
+                markers = {
+                    "markerEvents": [
+                        {"recordNumber":2,"timeRaw":"1.5","markerId":"0","description":"event A"},
+                        {"recordNumber":3,"timeRaw":"0.5","markerId":"0","description":"event B"},
+                    ],
+                    "timeMonotonicityDiagnostic": {"timeDecreaseCount":1},
+                }
+                result = summarize_housekeeping_csv(path, catalog, 2, markers)
+                self.assertEqual(result["pressureMonitorStatisticsByMarkerEvent"], {})
+                self.assertEqual(result["markerEventJoinDiagnostics"]["markerEventsUsed"], 0)
+                self.assertFalse(result["markerEventJoinDiagnostics"]["markerEventSourceTimeOrderValid"])
+
+        def test_non_numeric_marker_time_disables_event_join(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sample.csv"
+                path.write_text("TIME,MKID,CDH:BA_PRES\n1,0,1.0\n", encoding="utf-8")
+                catalog = [
+                    {"name":"TIME","fieldNumber":1,"dataType":"ASCII_Real","unit":"SECONDS","description":"SCLK"},
+                    {"name":"MKID","fieldNumber":2,"dataType":"ASCII_Integer","unit":"unitless","description":"Marker ID"},
+                    {"name":"CDH:BA_PRES","fieldNumber":3,"dataType":"ASCII_Real","unit":"Volts","description":"BA pressure monitor"},
+                ]
+                markers = {
+                    "markerEvents": [{"recordNumber":2,"timeRaw":"0.5","markerId":"0","description":"event"}],
+                    "timeMonotonicityDiagnostic": {"timeDecreaseCount":0,"nonnumericTimeRowCount":1},
+                }
+                result = summarize_housekeeping_csv(path, catalog, 1, markers)
+                self.assertEqual(result["pressureMonitorStatisticsByMarkerEvent"], {})
+                self.assertFalse(result["markerEventJoinDiagnostics"]["markerEventSourceTimeOrderValid"])
+
+        def test_nonmonotonic_housekeeping_clock_disables_following_event_joins(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sample.csv"
+                path.write_text(
+                    "TIME,MKID,CDH:BA_PRES\n1,0,1.0\n3,0,1.2\n2,0,1.4\n4,0,1.6\n",
+                    encoding="utf-8",
+                )
+                catalog = [
+                    {"name":"TIME","fieldNumber":1,"dataType":"ASCII_Real","unit":"SECONDS","description":"SCLK"},
+                    {"name":"MKID","fieldNumber":2,"dataType":"ASCII_Integer","unit":"unitless","description":"Marker ID"},
+                    {"name":"CDH:BA_PRES","fieldNumber":3,"dataType":"ASCII_Real","unit":"Volts","description":"BA pressure monitor"},
+                ]
+                markers = {"markerEvents": [
+                    {"recordNumber":2,"timeRaw":"0.5","markerId":"0","description":"event A"},
+                ]}
+                result = summarize_housekeeping_csv(path, catalog, 4, markers)
+                self.assertEqual(result["markerEventJoinDiagnostics"]["matchedHousekeepingRows"], 2)
+                self.assertEqual(result["markerEventJoinDiagnostics"]["rowsWithNonmonotonicTimeNotJoined"], 2)
 
         def test_housekeeping_never_carries_forward_missing_values(self) -> None:
             with tempfile.TemporaryDirectory() as tmp:
@@ -798,7 +1028,7 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         products = product["products"]
         hk_product = products.get("gnd-hk", {})
         hk = hk_product.get("housekeepingSummary", {})
-        marker_groups = hk.get("pressureMonitorStatisticsByMarkerId", {})
+        marker_groups = hk.get("pressureMonitorStatisticsByMarkerEvent", {})
         compact_marker_groups: dict[str, Any] = {}
         for marker_id, group in marker_groups.items():
             compact_channels = {}
@@ -815,10 +1045,13 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "last": channel.get("lastObservedRawValue"),
                 }
             compact_marker_groups[marker_id] = {
+                "markerEventRecordNumber": group.get("markerEventRecordNumber"),
+                "markerId": group.get("markerId"),
+                "markerDescription": group.get("markerDescription"),
+                "markerTimeRaw": group.get("markerTimeRaw"),
                 "rows": group.get("rowCount"),
                 "firstTimeRaw": group.get("firstTimeRaw"),
                 "lastTimeRaw": group.get("lastTimeRaw"),
-                "markerRows": group.get("markerRows", []),
                 "channels": compact_channels,
             }
 
@@ -875,14 +1108,14 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "blankMarkerIdRows": hk.get("blankMarkerIdRowCount"),
                 "markerCounts": hk.get("markerCounts"),
                 "pressureMonitorChannels": hk.get("pressureMonitorChannels"),
-                "pressureMonitorChannels": hk.get("pressureMonitorChannels"),
                 "pressureRelatedUninterpretedFields": hk.get("pressureRelatedUninterpretedFields"),
                 "valveStatusChannels": hk.get("valveStatusChannels"),
                 "reservoirValveStateTelemetry": hk.get("reservoirValveStateTelemetry"),
                 "distinctNonblankMarkerIdCount": hk.get("distinctNonblankMarkerIdCount"),
                 "selectedChannelCount": hk.get("selectedChannelCount"),
                 "channelStatistics": channel_stats,
-                "pressureMonitorStatisticsByMarkerId": compact_marker_groups,
+                "pressureMonitorStatisticsByMarkerEvent": compact_marker_groups,
+                "markerEventJoinDiagnostics": hk.get("markerEventJoinDiagnostics"),
                 "interpretation": hk.get("interpretation"),
             },
             "messageLog": {
@@ -894,6 +1127,9 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             "markerProduct": {
                 "rowCount": markers.get("rowCount"),
                 "descriptionCounts": markers.get("descriptionCounts"),
+                "markerIdOccurrenceCounts": markers.get("markerIdOccurrenceCounts"),
+                "reusedMarkerIds": markers.get("reusedMarkerIds"),
+                "timeMonotonicityDiagnostic": markers.get("timeMonotonicityDiagnostic"),
                 "markerRowsBoundedSample": markers.get("markerRowsBoundedSample", [])[:100],
             },
             "science": {
