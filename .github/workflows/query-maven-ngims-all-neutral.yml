@@ -1,0 +1,35 @@
+name: Query official MAVEN NGIMS all-neutral product index
+
+on:
+  push:
+    branches: [stage-3-planetary-physics]
+
+jobs:
+  query:
+    if: contains(github.event.head_commit.message, '[query-ngims-all-neutral]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stage-3-planetary-physics
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Query official all-neutral NGIMS product selector
+        run: python scripts/science/query-maven-ngims-all-neutral-index.py
+      - name: Commit retrieved all-neutral event index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/modules/Data/mavenNgimsAllNeutralIndex/
+          if git diff --cached --quiet; then
+            echo "No all-neutral index changes."
+          else
+            git commit -m "data(science): freeze official NGIMS all-neutral selector results [skip ci]"
+            git fetch origin stage-3-planetary-physics
+            git rebase origin/stage-3-planetary-physics
+            git push origin HEAD:stage-3-planetary-physics
+          fi
