@@ -9,8 +9,16 @@
     "sha256": "c7ed14c9bbbf374a2dc2c880a9c8da30fd3603547ce7be0b0f147cc3affe2a75",
     "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL2_2014.tar.gz"
   },
+  "discoveryAudit": {
+    "csoAbundanceProductFoundForExactTidAndEvent": false,
+    "focusModesFound": [
+      "csn"
+    ],
+    "matchingL2AbundanceProductCountIn2014AnnualArchive": 1,
+    "scope": "official 2014 annual NGIMS derived L2 archive only; absence outside this bundle is not inferred"
+  },
   "indexEvidence": {
-    "note": "The official index can expose multiple product modes/versions for the same TID; all matching L2 abundance products in the annual archive are retained separately.",
+    "note": "Only the csn-abund TID 14282 product is present in the 2014 annual L2 archive; no cso-abund product for this TID/event was found in that archive. The official single-species index lists this event as csn-abund.",
     "orbit": 391,
     "productEventUtcStart": "2014-12-11T15:45:25Z",
     "productEventUtcStop": "2014-12-11T17:29:43Z",
@@ -25,6 +33,8 @@
       "Each product retains its own product ID, focus mode, time, geometry, species and quality flag.",
       "No profile is merged across different focus modes or product versions.",
       "Unknown quality flags remain explicit and are not promoted to verified detections.",
+      "The archived abundance sentinel -999 and zero abundance values are counted separately and excluded from profile candidates.",
+      "No cso-abund product for this exact TID/event was found in the official 2014 annual L2 bundle; this event therefore has no O/NO/CO/O2 profile in the retrieved bundle.",
       "A single orbit is an upper-atmosphere spacecraft track, not a complete lower-atmosphere state."
     ],
     "precisionField": "fractional 1-sigma on abundance",
@@ -47,7 +57,9 @@
         "xmlSha256": "e3ec40da938d71f382c160d3ff911185a5ad9b51e49cf38b70b2d0b55aec80ab"
       },
       "csvSummary": {
+        "abundanceSentinelMinus999Rows": 905,
         "acceptedRows": 1564,
+        "acceptedRowsDefinition": "rows matching target TID/orbit with positive finite abundance and finite fractional precision in [0,1]; UR and unknown quality are counted here but are not profile candidates",
         "canonicalSISHeaders": [
           "t_utc",
           "t_unix",
@@ -72,28 +84,36 @@
           "csn": 1564
         },
         "noRowCount": 0,
+        "numericRejectionReasonCounts": {
+          "abundance_sentinel_-999": 905,
+          "nonpositive_abundance": 327
+        },
         "orbitCounts": {
           "391": 1564
         },
+        "precisionSentinelMinus999Rows": 687,
+        "profileCandidateRows": 987,
         "profileCandidates": [
           {
             "abundanceUnit": "particles/cm3",
-            "altitudeMaxKm": 290.1642,
-            "altitudeMinKm": 152.9768,
+            "altitudeMaxKm": 230.917,
+            "altitudeMinKm": 196.2793,
+            "direction": "inbound",
             "focusMode": "csn",
-            "hasDuplicateAltitude": true,
+            "hasDuplicateAltitude": false,
             "precisionMeaning": "fractional 1-sigma",
             "quality": "uncertain",
             "relativeSigmaMax": 0.064808,
-            "relativeSigmaMin": 0.000161,
-            "rowCount": 254,
+            "relativeSigmaMin": 0.003329,
+            "rowCount": 41,
             "species": "Ar",
-            "uniqueAltitudeCount": 253
+            "uniqueAltitudeCount": 41
           },
           {
             "abundanceUnit": "particles/cm3",
             "altitudeMaxKm": 195.5565,
             "altitudeMinKm": 152.9765,
+            "direction": "inbound",
             "focusMode": "csn",
             "hasDuplicateAltitude": false,
             "precisionMeaning": "fractional 1-sigma",
@@ -106,8 +126,24 @@
           },
           {
             "abundanceUnit": "particles/cm3",
+            "altitudeMaxKm": 290.1642,
+            "altitudeMinKm": 152.9768,
+            "direction": "outbound",
+            "focusMode": "csn",
+            "hasDuplicateAltitude": true,
+            "precisionMeaning": "fractional 1-sigma",
+            "quality": "uncertain",
+            "relativeSigmaMax": 0.041475,
+            "relativeSigmaMin": 0.000161,
+            "rowCount": 213,
+            "species": "Ar",
+            "uniqueAltitudeCount": 212
+          },
+          {
+            "abundanceUnit": "particles/cm3",
             "altitudeMaxKm": 207.825,
             "altitudeMinKm": 152.9765,
+            "direction": "inbound",
             "focusMode": "csn",
             "hasDuplicateAltitude": false,
             "precisionMeaning": "fractional 1-sigma",
@@ -122,15 +158,31 @@
             "abundanceUnit": "particles/cm3",
             "altitudeMaxKm": 392.3028,
             "altitudeMinKm": 152.9765,
+            "direction": "inbound",
+            "focusMode": "csn",
+            "hasDuplicateAltitude": false,
+            "precisionMeaning": "fractional 1-sigma",
+            "quality": "verified",
+            "relativeSigmaMax": 0.04225,
+            "relativeSigmaMin": 0.005678,
+            "rowCount": 271,
+            "species": "He",
+            "uniqueAltitudeCount": 271
+          },
+          {
+            "abundanceUnit": "particles/cm3",
+            "altitudeMaxKm": 301.6545,
+            "altitudeMinKm": 152.9768,
+            "direction": "outbound",
             "focusMode": "csn",
             "hasDuplicateAltitude": true,
             "precisionMeaning": "fractional 1-sigma",
             "quality": "verified",
-            "relativeSigmaMax": 0.04225,
+            "relativeSigmaMax": 0.032427,
             "relativeSigmaMin": 0.005482,
-            "rowCount": 481,
+            "rowCount": 210,
             "species": "He",
-            "uniqueAltitudeCount": 480
+            "uniqueAltitudeCount": 209
           }
         ],
         "qualityFlagCounts": {
@@ -140,6 +192,20 @@
           "OV": 210,
           "UR": 423,
           "unrecognized:I0": 154
+        },
+        "rawQualityFlagCounts": {
+          "I0": 346,
+          "IU": 574,
+          "IV": 464,
+          "OU": 228,
+          "OV": 478,
+          "UR": 706
+        },
+        "rawSpeciesRowCounts": {
+          "Ar": 699,
+          "CO2": 699,
+          "He": 699,
+          "N2": 699
         },
         "rejectedRows": 1232,
         "rowCount": 2796,
@@ -178,7 +244,8 @@
           "14282": 1564
         },
         "timeStartUtc": "2014-12-11T17:06:03Z",
-        "timeStopUtc": "2014-12-11T17:22:54Z"
+        "timeStopUtc": "2014-12-11T17:22:54Z",
+        "zeroAbundanceRows": 327
       },
       "filesCommitted": [
         "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv",
