@@ -592,6 +592,7 @@ export {
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromMeasurements,
   buildMavenNgimsNeutralProfileFromCsvImport,
+  coRegisterMavenNgimsNeutralProfileSet,
   parseMavenNgimsL2NeutralCsvRow,
   MAVEN_IUVS_NO_DAYGLOW_REFERENCE,
   MAVEN_IUVS_ATOMIC_OXYGEN_130KM_MODEL_CONSTRAINED_RATIOS
@@ -638,7 +639,9 @@ export type {
   MavenNgimsRowValidation,
   MavenNgimsImportPolicy,
   MavenNgimsProfileBuildResult,
-  MavenNgimsProfileSelection
+  MavenNgimsProfileSelection,
+  MavenNgimsMultiSpeciesCoRegisteredRow,
+  MavenNgimsMultiSpeciesCoRegistrationResult
 } from './mavenUpperAtmosphereEvidence';
 
 export { parseMavenNgimsL2NeutralCsvText } from './mavenUpperAtmosphereEvidence';
