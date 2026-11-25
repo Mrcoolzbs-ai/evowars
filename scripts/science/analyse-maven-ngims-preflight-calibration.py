@@ -388,7 +388,6 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
             item["name"] for item in selected
             if item["role"] in ("pressure", "reservoir_gas", "valve_flow")
         ]
-        marker_groups: dict[str, dict[str, Any]] = {}
         row_count = 0
         blank_marker_rows = 0
         nonnumeric_time_rows = 0
@@ -423,48 +422,6 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
 
             for name, channel_stats in stats.items():
                 update_housekeeping_stats(channel_stats, row.get(name, ""), record_number)
-
-            if pressure_fields and raw_marker:
-                group = marker_groups.setdefault(raw_marker, {
-                    "rowCount": 0,
-                    "firstTimeRaw": raw_time or None,
-                    "lastTimeRaw": raw_time or None,
-                    "channels": {
-                        name: {
-                            "observedValueCount": 0,
-                            "emptyValueCount": 0,
-                            "nonNumericValueCount": 0,
-                            "minObservedValue": None,
-                            "maxObservedValue": None,
-                            "firstObservedRawValue": None,
-                            "lastObservedRawValue": None,
-                        }
-                        for name in pressure_fields
-                    }
-                })
-                group["rowCount"] += 1
-                if raw_time:
-                    group["lastTimeRaw"] = raw_time
-                for name in pressure_fields:
-                    bucket = group["channels"][name]
-                    raw_value = (row.get(name, "") or "").strip()
-                    if not raw_value:
-                        bucket["emptyValueCount"] += 1
-                        continue
-                    try:
-                        value = float(raw_value)
-                    except ValueError:
-                        bucket["nonNumericValueCount"] += 1
-                        continue
-                    if not math.isfinite(value):
-                        bucket["nonNumericValueCount"] += 1
-                        continue
-                    bucket["observedValueCount"] += 1
-                    bucket["minObservedValue"] = value if bucket["minObservedValue"] is None else min(bucket["minObservedValue"], value)
-                    bucket["maxObservedValue"] = value if bucket["maxObservedValue"] is None else max(bucket["maxObservedValue"], value)
-                    if bucket["firstObservedRawValue"] is None:
-                        bucket["firstObservedRawValue"] = raw_value
-                    bucket["lastObservedRawValue"] = raw_value
 
             if row_count <= sample_cap or len(first_last_samples) < sample_cap * 2:
                 first_last_samples.append({
@@ -507,7 +464,7 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         "selectedChannelCount": len(finished),
         "channelStatistics": list(finished.values()),
         "pressureValveChannels": pressure_fields,
-        "pressureAndValveStatisticsByMarkerId": marker_groups,
+        "distinctNonblankMarkerIdCount": sum(1 for marker in marker_counts if marker != "__blank__"),
         "boundedFirstLastSamples": first_last_samples,
         "interpretation": {
             "rawTelemetryOnly": True,
@@ -683,7 +640,8 @@ def self_test() -> None:
                 self.assertEqual(pressure["observedValueCount"], 2)
                 self.assertEqual(pressure["emptyValueCount"], 1)
                 self.assertEqual(pressure["unit"], "Volts")
-                self.assertEqual(result["pressureAndValveStatisticsByMarkerId"]["10"]["channels"]["CDH:BA_PRES"]["observedValueCount"], 1)
+                self.assertEqual(result["markerCounts"], {"10":2,"11":1})
+                self.assertEqual(result["distinctNonblankMarkerIdCount"], 2)
                 self.assertFalse(result["interpretation"]["pressureVoltageConvertedToPhysicalPressure"])
                 self.assertEqual(result["rowCount"], 3)
 

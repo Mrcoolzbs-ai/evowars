@@ -26,6 +26,13 @@ jobs:
           python scripts/science/analyse-maven-ngims-preflight-calibration.py --self-test
       - name: Retrieve and audit selected raw pre-flight calibration products
         run: python scripts/science/analyse-maven-ngims-preflight-calibration.py
+      - name: Upload generated calibration audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngims-preflight-calibration-audit
+          path: src/modules/Data/mavenNgimsL1bCalibrationArchive/preflight-calibration-products.json
+          if-no-files-found: error
+          compression-level: 9
       - name: Commit generated evidence manifest
         run: |
           git config user.name "github-actions[bot]"

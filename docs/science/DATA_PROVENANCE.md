@@ -1193,3 +1193,10 @@ The report now includes `housekeepingSummary` for both calibration TIDs and
 `markerSummary` for their paired `gnd-mkr` products. This gives the next
 calibration review an auditable reservoir/pressure context without asserting a
 reference-gas density or deriving absolute sensitivity or `C_EN`.
+
+
+**Compact-output note.** The audit keeps complete campaign-level channel
+statistics, counts for every observed MKID, and bounded first/last raw records
+tagged with their MKID. It omits the very large fully expanded MKID-by-channel
+matrix; this avoids a report exceeding GitHub's 100 MB per-file limit while
+preserving raw CSVs in the external PDS archive.

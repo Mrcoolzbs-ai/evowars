@@ -1284,3 +1284,9 @@ ID. Sensor voltage is not converted into pressure without a documented
 calibration curve. The generated JSON is compact; raw CSV payloads stay in
 the external PDS archive. This step is evidence gathering only and does not
 make gas number density, absolute sensitivity or `C_EN` available.
+
+
+The generated housekeeping report retains campaign-wide channel statistics,
+all MKID row counts, and bounded marker-tagged first/last records. It omits the
+expanded MKID-by-channel matrix to remain below GitHub's 100 MB file limit;
+source CSV payloads remain in the PDS collection.
