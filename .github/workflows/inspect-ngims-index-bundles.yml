@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Validate index audit parser
+        run: python -m py_compile scripts/science/inspect-maven-ngims-index-bundles.py
       - name: Download and inspect official NGIMS selection index archives
         run: python scripts/science/inspect-maven-ngims-index-bundles.py
       - name: Commit index-bundle forensic inventory
