@@ -908,3 +908,55 @@ and Mars photochemical initialization. Tests are in
 Stage 4.2 remains **OPEN / NOT_READY**. L1B adds signal evidence only; it
 does not supply the missing neutral species or a complete synchronized
 photochemical initial state.
+
+
+## MAVEN NGIMS L1B event-matched housekeeping and marker products — TID 14282 / orbit 391 (25.11.2026)
+
+Three further L1B engineering products were retrieved from the official
+PDS4 event directory and frozen with their detached labels: `cal-hk`,
+`cal-mkr` and `cal-msg`. Their labels cover
+2014-12-11T15:45:25Z–17:29:43Z and carry the event token
+`014282_20141211T154406`.
+
+**cal-hk.** CSV payload 32,991,388 bytes, 88,639 rows, 324 columns.
+SHA-256: `b260fcb650e122b55d35d0c091821cf44b96f58866da0ad64b1ffa13c277bfe7`.
+Detached label declares 32,996,285 bytes (+4,897), has no MD5 and is
+forensic-only. Its TIME column is in seconds and is described as the
+spacecraft-clock counter approximated by the NGIMS internal clock at each
+row. Missing values mean a field was not read at that time; no interpolation
+is performed. Columns include open/closed-source filament, emission,
+voltage, temperature and other instrument housekeeping telemetry.
+
+**cal-mkr.** CSV payload 3,410 bytes, 88 rows and three columns
+(`TIME,MKID,DESCRIPTION`). SHA-256:
+`2e34b2f84f8c1a4c126de5b8b3a5ef96e945c43fec1c62c61f4ae7d60316fd42`.
+Detached label declares 3,433 bytes (+23), has no MD5 and is forensic-only.
+The PDS label identifies TIME as SCLK seconds, MKID as marker ID and
+DESCRIPTION as marker text. The file contains one TIDSTART, one TIDSTOP and
+15 paired mass-scan phase markers. Parser:
+`src/modules/Data/mavenNgimsL1bMarkerEvidence.ts`; it returns intervals
+only in SCLK coordinates and preserves all source marker records.
+
+**cal-msg.** Text payload 21,487 bytes / 558 lines. SHA-256:
+`ad5c5fb145305d328a6c6f9f83620dedb73a2031d95a8c1d1c5f41eea98871d8`.
+Detached label size matches but no MD5 is present and authenticity is not
+independently established. The log records the `sci_default_osnb`
+configuration, 15 phases, nominal integration period 30 ms, idle period
+300 ms, EM/filament settings, temperature compensation status and
+housekeeping messages. These are configuration/log facts, not a derived
+calibration response or energy correction factor.
+
+**Clock boundary.** Marker TIME and housekeeping TIME are SCLK-domain
+values. The HK label specifically calls TIME an NGIMS-internal-clock
+approximation. L1B `t_sclk_cor` is a corrected-clock field. No validated
+correlation between these clock coordinates is implemented, so the parser
+does not convert SCLK to UTC or align marker windows with L1B measurements.
+No nearest-neighbour, interpolation or time-tolerance join is performed.
+
+All three products remain instrument-operational evidence only. They do
+not yield species abundance, number density, absolute sensitivity, C_EN,
+or Scheduler/Mars initial-state eligibility. Original files and byte-level
+manifests are stored in
+`src/modules/Data/mavenNgimsL1bHousekeepingArchive/`; retrieval is
+reproducible with
+`scripts/science/retrieve-maven-ngims-l1b-housekeeping-tid-14282.py`.
