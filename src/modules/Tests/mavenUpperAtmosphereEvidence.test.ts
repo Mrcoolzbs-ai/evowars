@@ -26,6 +26,7 @@ import {
   buildMavenNgimsNeutralProfile,
   buildMavenNgimsNeutralProfileFromCsvImport,
   coRegisterMavenNgimsNeutralProfiles,
+  coRegisterMavenNgimsNeutralProfileSet,
   parseMavenNgimsL2NeutralCsvRow,
   parseMavenNgimsL2NeutralCsvText,
   selectMavenNgimsL2EventWindowProfile,
@@ -1504,6 +1505,37 @@ describe('MAVEN upper-atmosphere evidence', () => {
     )).toBe(true);
     expect(argonCo2.eligibleAsMarsPhotochemicalInitialState).toBe(false);
     expect(argonCo2.eligibleAsSchedulerInitialAbundance).toBe(false);
+
+    const exactTriple = coRegisterMavenNgimsNeutralProfileSet([helium, co2, argon]);
+    expect(exactTriple.status).toBe('completed');
+    if (exactTriple.status !== 'completed' || !exactTriple.rows) {
+      throw new Error(exactTriple.errors?.join('; ') ?? 'three-species exact co-registration failed');
+    }
+    expect(exactTriple).toMatchObject({
+      species: ['He', 'CO2', 'Ar'],
+      orbit: 391,
+      tid: 14282,
+      focusMode: 'csn',
+      direction: 'inbound',
+      unmatchedCountBySpecies: { He: 153, CO2: 0, Ar: 0 },
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false
+    });
+    expect(exactTriple.rows).toHaveLength(118);
+    expect(exactTriple.rows.every(row => {
+      const names = row.measurements.map(measurement => measurement.species);
+      const flags = row.measurements.map(measurement => measurement.qualityFlag);
+      return (
+        row.measurements.length === 3 &&
+        names.join(',') === 'He,CO2,Ar' &&
+        flags[0] === 'IV' &&
+        flags[1] === 'IU' &&
+        flags[2] === 'IV' &&
+        row.measurements.every(measurement =>
+          measurement.timeUtc === row.timeUtc && measurement.altitudeM === row.altitudeM
+        )
+      );
+    })).toBe(true);
 
     const nitrogen = buildMavenNgimsNeutralProfileFromCsvImport(strict, {
       species: 'N2',
