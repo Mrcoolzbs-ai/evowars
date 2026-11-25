@@ -1526,9 +1526,10 @@ describe('MAVEN upper-atmosphere evidence', () => {
       profileCandidateRows: 987
     });
     expect(manifest.discoveryAudit).toMatchObject({
-      matchingL2AbundanceProductCountIn2014AnnualArchive: 1,
-      focusModesFound: ['csn'],
-      csoAbundanceProductFoundForExactTidAndEvent: false
+      matchingL2AbundanceProductCountForExactTidAndEvent: 1,
+      focusModesFoundForExactTidAndEvent: ['csn'],
+      csoAbundanceProductFoundForExactTidAndEvent: false,
+      csoAbundanceProductCountIn2014AnnualArchive: 0
     });
     expect(product.csvSummary.speciesRowCounts).toEqual({
       Ar: 372, CO2: 352, He: 481, N2: 359
