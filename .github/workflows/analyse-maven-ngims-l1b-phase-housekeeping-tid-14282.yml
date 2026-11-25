@@ -1,0 +1,49 @@
+name: Analyse MAVEN NGIMS housekeeping by phase — TID 14282
+
+on:
+  push:
+    branches: [stage-3-planetary-physics]
+
+concurrency:
+  group: ngims-hk-phase-association-tid-14282-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyse:
+    if: contains(github.event.head_commit.message, '[analyze-ngims-l1b-phase-housekeeping-14282]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout frozen source products
+        uses: actions/checkout@v4
+        with:
+          ref: stage-3-planetary-physics
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate analysis script offline
+        run: |
+          python -m py_compile scripts/science/analyse-maven-ngims-l1b-phase-housekeeping-tid-14282.py
+          python scripts/science/analyse-maven-ngims-l1b-phase-housekeeping-tid-14282.py --self-test
+
+      - name: Associate exact HK marker IDs with phase-start markers
+        run: python scripts/science/analyse-maven-ngims-l1b-phase-housekeeping-tid-14282.py
+
+      - name: Commit phase association index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/modules/Data/mavenNgimsL1bHousekeepingArchive/phase-associations.json
+          if git diff --cached --quiet; then
+            echo "No phase association changes."
+          else
+            git commit -m "data(science): index NGIMS HK telemetry by phase marker [skip ci]"
+            git fetch origin stage-3-planetary-physics
+            git rebase origin/stage-3-planetary-physics
+            git push origin HEAD:stage-3-planetary-physics
+          fi

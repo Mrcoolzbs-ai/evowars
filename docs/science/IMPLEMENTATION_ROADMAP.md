@@ -1237,3 +1237,27 @@ housekeeping clock with L1B t_sclk_cor, interpolate, or join any marker to
 a neutral-abundance row. The HK label describes TIME as an NGIMS-internal
 clock approximation; equivalence with corrected L1B time is not established.
 Stage 4.2 remains OPEN / NOT_READY.
+
+
+## Stage 4.2 — exact phase-marker to housekeeping association (25.11.2026)
+
+The PDS cal-hk label defines MKID as the numeric ID of the most recent
+marker to occur at TIME. The implementation therefore associates a HK row
+with a mass-scan phase only when `HK.MKID` exactly equals that phase's
+cal-mkr "Phase mass scans starting" marker ID. Rows carrying the phase-end
+marker ID are counted separately as post-phase context. Other and blank
+MKIDs remain unassigned.
+
+No timestamp join is performed: HK TIME is an NGIMS-internal SCLK
+approximation, while the cal-mkr and L1B clock fields have distinct
+provenance. No UTC conversion, clock correlation, nearest-neighbour join,
+interpolation or carry-forward is used. Empty HK cells remain unread values.
+The TypeScript streaming parser reports per-channel observed counts, empty
+counts and min/max readbacks with PDS units; it retains bounded first/last
+source-record samples. A reproducible Python analysis workflow runs against
+the frozen 88,639-row HK CSV and writes
+`mavenNgimsL1bHousekeepingArchive/phase-associations.json`.
+
+These telemetry records are operational context only. They are not a
+validated sensitivity function, energy correction factor, neutral abundance
+or complete photochemical initial condition. Stage 4.2 remains OPEN / NOT_READY.

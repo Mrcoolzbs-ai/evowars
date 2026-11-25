@@ -688,3 +688,20 @@ export type {
   MavenNgimsL1bMarkerEventBounds,
   MavenNgimsL1bMarkerCsvImportResult
 } from './mavenNgimsL1bMarkerEvidence';
+
+
+// Stage 4.2: direct cal-mkr phase-start MKID → cal-hk telemetry association.
+export {
+  MAVEN_NGIMS_L1B_HK_EXPECTED_COLUMN_COUNT,
+  MAVEN_NGIMS_L1B_HK_FIELD_UNITS,
+  MAVEN_NGIMS_L1B_HK_PHASE_FIELDS,
+  MAVEN_NGIMS_L1B_HK_ASSOCIATION_LIMITATIONS,
+  associateMavenNgimsL1bHousekeepingRowsByPhase
+} from './mavenNgimsL1bHousekeepingEvidence';
+export type {
+  MavenNgimsL1bHousekeepingFieldSpec,
+  MavenNgimsL1bHousekeepingFieldStatistics,
+  MavenNgimsL1bHousekeepingPhaseSample,
+  MavenNgimsL1bHousekeepingPhaseAssociation,
+  MavenNgimsL1bHousekeepingPhaseAssociationResult
+} from './mavenNgimsL1bHousekeepingEvidence';

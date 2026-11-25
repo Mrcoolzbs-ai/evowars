@@ -51,3 +51,7 @@ export * from './mgsMarsOccultation.test';
 
 // --- MAVEN NGIMS L1B cal-mkr parser and SCLK-only phase windows (Stage 4.2) ---
 export * from './mavenNgimsL1bMarkerEvidence.test';
+
+
+// --- MAVEN NGIMS cal-mkr phase-start MKID → cal-hk telemetry association (Stage 4.2) ---
+export * from './mavenNgimsL1bHousekeepingEvidence.test';

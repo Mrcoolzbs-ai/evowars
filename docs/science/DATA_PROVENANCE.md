@@ -960,3 +960,45 @@ manifests are stored in
 `src/modules/Data/mavenNgimsL1bHousekeepingArchive/`; retrieval is
 reproducible with
 `scripts/science/retrieve-maven-ngims-l1b-housekeeping-tid-14282.py`.
+
+
+## Exact cal-mkr phase-start MKID to cal-hk telemetry association — TID 14282 / orbit 391 (25.11.2026)
+
+**Association key.** The cal-hk detached PDS4 label defines `MKID` as
+"the numeric ID of the most recent marker to occur at TIME". The HK parser
+therefore assigns a row to a phase only if its `MKID` is exactly equal to
+the marker ID of that phase's `Phase mass scans starting` record in
+cal-mkr. Rows with the phase's `Phase ended` marker ID are counted
+separately as post-phase context, not assigned to the phase. Blank IDs and
+all other marker IDs remain unassigned.
+
+**Clock policy.** HK `TIME` has units SECONDS and is described by PDS as a
+spacecraft-clock counter approximated by the NGIMS internal clock. It is
+retained as raw source context but is not compared to cal-mkr TIME or L1B
+`t_sclk_cor`. The marker ID is the direct relation. This implementation
+does not convert SCLK to UTC, estimate a clock offset, use a time window,
+perform nearest-neighbour matching, interpolate, or carry a previous
+telemetry value forward. The cal-hk label also says empty field values
+mean that the field was not read and that no interpolation is performed.
+
+**Channel dictionary.** The TS parser's selected operational channels use
+units from the exact PDS4 Field_Delimited entries: open/closed-source
+filament voltages and currents, emission/filament readbacks, source trap
+monitor, OS/CS temperatures, EM currents, multiplier analog monitor,
+backend filament and pressure-monitor voltages, instrument temperatures,
+QMS RF frequency, filament control voltages, integration-period count/setup
+and filament selector. Units are not inferred from channel names.
+
+**Result contract.** `src/modules/Data/mavenNgimsL1bHousekeepingEvidence.ts`
+processes the HK CSV record-by-record and reports exact MKID associations,
+per-phase row counts, source record ranges, channel observed/empty/non-numeric
+counts, min/max readbacks and bounded first/last samples. The original
+housekeeping CSV remains the source of truth; the phase index does not
+replace or rewrite source records. A reproducible Python workflow validates
+the frozen SHA-256 digests, PDS4 MKID semantics, the 15 marker pairs and all
+88,639 HK rows, then writes
+`src/modules/Data/mavenNgimsL1bHousekeepingArchive/phase-associations.json`.
+
+Housekeeping telemetry is instrument-operational context only. It does not
+provide species abundance, neutral number density, absolute sensitivity,
+fragmentation response, C_EN or Scheduler/Mars initial-state eligibility.
