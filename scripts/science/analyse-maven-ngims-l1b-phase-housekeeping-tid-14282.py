@@ -178,7 +178,7 @@ def update_field_stats(stats: dict, raw: str) -> None:
     stats["lastObservedRawValue"] = raw
 
 
-def analyse_housekeeping(phases: list[dict], field_catalog: dict[str, dict]) -> dict:
+def analyse_housekeeping(phases: list[dict], field_catalog: dict[str, dict], known_marker_ids: set[int]) -> dict:
     phase_by_start_id = {phase["startMarkerId"]: phase for phase in phases}
     phase_by_end_id = {phase["endMarkerId"]: phase for phase in phases}
     stats_by_start_id = {
