@@ -1,0 +1,1077 @@
+{
+  "archives": [
+    {
+      "byteLength": 6425576,
+      "contentLengthHeader": "6425576",
+      "contentType": "application/zip",
+      "httpStatus": 200,
+      "memberCount": 19,
+      "members": [
+        {
+          "compressedSize": 92,
+          "name": "__MACOSX/._The_NGIMS_Indices_",
+          "size": 220
+        },
+        {
+          "compressedSize": 1005874,
+          "name": "The_NGIMS_Indices_/MAVEN NGIMS Single Species Del 1-28.htm",
+          "size": 12794093,
+          "textAudit": {
+            "byteLength": 12794093,
+            "csoAbundLineCount": 0,
+            "lineCount": 329382,
+            "member": "The_NGIMS_Indices_/MAVEN NGIMS Single Species Del 1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 152,
+          "name": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Single Species Del 1-28.htm",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Single Species Del 1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 828504,
+          "name": "The_NGIMS_Indices_/MAVEN NGIMS Calibrated Del1-28.htm",
+          "size": 7747618,
+          "textAudit": {
+            "byteLength": 7747618,
+            "csoAbundLineCount": 0,
+            "lineCount": 203909,
+            "member": "The_NGIMS_Indices_/MAVEN NGIMS Calibrated Del1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 152,
+          "name": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Calibrated Del1-28.htm",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Calibrated Del1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 178,
+          "name": "The_NGIMS_Indices_/.DS_Store",
+          "size": 6148
+        },
+        {
+          "compressedSize": 53,
+          "name": "__MACOSX/The_NGIMS_Indices_/._.DS_Store",
+          "size": 120
+        },
+        {
+          "compressedSize": 756777,
+          "name": "The_NGIMS_Indices_/MAVEN NGIMS Scale Heights del 1-28.csv",
+          "size": 2515449,
+          "textAudit": {
+            "byteLength": 2515449,
+            "csoAbundLineCount": 0,
+            "lineCount": 11086,
+            "member": "The_NGIMS_Indices_/MAVEN NGIMS Scale Heights del 1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 152,
+          "name": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Scale Heights del 1-28.csv",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Scale Heights del 1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 772368,
+          "name": "The_NGIMS_Indices_/Maven NGIMS Altitude Resampled Del 1-28.htm",
+          "size": 5859629,
+          "textAudit": {
+            "byteLength": 5859629,
+            "csoAbundLineCount": 0,
+            "lineCount": 148357,
+            "member": "The_NGIMS_Indices_/Maven NGIMS Altitude Resampled Del 1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 190,
+          "name": "__MACOSX/The_NGIMS_Indices_/._Maven NGIMS Altitude Resampled Del 1-28.htm",
+          "size": 344,
+          "textAudit": {
+            "byteLength": 344,
+            "csoAbundLineCount": 0,
+            "lineCount": 5,
+            "member": "__MACOSX/The_NGIMS_Indices_/._Maven NGIMS Altitude Resampled Del 1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 830928,
+          "name": "The_NGIMS_Indices_/MAVEN NGIMS Single Species Del 1-28.csv",
+          "size": 4558165,
+          "textAudit": {
+            "byteLength": 4558165,
+            "csoAbundLineCount": 0,
+            "lineCount": 20577,
+            "member": "The_NGIMS_Indices_/MAVEN NGIMS Single Species Del 1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 152,
+          "name": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Single Species Del 1-28.csv",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Single Species Del 1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 688736,
+          "name": "The_NGIMS_Indices_/MAVEN NGIMS Calibrated Del1-28.csv",
+          "size": 2648673,
+          "textAudit": {
+            "byteLength": 2648673,
+            "csoAbundLineCount": 0,
+            "lineCount": 12736,
+            "member": "The_NGIMS_Indices_/MAVEN NGIMS Calibrated Del1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 152,
+          "name": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Calibrated Del1-28.csv",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Calibrated Del1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 874325,
+          "name": "The_NGIMS_Indices_/MAVEN NGIMS Scale Heights del 1-28.htm",
+          "size": 6698979,
+          "textAudit": {
+            "byteLength": 6698979,
+            "csoAbundLineCount": 0,
+            "lineCount": 166419,
+            "member": "The_NGIMS_Indices_/MAVEN NGIMS Scale Heights del 1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 190,
+          "name": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Scale Heights del 1-28.htm",
+          "size": 344,
+          "textAudit": {
+            "byteLength": 344,
+            "csoAbundLineCount": 0,
+            "lineCount": 4,
+            "member": "__MACOSX/The_NGIMS_Indices_/._MAVEN NGIMS Scale Heights del 1-28.htm"
+          }
+        },
+        {
+          "compressedSize": 661077,
+          "name": "The_NGIMS_Indices_/Maven NGIMS Altitude Resampled Del 1-28.csv",
+          "size": 2149103,
+          "textAudit": {
+            "byteLength": 2149103,
+            "csoAbundLineCount": 0,
+            "lineCount": 9263,
+            "member": "The_NGIMS_Indices_/Maven NGIMS Altitude Resampled Del 1-28.csv"
+          }
+        },
+        {
+          "compressedSize": 152,
+          "name": "__MACOSX/The_NGIMS_Indices_/._Maven NGIMS Altitude Resampled Del 1-28.csv",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_NGIMS_Indices_/._Maven NGIMS Altitude Resampled Del 1-28.csv"
+          }
+        }
+      ],
+      "name": "The_NGIMS_Indices_.zip",
+      "sha256": "d843e995034f35cdf3c08317b04e7fc4923a5b2c22a6cb3da7a1e1a4bdcf778b",
+      "url": "https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/The_NGIMS_Indices_.zip"
+    },
+    {
+      "byteLength": 3261238,
+      "contentLengthHeader": "3261238",
+      "contentType": "application/zip",
+      "httpStatus": 200,
+      "memberCount": 11,
+      "members": [
+        {
+          "compressedSize": 177,
+          "name": "__MACOSX/._The_other_3_NGIMS_Indices",
+          "size": 313
+        },
+        {
+          "compressedSize": 178,
+          "name": "The_other_3_NGIMS_Indices/.DS_Store",
+          "size": 6148
+        },
+        {
+          "compressedSize": 53,
+          "name": "__MACOSX/The_other_3_NGIMS_Indices/._.DS_Store",
+          "size": 120
+        },
+        {
+          "compressedSize": 735621,
+          "name": "The_other_3_NGIMS_Indices/MAVEN-NGIMS-Scale-height-del 1-26.csv",
+          "size": 2411937,
+          "textAudit": {
+            "byteLength": 2411937,
+            "csoAbundLineCount": 0,
+            "lineCount": 10389,
+            "member": "The_other_3_NGIMS_Indices/MAVEN-NGIMS-Scale-height-del 1-26.csv"
+          }
+        },
+        {
+          "compressedSize": 151,
+          "name": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN-NGIMS-Scale-height-del 1-26.csv",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN-NGIMS-Scale-height-del 1-26.csv"
+          }
+        },
+        {
+          "compressedSize": 752548,
+          "name": "The_other_3_NGIMS_Indices/MAVEN NGIMS Del 1-26 single species abundances.csv",
+          "size": 4214623,
+          "textAudit": {
+            "byteLength": 4214623,
+            "csoAbundLineCount": 0,
+            "lineCount": 19045,
+            "member": "The_other_3_NGIMS_Indices/MAVEN NGIMS Del 1-26 single species abundances.csv"
+          }
+        },
+        {
+          "compressedSize": 151,
+          "name": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN NGIMS Del 1-26 single species abundances.csv",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN NGIMS Del 1-26 single species abundances.csv"
+          }
+        },
+        {
+          "compressedSize": 855703,
+          "name": "The_other_3_NGIMS_Indices/MAVEN-NGIMS-Scale-height-del 1-26.htm",
+          "size": 6822216,
+          "textAudit": {
+            "byteLength": 6822216,
+            "csoAbundLineCount": 0,
+            "lineCount": 176763,
+            "member": "The_other_3_NGIMS_Indices/MAVEN-NGIMS-Scale-height-del 1-26.htm"
+          }
+        },
+        {
+          "compressedSize": 151,
+          "name": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN-NGIMS-Scale-height-del 1-26.htm",
+          "size": 288,
+          "textAudit": {
+            "byteLength": 288,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN-NGIMS-Scale-height-del 1-26.htm"
+          }
+        },
+        {
+          "compressedSize": 912950,
+          "name": "The_other_3_NGIMS_Indices/MAVEN NGIMS Del 1-26 single species abundances.htm",
+          "size": 11837791,
+          "textAudit": {
+            "byteLength": 11837791,
+            "csoAbundLineCount": 0,
+            "lineCount": 304870,
+            "member": "The_other_3_NGIMS_Indices/MAVEN NGIMS Del 1-26 single species abundances.htm"
+          }
+        },
+        {
+          "compressedSize": 191,
+          "name": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN NGIMS Del 1-26 single species abundances.htm",
+          "size": 344,
+          "textAudit": {
+            "byteLength": 344,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/The_other_3_NGIMS_Indices/._MAVEN NGIMS Del 1-26 single species abundances.htm"
+          }
+        }
+      ],
+      "name": "The_other_3_NGIMS_Indices_2.zip",
+      "sha256": "30bb5762b42546ec53fc6a714b1000fa631e213137c36540e55e8874b5a29fa2",
+      "url": "https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/The_other_3_NGIMS_Indices%202.zip"
+    },
+    {
+      "byteLength": 64662829,
+      "contentLengthHeader": "64662829",
+      "contentType": "application/zip",
+      "httpStatus": 200,
+      "memberCount": 69,
+      "members": [
+        {
+          "compressedSize": 136,
+          "name": "__MACOSX/._NGIMS_indexes",
+          "size": 213
+        },
+        {
+          "compressedSize": 87152,
+          "name": "NGIMS_indexes/IUVS_Occultation_Derived1-40.htm",
+          "size": 1122854,
+          "textAudit": {
+            "byteLength": 1122854,
+            "csoAbundLineCount": 0,
+            "lineCount": 29412,
+            "member": "NGIMS_indexes/IUVS_Occultation_Derived1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._IUVS_Occultation_Derived1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._IUVS_Occultation_Derived1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 410,
+          "name": "NGIMS_indexes/.DS_Store",
+          "size": 6148
+        },
+        {
+          "compressedSize": 53,
+          "name": "__MACOSX/NGIMS_indexes/._.DS_Store",
+          "size": 120
+        },
+        {
+          "compressedSize": 904946,
+          "name": "NGIMS_indexes/MAVEN_IUVS_Corona_calibrated_del1-40.htm",
+          "size": 11849151,
+          "textAudit": {
+            "byteLength": 11849151,
+            "csoAbundLineCount": 0,
+            "lineCount": 307545,
+            "member": "NGIMS_indexes/MAVEN_IUVS_Corona_calibrated_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Corona_calibrated_del1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Corona_calibrated_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 2511350,
+          "name": "NGIMS_indexes/Maven_IUVS_Echelle_Calibrated_del1-40.htm",
+          "size": 26871959,
+          "textAudit": {
+            "byteLength": 26871959,
+            "csoAbundLineCount": 0,
+            "lineCount": 686412,
+            "member": "NGIMS_indexes/Maven_IUVS_Echelle_Calibrated_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Calibrated_del1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Calibrated_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 1588821,
+          "name": "NGIMS_indexes/Maven_IUVS_Echelle_Processed_del_1-40.csv",
+          "size": 8001877,
+          "textAudit": {
+            "byteLength": 8001877,
+            "csoAbundLineCount": 0,
+            "lineCount": 33199,
+            "member": "NGIMS_indexes/Maven_IUVS_Echelle_Processed_del_1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Processed_del_1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Processed_del_1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 890702,
+          "name": "NGIMS_indexes/MAVEN_NGIMS_Calibrated_del1-40.csv",
+          "size": 3573649,
+          "textAudit": {
+            "byteLength": 3573649,
+            "csoAbundLineCount": 0,
+            "lineCount": 17773,
+            "member": "NGIMS_indexes/MAVEN_NGIMS_Calibrated_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Calibrated_del1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Calibrated_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 18473,
+          "name": "NGIMS_indexes/MAVEN-NGIMS-winds-Del 1-40.csv",
+          "size": 65879,
+          "textAudit": {
+            "byteLength": 65879,
+            "csoAbundLineCount": 0,
+            "lineCount": 319,
+            "member": "NGIMS_indexes/MAVEN-NGIMS-winds-Del 1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN-NGIMS-winds-Del 1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN-NGIMS-winds-Del 1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 64,
+          "embeddedWorkbookAudit": [],
+          "name": "NGIMS_indexes/~$iuvs_calibrated_bundle_disk_01242025.xlsx",
+          "size": 165
+        },
+        {
+          "compressedSize": 111,
+          "embeddedWorkbookAudit": [],
+          "name": "__MACOSX/NGIMS_indexes/._~$iuvs_calibrated_bundle_disk_01242025.xlsx",
+          "size": 188
+        },
+        {
+          "compressedSize": 1454328,
+          "name": "NGIMS_indexes/maven_iuvs_calibrated_limb_l1b_d39.csv",
+          "size": 11780775,
+          "textAudit": {
+            "byteLength": 11780775,
+            "csoAbundLineCount": 0,
+            "lineCount": 45244,
+            "member": "NGIMS_indexes/maven_iuvs_calibrated_limb_l1b_d39.csv"
+          }
+        },
+        {
+          "compressedSize": 341,
+          "name": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_limb_l1b_d39.csv",
+          "size": 549,
+          "textAudit": {
+            "byteLength": 549,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_limb_l1b_d39.csv"
+          }
+        },
+        {
+          "compressedSize": 2358056,
+          "name": "NGIMS_indexes/maven_iuvs_calibrated_limb_l1b_d40.htm",
+          "size": 45552132,
+          "textAudit": {
+            "byteLength": 45552132,
+            "csoAbundLineCount": 0,
+            "lineCount": 1139457,
+            "member": "NGIMS_indexes/maven_iuvs_calibrated_limb_l1b_d40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_limb_l1b_d40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_limb_l1b_d40.htm"
+          }
+        },
+        {
+          "compressedSize": 251384,
+          "name": "NGIMS_indexes/Maven_IUVS_Limb_Derived_Del_1-40.csv",
+          "size": 1073381,
+          "textAudit": {
+            "byteLength": 1073381,
+            "csoAbundLineCount": 0,
+            "lineCount": 4841,
+            "member": "NGIMS_indexes/Maven_IUVS_Limb_Derived_Del_1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Derived_Del_1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Derived_Del_1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 94645,
+          "name": "NGIMS_indexes/Maven_IUVS_Occultation_Processed_del1-40.csv",
+          "size": 409379,
+          "textAudit": {
+            "byteLength": 409379,
+            "csoAbundLineCount": 0,
+            "lineCount": 1730,
+            "member": "NGIMS_indexes/Maven_IUVS_Occultation_Processed_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Occultation_Processed_del1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Occultation_Processed_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 296812,
+          "name": "NGIMS_indexes/MAVEN_IUVS_Occultation_Calibrated_del11-40.htm",
+          "size": 4902602,
+          "textAudit": {
+            "byteLength": 4902602,
+            "csoAbundLineCount": 0,
+            "lineCount": 124323,
+            "member": "NGIMS_indexes/MAVEN_IUVS_Occultation_Calibrated_del11-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Occultation_Calibrated_del11-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Occultation_Calibrated_del11-40.htm"
+          }
+        },
+        {
+          "compressedSize": 604941,
+          "name": "NGIMS_indexes/Maven_NGIMS_Altitude-Resampled_del 1-40.csv",
+          "size": 2236799,
+          "textAudit": {
+            "byteLength": 2236799,
+            "csoAbundLineCount": 0,
+            "lineCount": 10898,
+            "member": "NGIMS_indexes/Maven_NGIMS_Altitude-Resampled_del 1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_NGIMS_Altitude-Resampled_del 1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_NGIMS_Altitude-Resampled_del 1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 12545916,
+          "name": "NGIMS_indexes/maven_iuvs_calibrated_disk_del_40.csv",
+          "size": 91520823
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_disk_del_40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_disk_del_40.csv"
+          }
+        },
+        {
+          "compressedSize": 534121,
+          "name": "NGIMS_indexes/Maven_IUVS_Limb_Processed_del._1-40.htm",
+          "size": 5016642,
+          "textAudit": {
+            "byteLength": 5016642,
+            "csoAbundLineCount": 0,
+            "lineCount": 129604,
+            "member": "NGIMS_indexes/Maven_IUVS_Limb_Processed_del._1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Processed_del._1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Processed_del._1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 792162,
+          "name": "NGIMS_indexes/MAVEN_NGIMS_Scale-Height&Temp_del1-40.csv",
+          "size": 3075486,
+          "textAudit": {
+            "byteLength": 3075486,
+            "csoAbundLineCount": 0,
+            "lineCount": 15427,
+            "member": "NGIMS_indexes/MAVEN_NGIMS_Scale-Height&Temp_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Scale-Height&Temp_del1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Scale-Height&Temp_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 1098177,
+          "name": "NGIMS_indexes/MAVEN_NGIMS_Single-Species_del1-40.csv",
+          "size": 6300565,
+          "textAudit": {
+            "byteLength": 6300565,
+            "csoAbundLineCount": 0,
+            "lineCount": 29697,
+            "member": "NGIMS_indexes/MAVEN_NGIMS_Single-Species_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Single-Species_del1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Single-Species_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 1915654,
+          "name": "NGIMS_indexes/Maven_IUVS_Echelle_Processed_del_1-40.htm",
+          "size": 22050420,
+          "textAudit": {
+            "byteLength": 22050420,
+            "csoAbundLineCount": 0,
+            "lineCount": 564539,
+            "member": "NGIMS_indexes/Maven_IUVS_Echelle_Processed_del_1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Processed_del_1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Processed_del_1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 2073171,
+          "name": "NGIMS_indexes/Maven_IUVS_Echelle_Calibrated_del1-40.csv",
+          "size": 9790917,
+          "textAudit": {
+            "byteLength": 9790917,
+            "csoAbundLineCount": 0,
+            "lineCount": 40368,
+            "member": "NGIMS_indexes/Maven_IUVS_Echelle_Calibrated_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Calibrated_del1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Echelle_Calibrated_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 746754,
+          "name": "NGIMS_indexes/MAVEN_IUVS_Corona_calibrated_del1-40.csv",
+          "size": 4227274,
+          "textAudit": {
+            "byteLength": 4227274,
+            "csoAbundLineCount": 0,
+            "lineCount": 17077,
+            "member": "NGIMS_indexes/MAVEN_IUVS_Corona_calibrated_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Corona_calibrated_del1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Corona_calibrated_del1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 1925409,
+          "name": "NGIMS_indexes/maven_iuvs_calibrated_limb_l1b_d40.csv",
+          "size": 17423553,
+          "textAudit": {
+            "byteLength": 17423553,
+            "csoAbundLineCount": 0,
+            "lineCount": 59962,
+            "member": "NGIMS_indexes/maven_iuvs_calibrated_limb_l1b_d40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_limb_l1b_d40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_limb_l1b_d40.csv"
+          }
+        },
+        {
+          "compressedSize": 24385,
+          "name": "NGIMS_indexes/MAVEN-NGIMS-winds-Del 1-40.htm",
+          "size": 206035,
+          "textAudit": {
+            "byteLength": 206035,
+            "csoAbundLineCount": 0,
+            "lineCount": 5573,
+            "member": "NGIMS_indexes/MAVEN-NGIMS-winds-Del 1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN-NGIMS-winds-Del 1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN-NGIMS-winds-Del 1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 1079806,
+          "name": "NGIMS_indexes/MAVEN_NGIMS_Calibrated_del1-40.htm",
+          "size": 10687922,
+          "textAudit": {
+            "byteLength": 10687922,
+            "csoAbundLineCount": 0,
+            "lineCount": 284516,
+            "member": "NGIMS_indexes/MAVEN_NGIMS_Calibrated_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Calibrated_del1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Calibrated_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 67174,
+          "name": "NGIMS_indexes/IUVS_Occultation_Derived1-40.csv",
+          "size": 389529,
+          "textAudit": {
+            "byteLength": 389529,
+            "csoAbundLineCount": 0,
+            "lineCount": 1721,
+            "member": "NGIMS_indexes/IUVS_Occultation_Derived1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._IUVS_Occultation_Derived1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._IUVS_Occultation_Derived1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 11841349,
+          "name": "NGIMS_indexes/maven_iuvs_calibrated_disk_del_39.csv",
+          "size": 86567705
+        },
+        {
+          "compressedSize": 340,
+          "name": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_disk_del_39.csv",
+          "size": 548,
+          "textAudit": {
+            "byteLength": 548,
+            "csoAbundLineCount": 0,
+            "lineCount": 2,
+            "member": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_disk_del_39.csv"
+          }
+        },
+        {
+          "compressedSize": 14819377,
+          "name": "NGIMS_indexes/maven_iuvs_calibrated_disk_del_40.htm",
+          "size": 247456731
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_disk_del_40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._maven_iuvs_calibrated_disk_del_40.htm"
+          }
+        },
+        {
+          "compressedSize": 736921,
+          "name": "NGIMS_indexes/Maven_NGIMS_Altitude-Resampled_del 1-40.htm",
+          "size": 6601338,
+          "textAudit": {
+            "byteLength": 6601338,
+            "csoAbundLineCount": 0,
+            "lineCount": 174519,
+            "member": "NGIMS_indexes/Maven_NGIMS_Altitude-Resampled_del 1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_NGIMS_Altitude-Resampled_del 1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_NGIMS_Altitude-Resampled_del 1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 1339672,
+          "name": "NGIMS_indexes/MAVEN_NGIMS_Single-Species_del1-40.htm",
+          "size": 18184566,
+          "textAudit": {
+            "byteLength": 18184566,
+            "csoAbundLineCount": 0,
+            "lineCount": 475304,
+            "member": "NGIMS_indexes/MAVEN_NGIMS_Single-Species_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Single-Species_del1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Single-Species_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 944887,
+          "name": "NGIMS_indexes/MAVEN_NGIMS_Scale-Height&Temp_del1-40.htm",
+          "size": 8896409,
+          "textAudit": {
+            "byteLength": 8896409,
+            "csoAbundLineCount": 0,
+            "lineCount": 231551,
+            "member": "NGIMS_indexes/MAVEN_NGIMS_Scale-Height&Temp_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Scale-Height&Temp_del1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_NGIMS_Scale-Height&Temp_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 446899,
+          "name": "NGIMS_indexes/Maven_IUVS_Limb_Processed_del._1-40.csv",
+          "size": 1790379,
+          "textAudit": {
+            "byteLength": 1790379,
+            "csoAbundLineCount": 0,
+            "lineCount": 7615,
+            "member": "NGIMS_indexes/Maven_IUVS_Limb_Processed_del._1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Processed_del._1-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Processed_del._1-40.csv"
+          }
+        },
+        {
+          "compressedSize": 116084,
+          "name": "NGIMS_indexes/Maven_IUVS_Occultation_Processed_del1-40.htm",
+          "size": 1106547,
+          "textAudit": {
+            "byteLength": 1106547,
+            "csoAbundLineCount": 0,
+            "lineCount": 27833,
+            "member": "NGIMS_indexes/Maven_IUVS_Occultation_Processed_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Occultation_Processed_del1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Occultation_Processed_del1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 299014,
+          "name": "NGIMS_indexes/Maven_IUVS_Limb_Derived_Del_1-40.htm",
+          "size": 3014807,
+          "textAudit": {
+            "byteLength": 3014807,
+            "csoAbundLineCount": 0,
+            "lineCount": 77604,
+            "member": "NGIMS_indexes/Maven_IUVS_Limb_Derived_Del_1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Derived_Del_1-40.htm",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._Maven_IUVS_Limb_Derived_Del_1-40.htm"
+          }
+        },
+        {
+          "compressedSize": 230700,
+          "name": "NGIMS_indexes/MAVEN_IUVS_Occultation_Calibrated_del11-40.csv",
+          "size": 1807584,
+          "textAudit": {
+            "byteLength": 1807584,
+            "csoAbundLineCount": 0,
+            "lineCount": 7303,
+            "member": "NGIMS_indexes/MAVEN_IUVS_Occultation_Calibrated_del11-40.csv"
+          }
+        },
+        {
+          "compressedSize": 111,
+          "name": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Occultation_Calibrated_del11-40.csv",
+          "size": 188,
+          "textAudit": {
+            "byteLength": 188,
+            "csoAbundLineCount": 0,
+            "lineCount": 1,
+            "member": "__MACOSX/NGIMS_indexes/._MAVEN_IUVS_Occultation_Calibrated_del11-40.csv"
+          }
+        }
+      ],
+      "name": "NGIMS_indexes.zip",
+      "sha256": "852130bfb426512b60c85cfbf4f1f0777ff4729d88cae04c303878583ab19560",
+      "url": "https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/NGIMS_indexes.zip"
+    },
+    {
+      "byteLength": 6906311,
+      "contentLengthHeader": "6906311",
+      "contentType": "text/csv",
+      "csoAbundLineCount": 0,
+      "httpStatus": 200,
+      "lineCount": 32618,
+      "member": "MAVEN_NGIMS_Single-Species_del1-43.csv",
+      "name": "MAVEN_NGIMS_Single-Species_del1-43.csv",
+      "sha256": "9753a06ca7a2f53e23f863d24ae494ba6645ce958806a95942af6020e58ca9c3",
+      "url": "https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_Single-Species_del1-43.csv"
+    }
+  ],
+  "interpretation": {
+    "candidateRowsAreNotMeasurements": true,
+    "detachedPds4LabelsDownloaded": false,
+    "indexOnly": true,
+    "measurementCsvPayloadsDownloaded": false,
+    "nextStep": "For each cso-abund URN, retrieve exact PDS4 CSV/XML and validate product identity, byte length, checksum, row-level quality and same-event geometry before co-registration."
+  },
+  "matches": [],
+  "retrievalDate": "2026-11-25",
+  "sourceDirectory": "https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/",
+  "summary": {
+    "csoAbundTextMatches": 0,
+    "failedSources": [],
+    "successfulSources": 4,
+    "uniqueCsoProductUrns": [],
+    "uniqueTids": [],
+    "zipMemberCount": 99
+  }
+}
