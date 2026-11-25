@@ -1619,7 +1619,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       tid: 14282,
       focusMode: 'csn',
       direction: 'inbound',
-      unmatchedCountBySpecies: { He: 153, CO2: 0, Ar: 0 },
+      unmatchedCountBySpecies: { He: 153, CO2: 16, Ar: 0 },
       eligibleAsMarsPhotochemicalInitialState: false,
       eligibleAsSchedulerInitialAbundance: false
     });
