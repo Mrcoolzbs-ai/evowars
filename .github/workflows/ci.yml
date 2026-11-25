@@ -1,5 +1,5 @@
 name: CI
-# Keep science branch verification rerunnable after source/test commits and typed L2 profile checks.
+# Keep science branch verification rerunnable after source/test commits and co-registration checks.
 
 on:
   push:
