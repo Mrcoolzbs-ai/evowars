@@ -23,7 +23,7 @@ jobs:
           python -m py_compile scripts/science/inspect-maven-ngims-index-bundles.py
           python scripts/science/inspect-maven-ngims-index-bundles.py --self-test
       - name: Download and inspect official NGIMS selection index archives
-        run: python scripts/science/inspect-maven-ngims-index-bundles.py
+        run: python scripts/science/inspect-maven-ngims-index-bundles.py --selector-only
       - name: Commit index-bundle forensic inventory
         run: |
           git config user.name "github-actions[bot]"
