@@ -40,6 +40,10 @@ RECORD_PATTERN = re.compile(
     r"mvn_ngi_l2_(?P<mode>[a-z0-9]+)-abund-14282_20141211t154406_v(?P<version>\d+)_r(?P<revision>\d+)\.(?P<ext>csv|xml)$",
     re.IGNORECASE,
 )
+ANY_ABUND_PATTERN = re.compile(
+    r"mvn_ngi_l2_(?P<mode>[a-z0-9]+)-abund-(?P<tid>\d+)_(?P<time>\d{8}t\d{6})_v(?P<version>\d+)_r(?P<revision>\d+)\.(?P<ext>csv|xml)$",
+    re.IGNORECASE,
+)
 REQUIRED_COLUMNS = [
     "t_utc", "t_unix", "t_sclk", "t_tid", "tid", "orbit", "focusmode",
     "alt", "lst", "long", "lat", "sza", "mass", "species",
@@ -353,13 +357,40 @@ def main() -> int:
     archive = tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz")
     with archive:
         matches = []
+        all_abundance_members = []
         for member in archive.getmembers():
             if not member.isfile():
                 continue
             basename = Path(member.name).name
+            broad_match = ANY_ABUND_PATTERN.fullmatch(basename)
+            if broad_match:
+                all_abundance_members.append((member, broad_match.groupdict()))
             match = RECORD_PATTERN.fullmatch(basename)
             if match:
                 matches.append((member, match.groupdict()))
+
+        # Directory-level inventory of every CSO all-neutral product in the
+        # annual archive. This is candidate discovery only, not measured data.
+        cso_candidates: dict[str, dict] = {}
+        for member, fields in all_abundance_members:
+            if fields["mode"].lower() != "cso":
+                continue
+            stem = member.name.rsplit(".", 1)[0]
+            candidate = cso_candidates.setdefault(stem, {
+                "productStem": stem,
+                "productIdFromName": "urn:nasa:pds:maven_ngims:l2:" + Path(stem).name.lower(),
+                "tid": int(fields["tid"]),
+                "timeToken": fields["time"].upper(),
+                "version": int(fields["version"]),
+                "revision": int(fields["revision"]),
+                "archiveYearPath": str(Path(member.name).parent),
+                "csvMember": None,
+                "xmlMember": None
+            })
+            if fields["ext"].lower() == "csv":
+                candidate["csvMember"] = member.name
+            elif fields["ext"].lower() == "xml":
+                candidate["xmlMember"] = member.name
         if not matches:
             fail("no TID 14282 / 2014-12-11T15:44:06 L2 abundance candidates found in official annual archive")
 
@@ -417,12 +448,22 @@ def main() -> int:
         "retrievalMethod": "exact original archive members extracted byte-for-byte; no line-ending rewriting",
         "products": products,
         "discoveryAudit": {
-            "matchingL2AbundanceProductCountIn2014AnnualArchive": len(products),
-            "focusModesFound": sorted({product["csvSummary"]["focusModeCounts"].keys().__iter__().__next__() for product in products}),
+            "matchingL2AbundanceProductCountForExactTidAndEvent": len(products),
+            "focusModesFoundForExactTidAndEvent": sorted({
+                mode
+                for product in products
+                for mode in product["csvSummary"]["focusModeCounts"]
+            }),
             "csoAbundanceProductFoundForExactTidAndEvent": any(
                 "mvn_ngi_l2_cso-abund-14282_20141211t154406" in product["csv"]["productId"].lower()
                 for product in products
             ),
+            "csoAbundanceProductCountIn2014AnnualArchive": len(cso_candidates),
+            "csoAbundanceProductsMissingCsvOrXmlPartner": sum(
+                1 for candidate in cso_candidates.values()
+                if not candidate["csvMember"] or not candidate["xmlMember"]
+            ),
+            "csoAbundanceCandidateCatalogFile": "cso-abund-product-catalog-2014.json",
             "scope": "official 2014 annual NGIMS derived L2 archive only; absence outside this bundle is not inferred"
         },
         "interpretation": {
@@ -445,9 +486,28 @@ def main() -> int:
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    cso_catalog = {
+        "archiveUrl": ARCHIVE_URL,
+        "archiveSha256": archive_provenance["sha256"],
+        "scope": "filename-level discovery of cso-abund products in the official 2014 annual archive; candidate CSV/XML payloads are not yet validated or joined",
+        "candidateCount": len(cso_candidates),
+        "candidates": sorted(
+            cso_candidates.values(),
+            key=lambda item: (item["tid"], item["timeToken"], item["version"], item["revision"])
+        )
+    }
+    (OUTPUT_DIR / "cso-abund-product-catalog-2014.json").write_text(
+        json.dumps(cso_catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     print(json.dumps({
         "status": "retrieved_and_audited",
         "archive": archive_provenance,
+        "csoAbundanceProductCountIn2014AnnualArchive": len(cso_candidates),
+        "csoAbundanceCandidateSample": sorted(
+            cso_candidates.values(),
+            key=lambda item: (item["tid"], item["timeToken"])
+        )[:10],
         "products": [
             {
                 "productId": product["csv"]["productId"],
