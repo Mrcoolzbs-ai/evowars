@@ -19,6 +19,7 @@ import {
   parseMavenNgimsL3ScaleHeightTemperatureCsvText,
   parseMavenNgimsL3ResampledDensityCsvText,
   importMavenNgimsL3ResampledDensityPds4Product,
+  importMavenNgimsL2NeutralPds4Product,
   selectMavenNgimsL3ResampledDensityPds4Profile,
   selectMavenNgimsL3ScaleHeightTemperatureRows,
   selectMavenNgimsL3ResampledDensityProfile,
@@ -1241,7 +1242,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
   });
 
 
-  it('parses the archived real NGIMS L2 csn-abund TID 14282 product and builds isolated evidence columns', () => {
+  it('parses the archived real NGIMS L2 csn-abund TID 14282 product and builds isolated evidence columns through its PDS4 label', async () => {
     const csvText = readFileSync(
       'src/modules/Data/mavenNgimsL2Archive/mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv',
       'utf8'
@@ -1257,6 +1258,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
           labelDeclaredFileSizeBytes: number;
           csvSizeConsistencyStatus: string;
           csvMd5Checksum: string | null;
+          csvSha256: string;
         };
         csvSummary: {
           sourceCsvHeaders: string[];
@@ -1290,6 +1292,63 @@ describe('MAVEN upper-atmosphere evidence', () => {
       csvSizeConsistencyStatus: 'mismatch_quarantined_no_md5',
       csvMd5Checksum: null
     });
+    const detachedLabelXml = readFileSync(
+      'src/modules/Data/mavenNgimsL2Archive/mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.xml',
+      'utf8'
+    );
+    const productId = 'urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406';
+    const csvFileName = 'mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv';
+
+    const strictPds4 = await importMavenNgimsL2NeutralPds4Product({
+      csvText, detachedLabelXml, expectedProductId: productId, expectedCsvFileName: csvFileName,
+      policy: { allowUncertain: true }
+    });
+    expect(strictPds4.status).toBe('rejected');
+    if (strictPds4.status !== 'rejected') {
+      throw new Error('PDS4 import must reject the detached-label file_size mismatch without forensic opt-in');
+    }
+    expect(strictPds4.errors.join(' ')).toMatch(/forensic opt-in is required/);
+
+    const wrongIdentity = await importMavenNgimsL2NeutralPds4Product({
+      csvText, detachedLabelXml, expectedProductId: productId + '-wrong', expectedCsvFileName: csvFileName,
+      allowLabelSizeMismatchForensicAnalysis: true
+    });
+    expect(wrongIdentity.status).toBe('rejected');
+    if (wrongIdentity.status === 'rejected') {
+      expect(wrongIdentity.errors.join(' ')).toMatch(/logical_identifier/);
+    }
+
+    const forensicImport = await importMavenNgimsL2NeutralPds4Product({
+      csvText,
+      detachedLabelXml,
+      expectedProductId: productId,
+      expectedCsvFileName: csvFileName,
+      policy: { allowUncertain: true },
+      allowLabelSizeMismatchForensicAnalysis: true
+    });
+    expect(forensicImport.status).toBe('imported_forensic_only');
+    if (forensicImport.status !== 'imported_forensic_only') {
+      throw new Error(forensicImport.status === 'rejected'
+        ? forensicImport.errors.join('; ')
+        : 'expected forensic-only L2 import');
+    }
+    expect(forensicImport.provenance).toMatchObject({
+      sourceProductId: productId,
+      csvFileName,
+      csvByteLength: 538939,
+      labelDeclaredFileSizeBytes: 539063,
+      csvSizeConsistencyStatus: 'mismatch_explicitly_accepted_for_forensic_analysis',
+      labelHeaderObjectLengthBytes: 124,
+      labelTableOffsetBytes: 124,
+      labelTableObjectLengthBytes: 538939,
+      labelFileLayoutDiagnosis: 'possible_header_double_count_in_label',
+      csvSha256: product.csv.csvSha256,
+      csvMd5Checksum: null,
+      csvMd5ChecksumStatus: 'not_present_in_detached_label',
+      csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
+      detachedLabelAuthenticity: 'not_independently_authenticated'
+    });
+    expect(forensicImport.warnings.join(' ')).toMatch(/forensic-only/);
     expect(product.csvSummary.sourceHeaderAliasesApplied).toEqual({
       cps_dt_bkd: 'cps_dt_bkgd',
       t_sclk_cor: 't_sclk'
@@ -1321,9 +1380,8 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(product.csvSummary.sourceCsvHeaders).toContain('t_sclk_cor');
     expect(product.csvSummary.sourceCsvHeaders).toContain('cps_dt_bkd');
 
-    const strict = parseMavenNgimsL2NeutralCsvText(csvText);
+    const strict = forensicImport.imported;
     expect(strict.status).toBe('parsed');
-    if (strict.status !== 'parsed') throw new Error(strict.errors.join('; '));
     expect(strict.headers).toContain('t_sclk_cor');
     expect(strict.headers).toContain('cps_dt_bkd');
     expect(strict.rows).toHaveLength(2796);
