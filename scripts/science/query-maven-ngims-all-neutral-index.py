@@ -197,6 +197,47 @@ def next_year_bounds(year: int) -> tuple[date, date]:
 
 
 
+def extract_selector_identifiers(html: str) -> tuple[list[str], list[str]]:
+    """Extract URNs and versioned filename stems without counting URNs as filenames."""
+    urns = sorted(set(URN_RE.findall(html)), key=str.lower)
+    urn_stems = {urn.rsplit(":", 1)[-1].lower() for urn in urns}
+    names = sorted(
+        {
+            name for name in PRODUCT_RE.findall(html)
+            if name.lower() not in urn_stems
+        },
+        key=str.lower,
+    )
+    return urns, names
+
+
+def product_identity_key(product_id: str) -> str:
+    """Normalize an L2 product URN or versioned filename to its shared product stem."""
+    value = product_id.rsplit(":", 1)[-1]
+    value = re.sub(r"_v\d+_r\d+$", "", value, flags=re.IGNORECASE)
+    return value.lower()
+
+
+def record_page_identifiers(
+    all_products: dict[str, dict],
+    year: int,
+    page_path: str,
+    urns: list[str],
+    product_names: list[str],
+) -> None:
+    """Merge a page's URN and filename evidence under one stable product identity."""
+    for field, identifiers in (("productId", urns), ("fileNameStem", product_names)):
+        for identifier in identifiers:
+            key = product_identity_key(identifier)
+            entry = all_products.setdefault(key, {
+                "firstSeenYearQuery": year,
+                "responsePages": [],
+            })
+            entry[field] = identifier
+            if page_path not in entry["responsePages"]:
+                entry["responsePages"].append(page_path)
+
+
 def build_source_metadata(form_provenance: dict) -> dict:
     """Return reproducible selector provenance without guessing the winning endpoint."""
     return {
@@ -228,12 +269,16 @@ def run_self_tests() -> None:
     <a href="?slice_start=500">Next</a>"""
     parser = ResultParser()
     parser.feed(sample_html)
-    urns = sorted(set(URN_RE.findall(sample_html)), key=str.lower)
-    names = sorted(set(PRODUCT_RE.findall(sample_html)), key=str.lower)
+    urns, names = extract_selector_identifiers(sample_html)
     assert len(parser.rows) == 2, f"expected header + one result row, got {len(parser.rows)}"
     assert len(urns) == 1 and "14282" in urns[0], f"unexpected URNs: {urns!r}"
-    assert len(names) == 1 and "14282" in names[0], f"unexpected product names: {names!r}"
+    assert len(names) == 1 and names[0].endswith("_v08_r01"), f"unexpected product names: {names!r}"
     assert any("slice_start" in link["href"] for link in parser.links), "next-page link was not captured"
+    merged: dict[str, dict] = {}
+    record_page_identifiers(merged, 2014, "fixture.html", urns, names)
+    assert len(merged) == 1, f"URN and CSV filename were not merged: {merged!r}"
+    only_product = next(iter(merged.values()))
+    assert only_product["productId"] == urns[0] and only_product["fileNameStem"] == names[0]
     assert next_year_bounds(2014) == (date(2014, 10, 18), date(2014, 12, 31))
     assert next_year_bounds(2025) == (date(2025, 1, 1), date(2025, 2, 15))
     source = build_source_metadata({"httpStatus": 200, "sha256": "fixture"})
@@ -273,8 +318,7 @@ def main() -> int:
             parser.feed(decoded)
             flat_text = clean_text(" ".join(parser.text_parts))
 
-            urns = sorted(set(URN_RE.findall(decoded)), key=str.lower)
-            product_names = sorted(set(PRODUCT_RE.findall(decoded)), key=str.lower)
+            urns, product_names = extract_selector_identifiers(decoded)
             metadata.update({
                 "year": year,
                 "pageNumber": page_number,
@@ -298,23 +342,9 @@ def main() -> int:
             })
             total_rows += len(parser.rows)
 
-            for urn in urns:
-                key = urn.lower()
-                entry = all_products.setdefault(key, {
-                    "productId": urn,
-                    "firstSeenYearQuery": year,
-                    "responsePages": [],
-                })
-                entry["responsePages"].append(str(page_path))
-
-            for name in product_names:
-                key = name.lower()
-                entry = all_products.setdefault(key, {
-                    "fileNameStem": name,
-                    "firstSeenYearQuery": year,
-                    "responsePages": [],
-                })
-                entry["responsePages"].append(str(page_path))
+            record_page_identifiers(
+                all_products, year, str(page_path), urns, product_names
+            )
 
             # No next page when the server returned fewer than PAGE_SIZE rows
             # and neither a full page nor pagination controls suggest more rows.
