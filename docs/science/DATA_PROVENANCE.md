@@ -1327,3 +1327,102 @@ calibration-reservoir description; Mahaffy et al. (2015),
 *The Neutral Gas and Ion Mass Spectrometer on the Mars Atmosphere and Volatile
 Evolution Mission*, Section 2.4 and Section 4.3,
 https://doi.org/10.1007/s11214-014-0091-1.
+
+
+## 2.38 Official MAVEN NGIMS L2/L3 product-index intersection (25 Nov 2026)
+
+A reproducible index-only audit downloads and parses the three official PDS
+product-selection CSVs: MAVEN_NGIMS_Single-Species_del1-43.csv (L2,
+6,906,311 bytes, SHA-256
+9753a06ca7a2f53e23f863d24ae494ba6645ce958806a95942af6020e58ca9c3),
+Maven_NGIMS_Altitude-Resampled_del 1-40.csv (L3 res-den, 2,236,799 bytes,
+SHA-256 d9410d5c96dc9c5cb14397154378711b00bb2dfdc20df5501d2f56ab1e37e693),
+and MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv (L3, 3,257,701 bytes,
+SHA-256 19e22386652347ec3052aa163660ef4172b13ce60d133fb47ea8a0eb7ffcc9ee).
+
+All three index downloads returned HTTP 200. The parser extracted 59,816
+product records: L2 csn-abund 16,945; L2 ion-abund 15,632; L3 res-den 11,090;
+L3 res-sht 16,149. Counts are records in the selection indexes, not counts
+of observations or valid density measurements. The L2 Single-Species index
+contains no cso-abund record; this finding is scoped to this index and does
+not establish mission-wide absence of all-neutral products.
+
+The cross-index join key is exactly (TID, product timestamp parsed from the
+PDS URN). Candidate sets are accepted only when there is one distinct URN
+per required product role and all three index rows have identical UTC
+start/stop windows. There is no nearest-neighbour matching, fuzzy timestamp
+tolerance, interpolation, or geometry-derived joining.
+
+The first audit identified 180 repeated L3 res-den references in both the
+Altitude-Resampled and Scale-Height/Temperature indexes. The same URN and
+same metadata are one product listed in two catalogs, not two measurements.
+The audit now collapses those repeated references while retaining both
+catalog source names. Numeric altitude and solar-longitude fields are compared
+as exact decimal values (Decimal), so 184.18 and 184.180 are equivalent
+without binary-float rounding or lossy rounding. Different URNs or genuinely
+different metadata remain fail-closed conflicts. Final counts: 17,020 exact
+event keys, 10,796 complete L2-CSN + L3-res-den + L3-res-sht triplets with
+matching index observation windows, 180 repeated catalog references collapsed,
+and zero unresolved duplicate join keys. These are index-level associations;
+they do not prove row-level time/altitude overlap or scientific fitness.
+
+**TID 14282 / orbit 391.** The three exact PDS identities are:
+
+- L2 CSN abundance: urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406
+- L3 resampled density: urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406
+- L3 scale-height temperature: urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406
+
+All three index records identify 2014-12-11 15:45:25–17:29:43 UTC as the
+observation window, and each reports altitude 152.981 km, signed solar
+longitude −110.209°, and MY 32. The closest-approach metadata is not
+consistent across product classes: L2 reports 16:37:34 UTC, while both L3
+indexes report 17:15:29 UTC. These source values are preserved independently;
+closest approach is not a join key and is not averaged.
+
+The downloaded measurement products add an important limitation that is
+not visible from the index match:
+
+- **L2 csn-abund**: 538,939 CSV bytes; detached label declares 539,063 (+124);
+  no MD5. SHA-256 of CSV:
+  b5954f0b1f70641d92bdbaa04b139736a8e02c1b154d03dffc2c890e34315721.
+  The product has 2,796 rows, of which 1,564 pass the numeric abundance/
+  precision gate for TID 14282 / orbit 391. There are 987 accepted profile
+  candidates after quality classification; N2 retains unknown I0/UR quality
+  and is not promoted.
+- **L3 res-den**: 23,658 CSV bytes; detached label declares 23,743 (+85);
+  no MD5. SHA-256 of CSV:
+  e495cabe79d44967f76ed4baea857b24df5e92ffca8faf2c890b872f82091678.
+  The 208 rows span 17:04:27–17:15:31 UTC. density_bins remains the raw
+  reported bin coordinate; linear cm-3/m-3 conversion is blocked because
+  the SIS log-bin description and Table A-9 unit annotation are unresolved.
+- **L3 res-sht**: 702 CSV bytes; detached label declares 843 (+141); no MD5.
+  SHA-256 of CSV:
+  02956e4c3571eeaa3692f788bfcb54b93655ea0fd88980ee08439051e6256e46.
+  Four rows yield two accepted HI fits: Ar 108.170861 ± 28.693767 K and
+  CO2 100.614597 ± 24.592182 K, each at exobase altitude 464.9283 km.
+  These are species-specific temperatures derived from scale-height fits,
+  not local T(z) observations.
+
+All three detached labels have the file-size discrepancy and no MD5; their
+original bytes are retained, labels are not independently authenticated,
+and PDS4 imports are explicitly forensic-only. The L2 row timestamps span
+17:06:03–17:22:54 UTC, L3 res-den rows span 17:04:27–17:15:31 UTC, and the
+two accepted L3 res-sht fit rows are timestamped 17:04:37 UTC. Equal product
+index windows therefore do not imply identical row-level temporal coverage.
+
+The frozen result is
+src/modules/Data/mavenNgimsIndexBundleAudit/product-index-audit.json;
+the reproducible parser is scripts/science/audit-ngims-product-indexes.py.
+The parser's offline tests cover exact URN role/TID/time parsing, duplicate
+catalog references, conflicting metadata, and window disagreement.
+TypeScript exposes linkMavenNgimsL2L3IndexProductSet(), which checks the
+three product roles, exact TID/product-time and identical index windows while
+preserving per-product closest-approach metadata. Both the index join and
+TypeScript link explicitly remain ineligible for Scheduler or Mars
+photochemical initial-state construction.
+
+This closes the product-index discovery/cross-link task only. It does not
+resolve NGIMS sensitivity calibration, L3 density-bin semantics, missing
+species/quality, common row-level vertical coverage, or the absence of a
+complete validated T(z)/P(z)/transport/chemistry initial state. Stage 4.2
+remains OPEN / NOT_READY.
