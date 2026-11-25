@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Retrieve one exact MAVEN NGIMS L1B OSNB calibrated science product.
 
+Run once by committing a subject containing [retrieve-ngims-l1b-osnb-14282].
+
 Trigger with [retrieve-ngims-l1b-osnb-14282].
 The product is identified by the official NGIMS L1B index and exact event
 window/orbit. The script locates the CSV/XML partner from the official PDS4
