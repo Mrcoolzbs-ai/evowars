@@ -141,7 +141,7 @@ def inspect_label(label_path: Path, payload_filename: str) -> dict[str, Any]:
                         "description": " ".join((scalar(field, "description") or "").split()),
                     })
                 break
-    if not fields:
+    if not fields and payload_filename.lower().endswith(".csv"):
         raise RuntimeError("no PDS4 Table_Delimited Record_Delimited schema found in " + label_path.name)
     return {
         "logicalIdentifier": (logical[0].text or "").strip(),
@@ -571,7 +571,11 @@ def summarize_message(path: Path) -> dict[str, Any]:
     }
 
 
-def fetch_and_audit_tid(tid: dict[str, str], work_dir: Path) -> dict[str, Any]:
+def fetch_and_audit_tid(
+    tid: dict[str, str],
+    work_dir: Path,
+    previous_products: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {
         "tid": int(tid["tid"]),
         "date": tid["timestamp"][:8],
@@ -579,6 +583,11 @@ def fetch_and_audit_tid(tid: dict[str, str], work_dir: Path) -> dict[str, Any]:
         "products": {},
     }
     for kind, extension in PRODUCT_KINDS.items():
+        if kind == "gnd-sci" and previous_products and kind in previous_products:
+            reused = json.loads(json.dumps(previous_products[kind]))
+            reused["reusedFromPriorManifest"] = True
+            result["products"][kind] = reused
+            continue
         stem = "mvn_ngi_l1c_" + kind + "-" + tid["tid"] + "_" + tid["timestamp"] + "_v01_r01"
         payload_name = stem + "." + extension
         label_name = stem + ".xml"
@@ -624,6 +633,25 @@ def self_test() -> None:
             sis = "Argon calibration"
             directory = "2012-09-23-08.19.45-10191-KrCalibration/"
             self.assertTrue("Argon" in sis and "Kr" in directory)
+
+        def test_text_pds_label_without_delimited_table_is_allowed(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                folder = Path(tmp)
+                label = folder / "sample.xml"
+                payload = folder / "sample.txt"
+                payload.write_text("test", encoding="utf-8")
+                label.write_text(
+                    '''<?xml version="1.0"?>
+                    <Product_Observational xmlns="http://pds.nasa.gov/pds4/pds/v1">
+                      <Identification_Area><logical_identifier>urn:test:sample</logical_identifier></Identification_Area>
+                      <File_Area_Observational><File><file_name>sample.txt</file_name>
+                        <file_size unit="byte">4</file_size></File></File_Area_Observational>
+                    </Product_Observational>''',
+                    encoding="utf-8",
+                )
+                result = inspect_label(label, "sample.txt")
+                self.assertEqual(result["columnNamesFromPdsLabel"], [])
+                self.assertEqual(result["columnCatalogFromPdsLabel"], [])
 
         def test_no_species_assignment_by_single_peak(self) -> None:
             with tempfile.TemporaryDirectory() as tmp:
@@ -685,11 +713,22 @@ def main() -> None:
         self_test()
         print("pre-flight calibration analyzer self-test: OK")
         return
+    previous_by_tid: dict[str, dict[str, Any]] = {}
+    if OUTPUT.is_file():
+        try:
+            previous_manifest = json.loads(OUTPUT.read_text(encoding="utf-8"))
+            previous_by_tid = {
+                str(product.get("tid")): product.get("products", {})
+                for product in previous_manifest.get("products", [])
+            }
+        except (OSError, json.JSONDecodeError):
+            previous_by_tid = {}
     results = []
     with tempfile.TemporaryDirectory(prefix="maven-ngims-calibration-") as temp:
         work_dir = Path(temp)
         for tid in TIDS:
-            results.append(fetch_and_audit_tid(tid, work_dir))
+            previous = previous_by_tid.get(str(int(tid["tid"])), {})
+            results.append(fetch_and_audit_tid(tid, work_dir, previous))
     output = {
         "schemaVersion": "1.0.0",
         "status": "preflight_products_and_housekeeping_audited_raw_sensitivity_not_rederived",
