@@ -580,10 +580,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       allowLabelSizeMismatchForensicAnalysis: true
     });
     expect(forensic.status).toBe('imported_forensic_only');
-    if (forensic.status === 'rejected') {
-      throw new Error(forensic.errors.join('; '));
-    }
-    if (forensic.status !== 'imported_forensic_only') {
+    if (forensic.status === 'rejected' || forensic.status === 'imported') {
       throw new Error('expected an explicitly forensic-only PDS4 import');
     }
     expect(forensic).toMatchObject({ forensicOnly: true });
@@ -725,6 +722,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       expectedCsvFileName: fileName
     });
     expect(imported.status, imported.status === 'rejected' ? imported.errors.join('; ') : '').toBe('imported');
+    if (imported.status === 'rejected' || imported.status === 'imported_forensic_only') {
+      throw new Error('expected a normal PDS4 import with a matching file size');
+    }
     expect(imported).toMatchObject({ forensicOnly: false, warnings: [] });
     expect(imported.provenance).toMatchObject({
       sourceProductId: productId,
@@ -752,6 +752,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       expectedCsvFileName: fileName
     });
     expect(md5Verified.status).toBe('imported');
+    if (md5Verified.status === 'rejected' || md5Verified.status === 'imported_forensic_only') {
+      throw new Error('expected a PDS4 import with the matching MD5');
+    }
     expect(md5Verified.provenance).toMatchObject({
       csvMd5Checksum: md5Checksum,
       csvMd5ChecksumStatus: 'verified_against_detached_label',
