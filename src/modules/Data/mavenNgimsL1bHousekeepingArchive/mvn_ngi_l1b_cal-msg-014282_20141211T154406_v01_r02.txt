@@ -1,0 +1,558 @@
+Data Directory: ./2014-12-11-15.44.06-14282-sci_default_osnbRev612/
+Creation Script: $Id: procSDC.py 942 2013-06-25 21:03:58Z eraaen $
+Created: 2015-03-11T21:31:08.061Z
+Hostname: gs699-ngimsmac1
+User: lab
+Created from /Users/lab/mavendata/spacecraft_data/L0/mvn_ngi_all_l0_20141211_v005.dat
+ 471584798: table segment=16280, total size=16280
+ 471584799: table segment=16280, total size=32560
+ 471584799: table segment=16280, total size=48840
+ 471584800: table segment=3524, total size=52364
+ 471584818: loading library file mavlib.305 (30131 bytes)
+ 471584825: FSW Configured EM1_CTRL=0x00000032 EM2_CTRL=0x00000033
+ 471584825: qms temperature compensation enabled
+ 471584825: QMS.KL = -.0001831055
+ 471584825: Event handlers installed
+ 471584825: lc: 132 channel entries, 132 enabled, 0 alarmed, alarm level=0
+ 471584825: Loaded mavlib.bas Revision: 305 
+ 471584826: MAVEN Science Script Start.
+ 471584826: science.bas  $Revision: 620 $
+ 471584826: PS Start Temperature (HK 21): 56468
+ 471584826: Configuration File: sci_default_osnb $Rev: 612 $
+ 471584826: Orbit Information: 
+ 471584826: Starting time: Default Science: CS and OS Neutral Beaming
+ 471584826: Number of phases=15
+ 471584826: CONFIGURATION
+ 471584826: HOLDS ENABLED: 0
+ 471584826: BA_PRESSURE_TEST: 0
+ 471584826: Filament/Multiplier ID: 2
+ 471584826: Filament Emission(1): 125
+ 471584826: Filament Emission(2): 125
+ 471584826: Nominal EM1 Voltage: 178
+ 471584826: Nominal EM2 Voltage: 178
+ 471584826: Nominal IP: 30 milliseconds
+ 471584826: Idle IP: 300 milliseconds
+ 471584826: Pressure Monitor DISABLED
+ 471584826: SCAN VECTORS.  Reading 10 Vectors.
+ 471584826: Vector(1) = 40., 344., 194., 44., 4., 3., 12., 13., 14., 14.5, 15., 16., 17., 18., 19., 45., 194., 44., 20., 21., 22., 27.
+, 28., 29., 30., 32., 36., 37., 38., 39., 41., 46., 45., 2., 194., 44., 190., 40.
+, 28., 29., 30., 32., 36., 37., 38., 39., 41., 46., 45., 2., 194., 44., 190., 40.
+ 471584828: Vector(2) = 40., 4., 2., 3., 12.
+, 13.sys.marker: id=1, txt=TIDSTART sci_default_osnb $Rev: 612 $
+, 13.sys.marker: id=1, txt=TIDSTART sci_default_osnb $Rev: 612 $
+ 471584828: , 14., 15., 16., 17., 18., 19., 4., 2., 20., 22., 28., 29., 30., 32., 36., 37., 38., 41., 46., 45., 44.
+, 2., 40.
+, 2., 40.
+ 471584829: Vector(3) = 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16., 17., 18., 19.
+, 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30., 31., 32., 33., 34., 35., 36., 37., 38., 39., 190.
+, 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30., 31., 32., 33., 34., 35., 36., 37., 38., 39., 190.
+, 40., 41., 42., 43., 344., 194., 44., 45., 46., 47., 48., 49., 50., 51., 52., 53., 54., 55., 56., 57., 58.
+, 40., 41., 42., 43., 344., 194., 44., 45., 46., 47., 48., 49., 50., 51., 52., 53., 54., 55., 56., 57., 58.
+, 59., 60., 61., 62., 63., 64., 65., 66., 67., 68., 69., 70., 71., 72., 73., 74., 75., 76., 77., 78., 79., 80.
+, 59., 60., 61., 62., 63., 64., 65., 66., 67., 68., 69., 70., 71., 72., 73., 74., 75., 76., 77., 78., 79., 80.
+, 81., 82., 83., 84., 85., 86., 87., 88., 89., 90.
+, 81., 82., 83., 84., 85., 86., 87., 88., 89., 90.
+ 471584834: Vector(4) = 
+ 471584834: Vector(5) = 
+ 471584834: Vector(6) = 
+ 471584834: Vector(7) = 
+ 471584834: Vector(8) = 
+ 471584834: Vector(9) = 
+ 471584834: Vector(10) = 
+ 471584834: FRAC SCANS.  Reading 10 definitions.
+ 471584834: FRACTIONAL(1): 
+Start=1.5  Stop=150.  Step=.1
+Start=1.5  Stop=150.  Step=.1
+ 471584834: FRACTIONAL(2): Start=151.5  Stop=300.  Step=.1
+ 471584834: FRACTIONAL(3): Start=301.5  Stop=450.  Step=.1
+ 471584834: FRACTIONAL(4): Start=2.  Stop=90.  Step=1.
+ 471584835: FRACTIONAL(5): Start=2.  Stop=2.  Step=1.
+ 471584835: FRACTIONAL(6): Start=2.  Stop=2.  Step=1.
+ 471584835: FRACTIONAL(7): Start=2.  Stop=2.  Step=1.
+ 471584835: FRACTIONAL(8): Start=2.  Stop=2.  Step=1.
+ 471584835: FRACTIONAL(9): Start=2.  Stop=2.  Step=1.
+ 471584835: FRACTIONAL(10): 
+Start=2.  Stop=2.  Step=1.
+Start=2.  Stop=2.  Step=1.
+ 471584835: WARMUP_DURATION=4588
+ 471584835: WARMUP IDLE TIME=0
+ 471584835: PRE BATEST IDLE TIME=0
+ 471584835: WARMUP_DELAY_REPEAT=420
+ 471584835: WARMUP MULTIPLIERS=1
+ 471584835: WARMUP FRACTIONALS=2
+ 471584835:   Executing fractional IDs: 1  2  
+ 471584835: Reading Phase 1
+ 471584836: [_PHASE 1_]
+ 471584836: Start Time: 0.
+ 471584836: Duration: 181
+ 471584836: IP: 30
+ 471584836: CS Scan// Type: Vector
+ 471584836:  CS Vector ID: 1
+ 471584836: OS Scan// Mode: 2
+ 471584836:  OS Scan Type: Vector
+ 471584836:  OS Vector ID: 2
+ 471584836: Pressure Check Period: 30
+ 471584836: 
+ 471584836: Reading Phase 2
+ 471584837: [_PHASE 2_]
+ 471584837: Start Time: 0.
+ 471584837: Duration: 5
+ 471584837: IP: 30
+ 471584837: CS Scan// Type: Vector
+ 471584837:  CS Vector ID: 3
+ 471584837: OS Scan// Mode: 2
+ 471584837:  OS Scan Type: Sequential
+ 471584837:  OS Scan ID: 4
+ 471584837: Pressure Check Period: 30
+ 471584837: 
+ 471584837: Reading Phase 3
+ 471584837: [_PHASE 3_]
+ 471584837: Start Time: 0.
+ 471584837: Duration: 137
+ 471584837: IP: 30
+ 471584837: CS Scan// Type: Vector
+ 471584837:  CS Vector ID: 1
+ 471584837: OS Scan// Mode: 2
+ 471584838:  OS Scan Type: Vector
+ 471584838:  OS Vector ID: 2
+ 471584838: Pressure Check Period: 30
+ 471584838: 
+ 471584838: Reading Phase 4
+ 471584838: [_PHASE 4_]
+ 471584838: Start Time: 0.
+ 471584838: Duration: 5
+ 471584838: IP: 30
+ 471584838: CS Scan// Type: 
+Vector
+Vector
+ 471584838:  CS Vector ID: 3
+ 471584838: OS Scan// Mode: 2
+ 471584838:  OS Scan Type: Sequential
+ 471584838:  OS Scan ID: 4
+ 471584838: Pressure Check Period: 30
+ 471584838: 
+ 471584838: Reading Phase 5
+ 471584839: [_PHASE 5_]
+ 471584839: Start Time: 0.
+ 471584839: Duration: 211
+ 471584839: IP: 30
+ 471584839: CS Scan// Type: Vector
+ 471584839:  CS Vector ID: 1
+ 471584839: OS Scan// Mode: 2
+ 471584839:  OS Scan Type: Vector
+ 471584839:  OS Vector ID: 2
+ 471584839: Pressure Check Period: 30
+ 471584839: 
+ 471584839: Reading Phase 6
+ 471584839: [_PHASE 6_]
+ 471584839: Start Time: 0.
+ 471584840: Duration: 5
+ 471584840: IP: 30
+ 471584840: CS Scan// Type: Vector
+ 471584840:  CS Vector ID: 3
+ 471584840: OS Scan// Mode: 2
+ 471584840:  OS Scan Type: Sequential
+ 471584840:  OS Scan ID: 4
+ 471584840: Pressure Check Period: 30
+ 471584840: 
+ 471584840: Reading Phase 7
+ 471584840: [_PHASE 7_]
+ 471584840: Start Time: 0.
+ 471584840: Duration: 179
+ 471584840: IP: 30
+ 471584840: CS Scan// Type: Vector
+ 471584840:  CS Vector ID: 1
+ 471584840: OS Scan// Mode: 2
+ 471584840:  OS Scan Type: Vector
+ 471584841:  OS Vector ID: 2
+ 471584841: Pressure Check Period: 30
+ 471584841: 
+ 471584841: Reading Phase 8
+ 471584841: [_PHASE 8_]
+ 471584841: Start Time: 0.
+ 471584841: Duration: 23
+ 471584841: IP: 30
+ 471584841: CS Scan// Type: Vector
+ 471584841:  CS Vector ID: 3
+ 471584841: OS Scan// Mode: 2
+ 471584841:  OS Scan Type: Sequential
+ 471584841:  OS Scan ID: 4
+ 471584841: Pressure Check Period: 30
+ 471584841: 
+ 471584841: Reading Phase 9
+ 471584842: [_PHASE 9_]
+ 471584842: Start Time: 0.
+ 471584842: Duration: 184
+ 471584842: IP: 30
+ 471584842: CS Scan// Type: Vector
+ 471584842:  CS Vector ID: 1
+ 471584842: OS Scan// Mode: 2
+ 471584842:  OS Scan Type: Vector
+ 471584842:  OS Vector ID: 2
+ 471584842: Pressure Check Period: 30
+ 471584842: 
+ 471584842: Reading Phase 10
+ 471584842: [_PHASE 10_]
+ 471584842: Start Time: 0.
+ 471584842: Duration: 5
+ 471584843: IP: 30
+ 471584843: CS Scan// Type: Vector
+ 471584843:  CS Vector ID: 3
+ 471584843: OS Scan// Mode: 2
+ 471584843:  OS Scan Type: Sequential
+ 471584843:  OS Scan ID: 4
+ 471584843: Pressure Check Period: 30
+ 471584843: 
+ 471584843: Reading Phase 11
+ 471584843: [_PHASE 11_]
+ 471584843: Start Time: 0.
+ 471584843: Duration: 209
+ 471584843: IP: 30
+ 471584843: CS Scan// Type: Vector
+ 471584843:  CS Vector ID: 1
+ 471584843: OS Scan// Mode: 2
+ 471584843:  OS Scan Type: Vector
+ 471584844:  OS Vector ID: 2
+ 471584844: Pressure Check Period: 30
+ 471584844: 
+ 471584844: Reading Phase 12
+ 471584844: [_PHASE 12_]
+ 471584844: Start Time: 0.
+ 471584844: Duration: 5
+ 471584844: IP: 30
+ 471584844: CS Scan// Type: Vector
+ 471584844:  CS Vector ID: 3
+ 471584844: OS Scan// Mode: 2
+ 471584844:  OS Scan Type: Sequential
+ 471584844:  OS Scan ID: 4
+ 471584844: Pressure Check Period: 30
+ 471584844: 
+ 471584844: Reading Phase 13
+ 471584845: [_PHASE 13_]
+ 471584845: Start Time: 0.
+ 471584845: Duration: 135
+ 471584845: IP: 30
+ 471584845: CS Scan// Type: Vector
+ 471584845:  CS Vector ID: 1
+ 471584845: OS Scan// Mode: 2
+ 471584845:  OS Scan Type: Vector
+ 471584845:  OS Vector ID: 2
+ 471584845: Pressure Check Period: 30
+ 471584845: 
+ 471584845: Reading Phase 14
+ 471584845: [_PHASE 14_]
+ 471584845: Start Time: 0.
+ 471584845: Duration: 5
+ 471584846: IP: 30
+ 471584846: CS Scan// Type: Vector
+ 471584846:  CS Vector ID: 3
+ 471584846: OS Scan// Mode: 2
+ 471584846:  OS Scan Type: Sequential
+ 471584846:  OS Scan ID: 4
+ 471584846: Pressure Check Period: 30
+ 471584846: 
+ 471584846: Reading Phase 15
+ 471584846: [_PHASE 15_]
+ 471584846: Start Time: 0.
+ 471584846: Duration: 95
+ 471584846: IP: 30
+ 471584846: CS Scan// Type: Vector
+ 471584846:  CS Vector ID: 1
+ 471584846: OS Scan// Mode: 2
+ 471584846:  OS Scan Type: Vector
+ 471584847:  OS Vector ID: 2
+ 471584847: Pressure Check Period: 30
+ 471584847: 
+ 471584847: Building fast switch arrays.
+ 471584849: CS_FOCUSING_SIZE=20
+ 471584852: OSNB_FOCUSING_SIZE=20
+ 471584854: OSION_FOCUSING_SIZE=20
+ 471584856: OSNT_FOCUSING_SIZE=20
+ 471584856: qms.telem mode = 1
+ 471584856: Disable pressure mon: qms.check_cps=1e8 qms.check_amu=500
+ 471584857: qms: IP time=270 setup=30
+ 471584857: Integration Period set to 30 milliseconds
+ 471584857: Multiplier 2 On @ 2462
+ 471584859: sys.marker: id=100, txt=Setting Nominal IP
+ 471584859: sys.marker: id=300, txt=EM 2 on @ 2462
+ 471584861: sys.marker: id=400, txt=OS Init 2, 2
+ 471584878: Filament 8 ON
+ 471584882: sys.marker: id=401, txt=Filament ON 8 @ 125
+ 471584882: sys.marker: id=500, txt=CS Init
+ 471584899: Filament 2 ON
+ 471584899: qms.telem mode = 3
+ 471584903: sys.marker: id=501, txt=Filament ON 2 @ 125
+ 471584903: sys.marker: id=1000, txt=Warmup Scan 1
+ 471584947: sys.marker: id=1001, txt=Warmup Scan 2
+ 471584992: Setting Integration Period to idle: 300
+ 471584992: qms.telem mode = 1
+ 471584992: qms: IP time=2970 setup=30
+ 471584992: IP 300
+ 471584992: Multipliers Off
+ 471584992: Wait 420 sec
+ 471584992: sys.marker: id=0, txt=
+ 471584992: sys.marker: id=1002, txt=Multipliers Off
+ 471585412: qms.telem mode = 3
+ 471585412: qms: IP time=270 setup=30
+ 471585412: IP 30
+ 471585412: Turning on multipler 2
+ 471585412: Multiplier 2 On @ 2462
+ 471585413: sys.marker: id=1003, txt=EM 2 on @ 2462
+ 471585413: sys.marker: id=1004, txt=Warmup Scan 1
+ 471585459: sys.marker: id=1005, txt=Warmup Scan 2
+ 471585503: Setting Integration Period to idle: 300
+ 471585503: qms.telem mode = 1
+ 471585503: qms: IP time=2970 setup=30
+ 471585503: IP 300
+ 471585503: Multipliers Off
+ 471585503: Wait 420 sec
+ 471585503: sys.marker: id=0, txt=
+ 471585503: sys.marker: id=1006, txt=Multipliers Off
+ 471585923: qms.telem mode = 3
+ 471585923: qms: IP time=270 setup=30
+ 471585923: IP 30
+ 471585923: Turning on multipler 2
+ 471585923: Multiplier 2 On @ 2462
+ 471585925: sys.marker: id=1007, txt=EM 2 on @ 2462
+ 471585925: sys.marker: id=1008, txt=Warmup Scan 1
+ 471585970: sys.marker: id=1009, txt=Warmup Scan 2
+ 471586014: Setting Integration Period to idle: 300
+ 471586014: qms.telem mode = 1
+ 471586014: qms: IP time=2970 setup=30
+ 471586014: IP 300
+ 471586014: Multipliers Off
+ 471586014: Wait 420 sec
+ 471586014: sys.marker: id=0, txt=
+ 471586015: sys.marker: id=1010, txt=Multipliers Off
+ 471586434: qms.telem mode = 3
+ 471586434: qms: IP time=270 setup=30
+ 471586434: IP 30
+ 471586434: Turning on multipler 2
+ 471586435: Multiplier 2 On @ 2462
+ 471586436: sys.marker: id=1011, txt=EM 2 on @ 2462
+ 471586436: sys.marker: id=1012, txt=Warmup Scan 1
+ 471586481: sys.marker: id=1013, txt=Warmup Scan 2
+ 471586525: Setting Integration Period to idle: 300
+ 471586525: qms.telem mode = 1
+ 471586525: qms: IP time=2970 setup=30
+ 471586525: IP 300
+ 471586525: Multipliers Off
+ 471586525: Wait 420 sec
+ 471586526: sys.marker: id=0, txt=
+ 471586526: sys.marker: id=1014, txt=Multipliers Off
+ 471586946: qms.telem mode = 3
+ 471586946: qms: IP time=270 setup=30
+ 471586946: IP 30
+ 471586946: Turning on multipler 2
+ 471586946: Multiplier 2 On @ 2462
+ 471586947: sys.marker: id=1015, txt=EM 2 on @ 2462
+ 471586947: sys.marker: id=1016, txt=Warmup Scan 1
+ 471586992: sys.marker: id=1017, txt=Warmup Scan 2
+ 471587036: Setting Integration Period to idle: 300
+ 471587036: qms.telem mode = 1
+ 471587036: qms: IP time=2970 setup=30
+ 471587036: IP 300
+ 471587037: Multipliers Off
+ 471587037: Wait 420 sec
+ 471587037: sys.marker: id=0, txt=
+ 471587037: sys.marker: id=1018, txt=Multipliers Off
+ 471587457: qms.telem mode = 3
+ 471587457: qms: IP time=270 setup=30
+ 471587457: IP 30
+ 471587457: Turning on multipler 2
+ 471587457: Multiplier 2 On @ 2462
+ 471587458: sys.marker: id=1019, txt=EM 2 on @ 2462
+ 471587458: sys.marker: id=1020, txt=Warmup Scan 1
+ 471587503: sys.marker: id=1021, txt=Warmup Scan 2
+ 471587547: Setting Integration Period to idle: 300
+ 471587548: qms.telem mode = 1
+ 471587548: qms: IP time=2970 setup=30
+ 471587548: IP 300
+ 471587548: Multipliers Off
+ 471587548: Wait 420 sec
+ 471587548: sys.marker: id=0, txt=
+ 471587548: sys.marker: id=1022, txt=Multipliers Off
+ 471587968: qms.telem mode = 3
+ 471587968: qms: IP time=270 setup=30
+ 471587968: IP 30
+ 471587968: Turning on multipler 2
+ 471587968: Multiplier 2 On @ 2462
+ 471587969: sys.marker: id=1023, txt=EM 2 on @ 2462
+ 471587969: sys.marker: id=1024, txt=Warmup Scan 1
+ 471588014: sys.marker: id=1025, txt=Warmup Scan 2
+ 471588059: Setting Integration Period to idle: 300
+ 471588059: qms.telem mode = 1
+ 471588059: qms: IP time=2970 setup=30
+ 471588059: IP 300
+ 471588059: Multipliers Off
+ 471588059: Wait 420 sec
+ 471588059: sys.marker: id=0, txt=
+ 471588059: sys.marker: id=1026, txt=Multipliers Off
+ 471588479: qms.telem mode = 3
+ 471588479: qms: IP time=270 setup=30
+ 471588479: IP 30
+ 471588479: Turning on multipler 2
+ 471588479: Multiplier 2 On @ 2462
+ 471588480: sys.marker: id=1027, txt=EM 2 on @ 2462
+ 471588480: sys.marker: id=1028, txt=Warmup Scan 1
+ 471588525: sys.marker: id=1029, txt=Warmup Scan 2
+ 471588570: Setting Integration Period to idle: 300
+ 471588570: qms.telem mode = 1
+ 471588570: qms: IP time=2970 setup=30
+ 471588570: IP 300
+ 471588570: Multipliers Off
+ 471588570: Wait 420 sec
+ 471588570: sys.marker: id=0, txt=
+ 471588570: sys.marker: id=1030, txt=Multipliers Off
+ 471588990: qms.telem mode = 3
+ 471588990: qms: IP time=270 setup=30
+ 471588990: IP 30
+ 471588990: Turning on multipler 2
+ 471588990: Multiplier 2 On @ 2462
+ 471588991: sys.marker: id=1031, txt=EM 2 on @ 2462
+ 471588991: sys.marker: id=1032, txt=Warmup Scan 1
+ 471589037: sys.marker: id=1033, txt=Warmup Scan 2
+ 471589081: Setting Integration Period to idle: 300
+ 471589081: qms.telem mode = 1
+ 471589081: qms: IP time=2970 setup=30
+ 471589081: IP 300
+ 471589081: Multipliers Off
+ 471589081: sys.marker: id=0, txt=
+ 471589081: Wait 333 sec
+ 471589081: sys.marker: id=1034, txt=Multipliers Off
+ 471589414: Phase Prep. 1
+ 471589415: Waiting -4589 seconds to start.
+ 471589415: Phase 1.  Duration: 181 sec.
+ 471589415: Starting Phase. Setting IP to nominal: 30
+ 471589415: qms.telem mode = 3
+ 471589415: qms: IP time=270 setup=30
+ 471589415: IP 30
+ 471589415: Turning on multipler 2
+ 471589415: Multiplier 2 On @ 2462
+ 471589416: sys.marker: id=2000, txt=EM 2 on @ 2462
+ 471589416: sys.marker: id=2001, txt=Phase mass scans starting
+ 471589596: End of phase 1
+ 471589597: Phase Prep. 2
+ 471589597: Waiting -4771 seconds to start.
+ 471589597: Phase 2.  Duration: 5 sec.
+ 471589597: Starting Phase. Setting IP to nominal: 30
+ 471589597: sys.marker: id=2002, txt=Phase ended.
+ 471589597: sys.marker: id=2103, txt=Phase mass scans starting
+ 471589603: End of phase 2
+ 471589603: Phase Prep. 3
+ 471589603: Waiting -4777 seconds to start.
+ 471589603: Phase 3.  Duration: 137 sec.
+ 471589603: Starting Phase. Setting IP to nominal: 30
+ 471589603: sys.marker: id=2104, txt=Phase ended.
+ 471589603: sys.marker: id=2205, txt=Phase mass scans starting
+ 471589741: End of phase 3
+ 471589741: Phase Prep. 4
+ 471589741: Waiting -4915 seconds to start.
+ 471589741: Phase 4.  Duration: 5 sec.
+ 471589741: Starting Phase. Setting IP to nominal: 30
+ 471589741: sys.marker: id=2206, txt=Phase ended.
+ 471589742: sys.marker: id=2307, txt=Phase mass scans starting
+ 471589747: End of phase 4
+ 471589747: Phase Prep. 5
+ 471589747: Waiting -4921 seconds to start.
+ 471589747: Phase 5.  Duration: 211 sec.
+ 471589747: Starting Phase. Setting IP to nominal: 30
+ 471589748: sys.marker: id=2308, txt=Phase ended.
+ 471589748: sys.marker: id=2409, txt=Phase mass scans starting
+ 471589958: End of phase 5
+ 471589958: Phase Prep. 6
+ 471589958: Waiting -5132 seconds to start.
+ 471589958: Phase 6.  Duration: 5 sec.
+ 471589958: Starting Phase. Setting IP to nominal: 30
+ 471589959: sys.marker: id=2410, txt=Phase ended.
+ 471589959: sys.marker: id=2511, txt=Phase mass scans starting
+ 471589964: End of phase 6
+ 471589964: Phase Prep. 7
+ 471589964: Waiting -5138 seconds to start.
+ 471589964: Phase 7.  Duration: 179 sec.
+ 471589965: Starting Phase. Setting IP to nominal: 30
+ 471589965: sys.marker: id=2512, txt=Phase ended.
+ 471589965: sys.marker: id=2613, txt=Phase mass scans starting
+ 471590145: End of phase 7
+ 471590145: Phase Prep. 8
+ 471590145: Waiting -5319 seconds to start.
+ 471590145: Phase 8.  Duration: 23 sec.
+ 471590145: Starting Phase. Setting IP to nominal: 30
+ 471590145: sys.marker: id=2614, txt=Phase ended.
+ 471590145: sys.marker: id=2715, txt=Phase mass scans starting
+ 471590168: End of phase 8
+ 471590168: Phase Prep. 9
+ 471590168: Waiting -5342 seconds to start.
+ 471590168: Phase 9.  Duration: 184 sec.
+ 471590168: Starting Phase. Setting IP to nominal: 30
+ 471590168: sys.marker: id=2716, txt=Phase ended.
+ 471590168: sys.marker: id=2817, txt=Phase mass scans starting
+ 471590353: End of phase 9
+ 471590353: Phase Prep. 10
+ 471590353: Waiting -5527 seconds to start.
+ 471590353: Phase 10.  Duration: 5 sec.
+ 471590353: Starting Phase. Setting IP to nominal: 30
+ 471590353: sys.marker: id=2818, txt=Phase ended.
+ 471590354: sys.marker: id=2919, txt=Phase mass scans starting
+ 471590359: End of phase 10
+ 471590359: Phase Prep. 11
+ 471590359: Waiting -5533 seconds to start.
+ 471590359: Phase 11.  Duration: 209 sec.
+ 471590359: Starting Phase. Setting IP to nominal: 30
+ 471590360: sys.marker: id=2920, txt=Phase ended.
+ 471590360: sys.marker: id=3021, txt=Phase mass scans starting
+ 471590568: End of phase 11
+ 471590568: Phase Prep. 12
+ 471590568: Waiting -5742 seconds to start.
+ 471590568: Phase 12.  Duration: 5 sec.
+ 471590568: Starting Phase. Setting IP to nominal: 
+30
+30
+ 471590568: sys.marker: id=3022, txt=Phase ended.
+ 471590568: sys.marker: id=3123, txt=Phase mass scans starting
+ 471590574: End of phase 12
+ 471590574: Phase Prep. 13
+ 471590574: Waiting -5748 seconds to start.
+ 471590574: Phase 13.  Duration: 135 sec.
+ 471590574: Starting Phase. Setting IP to nominal: 30
+ 471590574: sys.marker: id=3124, txt=Phase ended.
+ 471590575: sys.marker: id=3225, txt=Phase mass scans starting
+ 471590710: End of phase 13
+ 471590710: Phase Prep. 14
+ 471590710: Waiting -5884 seconds to start.
+ 471590710: Phase 14.  Duration: 5 sec.
+ 471590710: Starting Phase. Setting IP to nominal: 30
+ 471590711: sys.marker: id=3226, txt=Phase ended.
+ 471590711: sys.marker: id=3327, txt=Phase mass scans starting
+ 471590716: End of phase 14
+ 471590716: Phase Prep. 15
+ 471590716: Waiting -5890 seconds to start.
+ 471590716: Phase 15.  Duration: 95 sec.
+ 471590716: Starting Phase. Setting IP to nominal: 30
+ 471590717: sys.marker: id=3328, txt=Phase ended.
+ 471590717: sys.marker: id=3429, txt=Phase mass scans starting
+ 471590813: End of phase 15
+ 471590813: sys.marker: id=3430, txt=Phase ended.
+ 471590813: sys.marker: id=9000, txt=Shutdown
+ 471590813: sys.marker: id=9001, txt=Filaments Off
+ 471590813: Multipliers Off
+ 471590813: sys.marker: id=9002, txt=Multipliers Off
+ 471590814: qms: acquisition stopped
+ 471590824: Setting Integration Period to idle: 300
+ 471590824: qms.telem mode = 1
+ 471590824: sys.marker: id=9003, txt=Zero lens voltages
+ 471590824: qms: IP time=2970 setup=30
+ 471590824: IP 300
+ 471590824: NGIMS SCRIPT DONE.
+ 471590824: 
+ 471590825: sys.marker: id=10000, txt=TIDSTOP sci_default_osnb $Rev: 612 $
+ 471590895: loading library file mavlib.305 (30131 bytes)
+ 471590901: FSW Configured EM1_CTRL=0x00000032 EM2_CTRL=0x00000033
+ 471590901: qms temperature compensation enabled
+ 471590901: QMS.KL = -.0001831055
+ 471590901: Event handlers installed
+ 471590901: lc: 132 channel entries, 132 enabled, 0 alarmed, alarm level=0
+ 471590901: Loaded mavlib.bas Revision: 305 
+ 471590901: BEGIN qms_off.bas $Revision: 313 $
+ 471590921: qms: IP time=9970 setup=30
+ 471590922: sys.marker: id=86000, txt=qms_off.bas done
