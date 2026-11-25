@@ -1,0 +1,35 @@
+name: Inspect official MAVEN NGIMS index bundles for all-neutral products
+
+on:
+  push:
+    branches: [stage-3-planetary-physics]
+
+jobs:
+  inspect:
+    if: contains(github.event.head_commit.message, '[inspect-ngims-index-bundles]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stage-3-planetary-physics
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download and inspect official NGIMS selection index archives
+        run: python scripts/science/inspect-maven-ngims-index-bundles.py
+      - name: Commit index-bundle forensic inventory
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/modules/Data/mavenNgimsIndexBundleAudit/
+          if git diff --cached --quiet; then
+            echo "Index bundle audit is unchanged."
+          else
+            git commit -m "data(science): freeze official NGIMS index bundle audit [skip ci]"
+            git fetch origin stage-3-planetary-physics
+            git rebase origin/stage-3-planetary-physics
+            git push origin HEAD:stage-3-planetary-physics
+          fi
