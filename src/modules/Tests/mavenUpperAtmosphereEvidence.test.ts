@@ -20,6 +20,7 @@ import {
   parseMavenNgimsL3ResampledDensityCsvText,
   importMavenNgimsL3ResampledDensityPds4Product,
   importMavenNgimsL2NeutralPds4Product,
+  importMavenNgimsL3ScaleHeightTemperaturePds4Product,
   selectMavenNgimsL3ResampledDensityPds4Profile,
   selectMavenNgimsL3ScaleHeightTemperatureRows,
   selectMavenNgimsL3ResampledDensityProfile,
@@ -965,7 +966,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       .toBe('invalid_csv');
   });
 
-  it('imports the frozen same-event TID 14282 L3 scale-height temperature product as derived-fit evidence', () => {
+  it('imports the frozen same-event TID 14282 L3 scale-height product through its PDS4 label as forensic evidence', async () => {
     const csvText = readFileSync(
       'src/modules/Data/mavenNgimsShtArchive/mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.csv',
       'utf8'
@@ -1021,7 +1022,64 @@ describe('MAVEN upper-atmosphere evidence', () => {
     );
 
     const productId = manifest.productId;
-    const imported = parseMavenNgimsL3ScaleHeightTemperatureCsvText(csvText, productId);
+    const fileName = 'mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.csv';
+    const detachedLabelXml = readFileSync(
+      'src/modules/Data/mavenNgimsShtArchive/mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.xml',
+      'utf8'
+    );
+
+    const strictPds4 = await importMavenNgimsL3ScaleHeightTemperaturePds4Product({
+      csvText, detachedLabelXml, expectedProductId: productId, expectedCsvFileName: fileName
+    });
+    expect(strictPds4.status).toBe('rejected');
+    if (strictPds4.status !== 'rejected') {
+      throw new Error('strict scale-height PDS4 importer must reject file_size mismatch');
+    }
+    expect(strictPds4.errors.join(' ')).toMatch(/forensic opt-in is required/);
+
+    const wrongIdentity = await importMavenNgimsL3ScaleHeightTemperaturePds4Product({
+      csvText,
+      detachedLabelXml,
+      expectedProductId: productId + '-wrong',
+      expectedCsvFileName: fileName,
+      allowLabelSizeMismatchForensicAnalysis: true
+    });
+    expect(wrongIdentity.status).toBe('rejected');
+    if (wrongIdentity.status === 'rejected') {
+      expect(wrongIdentity.errors.join(' ')).toMatch(/logical_identifier/);
+    }
+
+    const forensic = await importMavenNgimsL3ScaleHeightTemperaturePds4Product({
+      csvText,
+      detachedLabelXml,
+      expectedProductId: productId,
+      expectedCsvFileName: fileName,
+      allowLabelSizeMismatchForensicAnalysis: true
+    });
+    expect(forensic.status).toBe('imported_forensic_only');
+    if (forensic.status !== 'imported_forensic_only') {
+      throw new Error(forensic.status === 'rejected'
+        ? forensic.errors.join('; ')
+        : 'expected forensic-only SHT import');
+    }
+    expect(forensic.provenance).toMatchObject({
+      sourceProductId: productId,
+      csvFileName: fileName,
+      csvByteLength: 702,
+      labelDeclaredFileSizeBytes: 843,
+      csvSizeConsistencyStatus: 'mismatch_explicitly_accepted_for_forensic_analysis',
+      labelHeaderObjectLengthBytes: 141,
+      labelTableOffsetBytes: 141,
+      labelTableObjectLengthBytes: 702,
+      labelFileLayoutDiagnosis: 'possible_header_double_count_in_label',
+      csvSha256: manifest.csv.csvSha256,
+      csvMd5Checksum: null,
+      csvMd5ChecksumStatus: 'not_present_in_detached_label',
+      csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
+      detachedLabelAuthenticity: 'not_independently_authenticated'
+    });
+    expect(forensic.warnings.join(' ')).toMatch(/forensic-only/);
+    const imported = forensic.imported;
     expect(imported.status).toBe('parsed');
     if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
     expect(imported.parsedRowCount).toBe(2);
