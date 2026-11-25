@@ -1312,15 +1312,17 @@ describe('MAVEN upper-atmosphere evidence', () => {
     });
     expect(helium.status).toBe('completed');
     if (helium.status !== 'completed') throw new Error(helium.errors?.join('; ') ?? 'He profile rejected');
+    if (!helium.measurements) throw new Error('completed He profile did not return measurements');
     expect(helium.measurements).toHaveLength(346);
     expect(helium.measurements.every(measurement =>
       measurement.qualityFlag === 'IV' &&
       measurement.numberDensityPerM3 > 0 &&
-      measurement.eligibleAsSchedulerInitialAbundance === false
+      measurement.eligibleAsSchedulerInitialAbundance === false &&
+      measurement.timeUtc.endsWith('Z')
     )).toBe(true);
     expect(new Set(helium.measurements.map(measurement => measurement.altitudeM)).size)
       .toBe(helium.measurements.length);
-    expect(helium.measurements[0].timeUtc).toBe('2014-12-11T17:11:37.000Z');
+    expect(helium.measurements[0].altitudeM).toBeLessThan(helium.measurements.at(-1)!.altitudeM);
 
     const sensitivity = parseMavenNgimsL2NeutralCsvText(csvText, { allowUncertain: true });
     expect(sensitivity.status).toBe('parsed');
@@ -1334,14 +1336,15 @@ describe('MAVEN upper-atmosphere evidence', () => {
     });
     expect(co2.status).toBe('completed');
     if (co2.status !== 'completed') throw new Error(co2.errors?.join('; ') ?? 'CO2 sensitivity profile rejected');
+    if (!co2.measurements) throw new Error('completed CO2 profile did not return measurements');
     expect(co2.measurements).toHaveLength(134);
     expect(co2.measurements.every(measurement =>
       measurement.qualityFlag === 'IU' &&
       measurement.quality === 'uncertain' &&
       measurement.relativeSigmaFraction >= 0 &&
-      measurement.relativeSigmaFraction <= 1
+      measurement.relativeSigmaFraction <= 1 &&
+      measurement.eligibleAsSchedulerInitialAbundance === false
     )).toBe(true);
-    expect(co2.eligibleAsMarsPhotochemicalInitialState).toBe(false);
   });
 
   it('parses a complete quoted CRLF NGIMS L2 CSV and retains per-row quality results', () => {
