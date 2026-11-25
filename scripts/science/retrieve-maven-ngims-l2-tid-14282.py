@@ -3,6 +3,7 @@
 
 Run once by committing a subject containing [import-ngims-l2-tid-14282].
 
+Trigger this one-shot retrieval with a commit subject containing [import-ngims-l2-tid-14282].
 The annual PDS archive is the byte-preserving source. Candidate files are
 selected by orbit/TID/product timestamp; every candidate is paired with its
 own detached PDS4 label, and file identity, size, optional MD5, and row schema
