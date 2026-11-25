@@ -507458,6 +507458,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "17.53",
+                "existing": "17.530",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48062_20220926t114403"
@@ -507479,6 +507486,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "184.18",
+                "existing": "184.180",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48070_20220927t022314"
@@ -507500,6 +507514,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "-171.42",
+                "existing": "-171.420",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48096_20220929t020027"
@@ -507521,6 +507542,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "183.55",
+                "existing": "183.550",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48098_20220929t054013"
@@ -507542,6 +507570,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "81.65",
+                "existing": "81.650",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48100_20220929t092000"
@@ -507563,6 +507598,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "67.38",
+                "existing": "67.380",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48114_20220930t105830"
@@ -507584,6 +507626,18 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "181.98",
+                "existing": "181.980",
+                "field": "altitudeKm"
+              },
+              {
+                "duplicate": "167.29",
+                "existing": "167.290",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48218_20221008t092607"
@@ -507605,6 +507659,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "181.8",
+                "existing": "181.800",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48226_20221009t000504"
@@ -507626,6 +507687,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "182.86",
+                "existing": "182.860",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48228_20221009t034447"
@@ -507647,6 +507715,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "182.93",
+                "existing": "182.930",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48242_20221010t052253"
@@ -507668,6 +507743,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "28.73",
+                "existing": "28.730",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48304_20221014t225358"
@@ -507689,6 +507771,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "182.28",
+                "existing": "182.280",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48322_20221016t075107"
@@ -507710,6 +507799,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "180.99",
+                "existing": "180.990",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48332_20221017t020933"
@@ -507731,6 +507827,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "180.83",
+                "existing": "180.830",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48346_20221018t034719"
@@ -507752,6 +507855,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "-134.67",
+                "existing": "-134.670",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48364_20221019t124417"
@@ -507773,6 +507883,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "181.36",
+                "existing": "181.360",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48374_20221020t070234"
@@ -507794,6 +507911,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "-58.81",
+                "existing": "-58.810",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48442_20221025t113020"
@@ -507815,6 +507939,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "87.44",
+                "existing": "87.440",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48450_20221026t020848"
@@ -507836,6 +507967,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "-72.86",
+                "existing": "-72.860",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48456_20221026t130740"
@@ -507857,6 +507995,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "181.55",
+                "existing": "181.550",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48458_20221026t164717"
@@ -507878,6 +508023,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "59.37",
+                "existing": "59.370",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48478_20221028t052323"
@@ -507899,6 +508051,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "181.69",
+                "existing": "181.690",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48482_20221028t124234"
@@ -507920,6 +508079,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "181.47",
+                "existing": "181.470",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48512_20221030t193630"
@@ -507941,6 +508107,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "180.85",
+                "existing": "180.850",
+                "field": "altitudeKm"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48514_20221030t231603"
@@ -507962,6 +508135,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "173.06",
+                "existing": "173.060",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48622_20221108t044344"
@@ -507983,6 +508163,13 @@
           {
             "duplicateSourceIndex": "l3_scale_height",
             "existingSourceIndex": "l3_resampled",
+            "fieldDifferences": [
+              {
+                "duplicate": "90.53",
+                "existing": "90.530",
+                "field": "solarLongitudeDeg"
+              }
+            ],
             "reason": "same_urn_has_conflicting_catalog_metadata",
             "role": "l3_res_den",
             "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48706_20221114t142722"
@@ -508012,7 +508199,7 @@
       "l3_res_den+l3_res_sht": 10841
     }
   },
-  "generatedAtUtc": "2026-11-25T18:42:44.692676+00:00",
+  "generatedAtUtc": "2026-11-25T18:44:11.897647+00:00",
   "indexes": [
     {
       "byteLength": 6906311,
