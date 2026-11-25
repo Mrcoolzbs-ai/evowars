@@ -1,0 +1,132 @@
+{
+  "archive": {
+    "byteLength": 5395180,
+    "fileName": "ngims_derivedL3_2014.tar.gz",
+    "httpContentLength": "5395180",
+    "httpContentType": "application/x-gzip",
+    "httpStatus": 200,
+    "sha256": "66300afebcd9e4470a3f749e8c763efb5782954d4338c25381d4c7e0cd4286da",
+    "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL3_2014.tar.gz"
+  },
+  "csv": {
+    "csvByteLength": 702,
+    "csvFileName": "mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.csv",
+    "csvMd5Checksum": null,
+    "csvMd5ChecksumStatus": "not_present_in_detached_label",
+    "csvSha256": "02956e4c3571eeaa3692f788bfcb54b93655ea0fd88980ee08439051e6256e46",
+    "csvSizeConsistencyStatus": "mismatch_quarantined_no_md5",
+    "detachedLabelAuthenticity": "not_independently_authenticated",
+    "labelDeclaredFileSizeBytes": 843,
+    "productId": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406",
+    "xmlSha256": "b59a0041fb9f1aa89e498f75412d1f385136040f4cd11d983f9d0f3921876520"
+  },
+  "interpretation": {
+    "notDirectPointTemperatureObservation": true,
+    "notLocalTemperatureObservation": true,
+    "notMarsPhotochemicalInitialState": true,
+    "notes": [
+      "Temperature is derived from species-specific H=m*g/(k*T) scale-height fit over exobase-to-homopause range.",
+      "The exobase altitude is not a pointwise representative temperature altitude.",
+      "HI fit quality is the good near-isothermic fit; HW, HA and H0 remain distinct categories.",
+      "This product cannot by itself provide a continuous vertical T(z) or P(z) profile."
+    ],
+    "productLevel": "L3 derived scale-height temperature"
+  },
+  "productId": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406",
+  "profileSummary": {
+    "acceptedRows": 2,
+    "profileCandidates": [
+      {
+        "derivedTemperatureRangeK": [
+          108.170861,
+          108.170861
+        ],
+        "exobaseAltitudeRangeKm": [
+          464.9283,
+          464.9283
+        ],
+        "fitQuality": "good_near_isothermic_fit",
+        "fitResidualRange": [
+          380.02672,
+          380.02672
+        ],
+        "qualityFlag": "HI",
+        "rowCount": 1,
+        "scaleHeightRangeKm": [
+          6.765265,
+          6.765265
+        ],
+        "species": "Ar",
+        "timeStartUtc": "2014-12-11T17:04:37Z",
+        "timeStopUtc": "2014-12-11T17:04:37Z"
+      },
+      {
+        "derivedTemperatureRangeK": [
+          100.614597,
+          100.614597
+        ],
+        "exobaseAltitudeRangeKm": [
+          464.9283,
+          464.9283
+        ],
+        "fitQuality": "good_near_isothermic_fit",
+        "fitResidualRange": [
+          189.644254,
+          189.644254
+        ],
+        "qualityFlag": "HI",
+        "rowCount": 1,
+        "scaleHeightRangeKm": [
+          5.720616,
+          5.720616
+        ],
+        "species": "CO2",
+        "timeStartUtc": "2014-12-11T17:04:37Z",
+        "timeStopUtc": "2014-12-11T17:04:37Z"
+      }
+    ],
+    "rawOrbitCounts": {
+      "391": 4
+    },
+    "rawQualityFlagCounts": {
+      "HI": 3,
+      "NA": 1
+    },
+    "rawSpeciesRowCounts": {
+      "Ar": 1,
+      "CO2": 1,
+      "He": 1,
+      "N2": 1
+    },
+    "rawTidCounts": {
+      "14282": 4
+    },
+    "rejectedRows": 2,
+    "rowCount": 4,
+    "schema": "NGIMS SIS Rev. 1.13 Table A-10",
+    "sourceHeaders": [
+      "t_utc",
+      "t_unix",
+      "t_sclk",
+      "t_tid",
+      "tid",
+      "orbit",
+      "exo_alt",
+      "mass",
+      "species",
+      "scale_height",
+      "scale_height_error",
+      "temperature",
+      "temperature_error",
+      "fit_residual",
+      "quality"
+    ],
+    "timeStartUtc": "2014-12-11T17:04:37Z",
+    "timeStopUtc": "2014-12-11T17:04:37Z"
+  },
+  "xml": {
+    "byteLength": 12206,
+    "fileName": "mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.xml",
+    "sha256": "b59a0041fb9f1aa89e498f75412d1f385136040f4cd11d983f9d0f3921876520"
+  }
+}
