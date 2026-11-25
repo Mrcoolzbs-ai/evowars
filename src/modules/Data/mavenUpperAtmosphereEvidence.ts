@@ -2967,6 +2967,170 @@ export function linkMavenNgimsL2L3IndexEventWindow(
   };
 }
 
+
+export interface MavenNgimsIndexProductWindowIdentity
+  extends MavenNgimsIndexEventWindowIdentity {
+  /** Index metadata, preserved as source evidence and never used as a join key. */
+  readonly closestApproachTimeUtc?: string;
+}
+
+export interface MavenNgimsL2L3IndexProductSetIdentity {
+  readonly l2CsnAbundance: MavenNgimsIndexProductWindowIdentity;
+  readonly l3ResampledDensity: MavenNgimsIndexProductWindowIdentity;
+  readonly l3ScaleHeightTemperature: MavenNgimsIndexProductWindowIdentity;
+}
+
+export type MavenNgimsL2L3IndexProductSetLinkResult =
+  | {
+      readonly status: 'matched';
+      readonly tid: number;
+      readonly productTime: string;
+      readonly timeStartUtc: string;
+      readonly timeStopUtc: string;
+      readonly productIds: {
+        readonly l2CsnAbundance: string;
+        readonly l3ResampledDensity: string;
+        readonly l3ScaleHeightTemperature: string;
+      };
+      readonly closestApproachTimesUtc: {
+        readonly l2CsnAbundance: string | null;
+        readonly l3ResampledDensity: string | null;
+        readonly l3ScaleHeightTemperature: string | null;
+      };
+      readonly coRegistrationBasis: 'same-tid-product-time-and-exact-time-window';
+      readonly closestApproachTimesAreJoinKeys: false;
+      readonly eligibleAsMarsPhotochemicalInitialState: false;
+    }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
+type MavenNgimsIndexedProductRole =
+  | { readonly level: 'l2'; readonly productType: 'csn-abund' | 'cso-abund'; readonly tid: number; readonly productTime: string }
+  | { readonly level: 'l3'; readonly productType: 'res-den' | 'res-sht'; readonly tid: number; readonly productTime: string };
+
+function parseMavenNgimsIndexProductId(value: unknown): MavenNgimsIndexedProductRole | null {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(
+    /mvn_ngi_(l[23])_(csn-abund|cso-abund|res-den|res-sht)-(\d+)_(\d{8}t\d{6})$/i
+  );
+  if (!match) return null;
+  const level = match[1].toLowerCase();
+  const productType = match[2].toLowerCase();
+  const tid = Number(match[3]);
+  const productTime = match[4].toLowerCase();
+  if (!Number.isSafeInteger(tid) || tid <= 0) return null;
+  if (level === 'l2' && (productType === 'csn-abund' || productType === 'cso-abund')) {
+    return { level, productType, tid, productTime };
+  }
+  if (level === 'l3' && (productType === 'res-den' || productType === 'res-sht')) {
+    return { level, productType, tid, productTime };
+  }
+  return null;
+}
+
+/**
+ * Link the three distinct official NGIMS product classes for one exact event.
+ * The join uses TID + the timestamp embedded in the PDS URN + identical UTC
+ * start/stop windows. Closest-approach times are returned unchanged as
+ * independent index metadata; they are not required to agree and are not
+ * used to infer measurement synchronization.
+ */
+export function linkMavenNgimsL2L3IndexProductSet(
+  products: MavenNgimsL2L3IndexProductSetIdentity
+): MavenNgimsL2L3IndexProductSetLinkResult {
+  const errors: string[] = [];
+  if (!products || typeof products !== 'object') {
+    return { status: 'rejected', errors: ['three NGIMS index product identities are required'] };
+  }
+
+  const entries = [
+    { role: 'l2CsnAbundance', item: products.l2CsnAbundance, level: 'l2', productType: 'csn-abund' },
+    { role: 'l3ResampledDensity', item: products.l3ResampledDensity, level: 'l3', productType: 'res-den' },
+    { role: 'l3ScaleHeightTemperature', item: products.l3ScaleHeightTemperature, level: 'l3', productType: 'res-sht' }
+  ] as const;
+
+  const parsed = entries.map(({ role, item, level, productType }) => {
+    if (!item || typeof item !== 'object') {
+      errors.push(\`${role} identity is required\`);
+      return null;
+    }
+    const identity = item as MavenNgimsIndexProductWindowIdentity;
+    if (typeof identity.sourceProductId !== 'string' || identity.sourceProductId.trim() === '') {
+      errors.push(\`${role} sourceProductId must identify an indexed PDS product\`);
+      return null;
+    }
+    if (!Number.isSafeInteger(identity.tid) || identity.tid <= 0) {
+      errors.push(\`${role} TID must be a positive safe integer\`);
+    }
+    const parsedId = parseMavenNgimsIndexProductId(identity.sourceProductId);
+    if (!parsedId) {
+      errors.push(\`${role} sourceProductId is not a recognized NGIMS PDS product URN\`);
+      return null;
+    }
+    if (parsedId.level !== level || parsedId.productType !== productType) {
+      errors.push(\`${role} sourceProductId has the wrong NGIMS product level or type\`);
+    }
+    if (parsedId.tid !== identity.tid) {
+      errors.push(\`${role} URN TID does not match the supplied TID\`);
+    }
+    const start = normalizeMavenIndexUtc(identity.timeStartUtc);
+    const stop = normalizeMavenIndexUtc(identity.timeStopUtc);
+    if (start === null || stop === null) {
+      errors.push(\`${role} observation window must contain valid UTC start/stop timestamps\`);
+    }
+    return { role, identity, parsedId, start, stop };
+  });
+
+  if (errors.length > 0 || parsed.some((entry) => entry === null)) {
+    return { status: 'rejected', errors };
+  }
+
+  const valid = parsed as NonNullable<(typeof parsed)[number]>[];
+  const first = valid[0];
+  if (valid.some((entry) =>
+    entry.parsedId.tid !== first.parsedId.tid ||
+    entry.parsedId.productTime !== first.parsedId.productTime
+  )) {
+    return {
+      status: 'rejected',
+      errors: ['L2/L3 product URNs do not share one exact TID and product-time identifier']
+    };
+  }
+  if (valid.some((entry) =>
+    entry.identity.tid !== first.identity.tid ||
+    entry.start !== first.start ||
+    entry.stop !== first.stop
+  )) {
+    return {
+      status: 'rejected',
+      errors: ['L2/L3 product identities do not share one exact TID and UTC observation window']
+    };
+  }
+  if (Date.parse(first.start!) >= Date.parse(first.stop!)) {
+    return { status: 'rejected', errors: ['NGIMS observation window stop must be later than start'] };
+  }
+
+  return {
+    status: 'matched',
+    tid: first.parsedId.tid,
+    productTime: first.parsedId.productTime,
+    timeStartUtc: first.start!,
+    timeStopUtc: first.stop!,
+    productIds: {
+      l2CsnAbundance: products.l2CsnAbundance.sourceProductId,
+      l3ResampledDensity: products.l3ResampledDensity.sourceProductId,
+      l3ScaleHeightTemperature: products.l3ScaleHeightTemperature.sourceProductId
+    },
+    closestApproachTimesUtc: {
+      l2CsnAbundance: products.l2CsnAbundance.closestApproachTimeUtc ?? null,
+      l3ResampledDensity: products.l3ResampledDensity.closestApproachTimeUtc ?? null,
+      l3ScaleHeightTemperature: products.l3ScaleHeightTemperature.closestApproachTimeUtc ?? null
+    },
+    coRegistrationBasis: 'same-tid-product-time-and-exact-time-window',
+    closestApproachTimesAreJoinKeys: false,
+    eligibleAsMarsPhotochemicalInitialState: false
+  };
+}
+
 /**
  * Canonical index cross-match candidate selected from the official NGIMS
  * del1-42 scale-height index and the PDS4 L2 archive directory. Only index
@@ -3007,8 +3171,14 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
     directoryLastModifiedUtc: '2018-08-15T14:27:00Z',
     focusMode: 'csn',
     neutralSpecies: ['Ar', 'CO2', 'He', 'N2'],
-    productPayloadImported: false,
-    labelPayloadImported: false
+    productPayloadImported: true,
+    labelPayloadImported: true,
+    csvByteLength: 538939,
+    labelDeclaredFileSizeBytes: 539063,
+    csvSha256: 'b5954f0b1f70641d92bdbaa04b139736a8e02c1b154d03dffc2c890e34315721',
+    pds4ImportMode: 'forensic-only' as const,
+    pds4FileSizeConsistency: 'mismatch_quarantined_no_md5' as const,
+    detachedLabelAuthenticity: 'not_independently_authenticated' as const
   },
   l3ResampledDensityProduct: {
     productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
@@ -3021,8 +3191,14 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
     productType: 'res-den',
     table: 'NGIMS SIS Rev. 1.13 Table A-9',
     densitySemantics: 'interpolated to equal-pressure altitude and averaged in constant log-density bins (0.2 log steps)',
-    productPayloadImported: false,
-    labelPayloadImported: false
+    productPayloadImported: true,
+    labelPayloadImported: true,
+    csvByteLength: 23658,
+    labelDeclaredFileSizeBytes: 23743,
+    csvSha256: 'e495cabe79d44967f76ed4baea857b24df5e92ffca8faf2c890b872f82091678',
+    pds4ImportMode: 'forensic-only' as const,
+    pds4FileSizeConsistency: 'mismatch_quarantined_no_md5' as const,
+    detachedLabelAuthenticity: 'not_independently_authenticated' as const
   },
   l3ResampledDensityIndex: {
     productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
@@ -3045,17 +3221,37 @@ export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
       isIndexGeometryNotSpeciesMeasurement: true
     }
   },
+  l3ScaleHeightTemperatureProduct: {
+    productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406',
+    fileName: 'mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.csv',
+    labelFileName: 'mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.xml',
+    productPayloadImported: true,
+    labelPayloadImported: true,
+    csvByteLength: 702,
+    labelDeclaredFileSizeBytes: 843,
+    csvSha256: '02956e4c3571eeaa3692f788bfcb54b93655ea0fd88980ee08439051e6256e46',
+    pds4ImportMode: 'forensic-only' as const,
+    pds4FileSizeConsistency: 'mismatch_quarantined_no_md5' as const,
+    detachedLabelAuthenticity: 'not_independently_authenticated' as const,
+    derivedFits: [
+      { species: 'Ar', qualityFlag: 'HI', exobaseAltitudeKm: 464.9283, derivedTemperatureK: 108.170861, uncertaintyK: 28.693767 },
+      { species: 'CO2', qualityFlag: 'HI', exobaseAltitudeKm: 464.9283, derivedTemperatureK: 100.614597, uncertaintyK: 24.592182 }
+    ] as const
+  },
   matching: {
     exactTidMatch: true,
+    exactProductTimeMatch: true,
     exactUtcWindowMatch: true,
     resampledDensityIndexVerified: true,
-    numericL2CsvImported: false,
-    numericL3ResampledDensityCsvImported: false,
-    numericL3TemperatureCsvImported: false,
+    numericL2CsvImported: true,
+    numericL3ResampledDensityCsvImported: true,
+    numericL3TemperatureCsvImported: true,
+    allThreePds4ImportsForensicOnly: true,
+    l3DensityBinsConvertedToLinearUnits: false,
     temperatureIsDerivedScaleHeightFit: true,
     neutralDensitySpeciesFromClosedSource: ['Ar', 'CO2', 'He', 'N2'],
     schedulerInitialStateEligible: false,
-    note: 'This is an archive cross-index candidate, not an imported measurement row. It links one TID and exact observation interval; it does not prove per-species numeric values, fit-quality class, or local temperature.'
+    note: 'The exact L2/L3 PDS identities and product windows are linked, and all three source payloads are frozen and parsed in forensic-only mode. L2 abundance rows and L3 res-den raw density bins are retained with their quality/provenance; L3 scale-height temperatures are species-specific derived fits, not local T(z). Closest-approach index timestamps differ by product class and are not join keys.'
   },
   provenance: {
     l2IndexHtml: 'https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN%20NGIMS%20Single%20Species.html',
