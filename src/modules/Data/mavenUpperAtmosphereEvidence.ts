@@ -723,6 +723,7 @@ export interface MavenNgimsProfileBuildResult {
   readonly species?: string;
   readonly orbit?: number;
   readonly tid?: number;
+  readonly focusMode?: MavenNgimsFocusMode;
   readonly direction?: 'inbound' | 'outbound';
   readonly quality?: 'verified' | 'uncertain';
   readonly measurements?: readonly MavenNgimsNeutralMeasurement[];
@@ -734,6 +735,7 @@ export interface MavenNgimsProfileSelection {
   readonly species: string;
   readonly orbit: number;
   readonly tid: number;
+  readonly focusMode: MavenNgimsFocusMode;
   readonly direction: 'inbound' | 'outbound';
   readonly quality: 'verified' | 'uncertain';
 }
@@ -760,6 +762,7 @@ export function buildMavenNgimsNeutralProfileFromMeasurements(
     }
     if (current.orbit !== first.orbit) identityErrors.push('profile cannot combine different MAVEN orbits');
     if (current.tid !== first.tid) identityErrors.push('profile cannot combine different NGIMS TIDs');
+    if (current.focusMode !== first.focusMode) identityErrors.push('profile cannot combine different NGIMS focus modes');
     if (current.species.trim().toUpperCase() !== first.species.trim().toUpperCase()) {
       identityErrors.push('profile cannot combine different neutral species');
     }
@@ -785,6 +788,7 @@ export function buildMavenNgimsNeutralProfileFromMeasurements(
     species: first.species,
     orbit: first.orbit,
     tid: first.tid,
+    focusMode: first.focusMode,
     direction: first.direction,
     quality: first.quality,
     measurements: sorted,
@@ -849,10 +853,11 @@ export function buildMavenNgimsNeutralProfileFromCsvImport(
     selection.orbit <= 0 ||
     !Number.isInteger(selection.tid) ||
     selection.tid < 0 ||
+    !FOCUS_MODES.includes(selection.focusMode) ||
     (selection.direction !== 'inbound' && selection.direction !== 'outbound') ||
     (selection.quality !== 'verified' && selection.quality !== 'uncertain')
   ) {
-    return { status: 'rejected', errors: ['profile selection must explicitly identify species, positive orbit, TID, track direction and quality class'] };
+    return { status: 'rejected', errors: ['profile selection must explicitly identify species, positive orbit, TID, focus mode, track direction and quality class'] };
   }
 
   const selected = imported.rows.flatMap((entry) => {
@@ -862,6 +867,7 @@ export function buildMavenNgimsNeutralProfileFromCsvImport(
       measurement.species.trim().toUpperCase() === selection.species.trim().toUpperCase() &&
       measurement.orbit === selection.orbit &&
       measurement.tid === selection.tid &&
+      measurement.focusMode === selection.focusMode &&
       measurement.direction === selection.direction &&
       measurement.quality === selection.quality
     ) ? [measurement] : [];
@@ -870,10 +876,150 @@ export function buildMavenNgimsNeutralProfileFromCsvImport(
   if (selected.length === 0) {
     return {
       status: 'rejected',
-      errors: ['the requested NGIMS species/orbit/TID/direction/quality selection has no accepted rows']
+      errors: ['the requested NGIMS species/orbit/TID/focus-mode/direction/quality selection has no accepted rows']
     };
   }
   return buildMavenNgimsNeutralProfileFromMeasurements(selected);
+}
+
+export interface MavenNgimsCoRegisteredPair {
+  readonly timeUtc: string;
+  readonly altitudeM: number;
+  readonly first: MavenNgimsNeutralMeasurement;
+  readonly second: MavenNgimsNeutralMeasurement;
+}
+
+export interface MavenNgimsCoRegistrationResult {
+  readonly status: 'completed' | 'rejected';
+  readonly firstSpecies?: string;
+  readonly secondSpecies?: string;
+  readonly orbit?: number;
+  readonly tid?: number;
+  readonly focusMode?: MavenNgimsFocusMode;
+  readonly direction?: 'inbound' | 'outbound';
+  readonly pairs?: readonly MavenNgimsCoRegisteredPair[];
+  readonly unmatchedFirstCount?: number;
+  readonly unmatchedSecondCount?: number;
+  readonly errors?: readonly string[];
+  readonly eligibleAsMarsPhotochemicalInitialState: false;
+  readonly eligibleAsSchedulerInitialAbundance: false;
+  readonly limitations: readonly string[];
+}
+
+/**
+ * Exact co-registration only: pair two already validated L2 profiles when
+ * both UTC timestamp and altitude match exactly. No interpolation, time
+ * tolerance, altitude tolerance, duplicate averaging, or quality promotion.
+ */
+export function coRegisterMavenNgimsNeutralProfiles(
+  firstProfile: MavenNgimsProfileBuildResult,
+  secondProfile: MavenNgimsProfileBuildResult
+): MavenNgimsCoRegistrationResult {
+  const limitations = [
+    'Exact join on UTC timestamp and altitude only; no interpolation, nearest-neighbour matching, or tolerance window is applied.',
+    'Both profiles must have the same MAVEN orbit, NGIMS TID, focus mode, and inbound/outbound branch.',
+    'Species-specific quality classes and 1-sigma abundance precision remain attached to each paired measurement; uncertain values are not upgraded.',
+    'This is a pairwise neutral-observation product, not a complete T(z), P(z), bulk atmosphere, global climatology, or Scheduler initial state.'
+  ];
+  if (!firstProfile || firstProfile.status !== 'completed' || !firstProfile.measurements) {
+    return {
+      status: 'rejected',
+      errors: ['first completed NGIMS profile with measurements is required'],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+  if (!secondProfile || secondProfile.status !== 'completed' || !secondProfile.measurements) {
+    return {
+      status: 'rejected',
+      errors: ['second completed NGIMS profile with measurements is required'],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+
+  const identityErrors: string[] = [];
+  if (firstProfile.species?.trim().toUpperCase() === secondProfile.species?.trim().toUpperCase()) {
+    identityErrors.push('co-registration requires two different neutral species');
+  }
+  if (firstProfile.orbit !== secondProfile.orbit) identityErrors.push('co-registration cannot combine different MAVEN orbits');
+  if (firstProfile.tid !== secondProfile.tid) identityErrors.push('co-registration cannot combine different NGIMS TIDs');
+  if (firstProfile.focusMode !== secondProfile.focusMode) identityErrors.push('co-registration cannot combine different NGIMS focus modes');
+  if (firstProfile.direction !== secondProfile.direction) identityErrors.push('co-registration cannot combine inbound and outbound profiles');
+  if (identityErrors.length > 0) {
+    return {
+      status: 'rejected',
+      errors: identityErrors,
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+
+  const keyOf = (measurement: MavenNgimsNeutralMeasurement): string =>
+    measurement.timeUtc + '|' + measurement.altitudeM.toString();
+  const firstIndex = new Map<string, MavenNgimsNeutralMeasurement>();
+  const secondIndex = new Map<string, MavenNgimsNeutralMeasurement>();
+  for (const measurement of firstProfile.measurements) {
+    const key = keyOf(measurement);
+    if (firstIndex.has(key)) {
+      return {
+        status: 'rejected',
+        errors: ['first profile contains duplicate exact time/altitude keys; no implicit averaging is allowed'],
+        eligibleAsMarsPhotochemicalInitialState: false,
+        eligibleAsSchedulerInitialAbundance: false,
+        limitations
+      };
+    }
+    firstIndex.set(key, measurement);
+  }
+  for (const measurement of secondProfile.measurements) {
+    const key = keyOf(measurement);
+    if (secondIndex.has(key)) {
+      return {
+        status: 'rejected',
+        errors: ['second profile contains duplicate exact time/altitude keys; no implicit averaging is allowed'],
+        eligibleAsMarsPhotochemicalInitialState: false,
+        eligibleAsSchedulerInitialAbundance: false,
+        limitations
+      };
+    }
+    secondIndex.set(key, measurement);
+  }
+
+  const pairs: MavenNgimsCoRegisteredPair[] = [];
+  for (const [key, first] of firstIndex) {
+    const second = secondIndex.get(key);
+    if (!second) continue;
+    pairs.push({ timeUtc: first.timeUtc, altitudeM: first.altitudeM, first, second });
+  }
+  if (pairs.length < 2) {
+    return {
+      status: 'rejected',
+      errors: ['fewer than two exact UTC/altitude matches exist between the two NGIMS profiles'],
+      eligibleAsMarsPhotochemicalInitialState: false,
+      eligibleAsSchedulerInitialAbundance: false,
+      limitations
+    };
+  }
+  pairs.sort((a, b) => a.altitudeM - b.altitudeM);
+  return {
+    status: 'completed',
+    firstSpecies: firstProfile.species!,
+    secondSpecies: secondProfile.species!,
+    orbit: firstProfile.orbit,
+    tid: firstProfile.tid,
+    focusMode: firstProfile.focusMode,
+    direction: firstProfile.direction,
+    pairs,
+    unmatchedFirstCount: firstIndex.size - pairs.length,
+    unmatchedSecondCount: secondIndex.size - pairs.length,
+    eligibleAsMarsPhotochemicalInitialState: false,
+    eligibleAsSchedulerInitialAbundance: false,
+    limitations
+  };
 }
 
 function parseFiniteField(
