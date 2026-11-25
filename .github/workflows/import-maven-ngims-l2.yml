@@ -4,6 +4,12 @@ on:
   push:
     branches: [stage-3-planetary-physics]
 
+# Two one-shot retrieval commits may be pushed close together. Serialize them
+# so the archive manifest commit cannot race the science-branch head.
+concurrency:
+  group: ngims-l2-tid-14282-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   retrieve:
     if: contains(github.event.head_commit.message, '[import-ngims-l2-tid-14282]')
@@ -29,6 +35,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin stage-3-planetary-physics
+          git pull --rebase origin stage-3-planetary-physics
           git add src/modules/Data/mavenNgimsL2Archive/
           if git diff --cached --quiet; then
             echo "No new L2 source files to freeze."
