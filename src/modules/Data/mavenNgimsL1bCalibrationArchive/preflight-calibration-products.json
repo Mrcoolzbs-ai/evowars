@@ -1,0 +1,3247 @@
+{
+  "limitations": [
+    "The script streams selected ground science CSVs and records raw mass-channel evidence, but does not calculate absolute sensitivity.",
+    "The gnd-hk products are large and have not yet been ingested; chamber pressure/reference gas density and the complete calibration chain are not independently validated here.",
+    "TID 10191 is called Argon calibration in SIS Table A-11, but its source message-log directory is named KrCalibration. Gas identity remains unassigned pending raw spectrum and pressure/reference-gas cross-check.",
+    "A raw mass-channel peak by itself is not treated as sufficient calibration-gas identification.",
+    "Preflight ground references must not be promoted to a flight-specific sensitivity for TID 14282 without matching detector, emission, gas density, and configuration evidence."
+  ],
+  "products": [
+    {
+      "date": "20120923",
+      "messageLogDirectoryName": "2012-09-23-08.19.45-10191-KrCalibration/",
+      "products": {
+        "gnd-mkr": {
+          "columnNamesFromPdsLabel": [
+            "TIME",
+            "MKID",
+            "DESCRIPTION"
+          ],
+          "detachedLabelAuthenticity": "not_independently_authenticated",
+          "labelDeclaredFileSizeBytes": 43457,
+          "labelDeclaredRecordCount": 1284,
+          "labelDownload": {
+            "byteLength": 7080,
+            "contentLengthHeader": "7080",
+            "contentType": "text/xml",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010191_20120923T081945_v01_r01.xml",
+            "httpStatus": 200,
+            "sha256": "4a968a25cb63613bc361e70d245145aa4d14e1db9c2f6c380ced07a4a5b1e4ba",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010191_20120923T081945_v01_r01.xml"
+          },
+          "labelSha256": "4a968a25cb63613bc361e70d245145aa4d14e1db9c2f6c380ced07a4a5b1e4ba",
+          "logicalIdentifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010191_20120923t081945",
+          "payloadDownload": {
+            "byteLength": 43457,
+            "contentLengthHeader": "43457",
+            "contentType": "text/csv",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010191_20120923T081945_v01_r01.csv",
+            "httpStatus": 200,
+            "sha256": "9030474b5b3287a2cfcd900bc72d11ddd01cdf69081bf3b7a9b2e45885cb05e3",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010191_20120923T081945_v01_r01.csv"
+          },
+          "payloadFileName": "mvn_ngi_l1c_gnd-mkr-010191_20120923T081945_v01_r01.csv",
+          "payloadSha256": "9030474b5b3287a2cfcd900bc72d11ddd01cdf69081bf3b7a9b2e45885cb05e3",
+          "payloadSizeMatchesLabel": true,
+          "rowCount": 1284
+        },
+        "gnd-msg": {
+          "columnNamesFromPdsLabel": [],
+          "detachedLabelAuthenticity": "not_independently_authenticated",
+          "labelDeclaredFileSizeBytes": 134871,
+          "labelDeclaredRecordCount": null,
+          "labelDownload": {
+            "byteLength": 5364,
+            "contentLengthHeader": "5364",
+            "contentType": "text/xml",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010191_20120923T081945_v01_r01.xml",
+            "httpStatus": 200,
+            "sha256": "903afb996a05737219c7ebfb68fc1cc9ea3e51e4cc4df2a9e09e01e8586d1e45",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010191_20120923T081945_v01_r01.xml"
+          },
+          "labelSha256": "903afb996a05737219c7ebfb68fc1cc9ea3e51e4cc4df2a9e09e01e8586d1e45",
+          "logicalIdentifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010191_20120923t081945",
+          "messageSummary": {
+            "containsReplacementCharacter": false,
+            "dataDirectoryName": "2012-09-23-08.19.45-10191-KrCalibration/",
+            "filamentOnCommands": [
+              1,
+              2,
+              4,
+              8
+            ],
+            "firstLines": [
+              "Data directory: 2012-09-23-08.19.45-10191-KrCalibration/",
+              "CDH\tFM\tFM\t2.2.1",
+              "LSIM\tFM\t16\t1.9",
+              "PS\tFM\tX",
+              "FB\tFM\t18",
+              "PROM Ver.\t1.8",
+              "GSE:.\tRevision: 1.6 ",
+              "Test temp.:.\t72 F 60% humidity",
+              "gse-startup.bas",
+              "packet 2",
+              "",
+              ""
+            ],
+            "lineCount": 3408,
+            "markerDescriptions": [
+              "OS Init 1, 4",
+              "CS Init",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2462",
+              "Filament ON 1 @ 125",
+              "FOCUS MODE 1",
+              "Filament ON 4 @ 125",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4"
+            ],
+            "multiplierOnCommands": [
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              }
+            ]
+          },
+          "payloadDownload": {
+            "byteLength": 134871,
+            "contentLengthHeader": "134871",
+            "contentType": "text/plain; charset=UTF-8",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010191_20120923T081945_v01_r01.txt",
+            "httpStatus": 200,
+            "sha256": "5f288eb928120bcbb9aaccfbcc8a33e2c20292d024075be2d8c00ad155f53d72",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010191_20120923T081945_v01_r01.txt"
+          },
+          "payloadFileName": "mvn_ngi_l1c_gnd-msg-010191_20120923T081945_v01_r01.txt",
+          "payloadSha256": "5f288eb928120bcbb9aaccfbcc8a33e2c20292d024075be2d8c00ad155f53d72",
+          "payloadSizeMatchesLabel": true
+        },
+        "gnd-sci": {
+          "columnNamesFromPdsLabel": [
+            "TIME",
+            "MKID",
+            "INTEGRATION_PERIOD",
+            "TUNING",
+            "MASS",
+            "COUNTS_PER_SECOND",
+            "DAC_ID",
+            "DAC_SETTING"
+          ],
+          "detachedLabelAuthenticity": "not_independently_authenticated",
+          "labelDeclaredFileSizeBytes": 41496331,
+          "labelDeclaredRecordCount": 986269,
+          "labelDownload": {
+            "byteLength": 10200,
+            "contentLengthHeader": "10200",
+            "contentType": "text/xml",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010191_20120923T081945_v01_r01.xml",
+            "httpStatus": 200,
+            "sha256": "25f0fa5a9dab338d4a559c8b5e2464d59829969e36ef282b6838823b54547a2d",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010191_20120923T081945_v01_r01.xml"
+          },
+          "labelSha256": "25f0fa5a9dab338d4a559c8b5e2464d59829969e36ef282b6838823b54547a2d",
+          "logicalIdentifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010191_20120923t081945",
+          "payloadDownload": {
+            "byteLength": 41496331,
+            "contentLengthHeader": "41496331",
+            "contentType": "text/csv",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010191_20120923T081945_v01_r01.csv",
+            "httpStatus": 200,
+            "sha256": "9e374819dd70b1f027bf1bcc67851436149409c623c5ad1901c5c6725c45b9d0",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010191_20120923T081945_v01_r01.csv"
+          },
+          "payloadFileName": "mvn_ngi_l1c_gnd-sci-010191_20120923T081945_v01_r01.csv",
+          "payloadSha256": "9e374819dd70b1f027bf1bcc67851436149409c623c5ad1901c5c6725c45b9d0",
+          "payloadSizeMatchesLabel": true,
+          "scienceSummary": {
+            "blankMassRowCount": 369294,
+            "detectedColumns": {
+              "counts": null,
+              "cps": "COUNTS_PER_SECOND",
+              "filament": null,
+              "focusModeOrTuning": "TUNING",
+              "integrationPeriod": "INTEGRATION_PERIOD",
+              "mass": "MASS",
+              "multiplier": null
+            },
+            "focusModeOrTuningSummaries": {
+              "1": {
+                "massBinCount": 900,
+                "targetMassEvidence": {
+                  "14": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 93282.72067669165,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 14.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "16": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 814635.7562218043,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 16.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "19": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 1095.1684210526314,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 19.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "28": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 407646.6862593985,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 28.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "40": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2079340.1234644444,
+                    "cpsObserved": 4500,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 4500
+                    },
+                    "massToCharge": 40.0,
+                    "multiplierValues": {},
+                    "rowCount": 4500
+                  },
+                  "44": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 87996.03167293237,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 44.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "84": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 34.53054585152843,
+                    "cpsObserved": 458,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 458
+                    },
+                    "massToCharge": 84.0,
+                    "multiplierValues": {},
+                    "rowCount": 458
+                  },
+                  "86": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 9.137991266375547,
+                    "cpsObserved": 458,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 458
+                    },
+                    "massToCharge": 86.0,
+                    "multiplierValues": {},
+                    "rowCount": 458
+                  }
+                },
+                "topMassBinsByIntegratedRawCounts": [
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 118.12437869822487,
+                    "cpsObserved": 169,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 169
+                    },
+                    "massToCharge": 0.0,
+                    "multiplierValues": {},
+                    "rowCount": 169
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4967.5051886792435,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.5,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 19222.04745283019,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.6,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 205209.99320754712,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.7,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 313347.4844339622,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.8,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 321351.5024999999,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.9,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 349432.7553014185,
+                    "cpsObserved": 564,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 564
+                    },
+                    "massToCharge": 2.0,
+                    "multiplierValues": {},
+                    "rowCount": 564
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 308404.7869339623,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.1,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 284773.93438679253,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.2,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 191221.69820754734,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.3,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 166.14301886792455,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.4,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 5.765377358490563,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.5,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4.1929716981132055,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.6,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 45.073820754716955,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.7,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 119.49716981132075,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.8,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 126.6599528301887,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.9,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 125.36154255319185,
+                    "cpsObserved": 564,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 564
+                    },
+                    "massToCharge": 3.0,
+                    "multiplierValues": {},
+                    "rowCount": 564
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 115.12952830188684,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 3.1,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 97.13523584905667,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 3.2,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 72.8513679245283,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 3.3,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  }
+                ]
+              },
+              "2": {
+                "massBinCount": 900,
+                "targetMassEvidence": {
+                  "14": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 56653.52154017858,
+                    "cpsObserved": 448,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 448
+                    },
+                    "massToCharge": 14.0,
+                    "multiplierValues": {},
+                    "rowCount": 448
+                  },
+                  "16": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 290807.70499999996,
+                    "cpsObserved": 448,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 448
+                    },
+                    "massToCharge": 16.0,
+                    "multiplierValues": {},
+                    "rowCount": 448
+                  },
+                  "19": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 617.3941964285713,
+                    "cpsObserved": 448,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 448
+                    },
+                    "massToCharge": 19.0,
+                    "multiplierValues": {},
+                    "rowCount": 448
+                  },
+                  "28": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 129715.02964285716,
+                    "cpsObserved": 448,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 448
+                    },
+                    "massToCharge": 28.0,
+                    "multiplierValues": {},
+                    "rowCount": 448
+                  },
+                  "40": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 979800.4310801645,
+                    "cpsObserved": 4416,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 4416
+                    },
+                    "massToCharge": 40.0,
+                    "multiplierValues": {},
+                    "rowCount": 4416
+                  },
+                  "44": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 25083.829263392865,
+                    "cpsObserved": 448,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 448
+                    },
+                    "massToCharge": 44.0,
+                    "multiplierValues": {},
+                    "rowCount": 448
+                  },
+                  "84": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 13.087812499999988,
+                    "cpsObserved": 416,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 416
+                    },
+                    "massToCharge": 84.0,
+                    "multiplierValues": {},
+                    "rowCount": 416
+                  },
+                  "86": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4.006586538461537,
+                    "cpsObserved": 416,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 416
+                    },
+                    "massToCharge": 86.0,
+                    "multiplierValues": {},
+                    "rowCount": 416
+                  }
+                },
+                "topMassBinsByIntegratedRawCounts": [
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 73.49070866141726,
+                    "cpsObserved": 127,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 127
+                    },
+                    "massToCharge": 0.0,
+                    "multiplierValues": {},
+                    "rowCount": 127
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 1758.1019531250008,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 1.5,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 6361.69,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 1.6,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 63269.09718749998,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 1.7,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 108653.93500000001,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 1.8,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 113979.45671874996,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 1.9,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 112260.80243750005,
+                    "cpsObserved": 480,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 480
+                    },
+                    "massToCharge": 2.0,
+                    "multiplierValues": {},
+                    "rowCount": 480
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 110037.61578124996,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.1,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 100574.07382812498,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.2,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 67879.91921874999,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.3,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 80.15101562499997,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.4,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4.34046875,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.5,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4.3403906249999995,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.6,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 19.965468749999996,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.7,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 49.76898437499997,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.8,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 55.84507812499997,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 2.9,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 53.009416666666766,
+                    "cpsObserved": 480,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 480
+                    },
+                    "massToCharge": 3.0,
+                    "multiplierValues": {},
+                    "rowCount": 480
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 49.768749999999976,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 3.1,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 47.45367187499996,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 3.2,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 34.432734375,
+                    "cpsObserved": 128,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 128
+                    },
+                    "massToCharge": 3.3,
+                    "multiplierValues": {},
+                    "rowCount": 128
+                  }
+                ]
+              },
+              "4": {
+                "massBinCount": 900,
+                "targetMassEvidence": {
+                  "14": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 643797.2706766916,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 14.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "16": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4983166.318515036,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 16.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "19": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4306.669417293234,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 19.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "28": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 4725575.39699248,
+                    "cpsObserved": 532,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 532
+                    },
+                    "massToCharge": 28.0,
+                    "multiplierValues": {},
+                    "rowCount": 532
+                  },
+                  "40": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3250358.5267711156,
+                    "cpsObserved": 4500,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 4500
+                    },
+                    "massToCharge": 40.0,
+                    "multiplierValues": {},
+                    "rowCount": 4500
+                  },
+                  "44": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 1113848.7247091935,
+                    "cpsObserved": 533,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 533
+                    },
+                    "massToCharge": 44.0,
+                    "multiplierValues": {},
+                    "rowCount": 533
+                  },
+                  "84": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 260.79582969432323,
+                    "cpsObserved": 458,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 458
+                    },
+                    "massToCharge": 84.0,
+                    "multiplierValues": {},
+                    "rowCount": 458
+                  },
+                  "86": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 80.62458515283852,
+                    "cpsObserved": 458,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 458
+                    },
+                    "massToCharge": 86.0,
+                    "multiplierValues": {},
+                    "rowCount": 458
+                  }
+                },
+                "topMassBinsByIntegratedRawCounts": [
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 137.6289349112427,
+                    "cpsObserved": 169,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 169
+                    },
+                    "massToCharge": 0.0,
+                    "multiplierValues": {},
+                    "rowCount": 169
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 32797.86844339622,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.5,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 184663.52193396227,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.6,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2433971.1738679237,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.7,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3289612.8579245294,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.8,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3380759.7833962273,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 1.9,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3487616.0361524858,
+                    "cpsObserved": 564,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 564
+                    },
+                    "massToCharge": 2.0,
+                    "multiplierValues": {},
+                    "rowCount": 564
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3308046.2963679247,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.1,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3322336.826933962,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.2,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2821969.776367925,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.3,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 1283.8920283018865,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.4,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 22.536792452830184,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.5,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 33.89249999999996,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.6,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 1279.699433962264,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.7,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3196.191273584901,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.8,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3253.6684905660372,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 2.9,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2680.3257624113485,
+                    "cpsObserved": 564,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 564
+                    },
+                    "massToCharge": 3.0,
+                    "multiplierValues": {},
+                    "rowCount": 564
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3085.953915094339,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 3.1,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3041.229999999999,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 3.2,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2479.5602358490546,
+                    "cpsObserved": 212,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 212
+                    },
+                    "massToCharge": 3.3,
+                    "multiplierValues": {},
+                    "rowCount": 212
+                  }
+                ]
+              }
+            },
+            "gasIdentityAssigned": false,
+            "gasIdentityNote": "Mass-channel signal summaries are preserved as raw evidence. A dominant channel alone is not treated as sufficient identification of the calibration gas.",
+            "headers": [
+              "TIME",
+              "MKID",
+              "INTEGRATION_PERIOD",
+              "TUNING",
+              "MASS",
+              "COUNTS_PER_SECOND",
+              "DAC_ID",
+              "DAC_SETTING"
+            ],
+            "invalidMassRowCount": 0,
+            "pdsLabelFieldNames": [
+              "TIME",
+              "MKID",
+              "INTEGRATION_PERIOD",
+              "TUNING",
+              "MASS",
+              "COUNTS_PER_SECOND",
+              "DAC_ID",
+              "DAC_SETTING"
+            ],
+            "rowCount": 986269
+          }
+        }
+      },
+      "sisDesignation": "Argon calibration",
+      "sisDesignationConflictsWithMessageDirectory": true,
+      "tid": 10191
+    },
+    {
+      "date": "20120923",
+      "messageLogDirectoryName": "2012-09-23-17.42.16-10194-KrCal/",
+      "products": {
+        "gnd-mkr": {
+          "columnNamesFromPdsLabel": [
+            "TIME",
+            "MKID",
+            "DESCRIPTION"
+          ],
+          "detachedLabelAuthenticity": "not_independently_authenticated",
+          "labelDeclaredFileSizeBytes": 11601,
+          "labelDeclaredRecordCount": 348,
+          "labelDownload": {
+            "byteLength": 7078,
+            "contentLengthHeader": "7078",
+            "contentType": "text/xml",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010194_20120923T174216_v01_r01.xml",
+            "httpStatus": 200,
+            "sha256": "a2fcbb5176fdf9f9edb2fda98c9189011a1ba6f9eecc06b8e39735e752406f3b",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010194_20120923T174216_v01_r01.xml"
+          },
+          "labelSha256": "a2fcbb5176fdf9f9edb2fda98c9189011a1ba6f9eecc06b8e39735e752406f3b",
+          "logicalIdentifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010194_20120923t174216",
+          "payloadDownload": {
+            "byteLength": 11601,
+            "contentLengthHeader": "11601",
+            "contentType": "text/csv",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010194_20120923T174216_v01_r01.csv",
+            "httpStatus": 200,
+            "sha256": "b507241b439de11eab61fcc48e6c43d9ca2c9bf225aff7616591c19414688a80",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-mkr-010194_20120923T174216_v01_r01.csv"
+          },
+          "payloadFileName": "mvn_ngi_l1c_gnd-mkr-010194_20120923T174216_v01_r01.csv",
+          "payloadSha256": "b507241b439de11eab61fcc48e6c43d9ca2c9bf225aff7616591c19414688a80",
+          "payloadSizeMatchesLabel": true,
+          "rowCount": 348
+        },
+        "gnd-msg": {
+          "columnNamesFromPdsLabel": [],
+          "detachedLabelAuthenticity": "not_independently_authenticated",
+          "labelDeclaredFileSizeBytes": 39959,
+          "labelDeclaredRecordCount": null,
+          "labelDownload": {
+            "byteLength": 5361,
+            "contentLengthHeader": "5361",
+            "contentType": "text/xml",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010194_20120923T174216_v01_r01.xml",
+            "httpStatus": 200,
+            "sha256": "d82ce87cbfe126c30a7f27adb8bfc867b311ec3c438452692584771b8fad0cc6",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010194_20120923T174216_v01_r01.xml"
+          },
+          "labelSha256": "d82ce87cbfe126c30a7f27adb8bfc867b311ec3c438452692584771b8fad0cc6",
+          "logicalIdentifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010194_20120923t174216",
+          "messageSummary": {
+            "containsReplacementCharacter": false,
+            "dataDirectoryName": "2012-09-23-17.42.16-10194-KrCal/",
+            "filamentOnCommands": [
+              1,
+              4
+            ],
+            "firstLines": [
+              "Data directory: 2012-09-23-17.42.16-10194-KrCal/",
+              "CDH\tFM\tFM\t2.2.1",
+              "LSIM\tFM\t16\t1.9",
+              "PS\tFM\tX",
+              "FB\tFM\t18",
+              "PROM Ver.\t1.8",
+              "GSE:.\tRevision: 1.6 ",
+              "Test temp.:.\t72 F 60% humidity",
+              "gse-startup.bas",
+              "packet 2",
+              "",
+              ""
+            ],
+            "lineCount": 997,
+            "markerDescriptions": [
+              "OS Init 1, 4",
+              "CS Init",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2462",
+              "Filament ON 1 @ 125",
+              "FOCUS MODE 1",
+              "Filament ON 4 @ 125",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "FOCUS MODE 4",
+              "CSN Background",
+              "CSN Background",
+              "FOCUS MODE 1",
+              "OSNT Background",
+              "OSNT Background",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "Change Emis. 1 @ 25",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2462",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "FOCUS MODE 4",
+              "EM 2 on @ 2462",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2462",
+              "PHD on EM1",
+              "PHD",
+              "PHD on EM1",
+              "PHD",
+              "EM 2 on @ 2624",
+              "PHD on EM2",
+              "PHD",
+              "Multipliers Off",
+              "EM 2 on @ 2462",
+              "PHD on EM2",
+              "PHD",
+              "Multipliers Off",
+              "EM 1 on @ 2462",
+              "PHD on EM1",
+              "PHD",
+              "AMU is 12",
+              "Multipliers Off",
+              "EM 1 on @ 2624",
+              "PHD on EM1",
+              "PHD",
+              "Multipliers Off",
+              "EM 2 on @ 2462",
+              "PHD on EM2",
+              "PHD",
+              "Multipliers Off",
+              "EM 2 on @ 2624",
+              "PHD on EM2",
+              "PHD",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "FOCUS MODE 4",
+              "EM 2 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "FOCUS MODE 4",
+              "EM 2 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "FOCUS MODE 4",
+              "EM 2 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "FOCUS MODE 4",
+              "EM 2 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "FOCUS MODE 4",
+              "EM 2 on @ 2624",
+              "FS:CSN Hi fil 1",
+              "FS:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "US:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "VS:CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "L6: CSN Hi fil 1",
+              "Multipliers Off",
+              "FOCUS MODE 4",
+              "EM 1 on @ 2624"
+            ],
+            "multiplierOnCommands": [
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2462
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 1,
+                "settingCode": 2624
+              },
+              {
+                "multiplier": 2,
+                "settingCode": 2624
+              }
+            ]
+          },
+          "payloadDownload": {
+            "byteLength": 39959,
+            "contentLengthHeader": "39959",
+            "contentType": "text/plain; charset=UTF-8",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010194_20120923T174216_v01_r01.txt",
+            "httpStatus": 200,
+            "sha256": "375aaeabdd38ebe19b7579c83703af9a0a706ee6427a8c6dc497ba532660b806",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-msg-010194_20120923T174216_v01_r01.txt"
+          },
+          "payloadFileName": "mvn_ngi_l1c_gnd-msg-010194_20120923T174216_v01_r01.txt",
+          "payloadSha256": "375aaeabdd38ebe19b7579c83703af9a0a706ee6427a8c6dc497ba532660b806",
+          "payloadSizeMatchesLabel": true
+        },
+        "gnd-sci": {
+          "columnNamesFromPdsLabel": [
+            "TIME",
+            "MKID",
+            "INTEGRATION_PERIOD",
+            "TUNING",
+            "MASS",
+            "COUNTS_PER_SECOND",
+            "DAC_ID",
+            "DAC_SETTING"
+          ],
+          "detachedLabelAuthenticity": "not_independently_authenticated",
+          "labelDeclaredFileSizeBytes": 15212736,
+          "labelDeclaredRecordCount": 352440,
+          "labelDownload": {
+            "byteLength": 10200,
+            "contentLengthHeader": "10200",
+            "contentType": "text/xml",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010194_20120923T174216_v01_r01.xml",
+            "httpStatus": 200,
+            "sha256": "36965c4fb7e1a67f456e55215182ebabec315309a5f42b1306feb846203e6e77",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010194_20120923T174216_v01_r01.xml"
+          },
+          "labelSha256": "36965c4fb7e1a67f456e55215182ebabec315309a5f42b1306feb846203e6e77",
+          "logicalIdentifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010194_20120923t174216",
+          "payloadDownload": {
+            "byteLength": 15212736,
+            "contentLengthHeader": "15212736",
+            "contentType": "text/csv",
+            "finalUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010194_20120923T174216_v01_r01.csv",
+            "httpStatus": 200,
+            "sha256": "09ad8d858db79dc0e0fcc8c7fd8ca6291e9d332caf6a8aa3658e725f38c81de7",
+            "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/2012/09/mvn_ngi_l1c_gnd-sci-010194_20120923T174216_v01_r01.csv"
+          },
+          "payloadFileName": "mvn_ngi_l1c_gnd-sci-010194_20120923T174216_v01_r01.csv",
+          "payloadSha256": "09ad8d858db79dc0e0fcc8c7fd8ca6291e9d332caf6a8aa3658e725f38c81de7",
+          "payloadSizeMatchesLabel": true,
+          "scienceSummary": {
+            "blankMassRowCount": 205331,
+            "detectedColumns": {
+              "counts": null,
+              "cps": "COUNTS_PER_SECOND",
+              "filament": null,
+              "focusModeOrTuning": "TUNING",
+              "integrationPeriod": "INTEGRATION_PERIOD",
+              "mass": "MASS",
+              "multiplier": null
+            },
+            "focusModeOrTuningSummaries": {
+              "1": {
+                "massBinCount": 891,
+                "targetMassEvidence": {
+                  "14": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 13622.223000000002,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 14.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  "16": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 110214.81399999998,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 16.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  "19": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 622.2209999999999,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 19.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  "28": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 183281.48200000002,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 28.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  "40": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 677.778,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 40.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  "44": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 66903.703,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 44.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  "84": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 22.224,
+                    "cpsObserved": 5,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 5
+                    },
+                    "massToCharge": 84.0,
+                    "multiplierValues": {},
+                    "rowCount": 5
+                  },
+                  "86": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 0.0,
+                    "cpsObserved": 5,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 5
+                    },
+                    "massToCharge": 86.0,
+                    "multiplierValues": {},
+                    "rowCount": 5
+                  }
+                },
+                "topMassBinsByIntegratedRawCounts": [
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 22.221999999999998,
+                    "cpsObserved": 5,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 5
+                    },
+                    "massToCharge": 0.0,
+                    "multiplierValues": {},
+                    "rowCount": 5
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2070.3689999999997,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 1.5,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 9981.483,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 1.6,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 126988.889,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 1.7,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 188129.62900000002,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 1.8,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 193011.11000000004,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 1.9,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 188659.259,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 182944.44300000003,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.1,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 170199.99899999998,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.2,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 118037.03800000002,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.3,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 62.96199999999999,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.4,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 0.0,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.5,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 0.0,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.6,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 22.221999999999998,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.7,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 70.37,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.8,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 81.482,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 2.9,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 59.25899999999999,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 3.0,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 29.628999999999998,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 3.1,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 51.851,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 3.2,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 51.852,
+                    "cpsObserved": 10,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 10
+                    },
+                    "massToCharge": 3.3,
+                    "multiplierValues": {},
+                    "rowCount": 10
+                  }
+                ]
+              },
+              "4": {
+                "massBinCount": 900,
+                "targetMassEvidence": {
+                  "14": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 16879.877112299477,
+                    "cpsObserved": 374,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 374
+                    },
+                    "massToCharge": 14.0,
+                    "multiplierValues": {},
+                    "rowCount": 374
+                  },
+                  "16": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 164963.16104278053,
+                    "cpsObserved": 374,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 374
+                    },
+                    "massToCharge": 16.0,
+                    "multiplierValues": {},
+                    "rowCount": 374
+                  },
+                  "19": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 241.03820855615027,
+                    "cpsObserved": 374,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 374
+                    },
+                    "massToCharge": 19.0,
+                    "multiplierValues": {},
+                    "rowCount": 374
+                  },
+                  "28": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 330423.4500802137,
+                    "cpsObserved": 374,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 374
+                    },
+                    "massToCharge": 28.0,
+                    "multiplierValues": {},
+                    "rowCount": 374
+                  },
+                  "40": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 128081.33595964816,
+                    "cpsObserved": 1933,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 1933
+                    },
+                    "massToCharge": 40.0,
+                    "multiplierValues": {},
+                    "rowCount": 1933
+                  },
+                  "44": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 138067.73612299474,
+                    "cpsObserved": 374,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 374
+                    },
+                    "massToCharge": 44.0,
+                    "multiplierValues": {},
+                    "rowCount": 374
+                  },
+                  "84": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3135761.472886297,
+                    "cpsObserved": 343,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 343
+                    },
+                    "massToCharge": 84.0,
+                    "multiplierValues": {},
+                    "rowCount": 343
+                  },
+                  "86": {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 2336932.620874635,
+                    "cpsObserved": 343,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 343
+                    },
+                    "massToCharge": 86.0,
+                    "multiplierValues": {},
+                    "rowCount": 343
+                  }
+                },
+                "topMassBinsByIntegratedRawCounts": [
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 88.26598130841121,
+                    "cpsObserved": 107,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 107
+                    },
+                    "massToCharge": 0.0,
+                    "multiplierValues": {},
+                    "rowCount": 107
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 3755.0357894736835,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 1.5,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 19171.215350877188,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 1.6,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 246937.94657894733,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 1.7,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 359809.29157894704,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 1.8,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 362124.10614035086,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 1.9,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 238931.110975,
+                    "cpsObserved": 400,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 400
+                    },
+                    "massToCharge": 2.0,
+                    "multiplierValues": {},
+                    "rowCount": 400
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 362847.3036842106,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.1,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 351121.8322807018,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.2,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 299030.53964912274,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.3,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 178.36289473684218,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.4,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 20.792894736842104,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.5,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 16.89421052631579,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.6,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 138.07710526315813,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.7,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 328.78482456140387,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.8,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 321.63798245614083,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 2.9,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 144.62962500000052,
+                    "cpsObserved": 400,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 400
+                    },
+                    "massToCharge": 3.0,
+                    "multiplierValues": {},
+                    "rowCount": 400
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 310.26657894736877,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 3.1,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 325.53675438596537,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 3.2,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  },
+                  {
+                    "countsMax": null,
+                    "countsMean": null,
+                    "countsMin": null,
+                    "countsObserved": 0,
+                    "countsSum": null,
+                    "cpsMean": 256.3356140350879,
+                    "cpsObserved": 114,
+                    "filamentValues": {},
+                    "integrationPeriodValues": {
+                      "0.027": 114
+                    },
+                    "massToCharge": 3.3,
+                    "multiplierValues": {},
+                    "rowCount": 114
+                  }
+                ]
+              }
+            },
+            "gasIdentityAssigned": false,
+            "gasIdentityNote": "Mass-channel signal summaries are preserved as raw evidence. A dominant channel alone is not treated as sufficient identification of the calibration gas.",
+            "headers": [
+              "TIME",
+              "MKID",
+              "INTEGRATION_PERIOD",
+              "TUNING",
+              "MASS",
+              "COUNTS_PER_SECOND",
+              "DAC_ID",
+              "DAC_SETTING"
+            ],
+            "invalidMassRowCount": 0,
+            "pdsLabelFieldNames": [
+              "TIME",
+              "MKID",
+              "INTEGRATION_PERIOD",
+              "TUNING",
+              "MASS",
+              "COUNTS_PER_SECOND",
+              "DAC_ID",
+              "DAC_SETTING"
+            ],
+            "rowCount": 352440
+          }
+        }
+      },
+      "sisDesignation": "Krypton calibration",
+      "sisDesignationConflictsWithMessageDirectory": false,
+      "tid": 10194
+    }
+  ],
+  "retrievedTidCount": 2,
+  "schemaVersion": "1.0.0",
+  "sourceCollection": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/",
+  "sourceSIS": "MAVEN NGIMS PDS SIS Rev. 1.13, Table A-11",
+  "status": "preflight_products_audited_raw_sensitivity_not_rederived"
+}
