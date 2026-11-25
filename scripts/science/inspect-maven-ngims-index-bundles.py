@@ -241,6 +241,14 @@ def run_self_tests() -> None:
 
 
 def main() -> int:
+    selector_only = "--selector-only" in sys.argv[1:]
+    selected_sources = (
+        [source for source in SOURCES if source["name"] == "MAVEN_NGIMS_Single-Species_del1-43.csv"]
+        if selector_only
+        else SOURCES
+    )
+    if selector_only and not selected_sources:
+        raise RuntimeError("official single-species selector CSV source is not configured")
     OUTPUT.mkdir(parents=True, exist_ok=True)
     archive_audits = []
     all_matches: list[dict] = []
