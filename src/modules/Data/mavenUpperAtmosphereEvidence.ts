@@ -3151,7 +3151,7 @@ function strictNgimsUtcTimestamp(value: string): string | null {
   return new Date(timestamp).toISOString();
 }
 
-/** Table A-9 t_utc is defined as UTC yyyy-mm-ddThh:mm:ss; a trailing Z is optional in the ASCII product. */
+/** NGIMS L3 t_utc is defined as UTC yyyy-mm-ddThh:mm:ss; a trailing Z is optional in ASCII products A-9/A-10. */
 function strictNgimsL3UtcTimestamp(value: string): string | null {
   const trimmed = value.trim();
   const withUtcSuffix = /Z$/i.test(trimmed) ? trimmed : trimmed + 'Z';
@@ -3175,8 +3175,8 @@ export function parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
   ) as Record<string, string | undefined>;
   const errors: string[] = [];
   const timeRaw = row.t_utc;
-  const timeUtc = typeof timeRaw === 'string' ? strictNgimsUtcTimestamp(timeRaw.trim()) : null;
-  if (timeUtc === null) errors.push('t_utc must be a valid UTC timestamp ending in Z');
+  const timeUtc = typeof timeRaw === 'string' ? strictNgimsL3UtcTimestamp(timeRaw.trim()) : null;
+  if (timeUtc === null) errors.push('t_utc must be a valid UTC calendar timestamp in the NGIMS Table A-10 format');
 
   const numberFields = [
     't_unix', 't_sclk', 't_tid', 'tid', 'orbit', 'exo_alt', 'mass',
