@@ -1265,9 +1265,19 @@ describe('MAVEN upper-atmosphere evidence', () => {
           qualityFlagCounts: Record<string, number>;
           rawSpeciesRowCounts: Record<string, number>;
           rawQualityFlagCounts: Record<string, number>;
-          rawQualityFlagCounts: Record<string, number>;
+          abundanceSentinelMinus999Rows: number;
+          zeroAbundanceRows: number;
+          precisionSentinelMinus999Rows: number;
+          numericRejectionReasonCounts: Record<string, number>;
+          profileCandidateRows: number;
         };
       }>;
+      discoveryAudit: {
+        matchingL2AbundanceProductCountIn2014AnnualArchive: number;
+        focusModesFound: string[];
+        csoAbundanceProductFoundForExactTidAndEvent: boolean;
+        scope: string;
+      };
     };
     expect(manifest.products).toHaveLength(1);
     const product = manifest.products[0];
@@ -1283,6 +1293,21 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(product.csvSummary.sourceHeaderAliasesApplied).toEqual({
       cps_dt_bkd: 'cps_dt_bkgd',
       t_sclk_cor: 't_sclk'
+    });
+    expect(product.csvSummary).toMatchObject({
+      abundanceSentinelMinus999Rows: 905,
+      zeroAbundanceRows: 327,
+      precisionSentinelMinus999Rows: 687,
+      numericRejectionReasonCounts: {
+        abundance_sentinel_-999: 905,
+        nonpositive_abundance: 327
+      },
+      profileCandidateRows: 987
+    });
+    expect(manifest.discoveryAudit).toMatchObject({
+      matchingL2AbundanceProductCountIn2014AnnualArchive: 1,
+      focusModesFound: ['csn'],
+      csoAbundanceProductFoundForExactTidAndEvent: false
     });
     expect(product.csvSummary.speciesRowCounts).toEqual({
       Ar: 372, CO2: 352, He: 481, N2: 359
@@ -1306,6 +1331,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
     // sentinel precision, or other numeric limitations.
     expect(strict.rows.filter(entry => entry.rawRecord.quality === 'I0')).toHaveLength(346);
     expect(strict.rows.filter(entry => entry.rawRecord.quality === 'UR')).toHaveLength(706);
+    expect(strict.rows.filter(entry =>
+      entry.rawRecord.species === 'He' &&
+      entry.rawRecord.quality === 'IV' &&
+      Number(entry.rawRecord.abundance) === -999
+    )).toHaveLength(75);
     expect(product.csvSummary.qualityFlagCounts).toMatchObject({
       IU: 175, IV: 389, OU: 213, OV: 210, UR: 423, 'unrecognized:I0': 154
     });
