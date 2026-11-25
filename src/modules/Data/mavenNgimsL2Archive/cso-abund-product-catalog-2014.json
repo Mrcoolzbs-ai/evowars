@@ -1,0 +1,7 @@
+{
+  "archiveSha256": "c7ed14c9bbbf374a2dc2c880a9c8da30fd3603547ce7be0b0f147cc3affe2a75",
+  "archiveUrl": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL2_2014.tar.gz",
+  "candidateCount": 0,
+  "candidates": [],
+  "scope": "filename-level discovery of cso-abund products in the official 2014 annual archive; candidate CSV/XML payloads are not yet validated or joined"
+}

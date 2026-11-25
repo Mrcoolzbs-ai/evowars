@@ -10,11 +10,14 @@
     "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL2_2014.tar.gz"
   },
   "discoveryAudit": {
+    "csoAbundanceCandidateCatalogFile": "cso-abund-product-catalog-2014.json",
+    "csoAbundanceProductCountIn2014AnnualArchive": 0,
     "csoAbundanceProductFoundForExactTidAndEvent": false,
-    "focusModesFound": [
+    "csoAbundanceProductsMissingCsvOrXmlPartner": 0,
+    "focusModesFoundForExactTidAndEvent": [
       "csn"
     ],
-    "matchingL2AbundanceProductCountIn2014AnnualArchive": 1,
+    "matchingL2AbundanceProductCountForExactTidAndEvent": 1,
     "scope": "official 2014 annual NGIMS derived L2 archive only; absence outside this bundle is not inferred"
   },
   "indexEvidence": {
