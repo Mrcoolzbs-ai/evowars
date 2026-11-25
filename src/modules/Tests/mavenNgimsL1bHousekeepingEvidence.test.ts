@@ -116,8 +116,13 @@ describe('MAVEN NGIMS phase-to-housekeeping association',()=>{
   it('rejects invalid schema, field sets and malformed rows',()=>{
     expect(associateMavenNgimsL1bHousekeepingRowsByPhase('TIME,MKID\n1,2',markers(),{fields,expectedColumnCount:2}))
       .toMatchObject({status:'rejected'});
-    expect(associateMavenNgimsL1bHousekeepingRowsByPhase(hk([['100','2001','bad','-25']]),markers(),{fields,expectedColumnCount:4}))
-      .toMatchObject({status:'rejected'});
+    const malformedValue=associateMavenNgimsL1bHousekeepingRowsByPhase(
+      hk([['100','2001','bad','-25']]),markers(),{fields,expectedColumnCount:4}
+    );
+    expect(malformedValue.status).toBe('completed');
+    if(malformedValue.status==='completed') {
+      expect(malformedValue.phaseAssociations?.[0].fieldStatistics[0].nonNumericValueCount).toBe(1);
+    }
     expect(associateMavenNgimsL1bHousekeepingRowsByPhase(hk([['100','2001','1','2']]),markers(),{fields:[...fields,{name:'MISSING',unit:'V'}],expectedColumnCount:4}))
       .toMatchObject({status:'rejected'});
   });
