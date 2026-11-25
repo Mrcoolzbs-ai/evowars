@@ -3,7 +3,8 @@
 > **Статус документа:** реконструкция требований и фактических контрактов по исходному коду, тестам, истории изменений и инженерным документам.
 >
 > **Срез:** 25 ноября 2026 года.  
-> **Кодовый срез:** ветка `stage-3-planetary-physics`, HEAD `56b721452c29dbbcddc4efb97e1431f527a9174d` (25.11.2026 17:45:48 UTC; последнее изменение — документационная коррекция статистики маркерных интервалов). Ветка также содержит Stage 4.2 реализации L1B, marker/HK и калибровочных evidence readers. Последняя подтверждённая полная CI-база — run [#1047](https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45517189242) на commit `e47deceecf765e06f2c10671b8aba245e538dd59` (3 329 тестов passed, 53 skipped); этот запуск предшествует последующим Stage 4.2 изменениям. Для HEAD `56b7214` проверенные GitHub status/workflow records не содержат результата CI, поэтому успешность run #1047 нельзя переносить на текущий HEAD.  
+> **Кодовый срез расширенной ветки:** `stage-3-planetary-physics`, текущий HEAD открытого PR #1 — `185ca962ad32118abf996d0a6e9bf216613fda04` (25.11.2026 18:51:21 UTC; последний commit синхронизирует документацию). После более раннего среза `56b7214` добавлены воспроизводимый аудит официальных индексов NGIMS L2/L3, точное сопоставление продуктов и замороженный результат аудита; см. §6.17.  
+> **CI:** последняя подтверждённая полная CI-база — run [#1047](https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45517189242) на commit `e47deceecf765e06f2c10671b8aba245e538dd59` (3 329 тестов passed, 53 skipped). Она предшествует Stage 4.2 и последующим изменениям. Для PR HEAD `185ca962` проверенные GitHub combined-status и PR-triggered workflow records не содержат результата; успешность run #1047 нельзя переносить на текущий HEAD.  
 > **Интеграционный статус:** кодовые изменения этой ветки остаются в открытом PR [#1](https://github.com/Mrcoolzbs-ai/evowars/pull/1) в `main`; этот документ восстановлен отдельно в `main` и сам по себе не означает, что функции этапа 3 уже вошли в основную ветку.
 >
 > Документ различает **реализовано**, **частично реализовано** и **планируется**. Наличие типа, интерфейса или проектного документа само по себе не означает, что соответствующая физическая модель работает в пользовательском сценарии.
@@ -235,7 +236,7 @@ The MGS selection is a temperature-only reference attachment. It does not replac
 
 ### 6.14 Архив NGIMS: покрытие и метаданные селектора
 
-На странице PDS NGIMS указано, что архив наблюдений на момент документированного среза охватывает данные по 15 февраля 2025 года (Ls 44.2, MY 38; миссия продолжается). В годовом каталоге за 2025 год перечислено 308 МБ abundance-продуктов. В качестве селектора Single-Species указан файл `MAVEN_NGIMS_Single-Species_del1-43.csv` размером 6,6 МБ с датой изменения 19 декабря 2025 года. Дата изменения селектора — это дата ревизии файла, а не дата последнего наблюдения. Связанный файл `.htm` размером 62 байта не является читаемой HTML-таблицей. Сам CSV-селектор не импортирован, поэтому его нельзя считать доказательством полного перечня доступных TID/orbit-продуктов. Это ограничение не отменяет отдельную адресную загрузку и проверку события TID 14282 / orbit 391 из годового архива 2014 года: конкретные импортированные продукты и их ограничения документированы отдельно в §§6.8 и 6.15–6.16. Ни покрытие архива, ни состав события не выводятся только из временной метки или имени файла.
+На странице PDS NGIMS указано, что архив наблюдений на момент документированного среза охватывает данные по 15 февраля 2025 года (Ls 44.2, MY 38; миссия продолжается). В годовом каталоге за 2025 год перечислено 308 МБ abundance-продуктов. Селектор Single-Species `MAVEN_NGIMS_Single-Species_del1-43.csv` имеет размер 6,6 МБ и дату изменения 19 декабря 2025 года; это дата ревизии файла индекса, а не дата последнего наблюдения. Связанный файл `.htm` размером 62 байта не является читаемой HTML-таблицей. Содержимое CSV-индекса теперь загружено и обработано вместе с индексами L3 res-den и L3 res-sht; это каталоги выбора продуктов, а не измерительный L2 abundance CSV. Точная логика связки и ограничения описаны в §6.17. Индексный аудит не означает, что весь архив продуктов импортирован или что все перечисленные записи являются наблюдениями пригодного качества.
 
 ### 6.15 MAVEN NGIMS L1B: измерительный сигнал и пределы калибровки
 
@@ -260,6 +261,80 @@ TID 14282 датирован 11 декабря 2014 года и относитс
 Предкалибровочные HK-продукты TID 10191 (991 617 строк; 324 столбца; 360 172 138 bytes) и TID 10194 (355 082 строк; 324 столбца; 128 894 809 bytes) проверены по PDS4 schema/record counts. `CDH:BA_PRES` и `CDH:BA_PRES_LO` — разреженные readbacks в вольтах, не давление; они встречаются примерно в 0.734% строк. Каналы `CDH:THPRES` и `FSW:THERM_PRESS` оставлены неинтерпретированными. HK строки связываются с последним предшествующим marker в raw SCLK порядке только при точном совпадении MKID; несовпадения не переназначаются соседнему событию. Поле/канал клапана резервуара не установлен.
 
 Ключевой отсутствующий источник — внешний stable ion gauge, которым, согласно описанию процедуры, измерялось давление при наземной статической калибровке; сам набор PDS NGIMS не содержит его серию, сертификат/диапазон и синхронизацию с интервалами спектрального измерения. Также остаётся расхождение: SIS обозначает TID 10191 как Argon, а имя message-log каталога содержит `KrCalibration`; спектральные признаки больше согласуются с Ar, но конфликт хранится как ручной флаг. Без внешнего pressure reference, подтверждённой reference-gas density, valve-open interval, CEM 2 dead-time и полного response matrix нельзя вывести absolute sensitivity или `C_EN` и нельзя делать CPS-to-density conversion. Stage 4.2 остаётся OPEN / NOT_READY; импортированные MAVEN данные не подключены к Scheduler initial state.
+
+### 6.17 Официальные индексы MAVEN NGIMS L2/L3: обнаружение и точная связь продуктов
+
+Загружены три официальных PDS selection-index CSV: L2 Single-Species
+`MAVEN_NGIMS_Single-Species_del1-43.csv` (6 906 311 bytes), L3 res-den
+`Maven_NGIMS_Altitude-Resampled_del 1-40.csv` (2 236 799 bytes) и L3
+res-sht `MAVEN_NGIMS_Scale-Height&Temp_del1-42.csv` (3 257 701 bytes).
+Все три загрузки завершились HTTP 200. Эти файлы — индексы выбора продуктов,
+а не таблицы измерений.
+
+Аудит извлёк 59 816 индексных записей: L2 csn-abund — 16 945, L2 ion-abund —
+15 632, L3 res-den — 11 090, L3 res-sht — 16 149. Это число записей в
+selection indexes, не число наблюдений или валидных измерений. В индексе
+L2 Single-Species нет записи cso-abund; вывод ограничен этим индексом и не
+доказывает миссионное отсутствие всех соответствующих продуктов.
+
+Ключ связи — строго `(TID, product timestamp из PDS URN)`. Кандидат принимается,
+только если для каждой роли существует один distinct URN, а все три записи
+имеют идентичные UTC start/stop windows. Nearest-neighbour, допуск по времени,
+интерполяция и геометрическое сопоставление не используются. Первичный аудит
+обнаружил 180 повторных ссылок L3 res-den, присутствовавших в двух каталогах.
+Один и тот же URN с идентичными метаданными учитывается как один продукт с
+двумя источниками каталога; числовые altitude и solar-longitude сравниваются
+как точные decimal values. Разные URN или различающиеся метаданные приводят
+к fail-closed конфликту. Итог: 17 020 distinct event keys, 10 796 полных
+L2-CSN + L3-res-den + L3-res-sht triples, 180 схлопнутых повторных ссылок и
+ноль неразрешённых duplicate join keys. Это связи на уровне индексов; они
+не доказывают совпадение временных/высотных строк и научную пригодность.
+
+**TID 14282 / orbit 391.** Три точные PDS identity:
+- L2 CSN abundance: `urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406`;
+- L3 resampled density: `urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406`;
+- L3 scale-height temperature: `urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406`.
+
+Индексные записи задают общее окно 2014-12-11 15:45:25–17:29:43 UTC,
+altitude 152.981 km, signed solar longitude −110.209° и MY 32. При этом
+closest-approach metadata расходится: L2 сообщает 16:37:34 UTC, оба L3 —
+17:15:29 UTC. Эти значения сохраняются раздельно; closest approach не является
+ключом связи и не усредняется.
+
+Связанные измерительные продукты имеют дополнительные блокеры:
+- **L2 csn-abund:** 538 939 CSV bytes, detached label заявляет 539 063 (+124);
+  MD5 отсутствует. Из 2 796 строк 1 564 проходят numeric abundance/precision
+  gate, 987 остаются profile candidates после quality classification.
+  N₂ с неизвестным I0/UR не повышается до detection.
+- **L3 res-den:** 23 658 CSV bytes, label заявляет 23 743 (+85), MD5 отсутствует.
+  В 208 строках `density_bins` сохраняется как raw coordinate: преобразование
+  в линейные cm⁻³/m⁻³ заблокировано неразрешённым противоречием между log-bin
+  описанием SIS и единицами Table A-9.
+- **L3 res-sht:** 702 CSV bytes, label заявляет 843 (+141), MD5 отсутствует.
+  Из четырёх строк приняты два HI fit: Ar 108.170861 ± 28.693767 K и CO₂
+  100.614597 ± 24.592182 K, оба на exobase altitude 464.9283 km. Это
+  видоспецифичные температуры, выведенные из scale-height fits, а не
+  локальные измерения T(z).
+
+У всех трёх detached labels есть file-size mismatch и отсутствует MD5.
+Исходные байты сохраняются, labels не аутентифицированы независимо, PDS4
+импорт разрешён только в forensic-only режиме. Временное покрытие строк также
+не совпадает: L2 — 17:06:03–17:22:54 UTC, L3 res-den — 17:04:27–17:15:31 UTC,
+два принятых L3 res-sht fit имеют timestamp 17:04:37 UTC.
+
+Замороженный результат: `src/modules/Data/mavenNgimsIndexBundleAudit/product-index-audit.json`;
+воспроизводимый аудит: `scripts/science/audit-ngims-product-indexes.py`.
+TypeScript-контракт `linkMavenNgimsL2L3IndexProductSet()` проверяет три роли,
+точные TID/product-time и одинаковые index windows, сохраняя исходные
+closest-approach metadata. Ни индексная связь, ни TypeScript link не допускаются
+к Scheduler или Mars photochemical initial-state construction.
+
+Это закрывает только задачу обнаружения и cross-link продуктов. Не решены
+NGIMS sensitivity calibration, семантика L3 density bins, отсутствующие виды и
+quality, общий row-level vertical coverage и отсутствие полного проверенного
+T(z)/P(z)/transport/chemistry initial state. Stage 4.2 остаётся
+**OPEN / NOT_READY**. Подробная byte-level provenance приведена в
+`docs/science/DATA_PROVENANCE.md` §2.38.
 
 ## 7. Химия и эволюция
 
@@ -346,7 +421,7 @@ UI отображает результат и объяснения, но не я
 | Физика тела, атмосферы, орбиты, энергетики, геологии и фазовый скрининг | PR #1 / Stage 3 | Частично реализовано | Орбитальные диапазоны модельные; геология преимущественно качественная; климатической модели нет |
 | MGS Mars `8028D38A.TPS` и гидростатический Core-адаптер | PR #1 / Stage 3 | Reference-адаптер и first-order 1σ postprocessor | Один retrieval-профиль; состав задаётся явно; диагональное приближение ковариации; неопределённости состава/гравитации/тела не рассчитаны; нет автоматического подключения к Scheduler-химии |
 | SAM, ACS HO2 и OpenMARS | PR #1 / Stage 3 | Evidence records и проверки coverage | SAM — неполный near-surface состав; ACS — upper limits, не detections; OpenMARS — модельные оценки; источники не образуют общий синхронный профиль |
-| MAVEN IUVS/NGIMS L2/L3 | Верхняя атмосфера, publication references, quality-aware readers и exact co-registration | Заморожены L2 csn-abund, L3 res-den и L3 res-sht TID 14282; exact 118-node He–CO₂–Ar intersection; PDS4 forensic gates | Только csn-abund для TID 14282; O/NO/NO₂/CO/O₂ отсутствуют, N₂ quality I0 неизвестен. He/IV 271, CO₂/IU 134, Ar/IV 118. SHT даёт два species-specific derived fit temperatures на 464.9283 km, не local T(z). Labels имеют file_size mismatch и no MD5; исходные байты quarantined. L3 density-bin conversion unresolved. Нет полного 16-species snapshot, синхронных T(z)/P(z), транспорта и Scheduler initial-state integration |
+| MAVEN IUVS/NGIMS L2/L3 | Верхняя атмосфера, publication references, quality-aware readers и exact co-registration | Заморожены L2 csn-abund, L3 res-den и L3 res-sht TID 14282; exact 118-node He–CO₂–Ar row intersection; отдельный аудит официальных L2/L3 product indexes: 59 816 записей, 17 020 event keys, 10 796 точных L2-CSN + L3-res-den + L3-res-sht index triples | Индексные triples — каталоговые связи, не число измеренных профилей и не доказательство row-level overlap. Для TID 14282: только csn-abund; O/NO/NO₂/CO/O₂ отсутствуют, N₂ quality I0/UR не повышается до detection. He/IV 271, CO₂/IU 134, Ar/IV 118. SHT даёт два species-specific derived fit temperatures на 464.9283 km, не local T(z). Labels имеют file_size mismatch и no MD5; исходные байты forensic-only. L3 density-bin conversion unresolved. Нет полного 16-species snapshot, синхронных T(z)/P(z), транспорта и Scheduler initial-state integration |
 | MAVEN NGIMS L1B / calibration evidence | Измерительные CPS, marker/HK временная структура и pre-flight calibration evidence | L1B TID 14282 (39 999 строк), 88-row marker log, exact MKID/HK association; SIS ground references и pre-flight TID 10191/10194 HK audit | m/z не определяет вид; CPS не конвертируется в плотность. File-size mismatches требуют forensic-only. Нет flight-specific sensitivity, C_EN, CEM 2 dead-time и внешней ion-gauge series; Stage 4.2 OPEN / NOT_READY |
 | Типизированные научные величины, provenance, резервуары, потоки, журналы и состояние мира | PR #1 / Stage 3 | Инфраструктура реализована | Наличие контрактов и инвариантов не означает наличие решателя для каждого физического процесса |
 | Часы, Scheduler, события, splitting и аудит | PR #1 / Stage 3 | Инфраструктура реализована | Полная автоматизация всех физических процессов не завершена |
@@ -413,6 +488,7 @@ npm run build
 | `src/modules/Data/marsAtmosphericChemistry.ts` | SAM Gale Crater, ACS/TGO HO2 upper limits и OpenMARS estimates с раздельным provenance |
 | `src/modules/Data/mavenUpperAtmosphereEvidence.ts`, `mavenNgimsL1bEvidence.ts`, `mavenNgimsL1bCalibrationReference.ts` и связанные frozen archive/evidence modules | MAVEN IUVS, NGIMS L2/L3/L1B readers, PDS4 gates, marker/HK diagnostics и ограниченные calibration references; без CPS-to-density модели |
 | `src/modules/Data/marsPhotochemistryEvidence.ts`, `marsGasPhaseKinetics.ts` | Source-backed photolysis и gas-phase kinetics для ограниченного механизма Марса |
+| `src/modules/Data/mavenNgimsIndexBundleAudit/`, `scripts/science/audit-ngims-product-indexes.py` | Frozen audit трёх официальных NGIMS selection indexes, exact TID/product-time/window joins, duplicate reconciliation и воспроизводимые проверки; результат не является Scheduler initial state |
 | `src/modules/RustSim/`, `rust/`, `scripts/` | Экспериментальный Rust/WASM-пилот и benchmark-инфраструктура |
 | `docs/science/`, `docs/rust/`, `docs/research/` | Расширенные инженерные, научные и исследовательские документы ветки PR #1 |
 
