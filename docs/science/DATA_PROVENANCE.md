@@ -1271,6 +1271,47 @@ clock offset, interpolation or carry-forward of a pressure measurement. The
 join is rejected if the marker time sequence is incomplete/non-monotonic or
 the HK time stream becomes non-monotonic.
 
+The final interval-join diagnostics are:
+
+| TID | HK rows (PDS4 label) | Marker events | HK rows matched | MKID/time mismatches | Blank MKID rows | Event groups | Groups with no BA sample |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10191 | 991,617 / 991,617 | 1,284 | 987,026 | 505 | 4,086 | 1,234 | 453 |
+| 10194 | 355,082 / 355,082 | 348 | 352,475 | 402 | 2,205 | 335 | 132 |
+
+Both HK and marker SCLK sequences had zero backward-time steps and zero
+non-numeric time rows. The mismatch counts are deliberately not force-joined:
+the matched records are those where the current HK MKID equals the latest
+preceding event's MKID. The excluded HK rows are 0.051% of nonblank-MKID rows
+for TID 10191 and 0.114% for TID 10194. Marker ID 0 is reused (467 event
+records in TID 10191); each use remains a separate event group keyed by the
+marker file's record number.
+
+The BA readback is sparse in the full housekeeping stream:
+
+| TID | `CDH:BA_PRES` samples | `CDH:BA_PRES_LO` samples |
+| --- | ---: | ---: |
+| 10191 | 7,281 / 991,617 (0.734%) | 7,282 / 991,617 (0.734%) |
+| 10194 | 2,607 / 355,082 (0.734%) | 2,608 / 355,082 (0.734%) |
+
+Thus, per-event means and ranges are statistics of the actual sparse readbacks
+only. They are not continuous pressure time series. For example, TID 10191 has
+84 `CSN Background` event intervals (621 `CDH:BA_PRES` samples,
+mean -0.01382 V) and 84 `OSNT Background` intervals (631 samples, mean
+-0.01858 V). TID 10194 has 10 events of each background type (74 samples each;
+means -0.03234 V for CSN and -0.03467 V for OSNT). These voltage offsets are
+not converted to pressure.
+
+The NGIMS calibration directory lists the `gnd-sci`, `gnd-hk`,
+`gnd-mkr` and `gnd-msg` products for these TIDs. The external stable
+ion-gauge measurements described by the calibration paper, and the Mechanical
+GSE pressure-monitor log, are not among the four retrieved NGIMS product files.
+The instrument paper describes Mechanical GSE as the calibration chamber,
+pressure monitors and gas manifold, and identifies MAVENGSE/MAVENDataView as
+the software used to command/view recorded test telemetry. This is the next
+archive/source to obtain; the present PDS products do not include its external
+pressure series. This does not establish that no separate GSE backup exists.
+
+
 The SIS calls TID 10191 Argon, while its message-log directory is named
 `KrCalibration`; this discrepancy remains a manual-review flag. Raw science
 evidence supports the SIS designation more strongly than the folder name:

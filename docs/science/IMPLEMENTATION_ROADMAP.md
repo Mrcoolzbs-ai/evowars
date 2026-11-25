@@ -1310,6 +1310,23 @@ in raw SCLK order only when the current MKID exactly matches that event, and
 groups are keyed by marker-event record number to keep reused MKID values
 separate. Non-monotonic/incomplete marker time axes disable the join.
 
+The current verified run has zero non-monotonic or non-numeric time rows.
+It associates 987,026 of 991,617 HK rows in TID 10191 and 352,475 of 355,082
+in TID 10194 with a preceding marker event whose MKID matches exactly. A
+further 505 and 402 rows, respectively, are flagged as ID/time mismatches,
+and 4,086 / 2,205 rows have blank MKID. No mismatches are assigned to a
+neighboring marker. The event reports contain 1,234 and 335 event groups;
+453 and 132 groups have no BA pressure-monitor sample.
+
+`CDH:BA_PRES` was observed 7,281 times (0.734% of HK rows) in TID 10191
+and 2,607 times (0.734%) in TID 10194. `CDH:BA_PRES_LO` was observed
+7,282 and 2,608 times. These are sparse voltage readbacks, not continuous
+pressure values. The PDS calibration archive does not contain the external
+stable ion-gauge series used in the static sensitivity procedure or the
+Mechanical GSE pressure-monitor log; locating a GSE backup remains the
+blocking task. Stage 4.2 remains OPEN.
+
+
 The 10191 SIS designation (Ar) remains in conflict with its `KrCalibration`
 message-log directory, although its raw spectrum favors Ar. TID 10194 is
 consistent with Kr. Both are still pre-flight evidence; neither establishes a
