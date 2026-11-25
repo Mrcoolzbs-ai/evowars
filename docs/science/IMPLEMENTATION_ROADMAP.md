@@ -1221,3 +1221,19 @@ Open-source sensitivity still requires reference-species calibration,
 closed/open response and energy-correction factor described in NGIMS SIS
 Rev. 1.13 §3.3. Tests cover schema, UTC normalization, flags, row diagnostics,
 strict selection and the non-eligibility guard. Stage 4.2 remains OPEN / NOT_READY.
+
+
+## Stage 4.2 — NGIMS marker-log event windows (25.11.2026)
+
+The event-matched cal-mkr product for TID 14282 / orbit 391 is frozen
+with its detached PDS4 label. Its 88 rows identify one TIDSTART marker,
+one TIDSTOP marker and 15 paired "Phase mass scans starting" / "Phase ended."
+intervals. A fail-closed TypeScript parser extracts these windows in the
+source SCLK-seconds coordinate and preserves the original marker records.
+
+This is an instrument-protocol timeline, not a calibrated mass-channel
+exposure model. The parser does not convert SCLK to UTC, correlate the
+housekeeping clock with L1B t_sclk_cor, interpolate, or join any marker to
+a neutral-abundance row. The HK label describes TIME as an NGIMS-internal
+clock approximation; equivalence with corrected L1B time is not established.
+Stage 4.2 remains OPEN / NOT_READY.
