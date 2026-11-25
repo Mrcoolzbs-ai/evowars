@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Retrieve and audit all MAVEN NGIMS L2 abundance products for TID 14282.
 
-Run once by committing a subject containing [import-ngims-l2-tid-14282]. The manifest records both raw source flags and numerically eligible profile groups.
+Run once by committing a subject containing [import-ngims-l2-tid-14282]. The manifest records both raw source flags and numerically eligible profile groups. Profile summaries now split inbound and outbound tracks.
 
 Trigger this one-shot retrieval with a commit subject containing [import-ngims-l2-tid-14282].
 The annual PDS archive is the byte-preserving source. Candidate files are
