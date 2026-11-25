@@ -668,7 +668,7 @@ A single NGIMS density row/profile is not an initial world state: it lacks co-lo
 **Archive index identity:** The PDS logs directory lists `MAVEN_NGIMS_l2_del1-35.csv` as the L2 neutral index (revision del1-35, last modified 2023-11-15; 5.2 MB in the directory listing): https://pdsatmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/logs/MAVEN_NGIMS_l2_del1-35.csv. This identifier is recorded in `MAVEN_NGIMS_PDS_ARCHIVE.archiveIndexFiles` as a retrieval locator. The index itself and its per-orbit row payloads have not yet been frozen in the repository; the CSV parser's test fixtures are explicitly synthetic.
 
 
-**Single-profile selection after whole-file import:** `buildMavenNgimsNeutralProfileFromCsvImport()` requires explicit selection of species, MAVEN orbit, NGIMS TID, inbound/outbound branch, and verified/uncertain quality class. Only accepted measurements matching all five selectors reach the monotonic profile builder; cross-species/orbit/direction/quality mixtures and duplicate altitudes remain rejected. This is an import/profile extraction helper only: no generated world, reservoir, or Scheduler state is mutated. Unit fixtures prove that O can be selected from a CSV that also contains NO, without mixing species.
+**Single-profile selection after whole-file import:** `buildMavenNgimsNeutralProfileFromCsvImport()` requires explicit selection of species, MAVEN orbit, NGIMS TID, NGIMS focus mode, inbound/outbound branch, and verified/uncertain quality class. Only accepted measurements matching all six selectors reach the monotonic profile builder; cross-species/orbit/TID/focus-mode/direction/quality mixtures and duplicate altitudes remain rejected. This is an import/profile extraction helper only: no generated world, reservoir, or Scheduler state is mutated.
 
 
 ## 2.33 MAVEN NGIMS current product-selection index and orbit scope (24 Nov 2026)
@@ -772,3 +772,88 @@ The Generator now offers a second explicit atmosphere-temperature reference opti
 This is intentionally a `partial_profile`, not a complete atmospheric column. It describes one occultation at 1998-01-28 03:30:14.324 UTC, latitude 29.213° N, longitude 56.774° E, local true solar time 5.727 h, solar longitude 24.2° and solar zenith angle 105.35°. It is not a global/seasonal Mars climatology. The PDS temperature uncertainties remain recorded in provenance but are not converted to midpoint-layer uncertainties because inter-node covariance is not supplied. No temperatures are extrapolated below the lowest or above the highest retrieved row.
 
 Generator attachment does not overwrite the randomly sampled body mass/radius/gravity, Mars atmosphere preset composition/pressure, or the generated inventory. It does not infer pressure from temperature, does not attach the separate MGS hydrostatic-column input (which additionally requires a caller-supplied normalized composition), and does not create O/O(1D)/H/OH/HO2 initial radical concentrations or enable physical kinetics. The profile can pass through `importSourcedAtmosphericTemperatureProfileForKinetics()` as 73 source-identified kinetic-layer geometry/temperature seeds; that adapter returns geometry and temperatures only, not species inventories, reactions or rates. Tests check all node/interval boundaries, provenance, contiguous intervals, valid profile status, strict kinetic-layer import, Generator selection gating and absence of invented radical/physical-kinetics state.
+
+
+## 2.37 Frozen MAVEN NGIMS TID 14282 event products and exact profile co-registration (25 Nov 2026)
+
+The 2014 official PDS4 annual derived-L2 archive was downloaded from
+`https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL2_2014.tar.gz`
+(byte length 79,960,722; locally computed archive SHA-256
+`c7ed14c9bbbf374a2dc2c880a9c8da30fd3603547ce7be0b0f147cc3affe2a75`).
+The archive audit found exactly one matching neutral abundance product for
+TID 14282 / orbit 391 / event timestamp 2014-12-11T15:44:06:
+`mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv` with its detached
+XML label. No `cso-abund` product for this exact event was present in this
+annual archive. The product is the closed-source `csn` focus mode, not an
+all-neutral `cso` product.
+
+The original archive member bytes are frozen without newline rewriting in
+`src/modules/Data/mavenNgimsL2Archive/`. The CSV contains 2,796 raw records
+(699 each for Ar, CO2, He and N2). The archive's two source-column aliases
+are retained in the manifest: `t_sclk_cor → t_sclk` and
+`cps_dt_bkd → cps_dt_bkgd`. The parser records these aliases without
+rewriting the original file. The CSV uses timezone-naive `t_utc` tokens;
+the PDS field contract defines UTC, so TypeScript normalizes these to ISO
+UTC strings ending in Z and does not reinterpret them in browser-local time.
+
+**Detached-label discrepancy:** the CSV is 538,939 bytes, while its PDS4
+`File/file_size` declares 539,063 bytes (+124). The label has no
+`md5_checksum`; its `Header.object_length` is 124 and its
+`Table_Delimited.offset` is 124, while the table object length is exactly
+538,939. This is consistent with a possible header double-count in the
+label metadata, but the label is not independently authenticated. The
+original bytes are therefore preserved with
+`csvSizeConsistencyStatus=mismatch_quarantined_no_md5`; no correction is
+applied and the detached label is not treated as a trusted checksum.
+The L3 res-den companion has the analogous 85-byte discrepancy
+(23,658 actual vs 23,743 declared, Header length 85, no MD5) and is also
+forensic-only. Its `density_bins` value is retained as a raw bin coordinate:
+the SIS prose describes logarithmic density bins, while the Table A-9 unit
+column prints Part/cc. Until that contract is resolved, the L3 reader
+emits no linear cm−3 or m−3 value.
+
+**L2 numerical/quality audit:** raw flags across the 2,796 rows are
+`I0=346`, `IU=574`, `IV=464`, `OU=228`, `OV=478`, `UR=706`.
+The separate numeric-eligibility subset contains 1,564 rows; it excludes
+905 abundance sentinel values of −999 and 327 zero-abundance rows (the
+two counts are independent reasons and must not be summed as unique rows).
+Additional precision/geometry/schema gates are applied per row. Unknown
+`I0` and `UR` never become scientific detections. The manifest reports
+raw archive counts separately from scientifically eligible profile rows.
+
+The accepted profile candidates remain separated by species, focus mode,
+quality and direction:
+- inbound He/IV: 271 positive rows, unique altitudes, 152.9765–392.3028 km;
+- inbound CO2/IU: 134 rows, unique altitudes, 152.9765–207.825 km, sensitivity-only;
+- inbound Ar/IV: 118 rows, unique altitudes, 152.9765–195.5565 km;
+- outbound He/OV: 210 rows with one duplicate altitude (209 unique);
+- outbound Ar/OU: 213 rows with one duplicate altitude (212 unique).
+No profile builder averages duplicate altitudes or splices inbound/outbound
+tracks. The 75 He/IV inbound rows carrying abundance sentinel −999 are not
+included in the 271-point positive profile; the CO2/IU profile also requires
+explicit `allowUncertain=true`.
+
+**Exact co-registration:** `coRegisterMavenNgimsNeutralProfiles()` pairs
+already validated L2 profiles only on exact UTC timestamp AND exact
+altitude, after requiring identical orbit, TID, focus mode and track
+direction. For this TID it produces 134 exact inbound He–CO2 pairs:
+He remains IV/verified, CO2 remains IU/uncertain; 137 additional accepted
+He rows have no CO2 counterpart, and no CO2 rows remain unmatched. No
+interpolation, time/altitude tolerance, nearest-neighbour substitution or
+averaging occurs. The pair result is not a full atmosphere, and remains
+ineligible for Scheduler or Mars photochemical initial-state construction.
+
+**What the event still does not contain:** this `csn-abund` product has no
+O, NO, NO2, CO or O2 species; N2 values in this product carry the unknown
+`I0` flag and do not form an accepted profile. The archive audit did not
+find an all-neutral `cso-abund` file for this exact TID/time. The two
+co-registered species are therefore not a complete bulk atmosphere or
+radical inventory. They also do not provide co-located full T(z), P(z),
+H/HO2 and transport boundary conditions. MGS 1998, IUVS 2016, SAM
+near-surface means, ACS HO2 limits and OpenMARS estimates remain separate
+evidence objects and must not be merged as a contemporaneous state.
+
+Implementation and regression tests: `src/modules/Data/mavenUpperAtmosphereEvidence.ts`,
+`src/modules/Tests/mavenUpperAtmosphereEvidence.test.ts`, frozen files and
+`manifest.json` in `src/modules/Data/mavenNgimsL2Archive/`. Latest full CI
+run #1047: https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45517189242.
