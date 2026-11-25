@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Inspect the official PDS Atmospheres NGIMS selection form (no data download).
+Trigger the one-shot workflow with [inspect-ngims-retrieval-form] in a commit subject.
 
 Trigger this diagnostic once with [inspect-ngims-retrieval-form] in a commit
 subject. The output contains only public form names/actions and option values.
