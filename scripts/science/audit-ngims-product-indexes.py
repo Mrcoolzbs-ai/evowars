@@ -16,6 +16,7 @@ import sys
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -202,6 +203,23 @@ def role(record: dict[str, Any]) -> str | None:
     }.get(key)
 
 
+
+def catalog_value_equal(field: str, left: Any, right: Any) -> bool:
+    """Compare indexed numeric metadata exactly without binary-float rounding."""
+    if field not in {"altitudeKm", "solarLongitudeDeg"}:
+        return left == right
+    if left is None or right is None:
+        return left == right
+    try:
+        left_decimal = Decimal(str(left))
+        right_decimal = Decimal(str(right))
+    except (InvalidOperation, ValueError):
+        return left == right
+    if not left_decimal.is_finite() or not right_decimal.is_finite():
+        return left == right
+    return left_decimal == right_decimal
+
+
 def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Join exact event keys; collapse repeated identical URNs across indexes only."""
     empty_group = lambda: {
@@ -248,9 +266,10 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
                     by_urn[urn_key] = normalized
                     continue
 
-                existing_signature = tuple(existing.get(field) for field in comparable_fields)
-                incoming_signature = tuple(item.get(field) for field in comparable_fields)
-                if existing_signature != incoming_signature:
+                if not all(
+                    catalog_value_equal(field, existing.get(field), item.get(field))
+                    for field in comparable_fields
+                ):
                     field_differences = [
                         {
                             "field": field,
@@ -258,7 +277,9 @@ def build_exact_event_join(records: list[dict[str, Any]]) -> dict[str, Any]:
                             "duplicate": item.get(field),
                         }
                         for field in comparable_fields
-                        if existing.get(field) != item.get(field)
+                        if not catalog_value_equal(
+                            field, existing.get(field), item.get(field)
+                        )
                     ]
                     identity_conflicts.append({
                         "role": event_role,
@@ -418,6 +439,7 @@ def run_self_tests() -> None:
     # not two competing measurements.
     repeated_resden = dict(parsed_by_source["l3_resampled"][0])
     repeated_resden["sourceIndex"] = "l3_scale_height"
+    repeated_resden["altitudeKm"] = "152.9810"  # same decimal value, different formatting
     collapsed = build_exact_event_join(records + [repeated_resden])
     assert collapsed["completeTripleCount"] == 1, collapsed
     assert collapsed["duplicateCatalogReferencesCollapsed"] == 1, collapsed
