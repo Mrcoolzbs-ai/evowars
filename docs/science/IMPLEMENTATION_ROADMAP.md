@@ -1336,3 +1336,51 @@ data and the remaining calibration chain are independently validated.
 
 
 Final event-level background BA_PRES pooled means (raw volts): TID 10191 CSN −0.016372 V, OSNT −0.016595 V; TID 10194 CSN −0.032945 V, OSNT −0.033004 V. These are sparse readback averages, not pressures.
+
+
+## Stage 4.2 — exact MAVEN NGIMS L2/L3 product-index intersection (25.11.2026)
+
+**Delivered:**
+- Added scripts/science/audit-ngims-product-indexes.py and
+  .github/workflows/audit-ngims-product-indexes.yml. The workflow downloads
+  only three official PDS selection indexes (L2 single-species, L3 res-den,
+  L3 res-sht), records SHA-256/byte counts, parses URNs and commits a frozen
+  machine-readable manifest.
+- The current audit parses 59,816 product records across the three indexes.
+  Exact (TID, product timestamp from URN) intersection yields 10,796
+  complete CSN-abund + res-den + res-sht product sets with matching UTC
+  start/stop windows. 180 cross-index references to the same res-den URNs
+  are collapsed only when all metadata agrees; exact decimal comparison
+  avoids false conflicts from trailing-zero formatting. No ambiguous join
+  key remains.
+- Added the TypeScript linkMavenNgimsL2L3IndexProductSet() contract and
+  Vitest coverage. It verifies exact product role, TID, URN product-time and
+  UTC window for all three products. Closest-approach times are preserved as
+  separate index metadata and are not used to join records.
+- TID 14282 / orbit 391 is a verified three-product index candidate. All
+  three products have matching index windows, but L2 and L3 closest-approach
+  timestamps differ. Actual row time coverage also differs by product.
+
+**Still blocked / not promoted:**
+- L2, L3 res-den and L3 res-sht payloads/labels are frozen, structurally
+  checked and parseable only in explicit forensic mode. The detached PDS4
+  file_size values differ from CSV payload lengths (+124, +85 and +141
+  bytes respectively), MD5 is absent, and labels are not independently
+  authenticated.
+- L3 res-den density bins remain raw: log-bin vs Table A-9 unit semantics
+  are unresolved. L3 res-sht temperatures remain species-specific
+  scale-height fits, not a local temperature profile. Product-level window
+  agreement is not row-level time/altitude co-registration.
+- The Single-Species index has CSN abundance and ion abundance products but
+  no CSO all-neutral product. The previously used legacy CGI selection
+  endpoint returns HTTP 404; do not treat that failed selector as evidence
+  of archive-wide product absence.
+- No CPS-to-density conversion, event-specific flight sensitivity, complete
+  fragmentation matrix, C_EN, validated external reference-gauge chain,
+  full set of required neutral/radical species, common T(z)/P(z), or
+  Scheduler-ready photochemical initial state has been established.
+
+Validation on the index workflow: parser self-tests, official index download,
+exact join and manifest freeze succeeded. Full repository CI on commit
+4615fecc7ff6d399101cd5b076c1421db981232d succeeded: TypeScript, Vitest,
+lint and production build. Stage 4.2 remains OPEN / NOT_READY.
