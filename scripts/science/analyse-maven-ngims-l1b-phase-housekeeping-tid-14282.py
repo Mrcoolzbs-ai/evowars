@@ -84,7 +84,7 @@ def pds_field_catalog() -> dict[str, dict]:
     return fields
 
 
-def parse_marker_phases() -> tuple[list[dict], dict]:
+def parse_marker_phases() -> tuple[list[dict], dict, set[int]]:
     rows = []
     with MKR_CSV.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
@@ -145,7 +145,7 @@ def parse_marker_phases() -> tuple[list[dict], dict]:
     for phase in phases:
         if phase["markerStartSclkSeconds"] < tid_start["timeSclkSeconds"] or phase["markerEndSclkSeconds"] > tid_stop["timeSclkSeconds"]:
             raise RuntimeError(f"phase {phase['phaseIndex']} lies outside TID bounds")
-    return phases, {"tidStart": tid_start, "tidStop": tid_stop, "markerRowCount": len(rows)}
+    return phases, {"tidStart": tid_start, "tidStop": tid_stop, "markerRowCount": len(rows)}, {row["markerId"] for row in rows}
 
 
 def new_field_stats(name: str, unit: str) -> dict:
@@ -243,7 +243,7 @@ def analyse_housekeeping(phases: list[dict], field_catalog: dict[str, dict]) -> 
                 continue
 
             marker_counts[str(marker_id)] += 1
-            if marker_id not in {row["markerId"] for row in []} and marker_id not in phase_by_start_id and marker_id not in phase_by_end_id:
+            if marker_id not in known_marker_ids:
                 # The full set of event marker IDs is retained below through
                 # marker ID counts only; unknown IDs are not phase-associated.
                 unknown_marker_counts[str(marker_id)] += 1
