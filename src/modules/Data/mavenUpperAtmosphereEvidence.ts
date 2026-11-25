@@ -3050,32 +3050,32 @@ export function linkMavenNgimsL2L3IndexProductSet(
 
   const parsed = entries.map(({ role, item, level, productType }) => {
     if (!item || typeof item !== 'object') {
-      errors.push(\`${role} identity is required\`);
+      errors.push(`${role} identity is required`);
       return null;
     }
     const identity = item as MavenNgimsIndexProductWindowIdentity;
     if (typeof identity.sourceProductId !== 'string' || identity.sourceProductId.trim() === '') {
-      errors.push(\`${role} sourceProductId must identify an indexed PDS product\`);
+      errors.push(`${role} sourceProductId must identify an indexed PDS product`);
       return null;
     }
     if (!Number.isSafeInteger(identity.tid) || identity.tid <= 0) {
-      errors.push(\`${role} TID must be a positive safe integer\`);
+      errors.push(`${role} TID must be a positive safe integer`);
     }
     const parsedId = parseMavenNgimsIndexProductId(identity.sourceProductId);
     if (!parsedId) {
-      errors.push(\`${role} sourceProductId is not a recognized NGIMS PDS product URN\`);
+      errors.push(`${role} sourceProductId is not a recognized NGIMS PDS product URN`);
       return null;
     }
     if (parsedId.level !== level || parsedId.productType !== productType) {
-      errors.push(\`${role} sourceProductId has the wrong NGIMS product level or type\`);
+      errors.push(`${role} sourceProductId has the wrong NGIMS product level or type`);
     }
     if (parsedId.tid !== identity.tid) {
-      errors.push(\`${role} URN TID does not match the supplied TID\`);
+      errors.push(`${role} URN TID does not match the supplied TID`);
     }
     const start = normalizeMavenIndexUtc(identity.timeStartUtc);
     const stop = normalizeMavenIndexUtc(identity.timeStopUtc);
     if (start === null || stop === null) {
-      errors.push(\`${role} observation window must contain valid UTC start/stop timestamps\`);
+      errors.push(`${role} observation window must contain valid UTC start/stop timestamps`);
     }
     return { role, identity, parsedId, start, stop };
   });
@@ -3133,8 +3133,8 @@ export function linkMavenNgimsL2L3IndexProductSet(
 
 /**
  * Canonical index cross-match candidate selected from the official NGIMS
- * del1-42 scale-height index and the PDS4 L2 archive directory. Only index
- * identifiers/timing are frozen here; numerical CSV payloads are not present.
+ * official L2/L3 selection indexes and the corresponding frozen PDS4 event
+ * products. All three CSV/XML payload pairs are imported in forensic-only mode.
  */
 export const MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE = {
   tid: 14282,
