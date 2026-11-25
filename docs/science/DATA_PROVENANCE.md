@@ -857,3 +857,54 @@ Implementation and regression tests: `src/modules/Data/mavenUpperAtmosphereEvide
 `src/modules/Tests/mavenUpperAtmosphereEvidence.test.ts`, frozen files and
 `manifest.json` in `src/modules/Data/mavenNgimsL2Archive/`. Latest full CI
 run #1047: https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45517189242.
+
+
+## MAVEN NGIMS L1B calibrated signal — TID 14282 / orbit 391 (25.11.2026)
+
+**Product.** NASA PDS4 MAVEN NGIMS L1B CSV
+`mvn_ngi_l1b_osnb-14282_20141211T154406_v09_r01.csv` and detached XML,
+logical identifier
+`urn:nasa:pds:maven_ngims:l1b:mvn_ngi_l1b_osnb-14282_20141211t154406`.
+The event index identifies TID 14282, orbit 391 and window
+2014-12-11T15:45:25Z–17:29:43Z; the L1B rows span
+17:03:58.937Z–17:27:14.447Z.
+
+**Structure.** The target product contains 39,999 rows: 22,579 CSN and
+17,420 OSNB. Both focus modes occur in this CSV and remain separate. The
+36-column Table A-6 product includes mass channel, counts, raw/dead-time
+corrected CPS, background-subtracted CPS, spacecraft context and a timing
+quality token.
+
+**Fixity.** CSV payload length is 14,600,292 bytes; SHA-256 of exact bytes:
+`342ba5b2045844b49cb2344f53e25d977aff05fc996e3db032caf7613ef0c486`.
+The detached label declares 14,603,490 bytes (+3,198), MD5 is absent.
+Original bytes are preserved unmodified. SHA-256 is a computed digest, not
+an independent archive checksum; the detached label is not independently
+authenticated. Import is forensic-only.
+
+**Interpretation.** L1B counts/CPS are calibrated instrument signals, not
+L2 neutral abundance in particles/cm3. m/z is not unique species identity;
+m/z 16 and 30 are candidate signals only, not O/NO detections. The L1B
+quality token TSC/TSU describes SCLK time correction and is not equivalent
+to L2 science flags IV/IU/OV/OU/UR. The dead-time-corrected,
+background-subtracted CPS field is the SIS-recommended signal for science
+computations, but remains a signal, not a density.
+
+**Calibration blocker.** NGIMS SIS Rev. 1.13 §3.3 describes open-source
+sensitivity using closed-source reference sensitivity, the closed/open
+response ratio for a reference species and energy correction C_EN. The
+current product does not supply a complete validated species response /
+fragmentation matrix or C_EN; no CPS-to-density conversion is implemented.
+A calibration comparison must retain time/altitude context and uncertainty;
+whole-file means are not evidence of a sensitivity coefficient.
+
+**Implementation.** `src/modules/Data/mavenNgimsL1bEvidence.ts` parses
+Table A-6, preserves raw fields, normalizes the PDS timezone-naive UTC token
+and supports strict TID/orbit/focus-mode/time/mass selection. Species and
+abundance fields are hard-coded null; outputs are ineligible for Scheduler
+and Mars photochemical initialization. Tests are in
+`src/modules/Tests/mavenNgimsL1bEvidence.test.ts`.
+
+Stage 4.2 remains **OPEN / NOT_READY**. L1B adds signal evidence only; it
+does not supply the missing neutral species or a complete synchronized
+photochemical initial state.

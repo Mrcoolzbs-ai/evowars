@@ -653,3 +653,24 @@ export type {
   MavenNgimsL2CsvRowResult,
   MavenNgimsL2CsvImportResult
 } from './mavenUpperAtmosphereEvidence';
+
+
+// Stage 4.2: MAVEN NGIMS L1B instrument-signal evidence (not abundance).
+export {
+  MAVEN_NGIMS_L1B_SIS_PROVENANCE,
+  MAVEN_NGIMS_L1B_PRODUCT_TID_14282,
+  MAVEN_NGIMS_L1B_LIMITATIONS,
+  MAVEN_NGIMS_L1B_CSV_HEADERS,
+  parseMavenNgimsL1bCsvText,
+  selectMavenNgimsL1bMassChannelSignals
+} from './mavenNgimsL1bEvidence';
+export type {
+  MavenNgimsL1bFocusMode,
+  MavenNgimsL1bTimeCorrection,
+  MavenNgimsL1bSignalRow,
+  MavenNgimsL1bRowValidation,
+  MavenNgimsL1bCsvRowResult,
+  MavenNgimsL1bCsvImportResult,
+  MavenNgimsL1bSignalSelection,
+  MavenNgimsL1bSignalSelectionResult
+} from './mavenNgimsL1bEvidence';

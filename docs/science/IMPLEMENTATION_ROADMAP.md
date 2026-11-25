@@ -1198,3 +1198,26 @@
 > **Инженерная проверка.** Для L2, L3 res-den и L3 res-sht теперь существуют отдельные PDS4 identity/structure/size gates; каждый допускает несоответствие размера только как forensic-only результат. L2 reader сохраняет raw rows/sentinels и UTC-normalizes timezone-naive t_utc; многосторонний co-registration API требует одинаковые orbit/TID/focus/direction и distinct species, точные ключи и отсутствие duplicate altitude-time keys. Все профили и derived-fit значения явно marked as not Scheduler eligible.
 >
 > **Граница готовности не меняется:** в этом событии всё ещё отсутствуют прямые O, NO, NO₂ и другие требуемые радикалы, а atomic H ниже нижней массовой границы NGIMS; нет полного совместимого 16-species snapshot, синхронных локальных T(z)/P(z), validated vertical diffusion/eddy transport/convection/photo-chemistry и полного набора rate constants/uncertainties. MGS/SAM/ACS/OpenMARS и MAVEN разных лет/мест/сценариев не сливаются в искусственную точку. Stage 4.2 остаётся **OPEN / NOT_READY**.
+
+
+## Stage 4.2 — MAVEN NGIMS L1B OSNB signal-evidence reader (25.11.2026)
+
+The official L1B product for TID 14282 / orbit 391 is frozen byte-for-byte
+with its detached PDS4 label. It contains 39,999 target rows in two focus
+modes: CSN 22,579 and OSNB 17,420. The new
+`mavenNgimsL1bEvidence.ts` module parses the strict 36-column Table A-6
+schema, preserves raw fields and supports selection by TID, orbit, focus
+mode, UTC window and optional m/z channels.
+
+The reader does not infer species from m/z, convert CPS to number density,
+join CSN and OSNB streams, or mark any row eligible for scientific
+initialization. L1B TSC/TSU is time-correction metadata, not L2 science
+quality. The CSV is 14,600,292 bytes; the detached label declares
+14,603,490 bytes (+3,198) and has no MD5. SHA-256 is recorded but is not an
+independent archive authenticity proof; the product remains forensic-only.
+m/z 16 and 30 remain candidate signals, not O/NO detections.
+
+Open-source sensitivity still requires reference-species calibration,
+closed/open response and energy-correction factor described in NGIMS SIS
+Rev. 1.13 §3.3. Tests cover schema, UTC normalization, flags, row diagnostics,
+strict selection and the non-eligibility guard. Stage 4.2 remains OPEN / NOT_READY.
