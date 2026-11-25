@@ -1002,3 +1002,65 @@ the frozen SHA-256 digests, PDS4 MKID semantics, the 15 marker pairs and all
 Housekeeping telemetry is instrument-operational context only. It does not
 provide species abundance, neutral number density, absolute sensitivity,
 fragmentation response, C_EN or Scheduler/Mars initial-state eligibility.
+
+
+## MAVEN NGIMS TID 14282: operational phase profile (Stage 4.2)
+
+The phase-level operational profile combines the 15 Reading Phase configuration
+blocks in the frozen cal-msg script log with the already verified cal-mkr
+phase-start/phase-end marker IDs and cal-hk readback summaries. The join key
+is the phase ordinal plus exact marker ID equality; numeric timestamps printed
+in cal-msg are not treated as SCLK coordinates and are not used for a
+timestamp join. The profile preserves the configured CS vector / OS scan
+type, OS mode, integration-period setting and pressure-check interval alongside
+the sparse HK observations.
+
+For TID 14282, the script log describes two alternating scan configurations:
+longer phases use CS Vector ID 1 with OS Vector ID 2; short phases use CS
+Vector ID 3 with OS Sequential Scan ID 4. Each config block declares IP 30
+and pressure-check period 30. The operational report retains per-phase
+telemetry coverage and values for source emission and filament monitors,
+EM1/EM2 current monitors, multiplier analogue monitors and QMS integration
+readbacks. It does not map the raw QMS:FIL_SELECT integer to a filament
+without a validated enum definition.
+
+Where both QMS timing readbacks are observed and constant within a phase,
+QMS:IP_COUNT = 0.027 s and QMS:IP_SETUP = 0.0029 s sum to 29.9 ms,
+consistent with the nominal 30 ms setting within telemetry precision.
+These readbacks are sparse and must not be treated as continuously sampled
+values. The selected QMS:RF_FREQ field has no readbacks in this event; this
+does not establish that RF was disabled.
+
+The OS and CS emission monitors remain approximately -249.4 to -249.6
+microamperes across the available phase samples. The instrument paper describes
+nominal emission selections of 50 or 250 microamperes; this comparison is a
+consistency check on telemetry magnitude only, not proof of calibrated
+emission or source sensitivity. The runtime message log also records
+"Multiplier 2 On @ 2462"; EM1/EM2 current monitors and MULTANA1/2 are
+preserved as raw monitor readbacks, not converted to detector gain.
+
+**Calibration boundary.** Closed-source sensitivity and open-source
+sensitivity are explicitly not derived. The open-source method requires
+dead-time-corrected count rates of the same reference species from both
+sources, closed-source sensitivity and the energy correction factor C_EN.
+Event-wide CSN/OSNB mass-channel summaries are not phase-, time-, altitude-
+or species-matched, so taking a ratio of their means or medians would not
+implement that calibration. The older pre-flight sensitivity table in the
+instrument paper states that sensitivities would be updated after the first
+in-flight calibration; those values are not substituted for this event's
+calibration. No numerical C_EN value was established from the event
+HK/MKR/MSG records or the cited instrument/SIS documentation.
+
+A reproducible analyzer validates source SHA-256 digests and exact runtime
+marker IDs, then writes
+src/modules/Data/mavenNgimsL1bHousekeepingArchive/operational-phase-diagnostics.json.
+The TypeScript implementation is
+src/modules/Data/mavenNgimsL1bOperationalPhaseEvidence.ts; tests cover
+alternating scan configurations, exact marker identity, sparse telemetry and
+the prohibition on timestamp joins. The result remains operational context
+only and is ineligible for neutral-density or Mars photochemical initialization.
+
+Sources: Mahaffy et al., NGIMS instrument paper
+(https://lasp.colorado.edu/maven/files/2014/10/MAVEN_NGIMS.pdf);
+NGIMS PDS SIS Rev. 1.3
+(https://lasp.colorado.edu/galaxy/download/attachments/26250002/NGIMS%20PDS%20SIS%20rev%201.3_MKE.pdf).

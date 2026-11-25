@@ -705,3 +705,18 @@ export type {
   MavenNgimsL1bHousekeepingPhaseAssociation,
   MavenNgimsL1bHousekeepingPhaseAssociationResult
 } from './mavenNgimsL1bHousekeepingEvidence';
+
+
+// Stage 4.2: MAVEN NGIMS cal-msg + cal-mkr + cal-hk operational phase diagnostics.
+export {
+  MAVEN_NGIMS_L1B_OPERATIONAL_FIELD_NAMES,
+  MAVEN_NGIMS_L1B_OPERATIONAL_LIMITATIONS,
+  parseMavenNgimsL1bCalMsgPhaseConfiguration,
+  buildMavenNgimsL1bOperationalPhaseDiagnostics
+} from './mavenNgimsL1bOperationalPhaseEvidence';
+export type {
+  MavenNgimsL1bCalMsgPhaseConfiguration,
+  MavenNgimsL1bCalMsgParseResult,
+  MavenNgimsL1bOperationalPhaseDiagnostic,
+  MavenNgimsL1bOperationalPhaseDiagnosticsResult
+} from './mavenNgimsL1bOperationalPhaseEvidence';

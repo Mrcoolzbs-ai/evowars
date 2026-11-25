@@ -55,3 +55,7 @@ export * from './mavenNgimsL1bMarkerEvidence.test';
 
 // --- MAVEN NGIMS cal-mkr phase-start MKID → cal-hk telemetry association (Stage 4.2) ---
 export * from './mavenNgimsL1bHousekeepingEvidence.test';
+
+
+// --- MAVEN NGIMS cal-msg operational phase configuration and exact MKID cross-check (Stage 4.2) ---
+export * from './mavenNgimsL1bOperationalPhaseEvidence.test';
