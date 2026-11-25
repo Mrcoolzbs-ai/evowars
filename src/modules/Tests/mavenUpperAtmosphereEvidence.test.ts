@@ -1425,9 +1425,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
       .toBe(helium.measurements.length);
     expect(helium.measurements[0].altitudeM).toBeLessThan(helium.measurements.at(-1)!.altitudeM);
 
-    const sensitivity = parseMavenNgimsL2NeutralCsvText(csvText, { allowUncertain: true });
+    // Reuse the PDS4-bound import; do not bypass its identity/fixity provenance gate.
+    const sensitivity = forensicImport.imported;
     expect(sensitivity.status).toBe('parsed');
-    if (sensitivity.status !== 'parsed') throw new Error(sensitivity.errors.join('; '));
     const co2 = buildMavenNgimsNeutralProfileFromCsvImport(sensitivity, {
       species: 'CO2',
       orbit: 391,
@@ -1474,6 +1474,46 @@ describe('MAVEN upper-atmosphere evidence', () => {
       pair.first.timeUtc === pair.second.timeUtc &&
       pair.first.altitudeM === pair.second.altitudeM
     )).toBe(true);
+
+    const argon = buildMavenNgimsNeutralProfileFromCsvImport(strict, {
+      species: 'Ar',
+      orbit: 391,
+      tid: 14282,
+      focusMode: 'csn',
+      direction: 'inbound',
+      quality: 'verified'
+    });
+    expect(argon.status).toBe('completed');
+    if (argon.status !== 'completed' || !argon.measurements) {
+      throw new Error(argon.errors?.join('; ') ?? 'Ar profile did not complete with measurements');
+    }
+    expect(argon.measurements).toHaveLength(118);
+    expect(argon.measurements.every(measurement => measurement.qualityFlag === 'IV')).toBe(true);
+
+    const argonCo2 = coRegisterMavenNgimsNeutralProfiles(argon, co2);
+    expect(argonCo2.status).toBe('completed');
+    if (argonCo2.status !== 'completed' || !argonCo2.pairs) {
+      throw new Error(argonCo2.errors?.join('; ') ?? 'Ar/CO2 exact co-registration failed');
+    }
+    expect(argonCo2.pairs).toHaveLength(118);
+    const heliumCo2Keys = new Set(
+      coRegistered.pairs!.map(pair => pair.timeUtc + '|' + pair.altitudeM)
+    );
+    expect(argonCo2.pairs.every(pair =>
+      heliumCo2Keys.has(pair.timeUtc + '|' + pair.altitudeM)
+    )).toBe(true);
+    expect(argonCo2.eligibleAsMarsPhotochemicalInitialState).toBe(false);
+    expect(argonCo2.eligibleAsSchedulerInitialAbundance).toBe(false);
+
+    const nitrogen = buildMavenNgimsNeutralProfileFromCsvImport(strict, {
+      species: 'N2',
+      orbit: 391,
+      tid: 14282,
+      focusMode: 'csn',
+      direction: 'inbound',
+      quality: 'verified'
+    });
+    expect(nitrogen.status).toBe('rejected');
   });
 
   it('parses a complete quoted CRLF NGIMS L2 CSV and retains per-row quality results', () => {
