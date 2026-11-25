@@ -231,6 +231,19 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
            declared_size == header_length + table_length
         else "not_diagnosable"
     )
+    table_elements = [node for node in areas[0].iter() if node.tag == qname("Table_Delimited")]
+    field_catalog = []
+    if len(table_elements) == 1:
+        for field_node in table_elements[0].iter():
+            if field_node.tag not in {qname("Field_Delimited"), qname("Group_Field_Delimited")}:
+                continue
+            field_catalog.append({
+                "fieldNumber": scalar(field_node, "field_number", optional=True),
+                "name": scalar(field_node, "name", optional=True),
+                "dataType": scalar(field_node, "data_type", optional=True),
+                "unit": scalar(field_node, "unit", optional=True),
+                "description": scalar(field_node, "description", optional=True),
+            })
     provenance = {
         "productId": product_id,
         "csvFileName": file_name,
@@ -248,6 +261,7 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
         "csvFixityStatus": "md5_verified_against_detached_label" if md5_label else "sha256_computed_not_compared_to_archive_checksum",
         "csvSha256": hashlib.sha256(csv_bytes).hexdigest(),
         "xmlSha256": hashlib.sha256(xml_bytes).hexdigest(),
+        "pds4TableFields": field_catalog,
         "detachedLabelAuthenticity": "not_independently_authenticated",
     }
     if not size_match:
@@ -264,17 +278,13 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
     if reader.fieldnames is None:
         raise RuntimeError("L1B CSV has no header")
     headers = [h.strip().lower() for h in reader.fieldnames]
-    rows = []
-    mass_counts: Counter[str] = Counter()
+
     focus_counts: Counter[str] = Counter()
-    orbit_counts: Counter[str] = Counter()
     tid_counts: Counter[str] = Counter()
-    time_values: list[float] = []
+    orbit_counts: Counter[str] = Counter()
+    mode_audit: dict[str, dict] = {}
     selected_rows = 0
     rejected_rows = 0
-    numeric_fields: Counter[str] = Counter()
-    minmax: dict[str, dict[str, float]] = {}
-    mass_samples: dict[str, list[dict[str, str]]] = defaultdict(list)
 
     def get_number(row: dict[str, str], key: str) -> float | None:
         value = row.get(key, "")
@@ -284,6 +294,17 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             return None
         return parsed if parsed == parsed and abs(parsed) != float("inf") else None
 
+    def new_mode_audit() -> dict:
+        return {
+            "rowCount": 0,
+            "massChannelRowCounts": Counter(),
+            "numericColumnValueCounts": Counter(),
+            "numericColumnMinMax": {},
+            "unixTimes": [],
+            "candidateMassChannelSampleRows": defaultdict(list),
+        }
+
+    relevant_mass_channels = {14, 15, 16, 28, 29, 30, 31, 32, 40, 44}
     for raw in reader:
         row = {str(k).strip().lower(): (v or "").strip() for k, v in raw.items()}
         tid_value = get_number(row, "tid")
@@ -296,45 +317,86 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
         if int(tid_value) != TID or int(orbit_value) != ORBIT:
             continue
         selected_rows += 1
-        focus = row.get("focus_mode", row.get("focusmode", "")).lower()
-        if focus:
-            focus_counts[focus] += 1
+        focus = row.get("focus_mode", row.get("focusmode", "")).lower() or "unknown"
+        focus_counts[focus] += 1
+        audit = mode_audit.setdefault(focus, new_mode_audit())
+        audit["rowCount"] += 1
+
         mass = get_number(row, "mass")
         if mass is not None:
             mass_key = str(int(mass)) if mass.is_integer() else format(mass, ".8g")
-            mass_counts[mass_key] += 1
+            audit["massChannelRowCounts"][mass_key] += 1
+
         unix_time = get_number(row, "t_unix")
         if unix_time is not None:
-            time_values.append(unix_time)
+            audit["unixTimes"].append(unix_time)
+
         for field in ("counts", "cps_raw", "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd", "cps"):
             value = get_number(row, field)
             if value is None:
                 continue
-            numeric_fields[field] += 1
-            if field not in minmax:
-                minmax[field] = {"min": value, "max": value}
+            audit["numericColumnValueCounts"][field] += 1
+            if field not in audit["numericColumnMinMax"]:
+                audit["numericColumnMinMax"][field] = {"min": value, "max": value}
             else:
-                minmax[field]["min"] = min(minmax[field]["min"], value)
-                minmax[field]["max"] = max(minmax[field]["max"], value)
-        # Record representative rows only for mass channels that can include
-        # neutral species or common fragments. They are candidate m/z channels,
-        # never inferred species or abundance.
-        if mass is not None and int(round(mass)) in {14, 15, 16, 28, 29, 30, 31, 32, 40, 44}:
-            key = str(int(round(mass)))
-            if len(mass_samples[key]) < 12:
-                mass_samples[key].append(row)
+                audit["numericColumnMinMax"][field]["min"] = min(
+                    audit["numericColumnMinMax"][field]["min"], value
+                )
+                audit["numericColumnMinMax"][field]["max"] = max(
+                    audit["numericColumnMinMax"][field]["max"], value
+                )
+
+        if mass is not None and int(round(mass)) in relevant_mass_channels:
+            mass_key = str(int(round(mass)))
+            sample = audit["candidateMassChannelSampleRows"][mass_key]
+            if len(sample) < 12:
+                sample.append({
+                    key: row.get(key, "")
+                    for key in [
+                        "t_unix", "t_sclk", "t_tid", "tid", "orbit",
+                        "focus_mode", "mass", "counts", "cps_raw",
+                        "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd"
+                    ]
+                })
 
     if selected_rows == 0:
         raise RuntimeError("no L1B data rows for exact TID14282/orbit391 found in downloaded CSV")
-    if set(focus_counts) != {FOCUS_MODE}:
-        raise RuntimeError(f"expected only focus mode {FOCUS_MODE}; observed {focus_counts}")
+    if FOCUS_MODE not in focus_counts:
+        raise RuntimeError(f"expected open-source focus mode {FOCUS_MODE} not found; observed {focus_counts}")
 
-    unix_start = min(time_values) if time_values else None
-    unix_stop = max(time_values) if time_values else None
     def iso_utc(seconds: float | None) -> str | None:
         if seconds is None:
             return None
         return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+    focus_mode_details = {}
+    for mode, audit in sorted(mode_audit.items()):
+        times = audit["unixTimes"]
+        focus_mode_details[mode] = {
+            "rowCount": audit["rowCount"],
+            "massChannelRowCounts": dict(audit["massChannelRowCounts"]),
+            "numericColumnValueCounts": dict(audit["numericColumnValueCounts"]),
+            "numericColumnMinMax": audit["numericColumnMinMax"],
+            "unixTimeMin": min(times) if times else None,
+            "unixTimeMax": max(times) if times else None,
+            "timeStartUtcFromCsv": iso_utc(min(times)) if times else None,
+            "timeStopUtcFromCsv": iso_utc(max(times)) if times else None,
+            "candidateMassChannelSampleRows": dict(audit["candidateMassChannelSampleRows"]),
+        }
+
+    osnb = focus_mode_details[FOCUS_MODE]
+    expected_start = datetime.fromisoformat(EVENT_START.replace("Z", "+00:00")).timestamp()
+    expected_stop = datetime.fromisoformat(EVENT_STOP.replace("Z", "+00:00")).timestamp()
+    osnb_start = osnb["unixTimeMin"]
+    osnb_stop = osnb["unixTimeMax"]
+    if osnb_start is not None and osnb_stop is not None:
+        osnb_time_window_consistency = (
+            "within_orbit_event_window"
+            if osnb_start >= expected_start and osnb_stop <= expected_stop
+            else "extends_outside_orbit_event_window"
+        )
+    else:
+        osnb_time_window_consistency = "not_available"
 
     detail = {
         "product": provenance,
@@ -356,14 +418,9 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             "allTidCountsInProduct": dict(tid_counts),
             "allOrbitCountsInProduct": dict(orbit_counts),
             "focusModeCountsForTarget": dict(focus_counts),
-            "massChannelRowCounts": dict(mass_counts),
-            "unixTimeMin": unix_start,
-            "unixTimeMax": unix_stop,
-            "timeStartUtcFromCsv": iso_utc(unix_start),
-            "timeStopUtcFromCsv": iso_utc(unix_stop),
-            "numericColumnValueCounts": dict(numeric_fields),
-            "numericColumnMinMax": minmax,
-            "candidateMassChannelRows": dict(mass_samples),
+            "focusModeDetails": focus_mode_details,
+            "openSourceOsnbTimeWindowConsistency": osnb_time_window_consistency,
+            "rejectedMalformedIdentityRows": rejected_rows,
         },
         "interpretation": {
             "l1bIsCalibratedInstrumentSignal": True,
@@ -372,10 +429,13 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             "massChannelCountsAndCpsAreNotNumberDensity": True,
             "requiresCalibrationResponseAndFragmentationModel": True,
             "noConversionToParticlesPerCm3Applied": True,
+            "massChannel16And30AreCandidateSignalsOnly": True,
             "noOOrNoNeutralAbundanceClaim": True,
-            "qualityCaveat": "NO-like mass channels require NGIMS in-instrument chemistry/fragmentation caveat and independent cross-check."
+            "noCrossModeMerge": True,
+            "qualityCaveat": "Mass channels must be interpreted with the NGIMS calibration/fragmentation model; NO-like m/z 30 requires independent chemistry-bias review."
         },
     }
+
     return provenance, detail
 
 
