@@ -980,6 +980,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
         csvByteLength: number;
         labelDeclaredFileSizeBytes: number;
         csvSizeConsistencyStatus: string;
+        csvSha256: string;
         csvMd5Checksum: string | null;
       };
       profileSummary: {
@@ -1081,7 +1082,6 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(forensic.warnings.join(' ')).toMatch(/forensic-only/);
     const imported = forensic.imported;
     expect(imported.status).toBe('parsed');
-    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
     expect(imported.parsedRowCount).toBe(2);
     expect(imported.rejectedRowCount).toBe(2);
     expect(imported.goodFitCount).toBe(2);
