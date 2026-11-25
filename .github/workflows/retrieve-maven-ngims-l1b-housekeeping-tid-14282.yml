@@ -1,0 +1,49 @@
+name: Retrieve MAVEN NGIMS L1B housekeeping for TID 14282
+
+on:
+  push:
+    branches: [stage-3-planetary-physics]
+
+concurrency:
+  group: ngims-l1b-housekeeping-tid-14282-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  retrieve:
+    if: contains(github.event.head_commit.message, '[retrieve-ngims-l1b-housekeeping-tid-14282]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout science branch
+        uses: actions/checkout@v4
+        with:
+          ref: stage-3-planetary-physics
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate retrieval logic offline
+        run: |
+          python -m py_compile scripts/science/retrieve-maven-ngims-l1b-housekeeping-tid-14282.py
+          python scripts/science/retrieve-maven-ngims-l1b-housekeeping-tid-14282.py --self-test
+
+      - name: Retrieve exact TID/orbit matched housekeeping products
+        run: python scripts/science/retrieve-maven-ngims-l1b-housekeeping-tid-14282.py
+
+      - name: Commit original PDS payloads and audit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/modules/Data/mavenNgimsL1bHousekeepingArchive/
+          if git diff --cached --quiet; then
+            echo "No housekeeping payload changes."
+          else
+            git commit -m "data(science): freeze NGIMS L1B housekeeping TID 14282 payload [skip ci]"
+            git fetch origin stage-3-planetary-physics
+            git rebase origin/stage-3-planetary-physics
+            git push origin HEAD:stage-3-planetary-physics
+          fi
