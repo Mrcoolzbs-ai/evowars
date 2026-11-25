@@ -1,5 +1,5 @@
 name: CI
-# Keep science branch verification rerunnable after exact co-registration and same-event SHT evidence updates.
+# Keep science branch verification rerunnable after exact co-registration and SHT PDS4 type-check updates.
 
 on:
   push:
