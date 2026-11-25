@@ -361,7 +361,7 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
                 sample.append({
                     key: row.get(key, "")
                     for key in [
-                        "t_unix", "t_sclk", "t_tid", "tid", "orbit",
+                        "t_utc", "t_unix", "t_sclk_cor", "t_tid", "tid", "orbit",
                         "focus_mode", "mass", "counts", "cps_raw",
                         "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd"
                     ]
@@ -501,7 +501,7 @@ def main() -> int:
             },
         }
         (OUTPUT / "l1b-osnb-retrieval-probe.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\\n",
+            json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -527,7 +527,7 @@ def main() -> int:
                 "attempts": attempts,
             }
             (OUTPUT / "l1b-osnb-tid-14282-manifest.json").write_text(
-                json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\\n",
+                json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -544,7 +544,7 @@ def main() -> int:
         "attempts": attempts,
     }
     (OUTPUT / "l1b-osnb-retrieval-probe.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\\n",
+        json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
