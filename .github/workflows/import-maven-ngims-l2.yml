@@ -1,0 +1,38 @@
+name: Import MAVEN NGIMS L2 abundance products for TID 14282
+
+on:
+  push:
+    branches: [stage-3-planetary-physics]
+
+jobs:
+  retrieve:
+    if: contains(github.event.head_commit.message, '[import-ngims-l2-tid-14282]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout science branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          ref: stage-3-planetary-physics
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download and audit exact L2 event products
+        run: python scripts/science/retrieve-maven-ngims-l2-tid-14282.py
+
+      - name: Commit frozen L2 source products and manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/modules/Data/mavenNgimsL2Archive/
+          if git diff --cached --quiet; then
+            echo "No new L2 source files to freeze."
+          else
+            git commit -m "data(science): freeze MAVEN NGIMS L2 TID 14282 products [skip ci]"
+            git push origin HEAD:stage-3-planetary-physics
+          fi
