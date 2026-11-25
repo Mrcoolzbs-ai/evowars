@@ -1263,6 +1263,8 @@ describe('MAVEN upper-atmosphere evidence', () => {
           sourceHeaderAliasesApplied: Record<string, string>;
           speciesRowCounts: Record<string, number>;
           qualityFlagCounts: Record<string, number>;
+          rawSpeciesRowCounts: Record<string, number>;
+          rawQualityFlagCounts: Record<string, number>;
           rawQualityFlagCounts: Record<string, number>;
         };
       }>;
