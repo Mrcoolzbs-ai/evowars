@@ -1,0 +1,192 @@
+{
+  "archive": {
+    "byteLength": 79960722,
+    "fileName": "ngims_derivedL2_2014.tar.gz",
+    "httpContentEncoding": null,
+    "httpContentLength": "79960722",
+    "httpContentType": "application/x-gzip",
+    "httpStatus": 200,
+    "sha256": "c7ed14c9bbbf374a2dc2c880a9c8da30fd3603547ce7be0b0f147cc3affe2a75",
+    "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_derivedL2_2014.tar.gz"
+  },
+  "indexEvidence": {
+    "note": "The official index can expose multiple product modes/versions for the same TID; all matching L2 abundance products in the annual archive are retained separately.",
+    "orbit": 391,
+    "productEventUtcStart": "2014-12-11T15:45:25Z",
+    "productEventUtcStop": "2014-12-11T17:29:43Z",
+    "productIdEvent": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406",
+    "tid": 14282
+  },
+  "interpretation": {
+    "allProductsRemainSeparate": true,
+    "l2AbundanceUnit": "particles/cm3",
+    "noAutomaticCrossModeOrSpeciesMerge": true,
+    "notes": [
+      "Each product retains its own product ID, focus mode, time, geometry, species and quality flag.",
+      "No profile is merged across different focus modes or product versions.",
+      "Unknown quality flags remain explicit and are not promoted to verified detections.",
+      "A single orbit is an upper-atmosphere spacecraft track, not a complete lower-atmosphere state."
+    ],
+    "precisionField": "fractional 1-sigma on abundance",
+    "schedulerInitializationEligible": false
+  },
+  "products": [
+    {
+      "archiveMemberCsv": "l2/2014/12/mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv",
+      "archiveMemberXml": "l2/2014/12/mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.xml",
+      "csv": {
+        "csvByteLength": 538939,
+        "csvFileName": "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv",
+        "csvMd5Checksum": null,
+        "csvMd5ChecksumStatus": "not_present_in_detached_label",
+        "csvSha256": "b5954f0b1f70641d92bdbaa04b139736a8e02c1b154d03dffc2c890e34315721",
+        "csvSizeConsistencyStatus": "mismatch_quarantined_no_md5",
+        "detachedLabelAuthenticity": "not_independently_authenticated",
+        "labelDeclaredFileSizeBytes": 539063,
+        "productId": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406",
+        "xmlSha256": "e3ec40da938d71f382c160d3ff911185a5ad9b51e49cf38b70b2d0b55aec80ab"
+      },
+      "csvSummary": {
+        "acceptedRows": 1564,
+        "canonicalSISHeaders": [
+          "t_utc",
+          "t_unix",
+          "t_sclk",
+          "t_tid",
+          "tid",
+          "orbit",
+          "focusmode",
+          "alt",
+          "lst",
+          "long",
+          "lat",
+          "sza",
+          "mass",
+          "species",
+          "cps_dt_bkgd",
+          "abundance",
+          "precision",
+          "quality"
+        ],
+        "focusModeCounts": {
+          "csn": 1564
+        },
+        "noRowCount": 0,
+        "orbitCounts": {
+          "391": 1564
+        },
+        "profileCandidates": [
+          {
+            "abundanceUnit": "particles/cm3",
+            "altitudeMaxKm": 290.1642,
+            "altitudeMinKm": 152.9768,
+            "focusMode": "csn",
+            "hasDuplicateAltitude": true,
+            "precisionMeaning": "fractional 1-sigma",
+            "quality": "uncertain",
+            "relativeSigmaMax": 0.064808,
+            "relativeSigmaMin": 0.000161,
+            "rowCount": 254,
+            "species": "Ar",
+            "uniqueAltitudeCount": 253
+          },
+          {
+            "abundanceUnit": "particles/cm3",
+            "altitudeMaxKm": 195.5565,
+            "altitudeMinKm": 152.9765,
+            "focusMode": "csn",
+            "hasDuplicateAltitude": false,
+            "precisionMeaning": "fractional 1-sigma",
+            "quality": "verified",
+            "relativeSigmaMax": 0.003124,
+            "relativeSigmaMin": 0.000156,
+            "rowCount": 118,
+            "species": "Ar",
+            "uniqueAltitudeCount": 118
+          },
+          {
+            "abundanceUnit": "particles/cm3",
+            "altitudeMaxKm": 207.825,
+            "altitudeMinKm": 152.9765,
+            "focusMode": "csn",
+            "hasDuplicateAltitude": false,
+            "precisionMeaning": "fractional 1-sigma",
+            "quality": "uncertain",
+            "relativeSigmaMax": 0.001777,
+            "relativeSigmaMin": 2.3e-05,
+            "rowCount": 134,
+            "species": "CO2",
+            "uniqueAltitudeCount": 134
+          },
+          {
+            "abundanceUnit": "particles/cm3",
+            "altitudeMaxKm": 392.3028,
+            "altitudeMinKm": 152.9765,
+            "focusMode": "csn",
+            "hasDuplicateAltitude": true,
+            "precisionMeaning": "fractional 1-sigma",
+            "quality": "verified",
+            "relativeSigmaMax": 0.04225,
+            "relativeSigmaMin": 0.005482,
+            "rowCount": 481,
+            "species": "He",
+            "uniqueAltitudeCount": 480
+          }
+        ],
+        "qualityFlagCounts": {
+          "IU": 175,
+          "IV": 389,
+          "OU": 213,
+          "OV": 210,
+          "UR": 423,
+          "unrecognized:I0": 154
+        },
+        "rejectedRows": 1232,
+        "rowCount": 2796,
+        "schema": "NGIMS SIS Rev. 1.13 Table A-8 L2 neutral abundances",
+        "sourceCsvHeaders": [
+          "t_utc",
+          "t_unix",
+          "t_sclk_cor",
+          "t_tid",
+          "tid",
+          "orbit",
+          "focusmode",
+          "alt",
+          "lst",
+          "long",
+          "lat",
+          "sza",
+          "mass",
+          "species",
+          "cps_dt_bkd",
+          "abundance",
+          "precision",
+          "quality"
+        ],
+        "sourceHeaderAliasesApplied": {
+          "cps_dt_bkd": "cps_dt_bkgd",
+          "t_sclk_cor": "t_sclk"
+        },
+        "speciesRowCounts": {
+          "Ar": 372,
+          "CO2": 352,
+          "He": 481,
+          "N2": 359
+        },
+        "tidCounts": {
+          "14282": 1564
+        },
+        "timeStartUtc": "2014-12-11T17:06:03Z",
+        "timeStopUtc": "2014-12-11T17:22:54Z"
+      },
+      "filesCommitted": [
+        "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv",
+        "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.xml"
+      ],
+      "xmlByteLength": 13483,
+      "xmlFileName": "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.xml"
+    }
+  ],
+  "retrievalMethod": "exact original archive members extracted byte-for-byte; no line-ending rewriting"
+}
