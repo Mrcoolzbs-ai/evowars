@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import re
+import statistics
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -301,6 +302,7 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             "numericColumnValueCounts": Counter(),
             "numericColumnMinMax": {},
             "unixTimes": [],
+            "signalValuesByMass": defaultdict(lambda: defaultdict(list)),
             "candidateMassChannelSampleRows": defaultdict(list),
         }
 
@@ -331,10 +333,12 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
         if unix_time is not None:
             audit["unixTimes"].append(unix_time)
 
+        signal_values = {}
         for field in ("counts", "cps_raw", "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd", "cps"):
             value = get_number(row, field)
             if value is None:
                 continue
+            signal_values[field] = value
             audit["numericColumnValueCounts"][field] += 1
             if field not in audit["numericColumnMinMax"]:
                 audit["numericColumnMinMax"][field] = {"min": value, "max": value}
@@ -345,6 +349,10 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
                 audit["numericColumnMinMax"][field]["max"] = max(
                     audit["numericColumnMinMax"][field]["max"], value
                 )
+        if mass is not None:
+            mass_key = str(int(mass)) if mass.is_integer() else format(mass, ".8g")
+            for field, value in signal_values.items():
+                audit["signalValuesByMass"][mass_key][field].append(value)
 
         if mass is not None and int(round(mass)) in relevant_mass_channels:
             mass_key = str(int(round(mass)))
@@ -372,11 +380,32 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
     focus_mode_details = {}
     for mode, audit in sorted(mode_audit.items()):
         times = audit["unixTimes"]
+        signal_summary = {}
+        for mass_key, fields in sorted(
+            audit["signalValuesByMass"].items(),
+            key=lambda item: float(item[0])
+        ):
+            signal_summary[mass_key] = {}
+            for field, raw_values in sorted(fields.items()):
+                values = sorted(raw_values)
+                count = len(values)
+                signal_summary[mass_key][field] = {
+                    "n": count,
+                    "min": values[0],
+                    "q05": values[max(0, int((count - 1) * 0.05))],
+                    "median": statistics.median(values),
+                    "mean": statistics.fmean(values),
+                    "q95": values[min(count - 1, int((count - 1) * 0.95))],
+                    "max": values[-1],
+                    "populationStdDev": statistics.pstdev(values) if count > 1 else 0.0,
+                    "positiveValueCount": sum(1 for value in values if value > 0),
+                }
         focus_mode_details[mode] = {
             "rowCount": audit["rowCount"],
             "massChannelRowCounts": dict(audit["massChannelRowCounts"]),
             "numericColumnValueCounts": dict(audit["numericColumnValueCounts"]),
             "numericColumnMinMax": audit["numericColumnMinMax"],
+            "massChannelSignalStatistics": signal_summary,
             "unixTimeMin": min(times) if times else None,
             "unixTimeMax": max(times) if times else None,
             "timeStartUtcFromCsv": iso_utc(min(times)) if times else None,
