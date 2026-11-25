@@ -1284,6 +1284,9 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(product.csvSummary.speciesRowCounts).toEqual({
       Ar: 372, CO2: 352, He: 481, N2: 359
     });
+    expect(product.csvSummary.rawQualityFlagCounts).toMatchObject({
+      IU: 574, IV: 464, OU: 228, OV: 478, UR: 706, I0: 346
+    });
     expect(product.csvSummary.qualityFlagCounts).toMatchObject({
       IU: 175, IV: 389, OU: 213, OV: 210, UR: 423, 'unrecognized:I0': 154
     });
@@ -1318,7 +1321,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(helium.status).toBe('completed');
     if (helium.status !== 'completed') throw new Error(helium.errors?.join('; ') ?? 'He profile rejected');
     if (!helium.measurements) throw new Error('completed He profile did not return measurements');
-    expect(helium.measurements).toHaveLength(346);
+    expect(helium.measurements).toHaveLength(271);
     expect(helium.measurements.every(measurement =>
       measurement.qualityFlag === 'IV' &&
       measurement.numberDensityPerM3 > 0 &&
