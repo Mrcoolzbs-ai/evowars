@@ -20,9 +20,18 @@ class FormInspector(HTMLParser):
         self.forms = []
         self.current = None
         self.current_select = None
+        self.scripts = []
+        self.in_script = False
+        self.script_text = ""
+        self.page_buttons = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag.lower() == "script":
+            self.in_script = True
+            self.script_text = ""
+        if tag.lower() in {"button"}:
+            self.page_buttons.append({"attrs": attrs, "text": ""})
         if tag.lower() == "form":
             self.current = {"tag": "form", **attrs, "inputs": [], "selects": [], "buttons": []}
             self.forms.append(self.current)
@@ -37,12 +46,19 @@ class FormInspector(HTMLParser):
             self.current["buttons"].append({"tag": tag, "attrs": attrs, "text": ""})
 
     def handle_data(self, data):
+        if self.in_script:
+            self.script_text += data
         if self.current_select and self.current_select["options"]:
             self.current_select["options"][-1]["text"] += data.strip()
         elif self.current and self.current["buttons"]:
             self.current["buttons"][-1]["text"] += data.strip()
 
     def handle_endtag(self, tag):
+        if tag.lower() == "script":
+            if self.script_text.strip():
+                self.scripts.append(self.script_text)
+            self.in_script = False
+            self.script_text = ""
         if tag.lower() == "select":
             self.current_select = None
         elif tag.lower() == "form":
@@ -67,7 +83,14 @@ def main() -> int:
         }, indent=2))
     parser = FormInspector()
     parser.feed(html.decode("utf-8", errors="replace"))
-    print(json.dumps({"forms": parser.forms}, ensure_ascii=False, indent=2))
+    print(json.dumps({
+        "forms": parser.forms,
+        "scriptsWithFormValidation": [
+            block for block in parser.scripts
+            if "function check" in block or "Start Time" in block or "postForm" in block
+        ],
+        "pageButtons": parser.page_buttons,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 
