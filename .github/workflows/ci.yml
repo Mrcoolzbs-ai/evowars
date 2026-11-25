@@ -1,5 +1,5 @@
 name: CI
-# Keep science branch verification rerunnable after source/test commits and co-registration checks.
+# Keep science branch verification rerunnable after exact NGIMS co-registration changes.
 
 on:
   push:
