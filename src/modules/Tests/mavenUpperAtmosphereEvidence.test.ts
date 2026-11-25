@@ -14,6 +14,7 @@ import {
   MAVEN_NGIMS_L3_SCALE_HEIGHT_TEMPERATURE_PROVENANCE,
   MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE,
   linkMavenNgimsL2L3IndexEventWindow,
+  linkMavenNgimsL2L3IndexProductSet,
   parseMavenInsituKeyParameterRecord,
   parseMavenNgimsL3ScaleHeightTemperatureCsvRow,
   parseMavenNgimsL3ScaleHeightTemperatureCsvText,
@@ -273,10 +274,13 @@ describe('MAVEN upper-atmosphere evidence', () => {
       timeStopUtc: '2014-12-11T17:29:43.000Z',
       matching: {
         exactTidMatch: true,
+        exactProductTimeMatch: true,
         exactUtcWindowMatch: true,
-        numericL2CsvImported: false,
-        numericL3ResampledDensityCsvImported: false,
-        numericL3TemperatureCsvImported: false,
+        numericL2CsvImported: true,
+        numericL3ResampledDensityCsvImported: true,
+        numericL3TemperatureCsvImported: true,
+        allThreePds4ImportsForensicOnly: true,
+        l3DensityBinsConvertedToLinearUnits: false,
         schedulerInitialStateEligible: false
       }
     });
@@ -293,8 +297,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
       directoryReportedSize: '526 KB',
       focusMode: 'csn',
       neutralSpecies: ['Ar', 'CO2', 'He', 'N2'],
-      productPayloadImported: false,
-      labelPayloadImported: false
+      productPayloadImported: true,
+      labelPayloadImported: true,
+      csvByteLength: 538939,
+      labelDeclaredFileSizeBytes: 539063,
+      pds4ImportMode: 'forensic-only'
     });
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityProduct).toMatchObject({
       productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
@@ -302,7 +309,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
       directoryReportedSize: '23 KB',
       directoryRowVerified: true,
       table: 'NGIMS SIS Rev. 1.13 Table A-9',
-      productPayloadImported: false
+      productPayloadImported: true,
+      labelPayloadImported: true,
+      csvByteLength: 23658,
+      labelDeclaredFileSizeBytes: 23743,
+      pds4ImportMode: 'forensic-only'
     });
     expect(MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE.l3ResampledDensityIndex).toMatchObject({
       productId: 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406',
@@ -349,6 +360,101 @@ describe('MAVEN upper-atmosphere evidence', () => {
       coRegistrationBasis: 'same-tid-and-exact-time-window',
       eligibleAsMarsPhotochemicalInitialState: false
     });
+  });
+
+  it('links one exact three-product NGIMS event while preserving per-index closest-approach times', () => {
+    const candidate = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE;
+    const result = linkMavenNgimsL2L3IndexProductSet({
+      l2CsnAbundance: {
+        sourceProductId: candidate.l2AbundanceProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc,
+        closestApproachTimeUtc: '2014-12-11T16:37:34.00Z'
+      },
+      l3ResampledDensity: {
+        sourceProductId: candidate.l3ResampledDensityProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc,
+        closestApproachTimeUtc: '2014-12-11T17:15:29'
+      },
+      l3ScaleHeightTemperature: {
+        sourceProductId: candidate.l3ScaleHeightTemperatureProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc,
+        closestApproachTimeUtc: '2014-12-11T17:15:29'
+      }
+    });
+    expect(result).toEqual({
+      status: 'matched',
+      tid: 14282,
+      productTime: '20141211t154406',
+      timeStartUtc: '2014-12-11T15:45:25.000Z',
+      timeStopUtc: '2014-12-11T17:29:43.000Z',
+      productIds: {
+        l2CsnAbundance: candidate.l2AbundanceProduct.productId,
+        l3ResampledDensity: candidate.l3ResampledDensityProduct.productId,
+        l3ScaleHeightTemperature: candidate.l3ScaleHeightTemperatureProduct.productId
+      },
+      closestApproachTimesUtc: {
+        l2CsnAbundance: '2014-12-11T16:37:34.00Z',
+        l3ResampledDensity: '2014-12-11T17:15:29',
+        l3ScaleHeightTemperature: '2014-12-11T17:15:29'
+      },
+      coRegistrationBasis: 'same-tid-product-time-and-exact-time-window',
+      closestApproachTimesAreJoinKeys: false,
+      eligibleAsMarsPhotochemicalInitialState: false
+    });
+  });
+
+  it('rejects a three-product link if the URN product-time or product role differs', () => {
+    const candidate = MAVEN_NGIMS_TID_14282_CROSS_INDEX_CANDIDATE;
+    const products = {
+      l2CsnAbundance: {
+        sourceProductId: candidate.l2AbundanceProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc
+      },
+      l3ResampledDensity: {
+        sourceProductId: candidate.l3ResampledDensityProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc
+      },
+      l3ScaleHeightTemperature: {
+        sourceProductId: candidate.l3ScaleHeightTemperatureProduct.productId,
+        tid: candidate.tid,
+        timeStartUtc: candidate.timeStartUtc,
+        timeStopUtc: candidate.timeStopUtc
+      }
+    };
+    expect(linkMavenNgimsL2L3IndexProductSet({
+      ...products,
+      l3ScaleHeightTemperature: {
+        ...products.l3ScaleHeightTemperature,
+        sourceProductId: products.l3ScaleHeightTemperature.sourceProductId.replace(
+          '20141211t154406',
+          '20141211t154407'
+        )
+      }
+    }).status).toBe('rejected');
+    expect(linkMavenNgimsL2L3IndexProductSet({
+      ...products,
+      l3ScaleHeightTemperature: {
+        ...products.l3ScaleHeightTemperature,
+        sourceProductId: candidate.l3ResampledDensityProduct.productId
+      }
+    }).status).toBe('rejected');
+    expect(linkMavenNgimsL2L3IndexProductSet({
+      ...products,
+      l3ResampledDensity: {
+        ...products.l3ResampledDensity,
+        timeStopUtc: '2014-12-11T17:29:44Z'
+      }
+    }).status).toBe('rejected');
   });
 
   it('rejects NGIMS L2/L3 links when TID or either endpoint of the time window differs', () => {
