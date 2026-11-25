@@ -16,13 +16,23 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import http.cookiejar
+from urllib.error import HTTPError, URLError
 from collections import Counter
 from datetime import date
 from html.parser import HTMLParser
 from pathlib import Path
 
 FORM_PAGE = "https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims_data_search.html"
-FORM_ACTION = "https://atmos.nmsu.edu:8443/maven_test/NGIMS_Browser"
+FORM_ACTIONS = [
+    "https://atmos.nmsu.edu:8443/maven_test/NGIMS_Browser",
+    "https://atmos.nmsu.edu:8443/maven_test/NGIMS_Browser/",
+    "https://atmos-ah-vs.nmsu.edu:8443/maven_test/NGIMS_Browser",
+    "https://pds-atmospheres.nmsu.edu:8443/maven_test/NGIMS_Browser",
+    "http://atmos.nmsu.edu:8443/maven_test/NGIMS_Browser",
+    "https://atmos.nmsu.edu/maven_test/NGIMS_Browser",
+    "https://pds-atmospheres.nmsu.edu/maven_test/NGIMS_Browser",
+]
 OUTPUT_DIR = Path("src/modules/Data/mavenNgimsAllNeutralIndex")
 START_DATE = date(2014, 10, 18)
 STOP_DATE = date(2025, 2, 15)
@@ -98,12 +108,16 @@ class ResultParser(HTMLParser):
             self._anchor_href = ""
 
 
+COOKIE_JAR = http.cookiejar.CookieJar()
+OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(COOKIE_JAR))
+
+
 def fetch_search_form() -> dict:
     request = urllib.request.Request(
         FORM_PAGE,
         headers={"User-Agent": "EvoWars-NGIMS-Index-Research/1.0", "Accept": "text/html"},
     )
-    with urllib.request.urlopen(request, timeout=45) as response:
+    with OPENER.open(request, timeout=45) as response:
         body = response.read(4_000_001)
         if len(body) > 4_000_000:
             raise RuntimeError("official NGIMS search form exceeds 4 MB")
@@ -113,6 +127,10 @@ def fetch_search_form() -> dict:
             "contentType": response.headers.get("Content-Type"),
             "byteLength": len(body),
             "sha256": hashlib.sha256(body).hexdigest(),
+            "cookies": [
+                {"name": cookie.name, "domain": cookie.domain, "path": cookie.path}
+                for cookie in COOKIE_JAR
+            ],
             "body": body,
         }
 
@@ -126,34 +144,51 @@ def submit_query(start: date, stop: date, offset: int) -> tuple[bytes, dict]:
         ("Stop Time", stop.isoformat() + "T23:59:59"),
     ]
     payload = urllib.parse.urlencode(fields).encode("ascii")
-    request = urllib.request.Request(
-        FORM_ACTION,
-        data=payload,
-        method="POST",
-        headers={
-            "User-Agent": "EvoWars-NGIMS-Index-Research/1.0",
-            "Accept": "text/html,application/xhtml+xml,*/*",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": FORM_PAGE,
-            "Origin": "https://pds-atmospheres.nmsu.edu",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=90) as response:
-        body = response.read(12_000_001)
-        if len(body) > 12_000_000:
-            raise RuntimeError("NGIMS selector response exceeds 12 MB safety limit")
-        return body, {
-            "requestStart": start.isoformat(),
-            "requestStop": stop.isoformat(),
-            "sliceStart": offset,
-            "sliceSize": PAGE_SIZE,
-            "httpStatus": response.status,
-            "finalUrl": response.geturl(),
-            "contentType": response.headers.get("Content-Type"),
-            "byteLength": len(body),
-            "sha256": hashlib.sha256(body).hexdigest(),
-        }
-
+    attempts = []
+    for endpoint in FORM_ACTIONS:
+        request = urllib.request.Request(
+            endpoint,
+            data=payload,
+            method="POST",
+            headers={
+                "User-Agent": "EvoWars-NGIMS-Index-Research/1.0",
+                "Accept": "text/html,application/xhtml+xml,*/*",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": FORM_PAGE,
+                "Origin": "https://pds-atmospheres.nmsu.edu",
+            },
+        )
+        try:
+            with OPENER.open(request, timeout=45) as response:
+                body = response.read(12_000_001)
+                if len(body) > 12_000_000:
+                    raise RuntimeError("NGIMS selector response exceeds 12 MB safety limit")
+                metadata = {
+                    "requestStart": start.isoformat(),
+                    "requestStop": stop.isoformat(),
+                    "sliceStart": offset,
+                    "sliceSize": PAGE_SIZE,
+                    "endpoint": endpoint,
+                    "httpStatus": response.status,
+                    "finalUrl": response.geturl(),
+                    "contentType": response.headers.get("Content-Type"),
+                    "byteLength": len(body),
+                    "sha256": hashlib.sha256(body).hexdigest(),
+                    "cookies": len(COOKIE_JAR),
+                }
+                return body, metadata
+        except HTTPError as error:
+            detail = error.read(1200).decode("utf-8", errors="replace")
+            attempts.append({
+                "endpoint": endpoint,
+                "status": error.code,
+                "reason": str(error.reason),
+                "server": error.headers.get("Server"),
+                "bodyPreview": clean_text(detail)[:500],
+            })
+        except (URLError, TimeoutError, OSError) as error:
+            attempts.append({"endpoint": endpoint, "error": str(error)})
+    raise RuntimeError("all official NGIMS selector endpoints failed: " + json.dumps(attempts))
 
 def next_year_bounds(year: int) -> tuple[date, date]:
     start = max(START_DATE, date(year, 1, 1))
@@ -164,8 +199,13 @@ def next_year_bounds(year: int) -> tuple[date, date]:
 def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     form = fetch_search_form()
-    (OUTPUT_DIR / "search-form.html").write_bytes(form.pop("body"))
+    form_body = form.pop("body")
+    (OUTPUT_DIR / "search-form.html").write_bytes(form_body)
     form_provenance = form
+    (OUTPUT_DIR / "search-form-provenance.json").write_text(
+        json.dumps(form_provenance, ensure_ascii=False, indent=2, sort_keys=True) + "\\n",
+        encoding="utf-8",
+    )
 
     all_products: dict[str, dict] = {}
     page_audit: list[dict] = []
