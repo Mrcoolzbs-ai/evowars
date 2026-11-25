@@ -3119,6 +3119,48 @@ export type MavenNgimsL3ScaleHeightTemperatureCsvImportResult =
     }
   | { readonly status: 'invalid_csv'; readonly errors: readonly string[] };
 
+export interface MavenNgimsL3ScaleHeightTemperaturePds4ImportInput {
+  readonly csvText: string;
+  readonly detachedLabelXml: string;
+  readonly expectedProductId: string;
+  readonly expectedCsvFileName: string;
+  readonly allowLabelSizeMismatchForensicAnalysis?: boolean;
+}
+
+export interface MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance {
+  readonly sourceProductId: string;
+  readonly csvFileName: string;
+  readonly csvByteLength: number;
+  readonly labelDeclaredFileSizeBytes: number;
+  readonly csvSizeConsistencyStatus: 'matches_detached_label_file_size' | 'mismatch_explicitly_accepted_for_forensic_analysis';
+  readonly labelHeaderObjectLengthBytes: number | null;
+  readonly labelTableOffsetBytes: number | null;
+  readonly labelTableObjectLengthBytes: number | null;
+  readonly labelFileLayoutDiagnosis: 'consistent' | 'possible_header_double_count_in_label' | 'not_diagnosable';
+  readonly csvSha256: string;
+  readonly csvMd5Checksum: string | null;
+  readonly csvMd5ChecksumStatus: 'not_present_in_detached_label' | 'verified_against_detached_label';
+  readonly csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum' | 'md5_verified_against_detached_label';
+  readonly detachedLabelAuthenticity: 'not_independently_authenticated';
+}
+
+export type MavenNgimsL3ScaleHeightTemperaturePds4ImportResult =
+  | {
+      readonly status: 'imported';
+      readonly forensicOnly: false;
+      readonly warnings: readonly [];
+      readonly imported: Extract<MavenNgimsL3ScaleHeightTemperatureCsvImportResult, { readonly status: 'parsed' }>;
+      readonly provenance: MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance;
+    }
+  | {
+      readonly status: 'imported_forensic_only';
+      readonly forensicOnly: true;
+      readonly warnings: readonly string[];
+      readonly imported: Extract<MavenNgimsL3ScaleHeightTemperatureCsvImportResult, { readonly status: 'parsed' }>;
+      readonly provenance: MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance;
+    }
+  | { readonly status: 'rejected'; readonly errors: readonly string[] };
+
 export interface MavenNgimsL3ScaleHeightTemperatureSelection {
   readonly tid: number;
   readonly orbit: number;
@@ -3322,6 +3364,183 @@ export function parseMavenNgimsL3ScaleHeightTemperatureCsvText(
 }
 
 /** Select one exact species/orbit/TID/quality class; never average across products or species. */
+/**
+ * Bind the L3 scale-height-fit CSV to its detached PDS4 label. A size
+ * discrepancy is rejected by default and requires explicit forensic opt-in.
+ * The parsed temperature remains derived-fit evidence, never a local T(z) node.
+ */
+export async function importMavenNgimsL3ScaleHeightTemperaturePds4Product(
+  input: MavenNgimsL3ScaleHeightTemperaturePds4ImportInput
+): Promise<MavenNgimsL3ScaleHeightTemperaturePds4ImportResult> {
+  if (!input || typeof input !== 'object' ||
+      typeof input.csvText !== 'string' || input.csvText.length === 0 ||
+      typeof input.detachedLabelXml !== 'string' || input.detachedLabelXml.trim() === '' ||
+      typeof input.expectedProductId !== 'string' || input.expectedProductId.trim() === '' ||
+      typeof input.expectedCsvFileName !== 'string' || input.expectedCsvFileName.trim() === '') {
+    return { status: 'rejected', errors: ['exact scale-height CSV, detached PDS4 label, expected product URN and CSV filename are required'] };
+  }
+  const xml = input.detachedLabelXml.replace(/<!--[\s\S]*?-->/g, '');
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
+    return { status: 'rejected', errors: ['PDS4 label must not contain a DTD or entity declaration'] };
+  }
+  if (typeof DOMParser === 'undefined') {
+    return { status: 'rejected', errors: ['XML DOMParser is unavailable in this runtime'] };
+  }
+
+  let labelDocument: Document;
+  try {
+    labelDocument = new DOMParser().parseFromString(xml, 'application/xml');
+  } catch {
+    return { status: 'rejected', errors: ['detached scale-height PDS4 XML label could not be parsed'] };
+  }
+  const root = labelDocument.documentElement;
+  if (!root || root.localName === 'parsererror' ||
+      root.localName !== 'Product_Observational' ||
+      root.namespaceURI !== PDS4_LABEL_NAMESPACE) {
+    return {
+      status: 'rejected',
+      errors: ['scale-height label must be a PDS4 Product_Observational document in the PDS namespace']
+    };
+  }
+
+  const identificationAreas = Array.from(labelDocument.getElementsByTagNameNS(
+    PDS4_LABEL_NAMESPACE, 'Identification_Area'
+  ));
+  const fileAreas = Array.from(labelDocument.getElementsByTagNameNS(
+    PDS4_LABEL_NAMESPACE, 'File_Area_Observational'
+  ));
+  const files = fileAreas.length === 1
+    ? Array.from(fileAreas[0].getElementsByTagNameNS(PDS4_LABEL_NAMESPACE, 'File'))
+    : [];
+  const errors: string[] = [];
+  if (identificationAreas.length !== 1 || identificationAreas[0]?.parentElement !== root) {
+    errors.push('scale-height label must contain exactly one direct-child Identification_Area');
+  }
+  if (fileAreas.length !== 1 || fileAreas[0]?.parentElement !== root) {
+    errors.push('scale-height label must contain exactly one direct-child File_Area_Observational');
+  }
+  if (files.length !== 1 || files[0]?.parentElement !== fileAreas[0]) {
+    errors.push('scale-height File_Area_Observational must contain exactly one direct-child File entry');
+  }
+
+  const logicalIdentifier = readPds4DetachedLabelElement(
+    identificationAreas.length === 1 ? identificationAreas[0] : root,
+    'logical_identifier'
+  );
+  const fileScope = files.length === 1 ? files[0] : root;
+  const fileName = readPds4DetachedLabelElement(fileScope, 'file_name');
+  const fileSize = readPds4DetachedLabelElement(fileScope, 'file_size');
+  const md5 = readPds4DetachedLabelElement(fileScope, 'md5_checksum');
+  if (logicalIdentifier.count !== 1 || logicalIdentifier.value !== input.expectedProductId.trim()) {
+    errors.push('scale-height label logical_identifier does not match expected archive URN');
+  }
+  if (fileName.count !== 1 || fileName.value !== input.expectedCsvFileName.trim()) {
+    errors.push('scale-height label file_name does not match expected CSV filename');
+  }
+  if (fileSize.count !== 1 || !fileSize.value) {
+    errors.push('scale-height label must contain exactly one file_size');
+  }
+  if (fileSize.count === 1 && fileSize.unit !== 'byte') {
+    errors.push('scale-height label file_size must use unit="byte"');
+  }
+  const declaredFileSize = fileSize.value === null ? Number.NaN : Number(fileSize.value);
+  if (fileSize.count === 1 && (!Number.isSafeInteger(declaredFileSize) || declaredFileSize <= 0)) {
+    errors.push('scale-height label file_size must be a positive integer byte count');
+  }
+  if (md5.count > 1 || (md5.count === 1 && (md5.value === null || !/^[a-f0-9]{32}$/i.test(md5.value)))) {
+    errors.push('scale-height label md5_checksum must be absent or exactly 32 hexadecimal characters');
+  }
+
+  const csvByteLength = new TextEncoder().encode(input.csvText).length;
+  const csvSizeMatchesLabel = Number.isSafeInteger(declaredFileSize) && declaredFileSize === csvByteLength;
+  if (!csvSizeMatchesLabel && input.allowLabelSizeMismatchForensicAnalysis !== true) {
+    errors.push('scale-height CSV byte length does not match detached label file_size; forensic opt-in is required');
+  }
+  const headerLayout = readPds4TableObjectLayout(fileAreas.length === 1 ? fileAreas[0] : null, 'Header');
+  const tableLayout = readPds4TableObjectLayout(fileAreas.length === 1 ? fileAreas[0] : null, 'Table_Delimited');
+  const labelFileLayoutDiagnosis: MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance['labelFileLayoutDiagnosis'] =
+    csvSizeMatchesLabel
+      ? 'consistent'
+      : (
+        headerLayout.objectLengthBytes !== null &&
+        tableLayout.offsetBytes === headerLayout.objectLengthBytes &&
+        tableLayout.objectLengthBytes === csvByteLength &&
+        declaredFileSize === headerLayout.objectLengthBytes + tableLayout.objectLengthBytes
+      )
+        ? 'possible_header_double_count_in_label'
+        : 'not_diagnosable';
+  if (errors.length > 0) return { status: 'rejected', errors };
+
+  const imported = parseMavenNgimsL3ScaleHeightTemperatureCsvText(
+    input.csvText,
+    logicalIdentifier.value!
+  );
+  if (imported.status !== 'parsed') return { status: 'rejected', errors: [...imported.errors] };
+
+  let csvSha256: string;
+  let csvMd5Checksum: string | null = null;
+  let csvMd5ChecksumStatus: MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance['csvMd5ChecksumStatus'] =
+    'not_present_in_detached_label';
+  let csvFixityStatus: MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance['csvFixityStatus'] =
+    'sha256_computed_not_compared_to_archive_checksum';
+  try {
+    csvSha256 = await computeMavenPdsCsvSha256(input.csvText);
+    if (md5.value !== null) {
+      const calculatedMd5 = computeMavenPdsCsvMd5(input.csvText);
+      const expectedMd5 = md5.value.toLowerCase();
+      if (calculatedMd5 !== expectedMd5) {
+        return { status: 'rejected', errors: ['scale-height CSV MD5 does not match detached PDS4 label'] };
+      }
+      csvMd5Checksum = expectedMd5;
+      csvMd5ChecksumStatus = 'verified_against_detached_label';
+      csvFixityStatus = 'md5_verified_against_detached_label';
+    }
+  } catch (error) {
+    return {
+      status: 'rejected',
+      errors: [error instanceof Error ? error.message : 'unable to compute scale-height CSV fixity hashes']
+    };
+  }
+
+  const provenance: MavenNgimsL3ScaleHeightTemperaturePds4ImportProvenance = {
+    sourceProductId: logicalIdentifier.value!,
+    csvFileName: fileName.value!,
+    csvByteLength,
+    labelDeclaredFileSizeBytes: declaredFileSize,
+    csvSizeConsistencyStatus: csvSizeMatchesLabel
+      ? 'matches_detached_label_file_size'
+      : 'mismatch_explicitly_accepted_for_forensic_analysis',
+    labelHeaderObjectLengthBytes: headerLayout.objectLengthBytes,
+    labelTableOffsetBytes: tableLayout.offsetBytes,
+    labelTableObjectLengthBytes: tableLayout.objectLengthBytes,
+    labelFileLayoutDiagnosis,
+    csvSha256,
+    csvMd5Checksum,
+    csvMd5ChecksumStatus,
+    csvFixityStatus,
+    detachedLabelAuthenticity: 'not_independently_authenticated'
+  };
+  if (!csvSizeMatchesLabel) {
+    return {
+      status: 'imported_forensic_only',
+      forensicOnly: true,
+      warnings: [
+        'Detached scale-height PDS4 label file_size is inconsistent with exact CSV bytes; import is forensic-only.',
+        'Original archive bytes are preserved; no line-ending normalization or inferred repair is applied.',
+        md5.value === null
+          ? 'No md5_checksum is present; SHA-256 is computed but not compared to an independent checksum.'
+          : 'CSV MD5 matches the supplied label, but the label itself is not independently authenticated.',
+        labelFileLayoutDiagnosis === 'possible_header_double_count_in_label'
+          ? 'Header.object_length + Table_Delimited.object_length equals file_size while the Table object length already equals the full CSV payload; possible header double-count.'
+          : 'The PDS4 object layout does not explain the file-size discrepancy.'
+      ],
+      imported,
+      provenance
+    };
+  }
+  return { status: 'imported', forensicOnly: false, warnings: [], imported, provenance };
+}
+
 export function selectMavenNgimsL3ScaleHeightTemperatureRows(
   imported: MavenNgimsL3ScaleHeightTemperatureCsvImportResult,
   selection: MavenNgimsL3ScaleHeightTemperatureSelection
