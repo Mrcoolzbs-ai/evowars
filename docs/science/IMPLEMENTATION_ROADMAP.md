@@ -1172,3 +1172,12 @@
 > реальный CSV/XML payload TID 14282 не импортирован и полный синхронный
 > химический профиль/интеграция Scheduler не получены.
 > Run: https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45509764819.
+
+
+> **Актуальный статус Stage 4.2 (25.11.2026; supersedes earlier “payload not imported” snapshots): реальные MAVEN PDS4 payloads получены и исследованы.** В репозитории заморожены оригинальные CSV/XML L3 res-den и L2 csn-abund TID 14282 из официальных годовых PDS архивов. L3: 208 rows; file_size в detached label расходится на +85 bytes, MD5 отсутствует; продукт импортируется только как forensic evidence, а `density_bins` не преобразуется в линейную концентрацию из-за конфликта между log-bin описанием и единицей Table A-9. L2: 2,796 строк; один продукт `csn-abund`, закрытый focus mode; label file_size расходится на +124 bytes, MD5 отсутствует, исходные байты quarantined без исправления. Статистика raw и численно допустимых строк разнесена в manifest.
+>
+> В L2 reader добавлены UTC-нормализация timezone-naive `t_utc`, сохранение `rawRecord`, обязательный focus mode в profile selection, запрет смешения focus modes и exact co-registration API. Верифицированный inbound He/IV профиль — 271 точка; CO2/IU — 134 точки только для sensitivity-исследования. Все 134 CO2 точки имеют точную пару He по времени и высоте; объединены без интерполяции и усреднения, при этом IV и IU остаются разными классами. В этом единственном продукте нет O/NO/NO2/CO/O2; N2 остаётся с нераспознанным `I0`. В официальном годовом архиве не найден `cso-abund` для этого точного TID/time.
+>
+> CI #1047 на commit `e47deceecf765e06f2c10671b8aba245e538dd59`: TypeScript, Vitest, lint и production build — success; 98 файлов passed, 2 skipped; 3329 tests passed, 53 skipped. Run: https://github.com/Mrcoolzbs-ai/evowars/actions/runs/45517189242.
+>
+> **Граница готовности не снимается:** два ко-регистрированных нейтральных вида не образуют полного contemporaneous atmosphere. Не хватает наблюдаемых O/NO/NO2/H/HO2, совместимых T(z)/P(z), vertical transport/diffusion и независимого обоснования скоростей/граничных условий. Наблюдения MGS 1998, IUVS 2016, SAM, ACS и OpenMARS нельзя сливать в один синхронный initial state. Ни один из этих импортов не активирует Scheduler initial abundance. Stage 4.2 остаётся **OPEN / NOT_READY**.
