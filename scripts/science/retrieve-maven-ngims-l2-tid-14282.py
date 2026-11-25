@@ -202,6 +202,8 @@ def parse_csv(csv_bytes: bytes) -> dict:
 
     species_counts: Counter[str] = Counter()
     quality_counts: Counter[str] = Counter()
+    raw_species_counts: Counter[str] = Counter()
+    raw_quality_counts: Counter[str] = Counter()
     focus_counts: Counter[str] = Counter()
     orbit_counts: Counter[str] = Counter()
     tid_counts: Counter[str] = Counter()
@@ -216,6 +218,13 @@ def parse_csv(csv_bytes: bytes) -> dict:
             header_aliases.get(str(k).strip().lower(), str(k).strip().lower()): (v or "").strip()
             for k, v in raw.items()
         }
+        # Preserve archive-level counts before numeric/quality eligibility gates.
+        raw_species = row.get("species", "").strip()
+        raw_quality = row.get("quality", "").strip().upper()
+        if raw_species:
+            raw_species_counts[raw_species] += 1
+        if raw_quality:
+            raw_quality_counts[raw_quality] += 1
         try:
             tid = int(row["tid"])
             orbit = int(row["orbit"])
@@ -289,6 +298,8 @@ def parse_csv(csv_bytes: bytes) -> dict:
         "focusModeCounts": dict(focus_counts),
         "speciesRowCounts": dict(species_counts),
         "qualityFlagCounts": dict(quality_counts),
+        "rawSpeciesRowCounts": dict(raw_species_counts),
+        "rawQualityFlagCounts": dict(raw_quality_counts),
         "timeStartUtc": min(timestamps).isoformat().replace("+00:00", "Z") if timestamps else None,
         "timeStopUtc": max(timestamps).isoformat().replace("+00:00", "Z") if timestamps else None,
         "noRowCount": no_rows,
