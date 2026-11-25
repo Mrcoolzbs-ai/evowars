@@ -387,3 +387,34 @@ npm run build
 ### 6.12 MAVEN NGIMS archive coverage and selector metadata
 
 The current PDS NGIMS landing page states that the data archive currently extends through 2025-02-15 (Ls 44.2, MY 38, ongoing). The annual 2025 archive listing reports 308 MB of abundance products. The current Single-Species selector is `MAVEN_NGIMS_Single-Species_del1-43.csv`, listed at 6.6 MB with file modification date 2025-12-19; this is a selector revision timestamp, not the last observation date. Its listed `.htm` companion is only 62 bytes and is not a readable HTML table. The actual selector CSV content and the selected per-orbit products remain unimported; exact TID/orbit observations must not be inferred from filenames or timestamps.
+
+
+### 6.13 Official MAVEN NGIMS L2/L3 product-index intersection (25.11.2026)
+
+The official L2 Single-Species, L3 res-den and L3 res-sht selection CSVs are
+downloaded and audited by scripts/science/audit-ngims-product-indexes.py.
+The current index-only result contains 59,816 parsed product records and
+10,796 exact L2-CSN + L3-res-den + L3-res-sht event triples with matching
+TID, product timestamp from the URN and exact UTC start/stop window. Duplicate
+references to one identical URN in multiple indexes are collapsed only when
+the corresponding metadata agrees; numeric altitude and solar-longitude
+values use exact decimal comparison, not rounded floating-point equality.
+
+For TID 14282 / orbit 391, the three product URNs are:
+- L2: urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406
+- L3 res-den: urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406
+- L3 res-sht: urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406
+
+Their index windows agree (2014-12-11 15:45:25–17:29:43 UTC), but L2 closest
+approach is 16:37:34 UTC and L3 closest approach is 17:15:29 UTC. Row-level
+coverage also differs. These timestamps remain separate source metadata and
+are not averaged.
+
+The three CSV/XML product pairs are frozen and parsed in forensic-only mode:
+all detached labels have file-size mismatches (+124, +85, +141 bytes), no MD5,
+and no independent label authentication. L2 abundance rows retain quality
+flags; N2's unknown I0/UR quality is not promoted. L3 res-den density_bins
+remain raw because the log-bin versus Table A-9 unit semantics are unresolved.
+L3 res-sht temperatures are species-specific scale-height fits, not local
+T(z). Neither exact index linking nor forensic product parsing makes these
+data Scheduler-eligible. Stage 4.2 remains OPEN / NOT_READY.
