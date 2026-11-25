@@ -35,12 +35,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin stage-3-planetary-physics
-          git pull --rebase origin stage-3-planetary-physics
           git add src/modules/Data/mavenNgimsL2Archive/
           if git diff --cached --quiet; then
             echo "No new L2 source files to freeze."
           else
             git commit -m "data(science): freeze MAVEN NGIMS L2 TID 14282 products [skip ci]"
+            git fetch origin stage-3-planetary-physics
+            git pull --rebase origin stage-3-planetary-physics
             git push origin HEAD:stage-3-planetary-physics
           fi
