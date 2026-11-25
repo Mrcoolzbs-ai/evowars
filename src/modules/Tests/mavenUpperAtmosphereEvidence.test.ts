@@ -528,8 +528,11 @@ describe('MAVEN upper-atmosphere evidence', () => {
     expect(selected.status).toBe('completed');
     if (selected.status !== 'completed') throw new Error(selected.errors.join('; '));
     expect(selected.measurements.map((measurement) => measurement.altitudeKm)).toEqual([150, 160, 170]);
-    expect(selected.measurements.map((measurement) => measurement.densityBinsPerCm3))
+    expect(selected.measurements.map((measurement) => measurement.reportedDensityBinValue))
       .toEqual([1.2e7, 8e6, 5e6]);
+    expect(selected.measurements.every((measurement) =>
+      measurement.densityBinsPerCm3 === null && measurement.densityBinsPerM3 === null
+    )).toBe(true);
     expect(selected.measurements[0].reportedDensityBinValue).toBe(1.2e7);
     expect(selected.measurements[0].densityBinsPerCm3).toBeNull();
     expect(selected.measurements[0].densityBinsPerM3).toBeNull();
@@ -558,8 +561,8 @@ describe('MAVEN upper-atmosphere evidence', () => {
 
   it('imports the frozen real TID 14282 archive as forensic-only and preserves raw density bins and quality flags', async () => {
     Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto });
-    const csvText = readFileSync(new URL('../../Data/mavenNgimsArchive/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv', import.meta.url), 'utf8');
-    const detachedLabelXml = readFileSync(new URL('../../Data/mavenNgimsArchive/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml', import.meta.url), 'utf8');
+    const csvText = readFileSync('src/modules/Data/mavenNgimsArchive/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv', 'utf8');
+    const detachedLabelXml = readFileSync('src/modules/Data/mavenNgimsArchive/mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.xml', 'utf8');
     const productId = 'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-14282_20141211t154406';
     const fileName = 'mvn_ngi_l3_res-den-14282_20141211T154406_v06_r01.csv';
 
@@ -733,7 +736,7 @@ describe('MAVEN upper-atmosphere evidence', () => {
       hashAlgorithm: 'SHA-256',
       sourceProductIdentityBasis: 'detached-pds4-label-logical-identifier',
       csvSizeConsistencyStatus: 'matches_detached_label_file_size',
-      labelFileLayoutDiagnosis: 'not_diagnosable',
+      labelFileLayoutDiagnosis: 'consistent',
       csvFixityStatus: 'sha256_computed_not_compared_to_archive_checksum',
       detachedLabelAuthenticity: 'not_independently_authenticated'
     });
