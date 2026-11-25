@@ -212,6 +212,10 @@ def parse_csv(csv_bytes: bytes) -> dict:
     row_count = 0
     rejected_rows = 0
     no_rows = 0
+    abundance_sentinel_minus_999_rows = 0
+    zero_abundance_rows = 0
+    precision_sentinel_minus_999_rows = 0
+    numeric_rejection_reason_counts: Counter[str] = Counter()
     for record_number, raw in enumerate(reader, start=1):
         row_count += 1
         row = {
@@ -235,11 +239,40 @@ def parse_csv(csv_bytes: bytes) -> dict:
         except (KeyError, TypeError, ValueError):
             rejected_rows += 1
             continue
+        if abundance == -999:
+            abundance_sentinel_minus_999_rows += 1
+        if abundance == 0:
+            zero_abundance_rows += 1
+        if precision == -999:
+            precision_sentinel_minus_999_rows += 1
+
         if tid != TID or orbit != ORBIT:
             rejected_rows += 1
+            numeric_rejection_reason_counts["wrong_tid_or_orbit"] += 1
             continue
-        if altitude <= 0 or mass < 2 or mass > 150 or abundance <= 0 or precision < 0 or precision > 1:
+        if altitude <= 0:
             rejected_rows += 1
+            numeric_rejection_reason_counts["nonpositive_altitude"] += 1
+            continue
+        if mass < 2 or mass > 150:
+            rejected_rows += 1
+            numeric_rejection_reason_counts["mass_outside_ngims_range"] += 1
+            continue
+        if abundance == -999:
+            rejected_rows += 1
+            numeric_rejection_reason_counts["abundance_sentinel_-999"] += 1
+            continue
+        if abundance <= 0:
+            rejected_rows += 1
+            numeric_rejection_reason_counts["nonpositive_abundance"] += 1
+            continue
+        if precision == -999:
+            rejected_rows += 1
+            numeric_rejection_reason_counts["precision_sentinel_-999"] += 1
+            continue
+        if precision < 0 or precision > 1:
+            rejected_rows += 1
+            numeric_rejection_reason_counts["precision_outside_0_1"] += 1
             continue
         try:
             time_text = row["t_utc"]
@@ -294,7 +327,13 @@ def parse_csv(csv_bytes: bytes) -> dict:
         "sourceHeaderAliasesApplied": aliases_applied,
         "rowCount": row_count,
         "acceptedRows": row_count - rejected_rows,
+        "acceptedRowsDefinition": "rows matching target TID/orbit with positive finite abundance and finite fractional precision in [0,1]; UR and unknown quality are counted here but are not profile candidates",
         "rejectedRows": rejected_rows,
+        "abundanceSentinelMinus999Rows": abundance_sentinel_minus_999_rows,
+        "zeroAbundanceRows": zero_abundance_rows,
+        "precisionSentinelMinus999Rows": precision_sentinel_minus_999_rows,
+        "numericRejectionReasonCounts": dict(numeric_rejection_reason_counts),
+        "profileCandidateRows": sum(len(rows) for rows in profiles.values()),
         "tidCounts": dict(tid_counts),
         "orbitCounts": dict(orbit_counts),
         "focusModeCounts": dict(focus_counts),
@@ -377,6 +416,15 @@ def main() -> int:
         },
         "retrievalMethod": "exact original archive members extracted byte-for-byte; no line-ending rewriting",
         "products": products,
+        "discoveryAudit": {
+            "matchingL2AbundanceProductCountIn2014AnnualArchive": len(products),
+            "focusModesFound": sorted({product["csvSummary"]["focusModeCounts"].keys().__iter__().__next__() for product in products}),
+            "csoAbundanceProductFoundForExactTidAndEvent": any(
+                "mvn_ngi_l2_cso-abund-14282_20141211t154406" in product["csv"]["productId"].lower()
+                for product in products
+            ),
+            "scope": "official 2014 annual NGIMS derived L2 archive only; absence outside this bundle is not inferred"
+        },
         "interpretation": {
             "allProductsRemainSeparate": True,
             "l2AbundanceUnit": "particles/cm3",
@@ -387,6 +435,8 @@ def main() -> int:
                 "Each product retains its own product ID, focus mode, time, geometry, species and quality flag.",
                 "No profile is merged across different focus modes or product versions.",
                 "Unknown quality flags remain explicit and are not promoted to verified detections.",
+                "The archived abundance sentinel -999 and zero abundance values are counted separately and excluded from profile candidates.",
+                "No cso-abund product for this exact TID/event was found in the official 2014 annual L2 bundle; this event therefore has no O/NO/CO/O2 profile in the retrieved bundle.",
                 "A single orbit is an upper-atmosphere spacecraft track, not a complete lower-atmosphere state."
             ]
         }
