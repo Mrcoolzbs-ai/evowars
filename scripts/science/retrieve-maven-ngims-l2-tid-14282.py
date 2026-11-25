@@ -179,9 +179,25 @@ def parse_csv(csv_bytes: bytes) -> dict:
     reader = csv.DictReader(io.StringIO(text, newline=""))
     if reader.fieldnames is None:
         fail("L2 CSV header missing")
-    headers = [h.strip().lower() for h in reader.fieldnames]
+    source_headers = [h.strip().lower() for h in reader.fieldnames]
+    # The archived L2 CSV uses two shortened/renamed column labels compared
+    # with the SIS Table A-8 vocabulary. Preserve the exact source names in
+    # provenance while normalizing aliases for schema validation only.
+    header_aliases = {
+        "t_sclk_cor": "t_sclk",
+        "cps_dt_bkd": "cps_dt_bkgd",
+    }
+    headers = [header_aliases.get(header, header) for header in source_headers]
     if headers != REQUIRED_COLUMNS:
-        fail(f"L2 CSV header differs from SIS 1.13 schema: {headers}")
+        fail(
+            "L2 CSV header differs from SIS 1.13 Table A-8 after documented "
+            f"alias normalization: source={source_headers}, canonical={headers}"
+        )
+    aliases_applied = {
+        source: canonical
+        for source, canonical in header_aliases.items()
+        if source in source_headers
+    }
 
     species_counts: Counter[str] = Counter()
     quality_counts: Counter[str] = Counter()
@@ -195,7 +211,10 @@ def parse_csv(csv_bytes: bytes) -> dict:
     no_rows = 0
     for record_number, raw in enumerate(reader, start=1):
         row_count += 1
-        row = {str(k).strip().lower(): (v or "").strip() for k, v in raw.items()}
+        row = {
+            header_aliases.get(str(k).strip().lower(), str(k).strip().lower()): (v or "").strip()
+            for k, v in raw.items()
+        }
         try:
             tid = int(row["tid"])
             orbit = int(row["orbit"])
@@ -258,6 +277,9 @@ def parse_csv(csv_bytes: bytes) -> dict:
         })
     return {
         "schema": "NGIMS SIS Rev. 1.13 Table A-8 L2 neutral abundances",
+        "sourceCsvHeaders": source_headers,
+        "canonicalSISHeaders": headers,
+        "sourceHeaderAliasesApplied": aliases_applied,
         "rowCount": row_count,
         "acceptedRows": row_count - rejected_rows,
         "rejectedRows": rejected_rows,
