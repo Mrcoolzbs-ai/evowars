@@ -7,39 +7,25 @@
       "csoAbundLineCount": 0,
       "csvSchema": {
         "headers": [
-          "Note: The geometry is calculated for the time of closest approach in planetocentric coordinates",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          ""
+          "Time of Closest Approach",
+          "URN",
+          "Start Time",
+          "Stop Time",
+          "Product Type",
+          "Solar Longitude (deg)",
+          "Solar Latitude (deg)",
+          "Spacecraft Longitude (deg)",
+          "Spacecraft Latitude (deg)",
+          "Altitude (km)",
+          "Phase Angle (deg)",
+          "Ls",
+          "Martian Year",
+          "Product Size (MB)"
         ],
-        "rowCount": 32617,
+        "parseStatus": "parsed",
+        "preambleRowCount": 1,
+        "rowCount": 32616,
         "sampleRows": [
-          [
-            "Time of Closest Approach",
-            "URN",
-            "Start Time",
-            "Stop Time",
-            "Product Type",
-            "Solar Longitude (deg)",
-            "Solar Latitude (deg)",
-            "Spacecraft Longitude (deg)",
-            "Spacecraft Latitude (deg)",
-            "Altitude (km)",
-            "Phase Angle (deg)",
-            "Ls",
-            "Martian Year",
-            "Product Size (MB)"
-          ],
           [
             "2014-10-18T11:51:29.00Z",
             "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-14015_20141018t100458",
@@ -71,13 +57,32 @@
             "216.6",
             "32",
             "0.532"
+          ],
+          [
+            "2014-10-18T15:42:36.50Z",
+            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-14016_20141018t133538",
+            "2014-10-18T13:36:54.00Z",
+            "2014-10-18T17:48:19.00Z",
+            "ion-abund",
+            "97.725",
+            "-14.564",
+            "137.975",
+            "43.004",
+            "185.539",
+            "68.757",
+            "216.6",
+            "32",
+            "2.793"
           ]
         ]
       },
       "httpStatus": 200,
       "lineCount": 32618,
       "member": "MAVEN_NGIMS_Single-Species_del1-43.csv",
-      "modeTokenLineCounts": {},
+      "modeTokenLineCounts": {
+        "csn-abund": 16945,
+        "ion-abund": 15632
+      },
       "name": "MAVEN_NGIMS_Single-Species_del1-43.csv",
       "productTokenCounts": {
         "mvn_ngi_l2_csn-abund-14016_20141018t133538": 1,
@@ -32659,7 +32664,7 @@
         "mvn_ngi_l2_ion-abund-61908_20250814t235341": 1
       },
       "sha256": "9753a06ca7a2f53e23f863d24ae494ba6645ce958806a95942af6020e58ca9c3",
-      "targetTid14282RowCount": 7,
+      "targetTid14282RowCount": 1,
       "targetTid14282Rows": [
         {
           "lineNumber": 116,
@@ -32667,68 +32672,15 @@
           "productFileTokens": [
             "mvn_ngi_l2_csn-abund-14282_20141211t154406"
           ],
+          "productIds": [
+            {
+              "mode": "csn-abund",
+              "tid": 14282,
+              "time": "20141211t154406"
+            }
+          ],
           "urns": [
             "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406"
-          ]
-        },
-        {
-          "lineNumber": 3841,
-          "lineText": "2016-08-22T15:22:36.50Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-20902_20160822t142826,2016-08-22T14:30:25.00Z,2016-08-22T16:14:48.00Z,csn-abund,112.624,-11.668,-93.34,-21.5,153.495,137.883,208.6,33,0.805",
-          "productFileTokens": [
-            "mvn_ngi_l2_csn-abund-20902_20160822t142826"
-          ],
-          "urns": [
-            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-20902_20160822t142826"
-          ]
-        },
-        {
-          "lineNumber": 3842,
-          "lineText": "2016-08-22T15:22:36.50Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-20902_20160822t142826,2016-08-22T14:30:25.00Z,2016-08-22T16:14:48.00Z,ion-abund,112.624,-11.668,-93.34,-21.5,153.495,137.883,208.6,33,1.2",
-          "productFileTokens": [
-            "mvn_ngi_l2_ion-abund-20902_20160822t142826"
-          ],
-          "urns": [
-            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-20902_20160822t142826"
-          ]
-        },
-        {
-          "lineNumber": 5952,
-          "lineText": "2017-06-26T15:22:22.00Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-24124_20170626t142824,2017-06-26T14:30:41.00Z,2017-06-26T16:15:03.00Z,csn-abund,-145.589,10.279,147.955,64.28,156.734,70.62,25,34,0.793",
-          "productFileTokens": [
-            "mvn_ngi_l2_csn-abund-24124_20170626t142824"
-          ],
-          "urns": [
-            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-24124_20170626t142824"
-          ]
-        },
-        {
-          "lineNumber": 5953,
-          "lineText": "2017-06-26T15:22:22.00Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-24124_20170626t142824,2017-06-26T14:30:41.00Z,2017-06-26T16:15:03.00Z,ion-abund,-145.589,10.279,147.955,64.28,156.734,70.62,25,34,2.145",
-          "productFileTokens": [
-            "mvn_ngi_l2_ion-abund-24124_20170626t142824"
-          ],
-          "urns": [
-            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-24124_20170626t142824"
-          ]
-        },
-        {
-          "lineNumber": 26403,
-          "lineText": "2023-11-02T15:50:40Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-53346_20231102t142824,2023-11-02T14:34:27.00Z,2023-11-02T16:01:00.00Z,csn-abund,-130.356,14.883,37.983,-70.503,184.753,123.882,142.31,37,0.75",
-          "productFileTokens": [
-            "mvn_ngi_l2_csn-abund-53346_20231102t142824"
-          ],
-          "urns": [
-            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-53346_20231102t142824"
-          ]
-        },
-        {
-          "lineNumber": 26404,
-          "lineText": "2023-11-02T15:50:40Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-53346_20231102t142824,2023-11-02T14:34:27.00Z,2023-11-02T16:01:00.00Z,ion-abund,-130.356,14.883,37.983,-70.503,184.753,123.882,142.31,37,1.516",
-          "productFileTokens": [
-            "mvn_ngi_l2_ion-abund-53346_20231102t142824"
-          ],
-          "urns": [
-            "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_ion-abund-53346_20231102t142824"
           ]
         }
       ],
