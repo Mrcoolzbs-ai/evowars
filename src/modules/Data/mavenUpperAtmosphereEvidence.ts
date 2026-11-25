@@ -590,9 +590,20 @@ function finiteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function parseNgimsUtcTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const trimmed = value.trim();
+  // PDS NGIMS t_utc is defined as UTC calendar time. Archive rows commonly
+  // omit the terminal Z, so treat timezone-naive ISO calendar tokens as UTC,
+  // not as the browser/runtime's local timezone.
+  const hasExplicitZone = /(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(trimmed);
+  const normalized = hasExplicitZone ? trimmed : trimmed + 'Z';
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 function validUtc(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0 &&
-    Number.isFinite(Date.parse(value));
+  return parseNgimsUtcTimestamp(value) !== null;
 }
 
 const FOCUS_MODES: readonly string[] = ['csn', 'osnb', 'osion', 'osnt'];
@@ -680,7 +691,7 @@ export function validateMavenNgimsL2NeutralRow(
 
   const measurement: MavenNgimsNeutralMeasurement = {
     species: row.species,
-    timeUtc: row.t_utc,
+    timeUtc: new Date(parseNgimsUtcTimestamp(row.t_utc)!).toISOString(),
     orbit: row.orbit,
     tid: row.tid,
     focusMode: row.focusmode,
@@ -922,6 +933,8 @@ export function parseMavenNgimsL2NeutralCsvRow(
 export interface MavenNgimsL2CsvRowResult {
   /** One-based record number after the CSV header (not a physical line number). */
   readonly recordNumber: number;
+  /** Exact decoded source fields, retained even when the scientific validator rejects a row. */
+  readonly rawRecord: Readonly<Record<string, string>>;
   readonly validation: MavenNgimsRowValidation;
 }
 
@@ -1076,6 +1089,9 @@ export function parseMavenNgimsL2NeutralCsvText(
     if (values.length !== headers.length) {
       return {
         recordNumber: index + 1,
+        rawRecord: Object.fromEntries(
+          headers.map((header, columnIndex) => [header, values[columnIndex] ?? ''])
+        ),
         validation: {
           status: 'rejected',
           errors: [{
@@ -1091,6 +1107,9 @@ export function parseMavenNgimsL2NeutralCsvText(
     );
     return {
       recordNumber: index + 1,
+      rawRecord: Object.fromEntries(
+        Object.entries(record).map(([key, value]) => [key, value ?? ''])
+      ),
       validation: parseMavenNgimsL2NeutralCsvRow(record, policy)
     };
   });
