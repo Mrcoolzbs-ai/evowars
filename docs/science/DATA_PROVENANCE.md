@@ -1200,3 +1200,74 @@ statistics, counts for every observed MKID, and bounded first/last raw records
 tagged with their MKID. It omits the very large fully expanded MKID-by-channel
 matrix; this avoids a report exceeding GitHub's 100 MB per-file limit while
 preserving raw CSVs in the external PDS archive.
+
+
+### Pre-flight calibration chamber housekeeping review (TID 10191 / 10194)
+
+The official 2012 calibration collection was streamed from PDS and its detached
+PDS4 labels were checked against the CSV headers and record counts.
+
+| TID | SIS designation | `gnd-hk` size | Rows / PDS4 declared | Columns | SHA-256 |
+| --- | --- | ---: | ---: | ---: | --- |
+| 10191 | Argon | 360,172,138 bytes | 991,617 / 991,617 | 324 | `12d2a05123cdadd56ff5e0480deb7a8b0e7198ba5676d3590fb55ba75ee63768` |
+| 10194 | Krypton | 128,894,809 bytes | 355,082 / 355,082 | 324 | `bea2d8b0543e6d52adc725c1ee119ef0b0e7a253e758248f2743dc3c15b0bf23` |
+
+The exact-mnemonic review identifies `CDH:BA_PRES` and `CDH:BA_PRES_LO`
+as Bayard–Alpert pressure-monitor readback candidates. The PDS SIS Rev. 1.3
+labels the engineering values in volts (the BA pressure channel has a 0–5 V
+engineering range); it does not supply the pressure transfer function in these
+housekeeping product labels. Raw values therefore remain volts:
+
+| TID | Channel | n | Minimum (V) | Maximum (V) | Mean (V) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 10191 | CDH:BA_PRES | 7,281 | -0.1268 | +0.1118 | -0.023446 |
+| 10191 | CDH:BA_PRES_LO | 7,282 | -0.0078 | +0.0079 | +0.000516 |
+| 10194 | CDH:BA_PRES | 2,607 | -0.3630 | +0.0490 | -0.035454 |
+| 10194 | CDH:BA_PRES_LO | 2,608 | -0.0073 | +0.0185 | +0.001702 |
+
+`CDH:THPRES` (0.3172–0.5159 V in TID 10191; 0.4509–0.5045 V in TID 10194)
+and integer `FSW:THERM_PRESS` values (35,637–36,148 and 35,973–36,072,
+respectively) are retained as uninterpreted pressure-related/status mnemonics;
+they are not merged into the Bayard–Alpert pressure record.
+
+A key distinction: the calibration paper states that static pre-flight
+sensitivity runs used an **external stable ion gauge** to read the equilibrated
+gas pressure while the corresponding NGIMS response was recorded. The onboard
+BA pressure monitor cannot replace that independent reference without its
+calibration curve, instrument range/zero context, and validated relation to
+the pressure at the ion source.
+
+No reservoir-valve state channel was identified among the 324 `gnd-hk`
+mnemonics. The `OS_RES1` / `OS_RES2` names are not gas-reservoir valves:
+`QMS:OS_RES1_VCTL` and `QMS:OS_RES2_VCTL` are source-electrode DAC settings,
+and the matching `CDH:OS_RES1_MON` / `CDH:OS_RES2_MON` are electrode drive
+monitor readbacks. Their zero-valued DAC settings must not be interpreted as
+closed calibration-reservoir valves. The message log records operator prompts
+to verify a stable chamber-pressure log, but that external pressure log is not
+present in these four NGIMS products.
+
+The analyser now uses exact telemetry mnemonics rather than searching generic
+PDS prose (which contains the phrase "no value is present" and previously
+created false-positive classifications). Pressure records are restricted to
+the BA channel pair; ambiguous `THPRES` and `THERM_PRESS` stay explicitly
+uninterpreted. The `gnd-hk` pressure monitor is summarized by its exact
+`MKID`, joined to `gnd-mkr.MKID` values and descriptions only on exact raw
+ID equality. No timestamp transformation, interpolation, or carry-forward is
+performed. Per-marker raw minima, maxima, means and population standard
+deviation remain in volts.
+
+The SIS calls TID 10191 Argon, while its message-log directory is named
+`KrCalibration`; this discrepancy remains a manual-review flag. Raw science
+evidence supports the SIS designation more strongly than the folder name:
+TID 10191 has a strong m/z 40 signal and weak m/z 84/86 response, while
+TID 10194 has strong m/z 84 and 86 signals in tuning 4, consistent with Kr.
+This evidence is recorded, not silently used to overwrite the SIS identity.
+
+Neither run establishes the external-gauge pressure, reference-gas density,
+valve-open interval or a pressure-to-ion-source calibration chain. Consequently
+no absolute sensitivity or `C_EN` is derived, and Stage 4.2 remains OPEN.
+Sources: MAVEN NGIMS PDS SIS Rev. 1.3 (2015), Appendix telemetry tables and
+calibration-reservoir description; Mahaffy et al. (2015),
+*The Neutral Gas and Ion Mass Spectrometer on the Mars Atmosphere and Volatile
+Evolution Mission*, Section 2.4 and Section 4.3,
+https://doi.org/10.1007/s11214-014-0091-1.

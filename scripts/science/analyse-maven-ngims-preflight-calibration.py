@@ -293,19 +293,27 @@ def summarize_science_csv(path: Path, pds_fields: list[str]) -> dict[str, Any]:
 
 
 def housekeeping_field_role(field: dict[str, Any]) -> str | None:
-    text = (field.get("name", "") + " " + field.get("description", "")).lower()
-    patterns = (
-        ("pressure", r"press|pres|vacuum|gauge"),
-        ("reservoir_gas", r"reservoir|tank|capillary|gas.?supply|bottle"),
-        ("valve_flow", r"valve|solenoid|flow.?control|leak.?valve"),
-        ("temperature", r"temp|temperature|therm"),
-        ("filament_source", r"filament|emission|ion.?source|source.?heater"),
-        ("multiplier_detector", r"multiplier|cem|detector|electron.?mult"),
-        ("rf_qms", r"rf|radio.?frequency|qms|quadrupole"),
-    )
-    for role, pattern in patterns:
-        if re.search(pattern, text):
-            return role
+    # Classify by exact telemetry mnemonic, never by the generic PDS field
+    # description ("no value is present" falsely matched the substring "pres").
+    name = field.get("name", "").strip().upper()
+    if name in {"CDH:BA_PRES", "CDH:BA_PRES_LO"}:
+        return "bayard_alpert_pressure_monitor_candidate"
+    if name == "CDH:THPRES":
+        return "pressure_related_mnemonic_uninterpreted"
+    if name == "FSW:THERM_PRESS":
+        return "status_or_thermal_pressure_code_uninterpreted"
+    if name.endswith("_TMP") or name in {"CDH:EXT_THERM2", "CDH:RF_TMP"}:
+        return "temperature_monitor_candidate"
+    if name in {
+        "CDH:EM1_IMON", "CDH:EM2_IMON", "CDH:MULTANA1", "CDH:MULTANA2",
+        "FSW:EM1_IMON", "FSW:EM2_IMON", "QMS:MT_MU1_VCTL", "QMS:MT_MU2_VCTL",
+    }:
+        return "multiplier_detector_monitor_candidate"
+    if ("FIL" in name or "EMIS" in name) and not re.search(r"EM[12]_IMON", name):
+        return "filament_source_monitor"
+    if "RF" in name:
+        return "rf_qms_monitor"
+    # OS_RES1/OS_RES2 are source electrodes, not gas-reservoir valves.
     return None
 
 
@@ -387,9 +395,10 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         stats = {item["name"]: new_housekeeping_stats(item) for item in selected}
         pressure_fields = [
             item["name"] for item in selected
-            if item["role"] in ("pressure", "reservoir_gas", "valve_flow")
+            if item["role"] == "bayard_alpert_pressure_monitor_candidate"
         ]
         row_count = 0
+        marker_groups: dict[str, dict[str, Any]] = {}
         blank_marker_rows = 0
         nonnumeric_time_rows = 0
         previous_time: float | None = None
@@ -409,6 +418,54 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
             if not raw_marker:
                 blank_marker_rows += 1
             marker_counts[marker_key] = marker_counts.get(marker_key, 0) + 1
+            if raw_marker and pressure_fields:
+                group = marker_groups.setdefault(raw_marker, {
+                    "rowCount": 0,
+                    "firstTimeRaw": raw_time or None,
+                    "lastTimeRaw": raw_time or None,
+                    "channels": {
+                        name: {
+                            "observedValueCount": 0,
+                            "emptyValueCount": 0,
+                            "nonNumericValueCount": 0,
+                            "minObservedValue": None,
+                            "maxObservedValue": None,
+                            "meanObservedValue": None,
+                            "populationStdDev": None,
+                            "_mean": 0.0,
+                            "_m2": 0.0,
+                            "firstObservedRawValue": None,
+                            "lastObservedRawValue": None,
+                        }
+                        for name in pressure_fields
+                    },
+                })
+                group["rowCount"] += 1
+                if raw_time:
+                    group["lastTimeRaw"] = raw_time
+                for name in pressure_fields:
+                    bucket = group["channels"][name]
+                    raw_value = (row.get(name, "") or "").strip()
+                    if not raw_value:
+                        bucket["emptyValueCount"] += 1
+                        continue
+                    try:
+                        numeric = float(raw_value)
+                    except ValueError:
+                        bucket["nonNumericValueCount"] += 1
+                        continue
+                    if not math.isfinite(numeric):
+                        bucket["nonNumericValueCount"] += 1
+                        continue
+                    bucket["observedValueCount"] += 1
+                    bucket["minObservedValue"] = numeric if bucket["minObservedValue"] is None else min(bucket["minObservedValue"], numeric)
+                    bucket["maxObservedValue"] = numeric if bucket["maxObservedValue"] is None else max(bucket["maxObservedValue"], numeric)
+                    delta = numeric - bucket["_mean"]
+                    bucket["_mean"] += delta / bucket["observedValueCount"]
+                    bucket["_m2"] += delta * (numeric - bucket["_mean"])
+                    if bucket["firstObservedRawValue"] is None:
+                        bucket["firstObservedRawValue"] = raw_value
+                    bucket["lastObservedRawValue"] = raw_value
             if raw_time:
                 if first_time_raw is None:
                     first_time_raw = raw_time
@@ -441,6 +498,13 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
                 })
 
     finished = {name: finish_housekeeping_stats(value) for name, value in stats.items()}
+    for marker_group in marker_groups.values():
+        for channel in marker_group["channels"].values():
+            count = channel["observedValueCount"]
+            mean = channel.pop("_mean")
+            m2 = channel.pop("_m2")
+            channel["meanObservedValue"] = mean if count else None
+            channel["populationStdDev"] = math.sqrt(m2 / count) if count else None
     record_count_status = (
         "matches_label" if declared_records == row_count
         else "mismatch" if declared_records is not None
@@ -464,8 +528,19 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
         "markerCounts": marker_counts,
         "selectedChannelCount": len(finished),
         "channelStatistics": list(finished.values()),
-        "pressureValveChannels": pressure_fields,
+        "pressureMonitorChannels": pressure_fields,
+        "pressureMonitorChannels": pressure_fields,
+        "pressureRelatedUninterpretedFields": [
+            item["name"] for item in selected
+            if item["role"] in (
+                "pressure_related_mnemonic_uninterpreted",
+                "status_or_thermal_pressure_code_uninterpreted",
+            )
+        ],
+        "valveStatusChannels": [],
+        "reservoirValveStateTelemetry": "not_identified_by_telemetry_mnemonic_in_this_product",
         "distinctNonblankMarkerIdCount": sum(1 for marker in marker_counts if marker != "__blank__"),
+        "pressureMonitorStatisticsByMarkerId": marker_groups,
         "boundedFirstLastSamples": first_last_samples,
         "interpretation": {
             "rawTelemetryOnly": True,
@@ -482,6 +557,7 @@ def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], 
 
 def summarize_marker_csv(path: Path) -> dict[str, Any]:
     rows = []
+    rows_by_id: dict[str, list[dict[str, Any]]] = {}
     counts: dict[str, int] = {}
     row_count = 0
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
@@ -500,11 +576,17 @@ def summarize_marker_csv(path: Path) -> dict[str, Any]:
             description = (row.get(desc_col, "") or "").strip()
             key = description.lower()
             counts[key] = counts.get(key, 0) + 1
-            if len(rows) < 300:
-                rows.append({"recordNumber": record_number, "timeRaw": row.get(time_col),
-                             "markerId": marker_id, "description": description})
-    return {"rowCount": row_count, "descriptionCounts": counts,
-            "markerRowsBoundedSample": rows, "timeCoordinateNotConverted": True}
+            item = {"recordNumber": record_number, "timeRaw": row.get(time_col),
+                     "markerId": marker_id, "description": description}
+            rows.append(item)
+            rows_by_id.setdefault(marker_id, []).append(item)
+    return {
+        "rowCount": row_count,
+        "descriptionCounts": counts,
+        "markerRowsBoundedSample": rows[:300],
+        "markerRowsById": rows_by_id,
+        "timeCoordinateNotConverted": True,
+    }
 
 def summarize_message(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8", errors="replace")
@@ -576,6 +658,19 @@ def fetch_and_audit_tid(
     result["sisDesignationConflictsWithMessageDirectory"] = (
         "Argon" in tid["sisDesignation"] and directory_name is not None and "Kr" in directory_name
     )
+    hk_summary = result["products"].get("gnd-hk", {}).get("housekeepingSummary", {})
+    marker_lookup = result["products"].get("gnd-mkr", {}).get("markerSummary", {}).get("markerRowsById", {})
+    pressure_by_marker = hk_summary.get("pressureMonitorStatisticsByMarkerId", {})
+    for marker_id, group in pressure_by_marker.items():
+        group["markerRows"] = marker_lookup.get(marker_id, [])
+        group["markerDescriptionCount"] = len(group["markerRows"])
+    result["reservoirTelemetryReview"] = {
+        "pressureMonitorChannels": hk_summary.get("pressureMonitorChannels", []),
+        "valveStatusChannels": hk_summary.get("valveStatusChannels", []),
+        "reservoirValveStateTelemetry": hk_summary.get("reservoirValveStateTelemetry"),
+        "pressureGroupJoin": "exact_raw_MKID_match_only",
+        "gasReservoirAssignment": "not_derived",
+    }
     return result
 
 
@@ -643,8 +738,37 @@ def self_test() -> None:
                 self.assertEqual(pressure["unit"], "Volts")
                 self.assertEqual(result["markerCounts"], {"10":2,"11":1})
                 self.assertEqual(result["distinctNonblankMarkerIdCount"], 2)
+                self.assertEqual(
+                    result["pressureMonitorStatisticsByMarkerId"]["10"]["channels"]["CDH:BA_PRES"]["observedValueCount"],
+                    1,
+                )
+                self.assertEqual(
+                    result["pressureMonitorStatisticsByMarkerId"]["10"]["channels"]["CDH:BA_PRES"]["meanObservedValue"],
+                    1.2,
+                )
                 self.assertFalse(result["interpretation"]["pressureVoltageConvertedToPhysicalPressure"])
                 self.assertEqual(result["rowCount"], 3)
+
+        def test_generic_word_present_does_not_classify_every_channel_as_pressure(self) -> None:
+            self.assertIsNone(housekeeping_field_role({
+                "name": "CDH:+13A_VMON",
+                "description": "If no value is present for a given TIME, no interpolation is performed.",
+            }))
+            self.assertEqual(
+                housekeeping_field_role({"name": "CDH:BA_PRES", "description": "Engineering readback"}),
+                "bayard_alpert_pressure_monitor_candidate",
+            )
+            self.assertEqual(
+                housekeeping_field_role({"name": "CDH:THPRES", "description": "No calibrated conversion stated"}),
+                "pressure_related_mnemonic_uninterpreted",
+            )
+            self.assertEqual(
+                housekeeping_field_role({"name": "FSW:THERM_PRESS", "description": "Integer status-like value"}),
+                "status_or_thermal_pressure_code_uninterpreted",
+            )
+            self.assertIsNone(
+                housekeeping_field_role({"name": "QMS:OS_RES1_VCTL", "description": "OS_RES1 electrode DAC setting"})
+            )
 
         def test_housekeeping_never_carries_forward_missing_values(self) -> None:
             with tempfile.TemporaryDirectory() as tmp:
@@ -674,7 +798,7 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         products = product["products"]
         hk_product = products.get("gnd-hk", {})
         hk = hk_product.get("housekeepingSummary", {})
-        marker_groups = hk.get("pressureAndValveStatisticsByMarkerId", {})
+        marker_groups = hk.get("pressureMonitorStatisticsByMarkerId", {})
         compact_marker_groups: dict[str, Any] = {}
         for marker_id, group in marker_groups.items():
             compact_channels = {}
@@ -685,6 +809,8 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "nonNumeric": channel.get("nonNumericValueCount", 0),
                     "min": channel.get("minObservedValue"),
                     "max": channel.get("maxObservedValue"),
+                    "mean": channel.get("meanObservedValue"),
+                    "populationStdDev": channel.get("populationStdDev"),
                     "first": channel.get("firstObservedRawValue"),
                     "last": channel.get("lastObservedRawValue"),
                 }
@@ -692,6 +818,7 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "rows": group.get("rowCount"),
                 "firstTimeRaw": group.get("firstTimeRaw"),
                 "lastTimeRaw": group.get("lastTimeRaw"),
+                "markerRows": group.get("markerRows", []),
                 "channels": compact_channels,
             }
 
@@ -730,6 +857,7 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             "sisDesignation": product.get("sisDesignation"),
             "messageLogDirectoryName": product.get("messageLogDirectoryName"),
             "sisDesignationConflictsWithMessageDirectory": product.get("sisDesignationConflictsWithMessageDirectory"),
+            "reservoirTelemetryReview": product.get("reservoirTelemetryReview"),
             "housekeeping": {
                 "fileName": hk_product.get("payloadFileName"),
                 "bytes": hk_product.get("payloadDownload", {}).get("byteLength"),
@@ -746,10 +874,15 @@ def build_compact_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "timeMonotonicityDiagnostic": hk.get("timeMonotonicityDiagnostic"),
                 "blankMarkerIdRows": hk.get("blankMarkerIdRowCount"),
                 "markerCounts": hk.get("markerCounts"),
-                "pressureValveChannels": hk.get("pressureValveChannels"),
+                "pressureMonitorChannels": hk.get("pressureMonitorChannels"),
+                "pressureMonitorChannels": hk.get("pressureMonitorChannels"),
+                "pressureRelatedUninterpretedFields": hk.get("pressureRelatedUninterpretedFields"),
+                "valveStatusChannels": hk.get("valveStatusChannels"),
+                "reservoirValveStateTelemetry": hk.get("reservoirValveStateTelemetry"),
+                "distinctNonblankMarkerIdCount": hk.get("distinctNonblankMarkerIdCount"),
                 "selectedChannelCount": hk.get("selectedChannelCount"),
                 "channelStatistics": channel_stats,
-                "pressureValveStatisticsByMarkerId": compact_marker_groups,
+                "pressureMonitorStatisticsByMarkerId": compact_marker_groups,
                 "interpretation": hk.get("interpretation"),
             },
             "messageLog": {

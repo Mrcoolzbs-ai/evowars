@@ -1290,3 +1290,26 @@ The generated housekeeping report retains campaign-wide channel statistics,
 all MKID row counts, and bounded marker-tagged first/last records. It omits the
 expanded MKID-by-channel matrix to remain below GitHub's 100 MB file limit;
 source CSV payloads remain in the PDS collection.
+
+
+### Stage 4.2 — pre-flight chamber pressure evidence: still OPEN
+
+Raw `gnd-hk` for pre-flight TIDs 10191 and 10194 has been retrieved and
+audited. PDS4 record counts match the two payloads. The calibrated pressure
+reference used by the static test procedure was an external stable ion gauge,
+not an inferred conversion of NGIMS `CDH:BA_PRES` volts. The external gauge
+record, its calibration certificate/range, and the alignment to the NGIMS
+spectral acquisition intervals have not yet been recovered.
+
+No calibration-reservoir valve-state channel was found in the 324-column
+housekeeping products. The `OS_RES1` / `OS_RES2` telemetry mnemonics refer to
+source electrodes, not the reservoir's two microvalves. Pressure grouping is
+now by exact raw `MKID` and joins to the marker product using the same ID;
+ambiguous pressure-like mnemonics are not used as physical pressure.
+
+The 10191 SIS designation (Ar) remains in conflict with its `KrCalibration`
+message-log directory, although its raw spectrum favors Ar. TID 10194 is
+consistent with Kr. Both are still pre-flight evidence; neither establishes a
+flight-specific calibration for TID 14282. Do not mark Stage 4.2 complete and
+do not derive absolute sensitivity or `C_EN` until the external reference-gauge
+data and the remaining calibration chain are independently validated.
