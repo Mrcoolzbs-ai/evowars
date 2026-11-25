@@ -14,6 +14,104 @@
       "applicable fragmentation/response matrix and background treatment"
     ]
   },
+  "calibrationReference": {
+    "deadTimeReference": {
+      "l1bColumns": {
+        "additionalCorrectionPermitted": false,
+        "cpsDtAlreadyDeadTimeCorrected": true,
+        "cpsDtBkgdAlreadyDeadTimeCorrected": true
+      },
+      "sisRev113": {
+        "cem1": {
+          "aSeconds": 1.5738e-08,
+          "bSeconds": -2.3125e-07
+        },
+        "cem2": {
+          "aSeconds": null,
+          "bSeconds": null
+        },
+        "formula": "tau = A * ln(m) + B",
+        "note": "SIS Table 2: CEM 2 coefficients are not available."
+      },
+      "stone2018": {
+        "aSeconds": 9.49e-09,
+        "bSeconds": -1.39e-07,
+        "formula": "tau = max(A * ln(m) + B, 0)",
+        "note": "Study-specific analysis model, not universal calibration."
+      }
+    },
+    "earlyMissionConfiguration": {
+      "actualTelemetry": {
+        "MT_MU1_VCTL_V": -45,
+        "MT_MU2_VCTL_V": -2437.6,
+        "multiplier2CommandLogged": 2462
+      },
+      "actualTelemetryInterpretation": "PDS SIS defines MT_MU1/2 as actual negative multiplier electrode voltages. The published 125/25 V setting is not mapped to these exact PDS channels.",
+      "date": "2014-12-11",
+      "initialSettingV": 125,
+      "laterSettingV": 25,
+      "orbit": 391,
+      "period": "October-December 2014",
+      "pipelineDifference": "2014 data used different calibration and computation methods from February 2015 onward",
+      "reason": "early-December contamination in m/z19 and m/z16 with loss of signal; several settings changed",
+      "reviewRequired": true,
+      "tid": 14282
+    },
+    "gainStabilization": {
+      "appliesOnlyToOrbitsAbove": 748,
+      "appliesToEvent": false,
+      "densityDivideFactor": 1.5331,
+      "eventOrbit": 391
+    },
+    "groundClosedSourceSensitivityRowCount": 8,
+    "inFlightN2Fragmentation": {
+      "calibrationGasRuns": 6,
+      "mass28To14FragmentFraction": 0.0347,
+      "oneSigma": 0.0042,
+      "scope": "N2 only; use of m/z14 and m/z28, not a global fragmentation matrix."
+    },
+    "openSourceReference": {
+      "cEn": null,
+      "computedForTid14282": false,
+      "formula": "Oa = [Sa(m_ref) * n_c(m_ref) / n_o(m_ref)] * C_EN(m_s)",
+      "requiredEvidence": [
+        "same reference gas measured in CS and OS",
+        "dead-time-corrected count rates",
+        "applicable closed-source sensitivity",
+        "validated C_EN",
+        "fragmentation/background model"
+      ]
+    },
+    "path": "src/modules/Data/mavenNgimsL1bCalibrationReference.json",
+    "preflightCalibrationCollection": {
+      "sisListedTids": [
+        10191,
+        10194,
+        10197,
+        10198,
+        10199,
+        10201,
+        10202,
+        10205,
+        10207,
+        10216,
+        10217
+      ],
+      "tid10191Conflict": {
+        "messageLogDirectory": "2012-09-23-08.19.45-10191-KrCalibration/",
+        "sisDesignation": "Argon calibration",
+        "status": "must be resolved from raw spectrum before gas identity assignment"
+      },
+      "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/"
+    },
+    "rfCorrection": {
+      "formula": "Sa = Sn * C_RF * sigma_s",
+      "greaterThan": 1,
+      "lessThanOrEqual": 0.71,
+      "massToChargeThreshold": 20.5
+    },
+    "schemaVersion": "1.0.0"
+  },
   "event": {
     "eventKey": "014282_20141211T154406",
     "eventStartUtc": "2014-12-11T15:45:25Z",
@@ -295,6 +393,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 6019,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 4,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 6019,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 4,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 181.0,
@@ -524,6 +644,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 197,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 197,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 5.0,
@@ -753,6 +895,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 4622,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 2,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 4622,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 2,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 137.0,
@@ -982,6 +1146,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 198,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 198,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 5.0,
@@ -1211,6 +1397,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 7044,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 7044,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 211.0,
@@ -1440,6 +1648,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 198,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 198,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 5.0,
@@ -1669,6 +1899,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 6027,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 6027,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 179.0,
@@ -1898,6 +2150,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 754,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 1,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 754,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 1,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 23.0,
@@ -2127,6 +2401,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 6185,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 6185,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 184.0,
@@ -2356,6 +2652,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 199,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 199,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 5.0,
@@ -2585,6 +2903,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 6967,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 6967,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 209.0,
@@ -2814,6 +3154,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 200,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 200,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 5.0,
@@ -3043,6 +3405,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 4544,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 4544,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 3,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 135.0,
@@ -3272,6 +3656,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 198,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 198,
+          "firstObservedRawValue": null,
+          "lastObservedRawValue": null,
+          "maxObservedValue": null,
+          "minObservedValue": null,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 0,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 5.0,
@@ -3501,6 +3907,28 @@
           "nonNumericValueCount": 0,
           "observedValueCount": 0,
           "unit": "Megahertz"
+        },
+        {
+          "emptyValueCount": 3215,
+          "firstObservedRawValue": "-45.0",
+          "lastObservedRawValue": "-45.0",
+          "maxObservedValue": -45.0,
+          "minObservedValue": -45.0,
+          "name": "QMS:MT_MU1_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 1,
+          "unit": "Volts"
+        },
+        {
+          "emptyValueCount": 3215,
+          "firstObservedRawValue": "-2437.6",
+          "lastObservedRawValue": "-2437.6",
+          "maxObservedValue": -2437.6,
+          "minObservedValue": -2437.6,
+          "name": "QMS:MT_MU2_VCTL",
+          "nonNumericValueCount": 0,
+          "observedValueCount": 1,
+          "unit": "Volts"
         }
       ],
       "runtimeDurationSeconds": 95.0,
@@ -3650,6 +4078,22 @@
       "nonNumericValueCount": 0,
       "observedValueCount": 23,
       "unit": "seconds"
+    },
+    "QMS_MT_MU1_VCTL": {
+      "emptyValueCount": 46567,
+      "maxObservedValue": -45.0,
+      "minObservedValue": -45.0,
+      "nonNumericValueCount": 0,
+      "observedValueCount": 23,
+      "unit": "Volts"
+    },
+    "QMS_MT_MU2_VCTL": {
+      "emptyValueCount": 46567,
+      "maxObservedValue": -2437.6,
+      "minObservedValue": -2437.6,
+      "nonNumericValueCount": 0,
+      "observedValueCount": 23,
+      "unit": "Volts"
     },
     "QMS_RF_FREQ": {
       "emptyValueCount": 46590,
