@@ -17,7 +17,7 @@ FIELDS=[
  'CDH:OS_FIL1_VMON','CDH:OS_FIL2_VMON','CDH:OS_FIL_EMON','CDH:OS_FIL1_IMON','CDH:OS_FIL2_IMON',
  'CDH:CS_FIL1_VMON','CDH:CS_FIL2_VMON','CDH:CS_FIL_EMON','CDH:CS_FIL1_IMON','CDH:CS_FIL2_IMON',
  'CDH:EM1_IMON','CDH:EM2_IMON','CDH:MULTANA1','CDH:MULTANA2',
- 'QMS:IP_COUNT','QMS:IP_SETUP','QMS:FIL_SELECT','QMS:RF_FREQ'
+ 'QMS:IP_COUNT','QMS:IP_SETUP','QMS:FIL_SELECT','QMS:RF_FREQ','QMS:MT_MU1_VCTL','QMS:MT_MU2_VCTL'
 ]
 def sha(path:Path)->str:
  h=hashlib.sha256()
@@ -176,7 +176,8 @@ def analyse()->dict[str,Any]:
    'EM1_current_monitor':aggregate('CDH:EM1_IMON'),'EM2_current_monitor':aggregate('CDH:EM2_IMON'),
    'MULTANA1_monitor':aggregate('CDH:MULTANA1'),'MULTANA2_monitor':aggregate('CDH:MULTANA2'),
    'QMS_IP_COUNT':aggregate('QMS:IP_COUNT'),'QMS_IP_SETUP':aggregate('QMS:IP_SETUP'),
-   'QMS_FIL_SELECT':aggregate('QMS:FIL_SELECT'),'QMS_RF_FREQ':aggregate('QMS:RF_FREQ')},
+   'QMS_FIL_SELECT':aggregate('QMS:FIL_SELECT'),'QMS_RF_FREQ':aggregate('QMS:RF_FREQ'),
+   'QMS_MT_MU1_VCTL':aggregate('QMS:MT_MU1_VCTL'),'QMS_MT_MU2_VCTL':aggregate('QMS:MT_MU2_VCTL')},
   'eventWideL1bSignalContext_notSensitivity':{'description':'CSN/OSNB m/z 40 channel summaries; no species identity or phase/time/altitude match is asserted.',
    'modes':signal,'ratioOrSensitivityDerived':False},
   'calibrationAssessment':{'closedSourceAbsoluteSensitivity':'not_derived','openSourceSensitivity':'not_derived','C_EN':None,

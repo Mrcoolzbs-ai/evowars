@@ -43,6 +43,8 @@ export const MAVEN_NGIMS_L1B_HK_FIELD_UNITS = {
   'CDH:RF_TMP': 'Degrees Celsius',
   'CDH:PS_TMP': 'Degrees Celsius',
   'QMS:RF_FREQ': 'Megahertz',
+  'QMS:MT_MU1_VCTL': 'Volts',
+  'QMS:MT_MU2_VCTL': 'Volts',
   'QMS:OS_FIL1_VCTL': 'Volts',
   'QMS:OS_FIL1_ECTL': 'Volts',
   'QMS:OS_FIL2_VCTL': 'Volts',

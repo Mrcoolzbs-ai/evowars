@@ -6,13 +6,14 @@ export const MAVEN_NGIMS_L1B_OPERATIONAL_FIELD_NAMES = [
   'CDH:OS_FIL1_VMON','CDH:OS_FIL2_VMON','CDH:OS_FIL_EMON','CDH:OS_FIL1_IMON','CDH:OS_FIL2_IMON',
   'CDH:CS_FIL1_VMON','CDH:CS_FIL2_VMON','CDH:CS_FIL_EMON','CDH:CS_FIL1_IMON','CDH:CS_FIL2_IMON',
   'CDH:EM1_IMON','CDH:EM2_IMON','CDH:MULTANA1','CDH:MULTANA2',
-  'QMS:IP_COUNT','QMS:IP_SETUP','QMS:FIL_SELECT','QMS:RF_FREQ'
+  'QMS:IP_COUNT','QMS:IP_SETUP','QMS:FIL_SELECT','QMS:RF_FREQ','QMS:MT_MU1_VCTL','QMS:MT_MU2_VCTL'
 ] as const;
 export const MAVEN_NGIMS_L1B_OPERATIONAL_LIMITATIONS = [
   'cal-msg phase blocks are paired with cal-hk summaries by phase ordinal and exact cal-mkr start/end MKID; cal-msg timestamps are not used as clock coordinates.',
   'HK values are sparse readbacks. Empty cells mean not read; no threshold state, interpolation or carry-forward is inferred.',
   'Filament and multiplier monitor values remain raw telemetry; no detector gain, filament identity enum or calibration response is derived.',
   'QMS:FIL_SELECT is retained as a raw integer; no validated enum mapping is supplied by the consulted field definition.',
+  'QMS:MT_MU1_VCTL and QMS:MT_MU2_VCTL are direct negative-electrode bias readbacks in volts, but do not alone establish calibration applicability or gain.',
   'No validated correlation is implemented between cal-msg/HK internal clock, cal-mkr SCLK and L1B t_sclk_cor.',
   'Whole-event CSN/OSNB signal summaries are not paired by species, phase, altitude or time and are not a sensitivity ratio.',
   'Closed/open-source sensitivity, C_EN, fragmentation response and neutral density are not produced.',

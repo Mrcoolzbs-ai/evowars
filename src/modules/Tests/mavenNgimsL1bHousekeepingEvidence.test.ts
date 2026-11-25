@@ -3,6 +3,7 @@ import {parseMavenNgimsL1bMarkerCsvText} from '../Data/mavenNgimsL1bMarkerEviden
 import {
   associateMavenNgimsL1bHousekeepingRowsByPhase,
   MAVEN_NGIMS_L1B_HK_ASSOCIATION_LIMITATIONS,
+  MAVEN_NGIMS_L1B_HK_FIELD_UNITS,
   type MavenNgimsL1bHousekeepingFieldSpec
 } from '../Data/mavenNgimsL1bHousekeepingEvidence';
 
@@ -28,6 +29,10 @@ function hk(rows:readonly string[][]):string {
 }
 
 describe('MAVEN NGIMS phase-to-housekeeping association',()=>{
+  it('defines direct multiplier negative-electrode bias readbacks in volts',()=>{
+    expect(MAVEN_NGIMS_L1B_HK_FIELD_UNITS['QMS:MT_MU1_VCTL']).toBe('Volts');
+    expect(MAVEN_NGIMS_L1B_HK_FIELD_UNITS['QMS:MT_MU2_VCTL']).toBe('Volts');
+  });
   it('associates telemetry by exact phase-start MKID and keeps end-marker rows separate',()=>{
     const result=associateMavenNgimsL1bHousekeepingRowsByPhase(hk([
       ['100.0','1','9','30'],
