@@ -1316,7 +1316,7 @@ in TID 10194 with a preceding marker event whose MKID matches exactly. A
 further 505 and 402 rows, respectively, are flagged as ID/time mismatches,
 and 4,086 / 2,205 rows have blank MKID. No mismatches are assigned to a
 neighboring marker. The event reports contain 1,234 and 335 event groups;
-453 and 132 groups have no BA pressure-monitor sample.
+484 and 139 groups have no BA pressure-monitor sample.
 
 `CDH:BA_PRES` was observed 7,281 times (0.734% of HK rows) in TID 10191
 and 2,607 times (0.734%) in TID 10194. `CDH:BA_PRES_LO` was observed
@@ -1333,3 +1333,6 @@ consistent with Kr. Both are still pre-flight evidence; neither establishes a
 flight-specific calibration for TID 14282. Do not mark Stage 4.2 complete and
 do not derive absolute sensitivity or `C_EN` until the external reference-gauge
 data and the remaining calibration chain are independently validated.
+
+
+Final event-level background BA_PRES pooled means (raw volts): TID 10191 CSN −0.016372 V, OSNT −0.016595 V; TID 10194 CSN −0.032945 V, OSNT −0.033004 V. These are sparse readback averages, not pressures.

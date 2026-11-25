@@ -1275,8 +1275,8 @@ The final interval-join diagnostics are:
 
 | TID | HK rows (PDS4 label) | Marker events | HK rows matched | MKID/time mismatches | Blank MKID rows | Event groups | Groups with no BA sample |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 10191 | 991,617 / 991,617 | 1,284 | 987,026 | 505 | 4,086 | 1,234 | 453 |
-| 10194 | 355,082 / 355,082 | 348 | 352,475 | 402 | 2,205 | 335 | 132 |
+| 10191 | 991,617 / 991,617 | 1,284 | 987,026 | 505 | 4,086 | 1,234 | 484 |
+| 10194 | 355,082 / 355,082 | 348 | 352,475 | 402 | 2,205 | 335 | 139 |
 
 Both HK and marker SCLK sequences had zero backward-time steps and zero
 non-numeric time rows. The mismatch counts are deliberately not force-joined:
@@ -1294,11 +1294,11 @@ The BA readback is sparse in the full housekeeping stream:
 | 10194 | 2,607 / 355,082 (0.734%) | 2,608 / 355,082 (0.734%) |
 
 Thus, per-event means and ranges are statistics of the actual sparse readbacks
-only. They are not continuous pressure time series. For example, TID 10191 has
-84 `CSN Background` event intervals (621 `CDH:BA_PRES` samples,
-mean -0.01382 V) and 84 `OSNT Background` intervals (631 samples, mean
--0.01858 V). TID 10194 has 10 events of each background type (74 samples each;
-means -0.03234 V for CSN and -0.03467 V for OSNT). These voltage offsets are
+only. They are not continuous pressure time series. For example, TID 10191 has 84 `CSN Background` event intervals (621 `CDH:BA_PRES`
+samples, pooled mean -0.016372 V) and 84 `OSNT Background` intervals (631
+samples, pooled mean -0.016595 V). TID 10194 has 10 events of each background type
+(74 samples each; pooled means -0.032945 V for CSN and -0.033004 V for OSNT).
+These voltage offsets are
 not converted to pressure.
 
 The NGIMS calibration directory lists the `gnd-sci`, `gnd-hk`,
