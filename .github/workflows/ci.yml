@@ -1,5 +1,5 @@
 name: CI
-# Keep science branch verification rerunnable after source/test commits and quality-gate updates.
+# Keep science branch verification rerunnable after source/test commits and forensic-selection updates.
 
 on:
   push:
