@@ -192,6 +192,12 @@ def summarize(csv_bytes: bytes) -> dict:
         if quality:
             raw_quality[quality] += 1
         try:
+            raw_tid = row.get("tid", "").strip()
+            raw_orbit = row.get("orbit", "").strip()
+            if raw_tid:
+                raw_tids[raw_tid] += 1
+            if raw_orbit:
+                raw_orbits[raw_orbit] += 1
             tid = int(row["tid"])
             orbit = int(row["orbit"])
             unix = float(row["t_unix"])
