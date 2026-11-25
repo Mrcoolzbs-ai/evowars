@@ -90,7 +90,8 @@ def discover_directory() -> tuple[str, list[str], list[dict]]:
             parser = Links()
             parser.feed(html)
             matching = sorted({
-                href for href in parser.hrefs
+                urllib.request.urljoin(directory, href)
+                for href in parser.hrefs
                 if STEM.lower() in href.lower()
                 and (href.lower().endswith(".csv") or href.lower().endswith(".xml"))
             })
