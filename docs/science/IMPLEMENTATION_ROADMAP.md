@@ -1272,3 +1272,15 @@ or complete photochemical initial condition. Stage 4.2 remains OPEN / NOT_READY.
 - The raw pre-flight calibration collection is being indexed; TID 10191 has a SIS-vs-message-log gas-name conflict that must be resolved from its spectrum and pressure/reference-gas evidence.
 - `C_EN`, flight-specific closed-source sensitivity for this event, CEM 2 dead-time coefficients, and a complete fragmentation response matrix are not validated. Stage 4.2 remains OPEN / NOT_READY for any new NGIMS CPS-to-density calibration path.
 
+
+
+### Pre-flight calibration gnd-hk inspection (Stage 4.2)
+
+The pre-flight calibration analyzer now includes the 343 MB TID 10191 and
+123 MB TID 10194 `gnd-hk` files. It validates their detached PDS4 Table
+schema, streams the raw housekeeping CSVs and records pressure/reservoir,
+valve/flow, temperature, filament, multiplier and QMS/RF telemetry by marker
+ID. Sensor voltage is not converted into pressure without a documented
+calibration curve. The generated JSON is compact; raw CSV payloads stay in
+the external PDS archive. This step is evidence gathering only and does not
+make gas number density, absolute sensitivity or `C_EN` available.

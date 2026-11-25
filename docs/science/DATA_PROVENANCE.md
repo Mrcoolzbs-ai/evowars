@@ -1168,3 +1168,28 @@ Sources: [NGIMS SIS Rev. 1.13](https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_
 [Mahaffy et al. (2014)](https://lasp.colorado.edu/maven/files/2014/10/MAVEN_NGIMS.pdf);
 [Terada et al. (2017)](https://doi.org/10.1002/2016JA023476);
 [Stone et al. (2018)](https://doi.org/10.1029/2018JE005552).
+
+
+### Ground calibration housekeeping products (TID 10191 and 10194)
+
+The raw calibration collection contains large event-specific `gnd-hk` housekeeping
+products for both TID 10191 (343 MB) and TID 10194 (123 MB), each with a detached
+PDS4 XML label. The calibration audit now retrieves these products in a streaming
+workflow, validates the detached schema against the CSV header, preserves the
+complete field catalog (name, declared unit, data type and description), and
+summarizes candidate pressure, reservoir/gas, valve/flow, temperature, filament,
+multiplier and RF/QMS channels by exact observed marker ID. It also retains
+bounded first/last samples and per-channel coverage/min/max/mean values.
+
+A field whose name or PDS description denotes a pressure monitor is still only
+a raw engineering readback. In particular, values labelled in volts are not
+converted into physical pressure without the corresponding sensor calibration
+curve and range. Blank fields remain unobserved, are never carried forward, and
+the clock/marker data are not used to invent a time correlation with another
+product. The gnd-hk payloads are streamed and summarized; the 343 MB and 123 MB
+raw CSVs are not added to the source repository.
+
+The report now includes `housekeepingSummary` for both calibration TIDs and
+`markerSummary` for their paired `gnd-mkr` products. This gives the next
+calibration review an auditable reservoir/pressure context without asserting a
+reference-gas density or deriving absolute sensitivity or `C_EN`.

@@ -10,6 +10,7 @@ permissions:
   contents: write
 jobs:
   analyse:
+    timeout-minutes: 90
     if: contains(github.event.head_commit.message, '[analyze-ngims-preflight-calibration]') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -32,5 +33,7 @@ jobs:
           git add src/modules/Data/mavenNgimsL1bCalibrationArchive/preflight-calibration-products.json
           if ! git diff --cached --quiet; then
             git commit -m "data(science): index NGIMS preflight calibration evidence [skip ci]"
-            git push
+            git fetch origin stage-3-planetary-physics
+            git rebase origin/stage-3-planetary-physics
+            git push origin HEAD:stage-3-planetary-physics
           fi

@@ -11,6 +11,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import re
 import sys
 import tempfile
@@ -26,12 +27,13 @@ BASES = (
 PDS_NS = "http://pds.nasa.gov/pds4/pds/v1"
 OUTPUT = Path("src/modules/Data/mavenNgimsL1bCalibrationArchive/preflight-calibration-products.json")
 USER_AGENT = "EvoWars-NGIMS-Preflight-Calibration-Audit/1.0"
-MAX_BYTES = 100_000_000
+MAX_BYTES = 500_000_000
 TIDS = (
     {"tid": "010191", "timestamp": "20120923T081945", "sisDesignation": "Argon calibration"},
     {"tid": "010194", "timestamp": "20120923T174216", "sisDesignation": "Krypton calibration"},
 )
 PRODUCT_KINDS = {
+    "gnd-hk": "csv",
     "gnd-sci": "csv",
     "gnd-msg": "txt",
     "gnd-mkr": "csv",
@@ -120,23 +122,34 @@ def inspect_label(label_path: Path, payload_filename: str) -> dict[str, Any]:
     declared_size = int(scalar(file_nodes[0], "file_size") or "0")
     declared_records = None
     fields: list[str] = []
+    catalog: list[dict[str, Any]] = []
     for table in root.iter():
         if table.tag == qname("Table_Delimited"):
             rec = next((x for x in table if x.tag == qname("Record_Delimited")), None)
             if rec is not None:
                 declared_records = scalar(table, "records")
-                fields = [
-                    scalar(f, "name") or ""
-                    for f in rec
-                    if f.tag == qname("Field_Delimited")
-                ]
+                for field in rec:
+                    if field.tag != qname("Field_Delimited"):
+                        continue
+                    name = scalar(field, "name") or ""
+                    fields.append(name)
+                    catalog.append({
+                        "name": name,
+                        "fieldNumber": int(scalar(field, "field_number") or "0"),
+                        "dataType": scalar(field, "data_type"),
+                        "unit": scalar(field, "unit") or "unitless",
+                        "description": " ".join((scalar(field, "description") or "").split()),
+                    })
                 break
+    if not fields:
+        raise RuntimeError("no PDS4 Table_Delimited Record_Delimited schema found in " + label_path.name)
     return {
         "logicalIdentifier": (logical[0].text or "").strip(),
         "payloadFileName": payload_filename,
         "labelDeclaredFileSizeBytes": declared_size,
         "labelDeclaredRecordCount": int(declared_records) if declared_records else None,
         "columnNamesFromPdsLabel": fields,
+        "columnCatalogFromPdsLabel": catalog,
         "labelSha256": sha256_file(label_path),
         "detachedLabelAuthenticity": "not_independently_authenticated",
     }
@@ -277,6 +290,263 @@ def summarize_science_csv(path: Path, pds_fields: list[str]) -> dict[str, Any]:
     }
 
 
+
+def housekeeping_field_role(field: dict[str, Any]) -> str | None:
+    text = (field.get("name", "") + " " + field.get("description", "")).lower()
+    patterns = (
+        ("pressure", r"press|pres|vacuum|gauge"),
+        ("reservoir_gas", r"reservoir|tank|capillary|gas.?supply|bottle"),
+        ("valve_flow", r"valve|solenoid|flow.?control|leak.?valve"),
+        ("temperature", r"temp|temperature|therm"),
+        ("filament_source", r"filament|emission|ion.?source|source.?heater"),
+        ("multiplier_detector", r"multiplier|cem|detector|electron.?mult"),
+        ("rf_qms", r"rf|radio.?frequency|qms|quadrupole"),
+    )
+    for role, pattern in patterns:
+        if re.search(pattern, text):
+            return role
+    return None
+
+
+def new_housekeeping_stats(field: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": field["name"],
+        "fieldNumber": field.get("fieldNumber"),
+        "unit": field.get("unit", "unknown"),
+        "dataType": field.get("dataType"),
+        "description": field.get("description", ""),
+        "role": housekeeping_field_role(field),
+        "observedValueCount": 0,
+        "emptyValueCount": 0,
+        "nonNumericValueCount": 0,
+        "minObservedValue": None,
+        "maxObservedValue": None,
+        "meanObservedValue": None,
+        "firstObservedRawValue": None,
+        "lastObservedRawValue": None,
+        "firstObservedRecordNumber": None,
+        "lastObservedRecordNumber": None,
+        "_sum": 0.0,
+    }
+
+
+def update_housekeeping_stats(stats: dict[str, Any], raw: str, record_number: int) -> None:
+    value_text = (raw or "").strip()
+    if not value_text:
+        stats["emptyValueCount"] += 1
+        return
+    try:
+        value = float(value_text)
+    except ValueError:
+        stats["nonNumericValueCount"] += 1
+        return
+    if not math.isfinite(value):
+        stats["nonNumericValueCount"] += 1
+        return
+    stats["observedValueCount"] += 1
+    stats["_sum"] += value
+    stats["minObservedValue"] = value if stats["minObservedValue"] is None else min(stats["minObservedValue"], value)
+    stats["maxObservedValue"] = value if stats["maxObservedValue"] is None else max(stats["maxObservedValue"], value)
+    if stats["firstObservedRawValue"] is None:
+        stats["firstObservedRawValue"] = value_text
+        stats["firstObservedRecordNumber"] = record_number
+    stats["lastObservedRawValue"] = value_text
+    stats["lastObservedRecordNumber"] = record_number
+
+
+def finish_housekeeping_stats(stats: dict[str, Any]) -> dict[str, Any]:
+    count = stats.pop("observedValueCount")
+    total = stats.pop("_sum")
+    stats["observedValueCount"] = count
+    stats["meanObservedValue"] = total / count if count else None
+    return stats
+
+
+def summarize_housekeeping_csv(path: Path, field_catalog: list[dict[str, Any]], declared_records: int | None) -> dict[str, Any]:
+    catalog = {item["name"]: item for item in field_catalog}
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if not reader.fieldnames:
+            raise RuntimeError("housekeeping CSV has no header: " + path.name)
+        headers = [item.strip() for item in reader.fieldnames]
+        if len(headers) != len(set(headers)):
+            raise RuntimeError("housekeeping CSV has duplicate column names: " + path.name)
+        if len(headers) != len(field_catalog):
+            raise RuntimeError(f"housekeeping CSV/PDS4 schema column count mismatch: {len(headers)} != {len(field_catalog)}")
+        if headers != [item["name"] for item in field_catalog]:
+            raise RuntimeError("housekeeping CSV column order/names differ from detached PDS4 label")
+
+        time_column = find_column(headers, ("TIME", "T_SCLK", "SCLK", "TIME_SCLK"))
+        marker_column = find_column(headers, ("MKID", "MARKER_ID", "MARKERID"))
+        selected = [
+            catalog[name] for name in headers
+            if name in catalog and housekeeping_field_role(catalog[name]) is not None
+        ]
+        stats = {item["name"]: new_housekeeping_stats(item) for item in selected}
+        pressure_fields = [
+            item["name"] for item in selected
+            if item["role"] in ("pressure", "reservoir_gas", "valve_flow")
+        ]
+        marker_groups: dict[str, dict[str, Any]] = {}
+        row_count = 0
+        blank_marker_rows = 0
+        nonnumeric_time_rows = 0
+        previous_time: float | None = None
+        time_decrease_count = 0
+        first_time_raw = None
+        last_time_raw = None
+        marker_counts: dict[str, int] = {}
+        first_last_samples: list[dict[str, Any]] = []
+        sample_cap = 24
+
+        for row in reader:
+            row_count += 1
+            record_number = row_count + 1
+            raw_time = (row.get(time_column, "") or "").strip() if time_column else ""
+            raw_marker = (row.get(marker_column, "") or "").strip() if marker_column else ""
+            marker_key = raw_marker if raw_marker else "__blank__"
+            if not raw_marker:
+                blank_marker_rows += 1
+            marker_counts[marker_key] = marker_counts.get(marker_key, 0) + 1
+            if raw_time:
+                if first_time_raw is None:
+                    first_time_raw = raw_time
+                last_time_raw = raw_time
+                try:
+                    current_time = float(raw_time)
+                    if previous_time is not None and current_time < previous_time:
+                        time_decrease_count += 1
+                    previous_time = current_time
+                except ValueError:
+                    nonnumeric_time_rows += 1
+
+            for name, channel_stats in stats.items():
+                update_housekeeping_stats(channel_stats, row.get(name, ""), record_number)
+
+            if pressure_fields and raw_marker:
+                group = marker_groups.setdefault(raw_marker, {
+                    "rowCount": 0,
+                    "firstTimeRaw": raw_time or None,
+                    "lastTimeRaw": raw_time or None,
+                    "channels": {
+                        name: {
+                            "observedValueCount": 0,
+                            "emptyValueCount": 0,
+                            "nonNumericValueCount": 0,
+                            "minObservedValue": None,
+                            "maxObservedValue": None,
+                            "firstObservedRawValue": None,
+                            "lastObservedRawValue": None,
+                        }
+                        for name in pressure_fields
+                    }
+                })
+                group["rowCount"] += 1
+                if raw_time:
+                    group["lastTimeRaw"] = raw_time
+                for name in pressure_fields:
+                    bucket = group["channels"][name]
+                    raw_value = (row.get(name, "") or "").strip()
+                    if not raw_value:
+                        bucket["emptyValueCount"] += 1
+                        continue
+                    try:
+                        value = float(raw_value)
+                    except ValueError:
+                        bucket["nonNumericValueCount"] += 1
+                        continue
+                    if not math.isfinite(value):
+                        bucket["nonNumericValueCount"] += 1
+                        continue
+                    bucket["observedValueCount"] += 1
+                    bucket["minObservedValue"] = value if bucket["minObservedValue"] is None else min(bucket["minObservedValue"], value)
+                    bucket["maxObservedValue"] = value if bucket["maxObservedValue"] is None else max(bucket["maxObservedValue"], value)
+                    if bucket["firstObservedRawValue"] is None:
+                        bucket["firstObservedRawValue"] = raw_value
+                    bucket["lastObservedRawValue"] = raw_value
+
+            if row_count <= sample_cap or len(first_last_samples) < sample_cap * 2:
+                first_last_samples.append({
+                    "recordNumber": record_number,
+                    "timeRaw": raw_time or None,
+                    "markerIdRaw": raw_marker or None,
+                    "fields": {name: (row.get(name, "") or "").strip() or None for name in pressure_fields}
+                })
+            elif len(first_last_samples) >= sample_cap * 2:
+                first_last_samples.pop(sample_cap)
+                first_last_samples.append({
+                    "recordNumber": record_number,
+                    "timeRaw": raw_time or None,
+                    "markerIdRaw": raw_marker or None,
+                    "fields": {name: (row.get(name, "") or "").strip() or None for name in pressure_fields}
+                })
+
+    finished = {name: finish_housekeeping_stats(value) for name, value in stats.items()}
+    record_count_status = (
+        "matches_label" if declared_records == row_count
+        else "mismatch" if declared_records is not None
+        else "not_declared"
+    )
+    return {
+        "rowCount": row_count,
+        "declaredRecordCount": declared_records,
+        "recordCountStatus": record_count_status,
+        "columnCount": len(headers),
+        "timeColumn": time_column,
+        "markerColumn": marker_column,
+        "firstTimeRaw": first_time_raw,
+        "lastTimeRaw": last_time_raw,
+        "timeMonotonicityDiagnostic": {
+            "timeDecreaseCount": time_decrease_count,
+            "nonnumericTimeRowCount": nonnumeric_time_rows,
+            "timeValuesUsedForPressureOrCalibrationConversion": False,
+        },
+        "blankMarkerIdRowCount": blank_marker_rows,
+        "markerCounts": marker_counts,
+        "selectedChannelCount": len(finished),
+        "channelStatistics": list(finished.values()),
+        "pressureValveChannels": pressure_fields,
+        "pressureAndValveStatisticsByMarkerId": marker_groups,
+        "boundedFirstLastSamples": first_last_samples,
+        "interpretation": {
+            "rawTelemetryOnly": True,
+            "pressureVoltageConvertedToPhysicalPressure": False,
+            "gasNumberDensityDerived": False,
+            "interpolationOrCarryForwardPerformed": False,
+            "calibrationSensitivityDerived": False,
+            "cEnDerived": False,
+            "markerClockJoinToOtherProductsPerformed": False,
+        },
+        "schemaFieldCatalog": field_catalog,
+    }
+
+
+def summarize_marker_csv(path: Path) -> dict[str, Any]:
+    rows = []
+    counts: dict[str, int] = {}
+    row_count = 0
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if not reader.fieldnames:
+            raise RuntimeError("marker CSV has no header: " + path.name)
+        headers = [x.strip() for x in reader.fieldnames]
+        time_col = find_column(headers, ("TIME", "T_SCLK", "SCLK"))
+        id_col = find_column(headers, ("MKID", "MARKER_ID", "MARKERID"))
+        desc_col = find_column(headers, ("DESCRIPTION", "DESC", "TEXT"))
+        if time_col is None or id_col is None or desc_col is None:
+            raise RuntimeError("marker CSV lacks TIME/MKID/DESCRIPTION columns")
+        for record_number, row in enumerate(reader, start=2):
+            row_count += 1
+            marker_id = (row.get(id_col, "") or "").strip()
+            description = (row.get(desc_col, "") or "").strip()
+            key = description.lower()
+            counts[key] = counts.get(key, 0) + 1
+            if len(rows) < 300:
+                rows.append({"recordNumber": record_number, "timeRaw": row.get(time_col),
+                             "markerId": marker_id, "description": description})
+    return {"rowCount": row_count, "descriptionCounts": counts,
+            "markerRowsBoundedSample": rows, "timeCoordinateNotConverted": True}
+
 def summarize_message(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
@@ -296,6 +566,7 @@ def summarize_message(path: Path) -> dict[str, Any]:
         "multiplierOnCommands": [{"multiplier": int(a), "settingCode": int(b)} for a, b in multiplier_commands],
         "filamentOnCommands": sorted({int(x) for x in filament_commands}),
         "containsReplacementCharacter": "\ufffd" in text,
+        "pressureRelevantLogLines": [line for line in lines if re.search(r"reservoir|pressure|press|valve|capillary|gas.?supply|tank|bottle|leak", line, re.I)][:300],
     }
 
 
@@ -319,12 +590,18 @@ def fetch_and_audit_tid(tid: dict[str, str], work_dir: Path) -> dict[str, Any]:
         label["payloadDownload"] = payload_meta
         label["payloadSizeMatchesLabel"] = label["labelDeclaredFileSizeBytes"] == payload_meta["byteLength"]
         label["payloadSha256"] = payload_meta["sha256"]
-        if kind == "gnd-sci":
+        if kind == "gnd-hk":
+            label["housekeepingSummary"] = summarize_housekeeping_csv(
+                payload_path,
+                label["columnCatalogFromPdsLabel"],
+                label["labelDeclaredRecordCount"],
+            )
+        elif kind == "gnd-sci":
             label["scienceSummary"] = summarize_science_csv(payload_path, label["columnNamesFromPdsLabel"])
         elif kind == "gnd-msg":
             label["messageSummary"] = summarize_message(payload_path)
-        else:
-            label["rowCount"] = sum(1 for _ in payload_path.open("r", encoding="utf-8-sig", errors="replace")) - 1
+        elif kind == "gnd-mkr":
+            label["markerSummary"] = summarize_marker_csv(payload_path)
         result["products"][kind] = label
     directory_name = result["products"]["gnd-msg"]["messageSummary"]["dataDirectoryName"]
     result["messageLogDirectoryName"] = directory_name
@@ -355,6 +632,47 @@ def self_test() -> None:
                 self.assertFalse(summary["gasIdentityAssigned"])
                 self.assertEqual(summary["rowCount"], 2)
 
+        def test_housekeeping_pressure_channel_is_raw_and_sparse(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sample.csv"
+                path.write_text(
+                    "TIME,MKID,CDH:BA_PRES,CDH:IS_TMP,CDH:OS_FIL_EMON\n"
+                    "1,10,1.2,20,-250\n"
+                    "2,10,,20,\n"
+                    "3,11,1.8,21,-249\n",
+                    encoding="utf-8",
+                )
+                catalog = [
+                    {"name":"TIME","fieldNumber":1,"dataType":"ASCII_Real","unit":"SECONDS","description":"NGIMS clock"},
+                    {"name":"MKID","fieldNumber":2,"dataType":"ASCII_Integer","unit":"unitless","description":"Marker ID"},
+                    {"name":"CDH:BA_PRES","fieldNumber":3,"dataType":"ASCII_Real","unit":"Volts","description":"Pressure monitor voltage"},
+                    {"name":"CDH:IS_TMP","fieldNumber":4,"dataType":"ASCII_Real","unit":"Degrees Celsius","description":"Instrument source temperature"},
+                    {"name":"CDH:OS_FIL_EMON","fieldNumber":5,"dataType":"ASCII_Real","unit":"Microamperes","description":"Open source filament emission monitor"},
+                ]
+                result = summarize_housekeeping_csv(path, catalog, 3)
+                pressure = next(x for x in result["channelStatistics"] if x["name"] == "CDH:BA_PRES")
+                self.assertEqual(pressure["observedValueCount"], 2)
+                self.assertEqual(pressure["emptyValueCount"], 1)
+                self.assertEqual(pressure["unit"], "Volts")
+                self.assertEqual(result["pressureAndValveStatisticsByMarkerId"]["10"]["channels"]["CDH:BA_PRES"]["observedValueCount"], 1)
+                self.assertFalse(result["interpretation"]["pressureVoltageConvertedToPhysicalPressure"])
+                self.assertEqual(result["rowCount"], 3)
+
+        def test_housekeeping_never_carries_forward_missing_values(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sample.csv"
+                path.write_text("TIME,MKID,QMS:MT_MU2_VCTL\n1,20,-2400\n2,20,\n3,21,-2300\n", encoding="utf-8")
+                catalog = [
+                    {"name":"TIME","fieldNumber":1,"dataType":"ASCII_Real","unit":"SECONDS","description":"time"},
+                    {"name":"MKID","fieldNumber":2,"dataType":"ASCII_Integer","unit":"unitless","description":"marker"},
+                    {"name":"QMS:MT_MU2_VCTL","fieldNumber":3,"dataType":"ASCII_Real","unit":"Volts","description":"Multiplier negative electrode voltage"},
+                ]
+                result = summarize_housekeeping_csv(path, catalog, 3)
+                stat = next(x for x in result["channelStatistics"] if x["name"] == "QMS:MT_MU2_VCTL")
+                self.assertEqual(stat["observedValueCount"], 2)
+                self.assertEqual(stat["emptyValueCount"], 1)
+                self.assertEqual(result["markerCounts"], {"20":2,"21":1})
+
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(Tests)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
@@ -373,14 +691,14 @@ def main() -> None:
             results.append(fetch_and_audit_tid(tid, work_dir))
     output = {
         "schemaVersion": "1.0.0",
-        "status": "preflight_products_audited_raw_sensitivity_not_rederived",
+        "status": "preflight_products_and_housekeeping_audited_raw_sensitivity_not_rederived",
         "sourceCollection": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/",
         "sourceSIS": "MAVEN NGIMS PDS SIS Rev. 1.13, Table A-11",
         "retrievedTidCount": len(results),
         "products": results,
         "limitations": [
-            "The script streams selected ground science CSVs and records raw mass-channel evidence, but does not calculate absolute sensitivity.",
-            "The gnd-hk products are large and have not yet been ingested; chamber pressure/reference gas density and the complete calibration chain are not independently validated here.",
+            "The script streams ground science and housekeeping CSVs; housekeeping pressure and valve monitor channels retain exact PDS units and are not converted from volts to physical pressure without sensor calibration.",
+            "The gnd-hk pressure/temperature/valve readbacks do not by themselves establish chamber pressure or reference-gas number density; gas density and the complete calibration chain remain to be independently validated.",
             "TID 10191 is called Argon calibration in SIS Table A-11, but its source message-log directory is named KrCalibration. Gas identity remains unassigned pending raw spectrum and pressure/reference-gas cross-check.",
             "A raw mass-channel peak by itself is not treated as sufficient calibration-gas identification.",
             "Preflight ground references must not be promoted to a flight-specific sensitivity for TID 14282 without matching detector, emission, gas density, and configuration evidence."
