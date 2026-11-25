@@ -3,7 +3,7 @@
 
 Run once by committing a subject containing [retrieve-ngims-l1b-osnb-14282].
 
-Trigger with [retrieve-ngims-l1b-osnb-14282].
+Trigger with [retrieve-ngims-l1b-osnb-14282]; directory listing links are resolved against the absolute PDS4 folder URL.
 The product is identified by the official NGIMS L1B index and exact event
 window/orbit. The script locates the CSV/XML partner from the official PDS4
 directory (or narrow version/revision probes), validates the detached label,
