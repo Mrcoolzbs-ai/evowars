@@ -1,7 +1,7 @@
 {
   "exactEventJoin": {
-    "coherentTimeWindowTripleCount": 10770,
-    "completeTripleCount": 10770,
+    "coherentTimeWindowTripleCount": 10796,
+    "completeTripleCount": 10796,
     "completeTriples": [
       {
         "productTime": "20141018t133538",
@@ -444725,6 +444725,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20220926t114403",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "184.433",
+            "closestApproachTimeUtc": "2022-09-26T13:03:53Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "17.53",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-09-26T11:48:56.00Z",
+            "stopTimeUtc": "2022-09-26T13:18:47.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48062_20220926t114403"
+          },
+          "l3_res_den": {
+            "altitudeKm": "184.433",
+            "closestApproachTimeUtc": "2022-09-26T13:03:53Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "17.530",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-26T11:48:56.00Z",
+            "stopTimeUtc": "2022-09-26T13:18:47.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48062_20220926t114403"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "184.433",
+            "closestApproachTimeUtc": "2022-09-26T13:03:53Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "17.53",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-26T11:48:56.00Z",
+            "stopTimeUtc": "2022-09-26T13:18:47.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48062_20220926t114403"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48062,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20220926t190338",
         "products": {
           "l2_csn": {
@@ -444770,6 +444818,54 @@
         },
         "schedulerEligible": false,
         "tid": 48066,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20220927t022314",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "184.18",
+            "closestApproachTimeUtc": "2022-09-27T03:43:03Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "163.658",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-09-27T02:28:07.00Z",
+            "stopTimeUtc": "2022-09-27T03:57:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48070_20220927t022314"
+          },
+          "l3_res_den": {
+            "altitudeKm": "184.180",
+            "closestApproachTimeUtc": "2022-09-27T03:43:03Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "163.658",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-27T02:28:07.00Z",
+            "stopTimeUtc": "2022-09-27T03:57:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48070_20220927t022314"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "184.18",
+            "closestApproachTimeUtc": "2022-09-27T03:43:03Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "163.658",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-27T02:28:07.00Z",
+            "stopTimeUtc": "2022-09-27T03:57:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48070_20220927t022314"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48070,
         "timeWindowStatus": "agree"
       },
       {
@@ -445253,6 +445349,150 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20220929t020027",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "184.107",
+            "closestApproachTimeUtc": "2022-09-29T03:20:17Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-171.42",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-09-29T02:05:20.00Z",
+            "stopTimeUtc": "2022-09-29T03:35:08.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48096_20220929t020027"
+          },
+          "l3_res_den": {
+            "altitudeKm": "184.107",
+            "closestApproachTimeUtc": "2022-09-29T03:20:17Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-171.420",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-29T02:05:20.00Z",
+            "stopTimeUtc": "2022-09-29T03:35:08.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48096_20220929t020027"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "184.107",
+            "closestApproachTimeUtc": "2022-09-29T03:20:17Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-171.42",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-29T02:05:20.00Z",
+            "stopTimeUtc": "2022-09-29T03:35:08.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48096_20220929t020027"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48096,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20220929t054013",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "183.55",
+            "closestApproachTimeUtc": "2022-09-29T07:00:02Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "135.121",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-09-29T05:45:06.00Z",
+            "stopTimeUtc": "2022-09-29T07:14:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48098_20220929t054013"
+          },
+          "l3_res_den": {
+            "altitudeKm": "183.550",
+            "closestApproachTimeUtc": "2022-09-29T07:00:02Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "135.121",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-29T05:45:06.00Z",
+            "stopTimeUtc": "2022-09-29T07:14:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48098_20220929t054013"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "183.55",
+            "closestApproachTimeUtc": "2022-09-29T07:00:02Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "135.121",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-29T05:45:06.00Z",
+            "stopTimeUtc": "2022-09-29T07:14:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48098_20220929t054013"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48098,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20220929t092000",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "184.448",
+            "closestApproachTimeUtc": "2022-09-29T10:39:50Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "81.65",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-09-29T09:24:53.00Z",
+            "stopTimeUtc": "2022-09-29T10:54:38.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48100_20220929t092000"
+          },
+          "l3_res_den": {
+            "altitudeKm": "184.448",
+            "closestApproachTimeUtc": "2022-09-29T10:39:50Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "81.650",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-29T09:24:53.00Z",
+            "stopTimeUtc": "2022-09-29T10:54:38.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48100_20220929t092000"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "184.448",
+            "closestApproachTimeUtc": "2022-09-29T10:39:50Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "81.65",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-29T09:24:53.00Z",
+            "stopTimeUtc": "2022-09-29T10:54:38.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48100_20220929t092000"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48100,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20220929t125949",
         "products": {
           "l2_csn": {
@@ -445394,6 +445634,54 @@
         },
         "schedulerEligible": false,
         "tid": 48110,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20220930t105830",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "184.238",
+            "closestApproachTimeUtc": "2022-09-30T12:18:19Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "67.38",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-09-30T11:03:24.00Z",
+            "stopTimeUtc": "2022-09-30T12:33:09.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48114_20220930t105830"
+          },
+          "l3_res_den": {
+            "altitudeKm": "184.238",
+            "closestApproachTimeUtc": "2022-09-30T12:18:19Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "67.380",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-30T11:03:24.00Z",
+            "stopTimeUtc": "2022-09-30T12:33:09.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48114_20220930t105830"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "184.238",
+            "closestApproachTimeUtc": "2022-09-30T12:18:19Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "67.38",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-09-30T11:03:24.00Z",
+            "stopTimeUtc": "2022-09-30T12:33:09.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48114_20220930t105830"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48114,
         "timeWindowStatus": "agree"
       },
       {
@@ -446741,6 +447029,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221008t092607",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.98",
+            "closestApproachTimeUtc": "2022-10-08T10:45:55Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "167.29",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-08T09:31:02.00Z",
+            "stopTimeUtc": "2022-10-08T11:00:48.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48218_20221008t092607"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.980",
+            "closestApproachTimeUtc": "2022-10-08T10:45:55Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "167.290",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-08T09:31:02.00Z",
+            "stopTimeUtc": "2022-10-08T11:00:48.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48218_20221008t092607"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.98",
+            "closestApproachTimeUtc": "2022-10-08T10:45:55Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "167.29",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-08T09:31:02.00Z",
+            "stopTimeUtc": "2022-10-08T11:00:48.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48218_20221008t092607"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48218,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221008t164535",
         "products": {
           "l2_csn": {
@@ -446834,6 +447170,102 @@
         },
         "schedulerEligible": false,
         "tid": 48224,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221009t000504",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.8",
+            "closestApproachTimeUtc": "2022-10-09T01:24:50Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-46.537",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-09T00:09:59.00Z",
+            "stopTimeUtc": "2022-10-09T01:31:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48226_20221009t000504"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.800",
+            "closestApproachTimeUtc": "2022-10-09T01:24:50Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-46.537",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-09T00:09:59.00Z",
+            "stopTimeUtc": "2022-10-09T01:31:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48226_20221009t000504"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.8",
+            "closestApproachTimeUtc": "2022-10-09T01:24:50Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-46.537",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-09T00:09:59.00Z",
+            "stopTimeUtc": "2022-10-09T01:31:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48226_20221009t000504"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48226,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221009t034447",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "182.86",
+            "closestApproachTimeUtc": "2022-10-09T05:04:35Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-99.999",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-09T03:49:42.00Z",
+            "stopTimeUtc": "2022-10-09T05:19:27.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48228_20221009t034447"
+          },
+          "l3_res_den": {
+            "altitudeKm": "182.860",
+            "closestApproachTimeUtc": "2022-10-09T05:04:35Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-99.999",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-09T03:49:42.00Z",
+            "stopTimeUtc": "2022-10-09T05:19:27.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48228_20221009t034447"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "182.86",
+            "closestApproachTimeUtc": "2022-10-09T05:04:35Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-99.999",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-09T03:49:42.00Z",
+            "stopTimeUtc": "2022-10-09T05:19:27.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48228_20221009t034447"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48228,
         "timeWindowStatus": "agree"
       },
       {
@@ -446978,6 +447410,54 @@
         },
         "schedulerEligible": false,
         "tid": 48240,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221010t052253",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "182.93",
+            "closestApproachTimeUtc": "2022-10-10T06:42:43Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-114.205",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-10T05:27:48.00Z",
+            "stopTimeUtc": "2022-10-10T06:57:37.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48242_20221010t052253"
+          },
+          "l3_res_den": {
+            "altitudeKm": "182.930",
+            "closestApproachTimeUtc": "2022-10-10T06:42:43Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-114.205",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-10T05:27:48.00Z",
+            "stopTimeUtc": "2022-10-10T06:57:37.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48242_20221010t052253"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "182.93",
+            "closestApproachTimeUtc": "2022-10-10T06:42:43Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-114.205",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-10T05:27:48.00Z",
+            "stopTimeUtc": "2022-10-10T06:57:37.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48242_20221010t052253"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48242,
         "timeWindowStatus": "agree"
       },
       {
@@ -447797,6 +448277,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221014t225358",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.461",
+            "closestApproachTimeUtc": "2022-10-15T00:13:47Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "28.73",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-14T22:58:54.00Z",
+            "stopTimeUtc": "2022-10-15T00:28:36.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48304_20221014t225358"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.461",
+            "closestApproachTimeUtc": "2022-10-15T00:13:47Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "28.730",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-14T22:58:54.00Z",
+            "stopTimeUtc": "2022-10-15T00:28:36.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48304_20221014t225358"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.461",
+            "closestApproachTimeUtc": "2022-10-15T00:13:47Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "28.73",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-14T22:58:54.00Z",
+            "stopTimeUtc": "2022-10-15T00:28:36.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48304_20221014t225358"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48304,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221015t061320",
         "products": {
           "l2_csn": {
@@ -448085,6 +448613,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221016t075107",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "182.28",
+            "closestApproachTimeUtc": "2022-10-16T09:10:56Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-92.299",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-16T07:56:03.00Z",
+            "stopTimeUtc": "2022-10-16T09:25:54.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48322_20221016t075107"
+          },
+          "l3_res_den": {
+            "altitudeKm": "182.280",
+            "closestApproachTimeUtc": "2022-10-16T09:10:56Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-92.299",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-16T07:56:03.00Z",
+            "stopTimeUtc": "2022-10-16T09:25:54.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48322_20221016t075107"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "182.28",
+            "closestApproachTimeUtc": "2022-10-16T09:10:56Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-92.299",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-16T07:56:03.00Z",
+            "stopTimeUtc": "2022-10-16T09:25:54.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48322_20221016t075107"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48322,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221016t151030",
         "products": {
           "l2_csn": {
@@ -448178,6 +448754,54 @@
         },
         "schedulerEligible": false,
         "tid": 48328,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221017t020933",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "180.99",
+            "closestApproachTimeUtc": "2022-10-17T03:29:22Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "0.457",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-17T02:14:29.00Z",
+            "stopTimeUtc": "2022-10-17T03:44:17.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48332_20221017t020933"
+          },
+          "l3_res_den": {
+            "altitudeKm": "180.990",
+            "closestApproachTimeUtc": "2022-10-17T03:29:22Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "0.457",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-17T02:14:29.00Z",
+            "stopTimeUtc": "2022-10-17T03:44:17.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48332_20221017t020933"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "180.99",
+            "closestApproachTimeUtc": "2022-10-17T03:29:22Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "0.457",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-17T02:14:29.00Z",
+            "stopTimeUtc": "2022-10-17T03:44:17.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48332_20221017t020933"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48332,
         "timeWindowStatus": "agree"
       },
       {
@@ -448373,6 +448997,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221018t034719",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "180.83",
+            "closestApproachTimeUtc": "2022-10-18T05:07:05Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-13.665",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-18T03:52:16.00Z",
+            "stopTimeUtc": "2022-10-18T05:10:12.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48346_20221018t034719"
+          },
+          "l3_res_den": {
+            "altitudeKm": "180.830",
+            "closestApproachTimeUtc": "2022-10-18T05:07:05Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-13.665",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-18T03:52:16.00Z",
+            "stopTimeUtc": "2022-10-18T05:10:12.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48346_20221018t034719"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "180.83",
+            "closestApproachTimeUtc": "2022-10-18T05:07:05Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-13.665",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-18T03:52:16.00Z",
+            "stopTimeUtc": "2022-10-18T05:10:12.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48346_20221018t034719"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48346,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221019t052458",
         "products": {
           "l2_csn": {
@@ -448469,6 +449141,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221019t124417",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.725",
+            "closestApproachTimeUtc": "2022-10-19T14:04:06Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-134.67",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-19T12:49:14.00Z",
+            "stopTimeUtc": "2022-10-19T14:18:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48364_20221019t124417"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.725",
+            "closestApproachTimeUtc": "2022-10-19T14:04:06Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-134.670",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-19T12:49:14.00Z",
+            "stopTimeUtc": "2022-10-19T14:18:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48364_20221019t124417"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.725",
+            "closestApproachTimeUtc": "2022-10-19T14:04:06Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-134.67",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-19T12:49:14.00Z",
+            "stopTimeUtc": "2022-10-19T14:18:57.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48364_20221019t124417"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48364,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221019t200336",
         "products": {
           "l2_csn": {
@@ -448562,6 +449282,54 @@
         },
         "schedulerEligible": false,
         "tid": 48372,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221020t070234",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.36",
+            "closestApproachTimeUtc": "2022-10-20T08:22:21Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-41.875",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-20T07:07:31.00Z",
+            "stopTimeUtc": "2022-10-20T08:37:18.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48374_20221020t070234"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.360",
+            "closestApproachTimeUtc": "2022-10-20T08:22:21Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-41.875",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-20T07:07:31.00Z",
+            "stopTimeUtc": "2022-10-20T08:37:18.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48374_20221020t070234"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.36",
+            "closestApproachTimeUtc": "2022-10-20T08:22:21Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-41.875",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-20T07:07:31.00Z",
+            "stopTimeUtc": "2022-10-20T08:37:18.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48374_20221020t070234"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48374,
         "timeWindowStatus": "agree"
       },
       {
@@ -449141,6 +449909,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221025t113020",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.786",
+            "closestApproachTimeUtc": "2022-10-25T12:50:07Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-58.81",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-25T11:35:18.00Z",
+            "stopTimeUtc": "2022-10-25T13:04:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48442_20221025t113020"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.786",
+            "closestApproachTimeUtc": "2022-10-25T12:50:07Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-58.810",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-25T11:35:18.00Z",
+            "stopTimeUtc": "2022-10-25T13:04:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48442_20221025t113020"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.786",
+            "closestApproachTimeUtc": "2022-10-25T12:50:07Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-58.81",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-25T11:35:18.00Z",
+            "stopTimeUtc": "2022-10-25T13:04:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48442_20221025t113020"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48442,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221025t150957",
         "products": {
           "l2_csn": {
@@ -449186,6 +450002,54 @@
         },
         "schedulerEligible": false,
         "tid": 48444,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221026t020848",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.688",
+            "closestApproachTimeUtc": "2022-10-26T03:28:38Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "87.44",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-26T02:13:46.00Z",
+            "stopTimeUtc": "2022-10-26T03:31:59.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48450_20221026t020848"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.688",
+            "closestApproachTimeUtc": "2022-10-26T03:28:38Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "87.440",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-26T02:13:46.00Z",
+            "stopTimeUtc": "2022-10-26T03:31:59.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48450_20221026t020848"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.688",
+            "closestApproachTimeUtc": "2022-10-26T03:28:38Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "87.44",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-26T02:13:46.00Z",
+            "stopTimeUtc": "2022-10-26T03:31:59.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48450_20221026t020848"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48450,
         "timeWindowStatus": "agree"
       },
       {
@@ -449282,6 +450146,102 @@
         },
         "schedulerEligible": false,
         "tid": 48454,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221026t130740",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.958",
+            "closestApproachTimeUtc": "2022-10-26T14:27:28Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-72.86",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-26T13:12:38.00Z",
+            "stopTimeUtc": "2022-10-26T14:42:20.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48456_20221026t130740"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.958",
+            "closestApproachTimeUtc": "2022-10-26T14:27:28Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-72.860",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-26T13:12:38.00Z",
+            "stopTimeUtc": "2022-10-26T14:42:20.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48456_20221026t130740"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.958",
+            "closestApproachTimeUtc": "2022-10-26T14:27:28Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-72.86",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-26T13:12:38.00Z",
+            "stopTimeUtc": "2022-10-26T14:42:20.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48456_20221026t130740"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48456,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221026t164717",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.55",
+            "closestApproachTimeUtc": "2022-10-26T18:07:06Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-126.298",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-26T16:52:15.00Z",
+            "stopTimeUtc": "2022-10-26T18:22:00.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48458_20221026t164717"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.550",
+            "closestApproachTimeUtc": "2022-10-26T18:07:06Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-126.298",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-26T16:52:15.00Z",
+            "stopTimeUtc": "2022-10-26T18:22:00.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48458_20221026t164717"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.55",
+            "closestApproachTimeUtc": "2022-10-26T18:07:06Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-126.298",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-26T16:52:15.00Z",
+            "stopTimeUtc": "2022-10-26T18:22:00.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48458_20221026t164717"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48458,
         "timeWindowStatus": "agree"
       },
       {
@@ -449477,6 +450437,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221028t052323",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.491",
+            "closestApproachTimeUtc": "2022-10-28T06:43:12Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "59.37",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-28T05:28:21.00Z",
+            "stopTimeUtc": "2022-10-28T06:58:09.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48478_20221028t052323"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.491",
+            "closestApproachTimeUtc": "2022-10-28T06:43:12Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "59.370",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-28T05:28:21.00Z",
+            "stopTimeUtc": "2022-10-28T06:58:09.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48478_20221028t052323"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.491",
+            "closestApproachTimeUtc": "2022-10-28T06:43:12Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "59.37",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-28T05:28:21.00Z",
+            "stopTimeUtc": "2022-10-28T06:58:09.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48478_20221028t052323"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48478,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221028t090300",
         "products": {
           "l2_csn": {
@@ -449522,6 +450530,54 @@
         },
         "schedulerEligible": false,
         "tid": 48480,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221028t124234",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.69",
+            "closestApproachTimeUtc": "2022-10-28T14:02:23Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-47.488",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-28T12:47:32.00Z",
+            "stopTimeUtc": "2022-10-28T14:17:13.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48482_20221028t124234"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.690",
+            "closestApproachTimeUtc": "2022-10-28T14:02:23Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-47.488",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-28T12:47:32.00Z",
+            "stopTimeUtc": "2022-10-28T14:17:13.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48482_20221028t124234"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.69",
+            "closestApproachTimeUtc": "2022-10-28T14:02:23Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-47.488",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-28T12:47:32.00Z",
+            "stopTimeUtc": "2022-10-28T14:17:13.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48482_20221028t124234"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48482,
         "timeWindowStatus": "agree"
       },
       {
@@ -449858,6 +450914,102 @@
         },
         "schedulerEligible": false,
         "tid": 48510,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221030t193630",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.47",
+            "closestApproachTimeUtc": "2022-10-30T20:56:18Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-128.938",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-30T19:41:29.00Z",
+            "stopTimeUtc": "2022-10-30T21:11:08.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48512_20221030t193630"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.470",
+            "closestApproachTimeUtc": "2022-10-30T20:56:18Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-128.938",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-30T19:41:29.00Z",
+            "stopTimeUtc": "2022-10-30T21:11:08.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48512_20221030t193630"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.47",
+            "closestApproachTimeUtc": "2022-10-30T20:56:18Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "-128.938",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-30T19:41:29.00Z",
+            "stopTimeUtc": "2022-10-30T21:11:08.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48512_20221030t193630"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48512,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221030t231603",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "180.85",
+            "closestApproachTimeUtc": "2022-10-31T00:35:51Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "177.642",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-10-30T23:21:02.00Z",
+            "stopTimeUtc": "2022-10-31T00:50:48.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48514_20221030t231603"
+          },
+          "l3_res_den": {
+            "altitudeKm": "180.850",
+            "closestApproachTimeUtc": "2022-10-31T00:35:51Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "177.642",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-30T23:21:02.00Z",
+            "stopTimeUtc": "2022-10-31T00:50:48.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48514_20221030t231603"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "180.85",
+            "closestApproachTimeUtc": "2022-10-31T00:35:51Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "177.642",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-10-30T23:21:02.00Z",
+            "stopTimeUtc": "2022-10-31T00:50:48.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48514_20221030t231603"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48514,
         "timeWindowStatus": "agree"
       },
       {
@@ -451061,6 +452213,54 @@
         "timeWindowStatus": "agree"
       },
       {
+        "productTime": "20221108t044344",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "181.442",
+            "closestApproachTimeUtc": "2022-11-08T06:11:01Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "173.06",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-11-08T04:48:44.00Z",
+            "stopTimeUtc": "2022-11-08T06:29:23.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48622_20221108t044344"
+          },
+          "l3_res_den": {
+            "altitudeKm": "181.442",
+            "closestApproachTimeUtc": "2022-11-08T06:11:01Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "173.060",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-11-08T04:48:44.00Z",
+            "stopTimeUtc": "2022-11-08T06:29:23.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48622_20221108t044344"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "181.442",
+            "closestApproachTimeUtc": "2022-11-08T06:11:01Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "173.06",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-11-08T04:48:44.00Z",
+            "stopTimeUtc": "2022-11-08T06:29:23.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48622_20221108t044344"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48622,
+        "timeWindowStatus": "agree"
+      },
+      {
         "productTime": "20221108t082601",
         "products": {
           "l2_csn": {
@@ -451730,6 +452930,54 @@
         },
         "schedulerEligible": false,
         "tid": 48704,
+        "timeWindowStatus": "agree"
+      },
+      {
+        "productTime": "20221114t142722",
+        "products": {
+          "l2_csn": {
+            "altitudeKm": "182.206",
+            "closestApproachTimeUtc": "2022-11-14T15:47:09Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "90.53",
+            "sourceIndex": "l2_single_species",
+            "sourceIndexes": [
+              "l2_single_species"
+            ],
+            "startTimeUtc": "2022-11-14T14:32:23.00Z",
+            "stopTimeUtc": "2022-11-14T16:01:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-48706_20221114t142722"
+          },
+          "l3_res_den": {
+            "altitudeKm": "182.206",
+            "closestApproachTimeUtc": "2022-11-14T15:47:09Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "90.530",
+            "sourceIndex": "l3_resampled",
+            "sourceIndexes": [
+              "l3_resampled",
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-11-14T14:32:23.00Z",
+            "stopTimeUtc": "2022-11-14T16:01:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48706_20221114t142722"
+          },
+          "l3_res_sht": {
+            "altitudeKm": "182.206",
+            "closestApproachTimeUtc": "2022-11-14T15:47:09Z",
+            "martianYear": "36",
+            "solarLongitudeDeg": "90.53",
+            "sourceIndex": "l3_scale_height",
+            "sourceIndexes": [
+              "l3_scale_height"
+            ],
+            "startTimeUtc": "2022-11-14T14:32:23.00Z",
+            "stopTimeUtc": "2022-11-14T16:01:58.00Z",
+            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-48706_20221114t142722"
+          }
+        },
+        "schedulerEligible": false,
+        "tid": 48706,
         "timeWindowStatus": "agree"
       },
       {
@@ -506427,6 +507675,17 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48060_20220926t080415"
       },
       {
+        "productTime": "20220926t114403",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48062,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48062_20220926t114403"
+      },
+      {
         "productTime": "20220926t190338",
         "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
         "role": "l3_res_den",
@@ -506436,6 +507695,17 @@
         ],
         "tid": 48066,
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48066_20220926t190338"
+      },
+      {
+        "productTime": "20220927t022314",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48070,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48070_20220927t022314"
       },
       {
         "productTime": "20220927t060301",
@@ -506548,6 +507818,39 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48094_20220928t222040"
       },
       {
+        "productTime": "20220929t020027",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48096,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48096_20220929t020027"
+      },
+      {
+        "productTime": "20220929t054013",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48098,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48098_20220929t054013"
+      },
+      {
+        "productTime": "20220929t092000",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48100,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48100_20220929t092000"
+      },
+      {
         "productTime": "20220929t125949",
         "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
         "role": "l3_res_den",
@@ -506579,6 +507882,17 @@
         ],
         "tid": 48110,
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48110_20220930t033857"
+      },
+      {
+        "productTime": "20220930t105830",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48114,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48114_20220930t105830"
       },
       {
         "productTime": "20220930t143819",
@@ -506889,6 +508203,17 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48216_20221008t054622"
       },
       {
+        "productTime": "20221008t092607",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48218,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48218_20221008t092607"
+      },
+      {
         "productTime": "20221008t164535",
         "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
         "role": "l3_res_den",
@@ -506909,6 +508234,28 @@
         ],
         "tid": 48224,
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48224_20221008t202520"
+      },
+      {
+        "productTime": "20221009t000504",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48226,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48226_20221009t000504"
+      },
+      {
+        "productTime": "20221009t034447",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48228,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48228_20221009t034447"
       },
       {
         "productTime": "20221009t072432",
@@ -506942,6 +508289,17 @@
         ],
         "tid": 48240,
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48240_20221010t014310"
+      },
+      {
+        "productTime": "20221010t052253",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48242,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48242_20221010t052253"
       },
       {
         "productTime": "20221010t090238",
@@ -507131,6 +508489,17 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48302_20221014t191415"
       },
       {
+        "productTime": "20221014t225358",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48304,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48304_20221014t225358"
+      },
+      {
         "productTime": "20221015t061320",
         "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
         "role": "l3_res_den",
@@ -507197,6 +508566,17 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48320_20221016t041128"
       },
       {
+        "productTime": "20221016t075107",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48322,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48322_20221016t075107"
+      },
+      {
         "productTime": "20221016t151030",
         "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
         "role": "l3_res_den",
@@ -507217,6 +508597,17 @@
         ],
         "tid": 48328,
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48328_20221016t185011"
+      },
+      {
+        "productTime": "20221017t020933",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48332,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48332_20221017t020933"
       },
       {
         "productTime": "20221017t054913",
@@ -507263,6 +508654,17 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48344_20221018t000738"
       },
       {
+        "productTime": "20221018t034719",
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
+        ],
+        "tid": 48346,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48346_20221018t034719"
+      },
+      {
         "productTime": "20221019t052458",
         "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
         "role": "l3_res_den",
@@ -507285,908 +508687,20 @@
         "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48362_20221019t090436"
       },
       {
-        "productTime": "20221019t200336",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48368,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48368_20221019t200336"
-      },
-      {
-        "productTime": "20221020t032256",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48372,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48372_20221020t032256"
-      },
-      {
-        "productTime": "20221020t214110",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48382,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48382_20221020t214110"
-      },
-      {
-        "productTime": "20221022t025822",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48398,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48398_20221022t025822"
-      },
-      {
-        "productTime": "20221022t063801",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48400,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48400_20221022t063801"
-      },
-      {
-        "productTime": "20221022t101739",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48402,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48402_20221022t101739"
-      },
-      {
-        "productTime": "20221022t135718",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48404,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48404_20221022t135718"
-      },
-      {
-        "productTime": "20221022t211633",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48408,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48408_20221022t211633"
-      },
-      {
-        "productTime": "20221023t225358",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48422,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48422_20221023t225358"
-      },
-      {
-        "productTime": "20221024t023340",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48424,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48424_20221024t023340"
-      },
-      {
-        "productTime": "20221024t061318",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48426,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48426_20221024t061318"
-      },
-      {
-        "productTime": "20221024t095256",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48428,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48428_20221024t095256"
-      },
-      {
-        "productTime": "20221025t041105",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48438,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48438_20221025t041105"
-      },
-      {
-        "productTime": "20221025t075043",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48440,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48440_20221025t075043"
-      },
-      {
-        "productTime": "20221025t150957",
-        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
-        "role": "l3_res_den",
-        "sourceIndexes": [
-          "l3_resampled",
-          "l3_scale_height"
-        ],
-        "tid": 48444,
-        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48444_20221025t150957"
-      }
-    ],
-    "duplicateCatalogReferencesCollapsed": 154,
-    "duplicateJoinKeysRejected": [
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "17.53",
-                "existing": "17.530",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48062_20220926t114403"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20220926t114403",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48062
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "184.18",
-                "existing": "184.180",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48070_20220927t022314"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20220927t022314",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48070
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "-171.42",
-                "existing": "-171.420",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48096_20220929t020027"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20220929t020027",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48096
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "183.55",
-                "existing": "183.550",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48098_20220929t054013"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20220929t054013",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48098
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "81.65",
-                "existing": "81.650",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48100_20220929t092000"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20220929t092000",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48100
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "67.38",
-                "existing": "67.380",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48114_20220930t105830"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20220930t105830",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48114
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "181.98",
-                "existing": "181.980",
-                "field": "altitudeKm"
-              },
-              {
-                "duplicate": "167.29",
-                "existing": "167.290",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48218_20221008t092607"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221008t092607",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48218
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "181.8",
-                "existing": "181.800",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48226_20221009t000504"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221009t000504",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48226
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "182.86",
-                "existing": "182.860",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48228_20221009t034447"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221009t034447",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48228
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "182.93",
-                "existing": "182.930",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48242_20221010t052253"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221010t052253",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48242
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "28.73",
-                "existing": "28.730",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48304_20221014t225358"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221014t225358",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48304
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "182.28",
-                "existing": "182.280",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48322_20221016t075107"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221016t075107",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48322
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "180.99",
-                "existing": "180.990",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48332_20221017t020933"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221017t020933",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48332
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "180.83",
-                "existing": "180.830",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48346_20221018t034719"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221018t034719",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48346
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "-134.67",
-                "existing": "-134.670",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48364_20221019t124417"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
         "productTime": "20221019t124417",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48364
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "181.36",
-                "existing": "181.360",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48374_20221020t070234"
-          }
+        "reason": "identical_urn_and_metadata_listed_in_multiple_indexes",
+        "role": "l3_res_den",
+        "sourceIndexes": [
+          "l3_resampled",
+          "l3_scale_height"
         ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221020t070234",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48374
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "-58.81",
-                "existing": "-58.810",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48442_20221025t113020"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221025t113020",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48442
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "87.44",
-                "existing": "87.440",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48450_20221026t020848"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221026t020848",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48450
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "-72.86",
-                "existing": "-72.860",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48456_20221026t130740"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221026t130740",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48456
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "181.55",
-                "existing": "181.550",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48458_20221026t164717"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221026t164717",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48458
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "59.37",
-                "existing": "59.370",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48478_20221028t052323"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221028t052323",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48478
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "181.69",
-                "existing": "181.690",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48482_20221028t124234"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221028t124234",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48482
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "181.47",
-                "existing": "181.470",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48512_20221030t193630"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221030t193630",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48512
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "180.85",
-                "existing": "180.850",
-                "field": "altitudeKm"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48514_20221030t231603"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221030t231603",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48514
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "173.06",
-                "existing": "173.060",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48622_20221108t044344"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221108t044344",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48622
-      },
-      {
-        "ambiguousRoles": {},
-        "identityConflicts": [
-          {
-            "duplicateSourceIndex": "l3_scale_height",
-            "existingSourceIndex": "l3_resampled",
-            "fieldDifferences": [
-              {
-                "duplicate": "90.53",
-                "existing": "90.530",
-                "field": "solarLongitudeDeg"
-              }
-            ],
-            "reason": "same_urn_has_conflicting_catalog_metadata",
-            "role": "l3_res_den",
-            "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48706_20221114t142722"
-          }
-        ],
-        "multiplicities": {
-          "l2_csn": 1,
-          "l2_cso": 0,
-          "l3_res_den": 1,
-          "l3_res_sht": 1
-        },
-        "productTime": "20221114t142722",
-        "reason": "same_urn_metadata_conflict",
-        "tid": 48706
+        "tid": 48364,
+        "urn": "urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-den-48364_20221019t124417"
       }
     ],
-    "exactEventKeyCount": 16994,
+    "duplicateCatalogReferencesCollapsed": 180,
+    "duplicateJoinKeysRejected": [],
+    "exactEventKeyCount": 17020,
     "fuzzyMatching": false,
     "interpolation": false,
     "joinKey": [
@@ -508194,12 +508708,12 @@
       "productTime from exact PDS URN"
     ],
     "partialPairCounts": {
-      "l2_csn+l3_res_den": 10813,
-      "l2_csn+l3_res_sht": 16048,
-      "l3_res_den+l3_res_sht": 10841
+      "l2_csn+l3_res_den": 10839,
+      "l2_csn+l3_res_sht": 16074,
+      "l3_res_den+l3_res_sht": 10867
     }
   },
-  "generatedAtUtc": "2026-11-25T18:44:11.897647+00:00",
+  "generatedAtUtc": "2026-11-25T18:45:27.423823+00:00",
   "indexes": [
     {
       "byteLength": 6906311,
@@ -508326,10 +508840,10 @@
   "scope": "official product-selection CSV indexes only; no measurement payloads",
   "sourcePage": "https://atmos.nmsu.edu/data_and_services/atmospheres_data/MAVEN/ngims.html",
   "summary": {
-    "coherentTimeWindowTripleCount": 10770,
-    "completeL2CsnL3ResDenResShtTripleCount": 10770,
-    "duplicateJoinKeysRejected": 26,
-    "exactEventKeyCount": 16994,
+    "coherentTimeWindowTripleCount": 10796,
+    "completeL2CsnL3ResDenResShtTripleCount": 10796,
+    "duplicateJoinKeysRejected": 0,
+    "exactEventKeyCount": 17020,
     "failedIndexes": [],
     "parsedProductRecords": 59816,
     "productTypeCounts": {
