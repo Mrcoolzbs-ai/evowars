@@ -51,7 +51,10 @@ SOURCES = [
 CSO_RE = re.compile(r"cso[-_]abund", re.IGNORECASE)
 URN_RE = re.compile(r"urn:nasa:pds:maven_ngims:l2:[A-Za-z0-9_.:-]+", re.IGNORECASE)
 FILE_RE = re.compile(r"mvn_ngi_l2_[A-Za-z0-9_.-]+", re.IGNORECASE)
-TID_RE = re.compile(r"cso[-_]abund[-_](\d+)", re.IGNORECASE)
+PRODUCT_ID_RE = re.compile(
+    r"mvn_ngi_l2_(?P<mode>[a-z0-9-]+)-(?P<tid>\d+)_(?P<time>\d{8}t\d{6})",
+    re.IGNORECASE,
+)
 
 
 def download(source: dict) -> tuple[bytes, dict]:
@@ -88,47 +91,91 @@ def scan_text(source_name: str, member_name: str, body: bytes, matches: list[dic
     product_token_counts: Counter[str] = Counter()
     urns_in_member: set[str] = set()
     mode_counts: Counter[str] = Counter()
+
     for index, line in enumerate(lines, start=1):
         urns = sorted(set(URN_RE.findall(line)))
         names = sorted(set(FILE_RE.findall(line)))
         if urns:
             urns_in_member.update(urns)
-        for token in ("csn", "osnb", "osnt", "osion", "cso-abund", "ion-abund"):
-            if re.search(r"\\b" + re.escape(token) + r"\\b", line, re.I):
-                mode_counts[token.lower()] += 1
+
+        # A TID is parsed only from a structured product identifier. Searching
+        # arbitrary row text is unsafe because timestamps can contain the same digits.
+        product_ids = {
+            (
+                match.group("mode").lower(),
+                int(match.group("tid")),
+                match.group("time").lower(),
+            )
+            for match in PRODUCT_ID_RE.finditer(line)
+        }
         product_token_counts.update(name.lower() for name in names)
-        tid_match = TID_RE.search(line)
-        if "14282" in line:
+        mode_counts.update(mode for mode, _, _ in product_ids)
+
+        if any(tid == 14282 for _, tid, _ in product_ids):
             target_tid_rows.append({
                 "lineNumber": index,
                 "urns": urns,
                 "productFileTokens": names,
-                "lineText": line[:3000]
+                "productIds": [
+                    {"mode": mode, "tid": tid, "time": time_token}
+                    for mode, tid, time_token in sorted(product_ids)
+                    if tid == 14282
+                ],
+                "lineText": line[:3000],
             })
-        if not CSO_RE.search(line):
+
+        cso_ids = sorted(
+            (mode, tid, time_token)
+            for mode, tid, time_token in product_ids
+            if mode == "cso-abund"
+        )
+        if not cso_ids:
             continue
+
         found += 1
-        matches.append({
-            "source": source_name,
-            "member": member_name,
-            "lineNumber": index,
-            "tid": int(tid_match.group(1)) if tid_match else None,
-            "urns": urns,
-            "productFileTokens": names,
-            "lineText": line[:3000],
-        })
+        for mode, tid, time_token in cso_ids:
+            matches.append({
+                "source": source_name,
+                "member": member_name,
+                "lineNumber": index,
+                "tid": tid,
+                "time": time_token,
+                "productType": mode,
+                "urns": urns,
+                "productFileTokens": names,
+                "lineText": line[:3000],
+            })
+
     csv_schema = None
     if PurePosixPath(member_name).suffix.lower() == ".csv":
         try:
             parsed_rows = list(csv.reader(io.StringIO(text)))
-            if parsed_rows:
+            expected_headers = {"Time of Closest Approach", "URN", "Product Type"}
+            header_index = next(
+                (
+                    row_index
+                    for row_index, row in enumerate(parsed_rows)
+                    if expected_headers.issubset({cell.strip() for cell in row})
+                ),
+                None,
+            )
+            if header_index is None:
                 csv_schema = {
-                    "headers": parsed_rows[0],
-                    "rowCount": max(0, len(parsed_rows) - 1),
-                    "sampleRows": parsed_rows[1:4],
+                    "parseStatus": "header_not_found",
+                    "preambleRows": len(parsed_rows),
+                    "firstRows": parsed_rows[:3],
+                }
+            else:
+                csv_schema = {
+                    "parseStatus": "parsed",
+                    "preambleRowCount": header_index,
+                    "headers": parsed_rows[header_index],
+                    "rowCount": max(0, len(parsed_rows) - header_index - 1),
+                    "sampleRows": parsed_rows[header_index + 1:header_index + 4],
                 }
         except csv.Error as error:
             csv_schema = {"parseError": str(error)}
+
     return {
         "member": member_name,
         "byteLength": len(body),
@@ -199,13 +246,12 @@ def inspect_zip(source_name: str, body: bytes, matches: list[dict]) -> dict:
 
 
 def run_self_tests() -> None:
-    """Offline regression tests for CSV, URN, filename and TID extraction."""
+    """Offline regression tests for CSV preambles and structured product IDs."""
     sample = (
-        "product_id,filename,notes\n"
-        "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_cso-abund-14282_20141211t154406,"
-        "mvn_ngi_l2_cso-abund-14282_20141211T154406_v08_r01.csv,fixture\n"
-        "urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-14282_20141211t154406,"
-        "mvn_ngi_l2_csn-abund-14282_20141211T154406_v08_r01.csv,control\n"
+        "Note: geometry is reported at closest approach\n"
+        "Time of Closest Approach,URN,Start Time,Stop Time,Product Type\n"
+        "2014-12-11T16:37:34Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_cso-abund-14282_20141211t154406,2014-12-11T15:45:25Z,2014-12-11T17:29:43Z,cso-abund\n"
+        "2016-08-22T15:22:36Z,urn:nasa:pds:maven_ngims:l2:mvn_ngi_l2_csn-abund-20902_20160822t142824,2016-08-22T14:30:25Z,2016-08-22T16:14:48Z,csn-abund\n"
     )
     matches: list[dict] = []
     audit = scan_text(
@@ -214,30 +260,32 @@ def run_self_tests() -> None:
         sample.encode("utf-8"),
         matches,
     )
+    assert audit["csvSchema"]["parseStatus"] == "parsed", audit
+    assert audit["csvSchema"]["preambleRowCount"] == 1, audit
     assert audit["csvSchema"]["rowCount"] == 2, audit
-    assert audit["targetTid14282RowCount"] == 2, audit
     assert audit["csoAbundLineCount"] == 1, audit
+    assert audit["targetTid14282RowCount"] == 1, audit
+    assert audit["targetTid14282Rows"][0]["productIds"][0]["tid"] == 14282, audit
     assert len(matches) == 1, matches
-    assert matches[0]["tid"] == 14282, matches
-    assert len(matches[0]["urns"]) == 1, matches
-    assert matches[0]["urns"][0].lower().endswith(
-        "mvn_ngi_l2_cso-abund-14282_20141211t154406"
-    ), matches
-    assert any("cso-abund-14282" in name for name in matches[0]["productFileTokens"]), matches
-    assert len(audit["uniqueUrns"]) == 2, audit
+    assert matches[0]["tid"] == 14282 and matches[0]["productType"] == "cso-abund", matches
+    assert audit["modeTokenLineCounts"] == {"cso-abund": 1, "csn-abund": 1}, audit
 
-    control_matches: list[dict] = []
-    control = scan_text(
-        "fixture.txt",
-        "fixture.txt",
-        b"ordinary product without an abundance marker",
-        control_matches,
+    # Timestamp contains "14282", but the product's actual TID is 20902.
+    timestamp_collision = (
+        "2016-08-22T15:22:36Z,urn:nasa:pds:maven_ngims:l2:"
+        "mvn_ngi_l2_csn-abund-20902_20160822t142824"
     )
-    assert control["csoAbundLineCount"] == 0
-    assert not control_matches
+    collision = scan_text(
+        "fixture.txt",
+        "fixture.txt",
+        timestamp_collision.encode("utf-8"),
+        [],
+    )
+    assert collision["targetTid14282RowCount"] == 0, collision
+    assert collision["csoAbundLineCount"] == 0, collision
     print(
         "NGIMS index-bundle self-test: PASS "
-        "(CSV schema, TID, URN, filename token, CSO filtering)"
+        "(CSV preamble/header, row counts, product modes, exact TID parsing)"
     )
 
 
