@@ -8,6 +8,7 @@ contexts containing cso-abund/NGIMS L2 product URNs.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import io
 import json
@@ -81,13 +82,30 @@ def scan_text(source_name: str, member_name: str, body: bytes, matches: list[dic
     text = body.decode("utf-8-sig", errors="replace")
     lines = text.splitlines()
     found = 0
+    target_tid_rows = []
+    product_token_counts: Counter[str] = Counter()
+    urns_in_member: set[str] = set()
+    mode_counts: Counter[str] = Counter()
     for index, line in enumerate(lines, start=1):
+        urns = sorted(set(URN_RE.findall(line)))
+        names = sorted(set(FILE_RE.findall(line)))
+        if urns:
+            urns_in_member.update(urns)
+        for token in ("csn", "osnb", "osnt", "osion", "cso-abund", "ion-abund"):
+            if re.search(r"\\b" + re.escape(token) + r"\\b", line, re.I):
+                mode_counts[token.lower()] += 1
+        product_token_counts.update(name.lower() for name in names)
+        tid_match = TID_RE.search(line)
+        if "14282" in line:
+            target_tid_rows.append({
+                "lineNumber": index,
+                "urns": urns,
+                "productFileTokens": names,
+                "lineText": line[:3000]
+            })
         if not CSO_RE.search(line):
             continue
         found += 1
-        urns = sorted(set(URN_RE.findall(line)))
-        names = sorted(set(FILE_RE.findall(line)))
-        tid_match = TID_RE.search(line)
         matches.append({
             "source": source_name,
             "member": member_name,
@@ -97,11 +115,29 @@ def scan_text(source_name: str, member_name: str, body: bytes, matches: list[dic
             "productFileTokens": names,
             "lineText": line[:3000],
         })
+    csv_schema = None
+    if PurePosixPath(member_name).suffix.lower() == ".csv":
+        try:
+            parsed_rows = list(csv.reader(io.StringIO(text)))
+            if parsed_rows:
+                csv_schema = {
+                    "headers": parsed_rows[0],
+                    "rowCount": max(0, len(parsed_rows) - 1),
+                    "sampleRows": parsed_rows[1:4],
+                }
+        except csv.Error as error:
+            csv_schema = {"parseError": str(error)}
     return {
         "member": member_name,
         "byteLength": len(body),
         "lineCount": len(lines),
         "csoAbundLineCount": found,
+        "uniqueUrns": sorted(urns_in_member, key=str.lower),
+        "productTokenCounts": dict(product_token_counts),
+        "modeTokenLineCounts": dict(mode_counts),
+        "targetTid14282Rows": target_tid_rows[:100],
+        "targetTid14282RowCount": len(target_tid_rows),
+        "csvSchema": csv_schema,
     }
 
 
