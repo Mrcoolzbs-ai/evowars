@@ -204,91 +204,108 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             raise RuntimeError("invalid PDS4 md5_checksum syntax")
         if md5_computed != md5_label.lower():
             raise RuntimeError("downloaded CSV MD5 mismatch with PDS4 label")
-    elif not size_match:
-        raise RuntimeError(
-            f"file_size mismatch without md5_checksum: label={declared_size}, CSV={len(csv_bytes)}"
-        )
 
-    if not size_match and md5_label is None:
-        raise RuntimeError("size mismatch with no MD5 cannot be accepted for a scientific import")
+    def direct_size(area: ET.Element, object_name: str) -> tuple[int | None, int | None]:
+        objects = [node for node in list(area) if node.tag == qname(object_name)]
+        if len(objects) != 1:
+            return None, None
+        off = scalar(objects[0], "offset", optional=True)
+        length = scalar(objects[0], "object_length", optional=True)
+        try:
+            off_value = int(off) if off is not None else None
+            len_value = int(length) if length is not None else None
+        except ValueError:
+            return None, None
+        return off_value, len_value
 
+    header_offset, header_length = direct_size(areas[0], "Header")
+    table_offset, table_length = direct_size(areas[0], "Table_Delimited")
+    layout = "consistent" if size_match else (
+        "possible_header_double_count_in_label"
+        if header_length is not None and
+           table_offset == header_length and
+           table_length == len(csv_bytes) and
+           declared_size == header_length + table_length
+        else "not_diagnosable"
+    )
     provenance = {
         "productId": product_id,
         "csvFileName": file_name,
         "csvByteLength": len(csv_bytes),
         "labelDeclaredFileSizeBytes": declared_size,
-        "csvSizeConsistencyStatus": "matches_label" if size_match else "mismatch_with_md5_verified",
+        "csvSizeConsistencyStatus": "matches_label" if size_match else "mismatch_forensic_only",
+        "labelHeaderOffsetBytes": header_offset,
+        "labelHeaderObjectLengthBytes": header_length,
+        "labelTableOffsetBytes": table_offset,
+        "labelTableObjectLengthBytes": table_length,
+        "labelFileLayoutDiagnosis": layout,
         "md5Checksum": md5_label,
+        "md5Computed": md5_computed,
         "md5ChecksumStatus": "verified_against_detached_label" if md5_label else "not_present_in_detached_label",
+        "csvFixityStatus": "md5_verified_against_detached_label" if md5_label else "sha256_computed_not_compared_to_archive_checksum",
         "csvSha256": hashlib.sha256(csv_bytes).hexdigest(),
         "xmlSha256": hashlib.sha256(xml_bytes).hexdigest(),
         "detachedLabelAuthenticity": "not_independently_authenticated",
     }
+    if not size_match:
+        provenance["forensicOnly"] = True
+        provenance["forensicWarning"] = (
+            "Detached PDS4 file_size is inconsistent with the exact L1B CSV bytes; "
+            "original bytes are retained without line-ending normalization or repair."
+        )
+    else:
+        provenance["forensicOnly"] = False
 
     data_text = csv_bytes.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(data_text, newline=""))
     if reader.fieldnames is None:
         raise RuntimeError("L1B CSV has no header")
     headers = [h.strip().lower() for h in reader.fieldnames]
-    aliases = {
-        "focus_mode": "focusmode",
-        "temperature_s": "temperature_s",
-    }
-    normalized = [aliases.get(h, h) for h in headers]
     rows = []
     mass_counts: Counter[str] = Counter()
     focus_counts: Counter[str] = Counter()
     orbit_counts: Counter[str] = Counter()
     tid_counts: Counter[str] = Counter()
     time_values: list[float] = []
-    selected_tids = 0
     selected_rows = 0
     rejected_rows = 0
-    speciesless_mass_channels: Counter[str] = Counter()
     numeric_fields: Counter[str] = Counter()
     minmax: dict[str, dict[str, float]] = {}
+    mass_samples: dict[str, list[dict[str, str]]] = defaultdict(list)
 
-    # Process by raw header names; preserve every column and do not infer
-    # molecular identities from m/z alone.
+    def get_number(row: dict[str, str], key: str) -> float | None:
+        value = row.get(key, "")
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed == parsed and abs(parsed) != float("inf") else None
+
     for raw in reader:
         row = {str(k).strip().lower(): (v or "").strip() for k, v in raw.items()}
-        def number(key: str) -> float | None:
-            value = row.get(key) or row.get("focus_mode")
-            try:
-                return float(value) if value not in ("", "nan", "NaN") else None
-            except ValueError:
-                return None
-
-        tid = number("tid")
-        orbit = number("orbit")
-        if tid is None or orbit is None:
+        tid_value = get_number(row, "tid")
+        orbit_value = get_number(row, "orbit")
+        if tid_value is None or orbit_value is None:
             rejected_rows += 1
             continue
-        if int(tid) != TID or int(orbit) != ORBIT:
+        tid_counts[str(int(tid_value))] += 1
+        orbit_counts[str(int(orbit_value))] += 1
+        if int(tid_value) != TID or int(orbit_value) != ORBIT:
             continue
-        selected_tids += 1
         selected_rows += 1
         focus = row.get("focus_mode", row.get("focusmode", "")).lower()
         if focus:
             focus_counts[focus] += 1
-        try:
-            mass = float(row.get("mass", ""))
-            if mass.is_integer():
-                mass_key = str(int(mass))
-            else:
-                mass_key = format(mass, ".6g")
+        mass = get_number(row, "mass")
+        if mass is not None:
+            mass_key = str(int(mass)) if mass.is_integer() else format(mass, ".8g")
             mass_counts[mass_key] += 1
-        except ValueError:
-            pass
-        try:
-            unix_time = float(row.get("t_unix", ""))
+        unix_time = get_number(row, "t_unix")
+        if unix_time is not None:
             time_values.append(unix_time)
-        except ValueError:
-            pass
-        for field in ("counts", "cps_raw", "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd", "abundance"):
-            try:
-                value = float(row[field])
-            except (KeyError, ValueError):
+        for field in ("counts", "cps_raw", "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd", "cps"):
+            value = get_number(row, field)
+            if value is None:
                 continue
             numeric_fields[field] += 1
             if field not in minmax:
@@ -296,46 +313,54 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             else:
                 minmax[field]["min"] = min(minmax[field]["min"], value)
                 minmax[field]["max"] = max(minmax[field]["max"], value)
-        # Keep a compact audit subset for masses relevant to neutral species
-        # and their known fragments; m/z values are candidate channels only.
-        try:
-            m = float(row.get("mass", ""))
-            if m in {14, 15, 16, 28, 29, 30, 32, 40, 44}:
-                rows.append({k: row.get(k, "") for k in [
-                    "t_unix", "t_sclk", "t_tid", "tid", "orbit",
-                    "focus_mode", "mass", "counts", "cps_raw",
-                    "cps_raw_bkgd", "cps_dt", "cps_dt_bkgd"
-                ]})
-        except ValueError:
-            pass
+        # Record representative rows only for mass channels that can include
+        # neutral species or common fragments. They are candidate m/z channels,
+        # never inferred species or abundance.
+        if mass is not None and int(round(mass)) in {14, 15, 16, 28, 29, 30, 31, 32, 40, 44}:
+            key = str(int(round(mass)))
+            if len(mass_samples[key]) < 12:
+                mass_samples[key].append(row)
 
-    if selected_tids == 0:
+    if selected_rows == 0:
         raise RuntimeError("no L1B data rows for exact TID14282/orbit391 found in downloaded CSV")
+    if set(focus_counts) != {FOCUS_MODE}:
+        raise RuntimeError(f"expected only focus mode {FOCUS_MODE}; observed {focus_counts}")
 
-    time_start = min(time_values) if time_values else None
-    time_stop = max(time_values) if time_values else None
-    manifest = {
+    unix_start = min(time_values) if time_values else None
+    unix_stop = max(time_values) if time_values else None
+    def iso_utc(seconds: float | None) -> str | None:
+        if seconds is None:
+            return None
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+    detail = {
         "product": provenance,
         "source": "NASA PDS4 MAVEN NGIMS L1B calibrated science data",
         "event": {
             "tid": TID,
             "orbit": ORBIT,
             "focusModeExpected": FOCUS_MODE,
-            "timeStartUtc": EVENT_START,
-            "timeStopUtc": EVENT_STOP,
+            "timeStartUtcFromOfficialIndex": EVENT_START,
+            "timeStopUtcFromOfficialIndex": EVENT_STOP,
+            "indexClosestApproachUtc": "2014-12-11T17:15:29Z",
+            "indexSpacecraftAltitudeKm": 152.98124663,
+            "indexPhaseAngleDeg": 112.21790292,
+            "indexMarsSolarLongitudeDeg": 250.49,
         },
         "csv": {
             "sourceHeaders": headers,
-            "sourceHeaderAliases": aliases,
             "rowCountForTargetTidOrbit": selected_rows,
-            "focusModeCounts": dict(focus_counts),
+            "allTidCountsInProduct": dict(tid_counts),
+            "allOrbitCountsInProduct": dict(orbit_counts),
+            "focusModeCountsForTarget": dict(focus_counts),
             "massChannelRowCounts": dict(mass_counts),
-            "unixTimeMin": time_start,
-            "unixTimeMax": time_stop,
+            "unixTimeMin": unix_start,
+            "unixTimeMax": unix_stop,
+            "timeStartUtcFromCsv": iso_utc(unix_start),
+            "timeStopUtcFromCsv": iso_utc(unix_stop),
             "numericColumnValueCounts": dict(numeric_fields),
             "numericColumnMinMax": minmax,
-            "selectedMassChannelAuditRows": rows[:5000],
-            "selectedMassChannelAuditRowCount": len(rows),
+            "candidateMassChannelRows": dict(mass_samples),
         },
         "interpretation": {
             "l1bIsCalibratedInstrumentSignal": True,
@@ -345,9 +370,10 @@ def validate_label(xml_bytes: bytes, csv_bytes: bytes, csv_name: str) -> tuple[d
             "requiresCalibrationResponseAndFragmentationModel": True,
             "noConversionToParticlesPerCm3Applied": True,
             "noOOrNoNeutralAbundanceClaim": True,
+            "qualityCaveat": "NO-like mass channels require NGIMS in-instrument chemistry/fragmentation caveat and independent cross-check."
         },
     }
-    return provenance, manifest
+    return provenance, detail
 
 
 def main() -> int:
