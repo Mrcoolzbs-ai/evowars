@@ -965,6 +965,108 @@ describe('MAVEN upper-atmosphere evidence', () => {
       .toBe('invalid_csv');
   });
 
+  it('imports the frozen same-event TID 14282 L3 scale-height temperature product as derived-fit evidence', () => {
+    const csvText = readFileSync(
+      'src/modules/Data/mavenNgimsShtArchive/mvn_ngi_l3_res-sht-14282_20141211T154406_v06_r01.csv',
+      'utf8'
+    );
+    const manifest = JSON.parse(readFileSync(
+      'src/modules/Data/mavenNgimsShtArchive/manifest.json',
+      'utf8'
+    )) as {
+      productId: string;
+      csv: {
+        csvByteLength: number;
+        labelDeclaredFileSizeBytes: number;
+        csvSizeConsistencyStatus: string;
+        csvMd5Checksum: string | null;
+      };
+      profileSummary: {
+        rowCount: number;
+        acceptedRows: number;
+        rejectedRows: number;
+        rawSpeciesRowCounts: Record<string, number>;
+        rawQualityFlagCounts: Record<string, number>;
+        profileCandidates: Array<{
+          species: string;
+          qualityFlag: string;
+          rowCount: number;
+          derivedTemperatureRangeK: number[];
+          exobaseAltitudeRangeKm: number[];
+        }>;
+      };
+    };
+    expect(manifest.productId).toBe(
+      'urn:nasa:pds:maven_ngims:l3:mvn_ngi_l3_res-sht-14282_20141211t154406'
+    );
+    expect(manifest.csv).toMatchObject({
+      csvByteLength: 702,
+      labelDeclaredFileSizeBytes: 843,
+      csvSizeConsistencyStatus: 'mismatch_quarantined_no_md5',
+      csvMd5Checksum: null
+    });
+    expect(manifest.profileSummary).toMatchObject({
+      rowCount: 4,
+      acceptedRows: 2,
+      rejectedRows: 2,
+      rawSpeciesRowCounts: { Ar: 1, CO2: 1, N2: 1, He: 1 },
+      rawQualityFlagCounts: { HI: 3, NA: 1 }
+    });
+    expect(manifest.profileSummary.profileCandidates).toHaveLength(2);
+    expect(manifest.profileSummary.profileCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ species: 'Ar', qualityFlag: 'HI', rowCount: 1 }),
+        expect.objectContaining({ species: 'CO2', qualityFlag: 'HI', rowCount: 1 })
+      ])
+    );
+
+    const productId = manifest.productId;
+    const imported = parseMavenNgimsL3ScaleHeightTemperatureCsvText(csvText, productId);
+    expect(imported.status).toBe('parsed');
+    if (imported.status !== 'parsed') throw new Error(imported.errors.join('; '));
+    expect(imported.parsedRowCount).toBe(2);
+    expect(imported.rejectedRowCount).toBe(2);
+    expect(imported.goodFitCount).toBe(2);
+    expect(imported.rows.every(entry =>
+      entry.validation.status === 'rejected' ||
+      entry.validation.row.timeUtc === '2014-12-11T17:04:37.000Z'
+    )).toBe(true);
+
+    const co2 = selectMavenNgimsL3ScaleHeightTemperatureRows(imported, {
+      tid: 14282,
+      orbit: 391,
+      species: 'CO2',
+      qualityFlag: 'HI'
+    });
+    expect(co2.status).toBe('completed');
+    if (co2.status !== 'completed') throw new Error(co2.errors.join('; '));
+    expect(co2.rows).toHaveLength(1);
+    expect(co2.rows[0]).toMatchObject({
+      species: 'CO2',
+      exobaseAltitudeKm: 464.9283,
+      scaleHeightKm: 5.720616,
+      scaleHeightFitErrorKm: 1.398231,
+      scaleHeightTemperatureK: 100.614597,
+      temperatureFitErrorK: 24.592182,
+      qualityFlag: 'HI',
+      fitQuality: 'good_near_isothermic_fit',
+      eligibleAsLocalNeutralTemperatureObservation: false,
+      eligibleAsMarsPhotochemicalInitialState: false
+    });
+
+    const argon = selectMavenNgimsL3ScaleHeightTemperatureRows(imported, {
+      tid: 14282,
+      orbit: 391,
+      species: 'Ar',
+      qualityFlag: 'HI'
+    });
+    expect(argon.status).toBe('completed');
+    if (argon.status !== 'completed') throw new Error(argon.errors.join('; '));
+    expect(argon.rows).toHaveLength(1);
+    expect(argon.rows[0].scaleHeightTemperatureK).toBe(108.170861);
+    expect(argon.rows[0].eligibleAsLocalNeutralTemperatureObservation).toBe(false);
+  });
+
   it('parses the SIS 1.13 Table A-10 derived scale-height temperature without upgrading it to a local observation', () => {
     const result = parseMavenNgimsL3ScaleHeightTemperatureCsvRow(
       scaleHeightCsvRow(),
