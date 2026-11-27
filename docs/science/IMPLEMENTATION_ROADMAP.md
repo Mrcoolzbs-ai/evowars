@@ -1424,3 +1424,9 @@ is therefore the 12 complete events; TID 10191 remains unresolved and must
 not be backfilled from a neighboring TID. CI workflow
 `Audit MAVEN NGIMS pre-launch calibration collection inventory` succeeded,
 including self-test, official PDS download and evidence commit.
+
+
+### Stage 4.2 — targeted payload retrieval automation
+- Added `scripts/science/retrieve-ngims-calibration-evidence.py` and manual workflow `.github/workflows/retrieve-ngims-calibration-evidence.yml` to resolve exact LIDVIDs and collect raw product/label evidence for 12 complete inventory events.
+- Retrieval bundle is an expiring Actions artifact, not checked into source; product URL, file size and SHA-256 are preserved in manifest.
+- Resolver has not yet been remotely run; retrieval remains unverified. No calibration fit or CPS→density conversion is enabled. **4.2 OPEN / NOT_READY.**
