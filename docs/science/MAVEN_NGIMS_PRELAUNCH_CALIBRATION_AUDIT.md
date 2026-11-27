@@ -64,3 +64,7 @@ Review date: 2026-11-27. Scope: evidence identification and applicability, not n
 - The current pressure blocker is external stable ion-gauge reference plus calibration certificate/range and acquisition-time alignment. Sparse `CDH:BA_PRES` telemetry is voltage, not a pressure calibration; no conversion from that voltage is permitted.
 - No sensitivity values, C_EN, closed-source/ram correction, or CPS→neutral density conversion are newly claimed.
 - This inventory is documentation/provenance work; it does not authorize Scheduler or Mars photochemistry initialization.
+
+## Inventory automation
+
+A CI workflow now exists to freeze the official PDS calibration collection CSV/XML inventory, checksum source files, and identify records matching the candidate TIDs. The workflow includes a parser self-test and manual dispatch; it is deliberately inventory-only and cannot retrieve/calibrate spectra or change scientific readiness. The first remote run is pending.
