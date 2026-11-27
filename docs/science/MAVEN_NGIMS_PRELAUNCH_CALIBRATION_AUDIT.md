@@ -1,6 +1,6 @@
 # MAVEN/NGIMS pre-launch calibration evidence audit — Stage 4.2.2
 
-**Status: inventory verified; source products not yet downloaded/parsed; no calibration constants promoted.**  
+**Status: source audit in progress; SIS/PDS inventory verified; raw calibration science products not yet fully audited; no calibration constants promoted.**  
 Review date: 2026-11-27. Scope: evidence identification and applicability, not numerical calibration.
 
 ## 1. Primary references
@@ -47,17 +47,20 @@ Review date: 2026-11-27. Scope: evidence identification and applicability, not n
 
 ## 4. Retrieval plan / acceptance checklist
 
-- [ ] Fetch PDS calibration collection inventory and identify exact products for all listed TIDs.
+- [ ] Fetch PDS calibration collection inventory and identify exact science spectra/labels for all listed TIDs (housekeeping for TIDs 10191 and 10194 is already audited in the branch roadmap).
 - [ ] Download each candidate product with PDS labels; record DOI/URN, version, checksum, and source URL.
 - [ ] Parse science data and label-defined columns, units, missing-value codes; reject mismatched row counts.
 - [ ] Join product families only by documented event/TID IDs; verify marker/log phase structure.
-- [ ] Establish calibration gas composition/purity and chamber pressure metadata for each run.
+- [ ] Resolve TID 10191 species ambiguity using raw science product labels, spectra and event logs.
+- [ ] Establish calibration gas composition/purity and external reference-gauge pressure metadata for each run.
 - [ ] Compare replicate runs; separate configuration changes (filament, CEM, emission, scan) rather than pooling.
 - [ ] Compute calibration only from raw measurements and traceable standards; report confidence/uncertainty and fit range.
 - [ ] Keep readiness gate blocked until each required flight-applicability gate is supported by event-scoped evidence.
 
 ## 5. Explicit conclusions (current)
 
-- Verified source documents identify the pre-launch collection and event TIDs, but the raw product contents have **not** been fetched and audited in this development step.
+- The source documents and calibration-event inventory are verified. The branch roadmap records that pre-flight housekeeping payloads for TIDs 10191 and 10194 have already been retrieved and audited, but the science spectra/raw calibration response products and external pressure-gauge series are not yet established here.
+- There is an event-identity conflict for TID 10191: SIS Table A-11 says Argon; its message-log directory is reported as `KrCalibration`, while the raw spectrum favors Ar. Resolve from product labels, spectra and configuration before accepting any species assignment. TID 10194 is consistent with Kr.
+- The current pressure blocker is external stable ion-gauge reference plus calibration certificate/range and acquisition-time alignment. Sparse `CDH:BA_PRES` telemetry is voltage, not a pressure calibration; no conversion from that voltage is permitted.
 - No sensitivity values, C_EN, closed-source/ram correction, or CPS→neutral density conversion are newly claimed.
 - This inventory is documentation/provenance work; it does not authorize Scheduler or Mars photochemistry initialization.
