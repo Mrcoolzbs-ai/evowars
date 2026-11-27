@@ -10,8 +10,10 @@ import {
   MAVEN_NGIMS_PREFLIGHT_CALIBRATION_TIDS,
   calculateMavenNgimsGroundReferenceSensitivity,
   findMavenNgimsGroundClosedSourceSensitivity,
-  getMavenNgimsRfCorrectionFactor
+  getMavenNgimsRfCorrectionFactor,
+  evaluateMavenNgimsFlightCalibrationReadiness
 } from '../Data/mavenNgimsL1bCalibrationReference';
+import type { MavenNgimsFlightCalibrationReadinessInput } from '../Data/mavenNgimsL1bCalibrationReference';
 
 describe('MAVEN NGIMS calibration reference constraints',()=>{
   it('contains all eight SIS preflight ground sensitivity rows',()=>{
@@ -64,7 +66,7 @@ describe('MAVEN NGIMS calibration reference constraints',()=>{
 
 
 describe('flight calibration readiness gate',()=>{
-  const readyEvidence = () => ({
+  const readyEvidence = (): MavenNgimsFlightCalibrationReadinessInput => ({
     closed_source_sensitivity:{status:'validated' as const,evidenceId:'flight-cs-sensitivity-1',applicability:'flight_event_specific' as const},
     paired_open_closed_response:{status:'validated' as const,evidenceId:'paired-count-rates-1',applicability:'flight_event_specific' as const},
     energy_correction_cEn:{status:'validated' as const,evidenceId:'c-en-validation-1',applicability:'flight_event_specific' as const},
