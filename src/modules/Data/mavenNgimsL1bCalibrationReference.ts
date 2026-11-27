@@ -197,3 +197,80 @@ export const MAVEN_NGIMS_CALIBRATION_COLLECTION = {
   eventProducts: 'gnd-sci, gnd-hk, gnd-mkr, gnd-msg',
   sourceTids: [10191, 10194, 10197, 10198, 10199, 10201, 10202, 10205, 10207, 10216, 10217]
 } as const;
+
+
+/**
+ * A fail-closed checklist for deciding whether flight CPS may be converted
+ * to neutral density. This is a readiness gate only: it performs no
+ * calibration math and cannot promote preflight/fixture evidence to flight.
+ */
+export type MavenNgimsCalibrationGateStatus = 'validated' | 'missing' | 'unresolved' | 'not_applicable';
+export interface MavenNgimsCalibrationGateEvidence {
+  readonly status: MavenNgimsCalibrationGateStatus;
+  readonly evidenceId?: string;
+  readonly applicability?: 'flight_event_specific';
+  readonly rationale?: string;
+}
+export type MavenNgimsCalibrationGateId =
+  | 'closed_source_sensitivity'
+  | 'paired_open_closed_response'
+  | 'energy_correction_cEn'
+  | 'fragmentation_background'
+  | 'detector_dead_time'
+  | 'event_configuration_review';
+export type MavenNgimsFlightCalibrationReadinessInput =
+  Readonly<Record<MavenNgimsCalibrationGateId, MavenNgimsCalibrationGateEvidence>>;
+export interface MavenNgimsFlightCalibrationReadiness {
+  readonly status: 'ready' | 'blocked';
+  readonly densityConversionAllowed: boolean;
+  readonly gates: readonly {
+    readonly id: MavenNgimsCalibrationGateId;
+    readonly status: MavenNgimsCalibrationGateStatus;
+    readonly evidenceId: string | null;
+    readonly rationale: string | null;
+  }[];
+  readonly blockers: readonly string[];
+}
+
+/** Requires a flight-event-specific evidence reference for every validated gate. */
+export function evaluateMavenNgimsFlightCalibrationReadiness(
+  input: MavenNgimsFlightCalibrationReadinessInput
+): MavenNgimsFlightCalibrationReadiness {
+  const gateIds: readonly MavenNgimsCalibrationGateId[] = [
+    'closed_source_sensitivity',
+    'paired_open_closed_response',
+    'energy_correction_cEn',
+    'fragmentation_background',
+    'detector_dead_time',
+    'event_configuration_review'
+  ];
+  const blockers: string[] = [];
+  const gates = gateIds.map(id => {
+    const evidence = input?.[id];
+    const validEvidenceId = typeof evidence?.evidenceId === 'string' && evidence.evidenceId.trim() !== '';
+    const validatedWithFlightScope = evidence?.status === 'validated' &&
+      evidence.applicability === 'flight_event_specific' && validEvidenceId;
+    const validNotApplicable = evidence?.status === 'not_applicable' &&
+      typeof evidence.rationale === 'string' && evidence.rationale.trim() !== '';
+    if (!validatedWithFlightScope && !validNotApplicable) {
+      const reason = evidence?.status === 'missing' ? 'missing evidence' :
+        evidence?.status === 'unresolved' ? 'unresolved evidence' :
+        evidence?.status === 'validated' ? 'validated status lacks flight scope or evidence ID' :
+        'not-applicable status requires a rationale';
+      blockers.push(id + ': ' + reason);
+    }
+    return {
+      id,
+      status: evidence?.status ?? 'missing',
+      evidenceId: validatedWithFlightScope ? evidence.evidenceId!.trim() : null,
+      rationale: typeof evidence?.rationale === 'string' ? evidence.rationale : null
+    };
+  });
+  const ready = blockers.length === 0;
+  return {
+    status: ready ? 'ready' : 'blocked',
+    densityConversionAllowed: ready,
+    gates,
+    blockers
+  };
+}
