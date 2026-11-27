@@ -1430,3 +1430,9 @@ including self-test, official PDS download and evidence commit.
 - Added `scripts/science/retrieve-ngims-calibration-evidence.py` and manual workflow `.github/workflows/retrieve-ngims-calibration-evidence.yml` to resolve exact LIDVIDs and collect raw product/label evidence for 12 complete inventory events.
 - Retrieval bundle is an expiring Actions artifact, not checked into source; product URL, file size and SHA-256 are preserved in manifest.
 - Resolver has not yet been remotely run; retrieval remains unverified. No calibration fit or CPS→density conversion is enabled. **4.2 OPEN / NOT_READY.**
+
+
+### Stage 4.2 — retrieval client hardening and tests
+- Hardened PDS LIDVID resolution: preserve resolver response, reject explicit identifier mismatch, extract only explicit locator fields, and allow downloads only from HTTPS PDS/NMSU hosts.
+- Added offline safety tests for locator extraction, exact LIDVID matching, relative path resolution, and rejection of untrusted hosts/non-HTTPS URLs; retrieval workflow executes them before network access.
+- These tests establish client safety only. No live retrieval run, science payload validation, or calibration fit is claimed. **Stage 4.2 remains OPEN / NOT_READY.**
