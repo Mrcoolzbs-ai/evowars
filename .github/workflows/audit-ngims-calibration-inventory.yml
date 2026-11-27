@@ -1,6 +1,7 @@
 name: Audit MAVEN NGIMS pre-launch calibration collection inventory
 
 on:
+  workflow_dispatch:
   push:
     branches: [stage-3-planetary-physics]
 
