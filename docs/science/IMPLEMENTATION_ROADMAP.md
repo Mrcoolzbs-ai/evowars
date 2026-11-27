@@ -1384,3 +1384,25 @@ Validation on the index workflow: parser self-tests, official index download,
 exact join and manifest freeze succeeded. Full repository CI on commit
 4615fecc7ff6d399101cd5b076c1421db981232d succeeded: TypeScript, Vitest,
 lint and production build. Stage 4.2 remains OPEN / NOT_READY.
+
+
+## Stage 4.2 — pre-launch calibration evidence inventory (2026-11-27)
+
+Added `docs/science/MAVEN_NGIMS_PRELAUNCH_CALIBRATION_AUDIT.md` to consolidate the
+PDS/SIS calibration TID inventory, retrieval requirements, evidence staging,
+and applicability rules. SIS Table A-11 candidate events include Ar/Kr/Xe/He
+runs, repeated calibrations, CS/OS switching, and pre-/post-pinch-off runs.
+The SIS dates for TIDs 10241/10242 are anomalous and must not be silently
+normalized.
+
+This audit reconciles with the earlier HK work: raw pre-flight housekeeping
+for TIDs 10191 and 10194 is already retrieved and analyzed. The science
+spectra/raw response payloads and external stable ion-gauge reference series
+remain unverified. TID 10191 has an unresolved identity discrepancy (SIS says
+Ar; message-log directory is `KrCalibration`; raw spectrum reportedly favors
+Ar); TID 10194 is consistent with Kr. The external gauge certificate/range
+and alignment to spectra are still blocking. Sparse BA_PRES voltage samples
+are not pressure measurements.
+
+No constants, C_EN, flight sensitivity, or CPS→density conversion are promoted.
+Stage 4.2 remains OPEN / NOT_READY.
