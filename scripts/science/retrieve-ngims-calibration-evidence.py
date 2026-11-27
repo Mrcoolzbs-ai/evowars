@@ -24,7 +24,7 @@ def extract_urls(obj):
     found=[]
     if isinstance(obj,dict):
         for k,v in obj.items():
-            if isinstance(v,str) and (k.lower() in {"url","file_url","href","file_name","filename","local_identifier"}):
+            if isinstance(v,str) and (k.lower() in {"url","file_url","href","file_name","filename","local_identifier","path","file_path","data_file_name","label_file_name"} or v.lower().endswith((".csv",".txt",".xml"))):
                 found.append(v)
             else: found.extend(extract_urls(v))
     elif isinstance(obj,list):
