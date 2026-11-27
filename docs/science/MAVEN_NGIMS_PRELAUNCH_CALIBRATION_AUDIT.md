@@ -57,7 +57,23 @@ Review date: 2026-11-27. Scope: evidence identification and applicability, not n
 - [ ] Compute calibration only from raw measurements and traceable standards; report confidence/uncertainty and fit range.
 - [ ] Keep readiness gate blocked until each required flight-applicability gate is supported by event-scoped evidence.
 
-## 5. Explicit conclusions (current)
+## 5. Frozen archive inventory results (retrieved 2026-11-27)
+
+The automated workflow retrieved the official PDS inventory CSV (4,338 bytes) and collection label (4,441 bytes), HTTP 200, and froze SHA-256 metadata. Inventory: **50 primary members, 0 secondary**. All 50 records belong to the targeted 13 TIDs. Product family counts: 13 marker files, 13 message logs, 12 housekeeping files, 12 science spectra.
+
+| TID | inventory product families | status |
+|---|---|---|
+| 10191 | marker + message only; **no science/HK members in inventory** | incomplete; likely requires alternative source or product clarification |
+| 10194 | science + HK + marker + message | complete product family present |
+| 10197, 10198, 10199 | science + HK + marker + message | complete family present |
+| 10201, 10202 | science + HK + marker + message | complete family present |
+| 10205, 10207 | science + HK + marker + message | complete family present |
+| 10216, 10217 | science + HK + marker + message | complete family present (switching tests) |
+| 10241, 10242 | science + HK + marker + message | complete family present (pre/post pinch-off) |
+
+This **changes retrieval priorities**: TID 10191 cannot be analyzed as a complete event from this collection; do not silently substitute 10194 or use its message log to infer the spectrum. For the other 12 TIDs, exact product identifiers are available and can be retrieved next. The inventory automation succeeded in CI; parser self-test passed.
+
+## 6. Explicit conclusions (current)
 
 - The source documents and calibration-event inventory are verified. The branch roadmap records that pre-flight housekeeping payloads for TIDs 10191 and 10194 have already been retrieved and audited, but the science spectra/raw calibration response products and external pressure-gauge series are not yet established here.
 - There is an event-identity conflict for TID 10191: SIS Table A-11 says Argon; its message-log directory is reported as `KrCalibration`, while the raw spectrum favors Ar. Resolve from product labels, spectra and configuration before accepting any species assignment. TID 10194 is consistent with Kr.
