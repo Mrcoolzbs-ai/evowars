@@ -95,10 +95,10 @@ def main():
             urls=extract_urls(label_json)
             candidate_urls=[]
             for item in urls:
-                if item.startswith("http://") or item.startswith("https://"):
-                    candidate_urls.append(item)
-                elif item.lower().endswith((".csv",".txt",".xml")):
-                    candidate_urls.append(urllib.parse.urljoin(BASE,item))
+                try:
+                    candidate_urls.append(resolve_candidate_url(item))
+                except ValueError as exc:
+                    manifest["errors"].append({"identifier":lidvid,"locator":item,"error":str(exc)})
             candidate_urls=list(dict.fromkeys(candidate_urls))
             # Do not assume API schema: capture locator evidence and fail this product if no files found.
             product={"identifier":lidvid,"tid":record["tid"],"resolver_url":apiurl,"locator_candidates":candidate_urls,"retrieved":[]}
