@@ -1406,3 +1406,21 @@ are not pressure measurements.
 
 No constants, C_EN, flight sensitivity, or CPS→density conversion are promoted.
 Stage 4.2 remains OPEN / NOT_READY.
+
+
+### Inventory retrieval automation — successful (2026-11-27)
+
+The new inventory audit script/workflow passed parser self-test and downloaded
+the official PDS calibration inventory CSV and XML (HTTP 200). Snapshot is
+frozen at `src/modules/Data/mavenNgimsCalibrationInventoryAudit/calibration-inventory.json`
+with byte counts and SHA-256. Inventory has **50 primary / 0 secondary records**
+for the 13 target TIDs: 13 marker, 13 message, 12 HK, and 12 science products.
+
+Important discovery: TID 10191 has only marker and message records in the
+calibration collection — no science spectrum or HK member is listed. It is
+not a complete calibration event within this archive collection. The other
+12 TIDs have complete science/HK/marker/message families. Retrieval priority
+is therefore the 12 complete events; TID 10191 remains unresolved and must
+not be backfilled from a neighboring TID. CI workflow
+`Audit MAVEN NGIMS pre-launch calibration collection inventory` succeeded,
+including self-test, official PDS download and evidence commit.
