@@ -84,3 +84,10 @@ This **changes retrieval priorities**: TID 10191 cannot be analyzed as a complet
 ## Inventory automation
 
 A CI workflow now exists to freeze the official PDS calibration collection CSV/XML inventory, checksum source files, and identify records matching the candidate TIDs. The workflow includes a parser self-test and manual dispatch; it is deliberately inventory-only and cannot retrieve/calibrate spectra or change scientific readiness. The first remote run is pending.
+
+
+## 7. Retrieval automation added (2026-11-27)
+
+A manual GitHub Actions workflow and Python resolver were added to retrieve evidence for the 12 complete inventory events (default TIDs: 10194, 10197, 10198, 10199, 10201, 10202, 10205, 10207, 10216, 10217, 10241, 10242). It resolves exact PDS LIDVIDs via the PDS Search API, preserves resolver JSON, follows only locators from resolved product metadata (or relative file references against the calibration archive), records SHA-256/size/source, and uploads an evidence artifact for 14 days. It does not commit raw data to the repository or fit calibration.
+
+**Status:** code/workflow committed, but remote retrieval has not yet been executed in this session. Resolver/API locator schema is intentionally treated as uncertain; the workflow is fail-closed and exits nonzero if any requested product lacks retrieved payload evidence. Therefore raw calibration science payloads remain **not yet verified/retrieved**, and Stage 4.2 remains OPEN / NOT_READY.
