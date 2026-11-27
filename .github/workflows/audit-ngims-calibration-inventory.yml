@@ -1,0 +1,39 @@
+name: Audit MAVEN NGIMS pre-launch calibration collection inventory
+
+on:
+  push:
+    branches: [stage-3-planetary-physics]
+
+jobs:
+  audit:
+    if: contains(github.event.head_commit.message, '[audit-ngims-calibration-inventory]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stage-3-planetary-physics
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate inventory parser
+        run: |
+          python -m py_compile scripts/science/audit-ngims-calibration-inventory.py
+          python scripts/science/audit-ngims-calibration-inventory.py --self-test
+      - name: Download official PDS calibration inventory and collection label
+        run: python scripts/science/audit-ngims-calibration-inventory.py
+      - name: Commit frozen inventory evidence
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/modules/Data/mavenNgimsCalibrationInventoryAudit/calibration-inventory.json
+          if git diff --cached --quiet; then
+            echo "Calibration inventory unchanged."
+          else
+            git commit -m "data(science): freeze NGIMS calibration collection inventory [skip ci]"
+            git fetch origin stage-3-planetary-physics
+            git rebase origin/stage-3-planetary-physics
+            git push origin HEAD:stage-3-planetary-physics
+          fi
