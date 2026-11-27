@@ -3,7 +3,7 @@
 
 This is evidence acquisition only. It never interprets calibration values.
 """
-import argparse, hashlib, json, os, re, sys, urllib.parse, urllib.request
+import argparse, hashlib, json, re, sys, urllib.parse, urllib.request
 from pathlib import Path
 
 SNAPSHOT = Path("src/modules/Data/mavenNgimsCalibrationInventoryAudit/calibration-inventory.json")
@@ -21,15 +21,55 @@ def get(url):
         return body, r.headers.get("Content-Type","")
 
 def extract_urls(obj):
-    found=[]
-    if isinstance(obj,dict):
-        for k,v in obj.items():
-            if isinstance(v,str) and (k.lower() in {"url","file_url","href","file_name","filename","local_identifier","path","file_path","data_file_name","label_file_name"} or v.lower().endswith((".csv",".txt",".xml"))):
-                found.append(v)
-            else: found.extend(extract_urls(v))
-    elif isinstance(obj,list):
-        for v in obj: found.extend(extract_urls(v))
-    return found
+    """Return only explicit file locator values, never arbitrary metadata strings."""
+    locator_keys = {
+        "url", "file_url", "href", "file_name", "filename", "path",
+        "file_path", "data_file_name", "label_file_name", "file_location"
+    }
+    found = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            key_norm = key.rsplit(":", 1)[-1].lower()
+            if isinstance(value, str) and key_norm in locator_keys:
+                if value.lower().endswith((".csv", ".txt", ".xml", ".dat", ".tab", ".lbl")) or value.startswith(("https://", "http://")):
+                    found.append(value.strip())
+            else:
+                found.extend(extract_urls(value))
+    elif isinstance(obj, list):
+        for value in obj:
+            found.extend(extract_urls(value))
+    return list(dict.fromkeys(found))
+
+
+def response_matches_lidvid(obj, lidvid):
+    """Require the resolver response to identify the exact requested product."""
+    tokens = []
+    def walk(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key.rsplit(":", 1)[-1].lower() in {"lidvid", "logical_identifier", "identifier"} and isinstance(child, str):
+                    tokens.append(child)
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+    walk(obj)
+    # Some PDS Search responses wrap the product without repeating LIDVID.
+    # In that case do not reject solely on absence; caller preserves resolver URL.
+    return not tokens or lidvid in tokens
+
+
+def resolve_candidate_url(item):
+    if item.startswith(("https://", "http://")):
+        url = item
+    else:
+        url = urllib.parse.urljoin(BASE, item.lstrip("/"))
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc not in {
+        "atmos.nmsu.edu", "pds-atmospheres.nmsu.edu", "pds.nasa.gov"
+    }:
+        raise ValueError(f"untrusted or non-HTTPS product locator: {url}")
+    return url
 
 def main():
     p=argparse.ArgumentParser()
@@ -44,7 +84,7 @@ def main():
     manifest={"scope":"raw_evidence_only","requestedTids":sorted(tids),"products":[],"errors":[]}
     for record in records:
         lidvid=record["identifier"]
-        apiurl=API+urllib.parse.quote(lidvid,safe="")
+        apiurl=API+urllib.parse.quote(lidvid,safe=":")
         try:
             label_body,_=get(apiurl)
             label_json=json.loads(label_body)
