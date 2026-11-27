@@ -61,3 +61,44 @@ describe('MAVEN NGIMS calibration reference constraints',()=>{
     expect(MAVEN_NGIMS_PREFLIGHT_CALIBRATION_TIDS.find(x=>x.tid===10194)?.sisDesignation).toBe('Krypton calibration');
   });
 });
+
+
+describe('flight calibration readiness gate',()=>{
+  const readyEvidence = () => ({
+    closed_source_sensitivity:{status:'validated' as const,evidenceId:'flight-cs-sensitivity-1',applicability:'flight_event_specific' as const},
+    paired_open_closed_response:{status:'validated' as const,evidenceId:'paired-count-rates-1',applicability:'flight_event_specific' as const},
+    energy_correction_cEn:{status:'validated' as const,evidenceId:'c-en-validation-1',applicability:'flight_event_specific' as const},
+    fragmentation_background:{status:'validated' as const,evidenceId:'fragment-background-1',applicability:'flight_event_specific' as const},
+    detector_dead_time:{status:'validated' as const,evidenceId:'cem-deadtime-1',applicability:'flight_event_specific' as const},
+    event_configuration_review:{status:'validated' as const,evidenceId:'event-config-review-1',applicability:'flight_event_specific' as const}
+  });
+  it('only reports ready when every gate has flight-scoped evidence',()=>{
+    const result=evaluateMavenNgimsFlightCalibrationReadiness(readyEvidence());
+    expect(result.status).toBe('ready');
+    expect(result.densityConversionAllowed).toBe(true);
+    expect(result.blockers).toEqual([]);
+  });
+  it('blocks unresolved gates and reports each blocker',()=>{
+    const input=readyEvidence();
+    input.energy_correction_cEn={status:'unresolved',rationale:'C_EN not established'};
+    input.detector_dead_time={status:'missing'};
+    const result=evaluateMavenNgimsFlightCalibrationReadiness(input);
+    expect(result.status).toBe('blocked');
+    expect(result.densityConversionAllowed).toBe(false);
+    expect(result.blockers).toHaveLength(2);
+  });
+  it('rejects preflight evidence promoted without event-specific scope',()=>{
+    const input=readyEvidence();
+    input.closed_source_sensitivity={status:'validated',evidenceId:'ground-preflight',applicability:undefined};
+    const result=evaluateMavenNgimsFlightCalibrationReadiness(input);
+    expect(result.status).toBe('blocked');
+    expect(result.blockers[0]).toContain('flight scope');
+  });
+  it('requires a rationale for a not-applicable gate',()=>{
+    const input=readyEvidence();
+    input.detector_dead_time={status:'not_applicable'};
+    expect(evaluateMavenNgimsFlightCalibrationReadiness(input).status).toBe('blocked');
+    input.detector_dead_time={status:'not_applicable',rationale:'L1B CPS columns already dead-time corrected; no additional correction applied'};
+    expect(evaluateMavenNgimsFlightCalibrationReadiness(input).status).toBe('ready');
+  });
+});
