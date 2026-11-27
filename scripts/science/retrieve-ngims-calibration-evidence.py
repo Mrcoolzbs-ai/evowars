@@ -88,7 +88,9 @@ def main():
         try:
             label_body,_=get(apiurl)
             label_json=json.loads(label_body)
-            # PDS API records commonly expose one or more file locations. Preserve the resolved label.
+            if not response_matches_lidvid(label_json, lidvid):
+                raise ValueError(f"PDS resolver returned a different product than requested: {lidvid}")
+            # Preserve the exact resolver response as evidence, even when no locator is exposed.
             (out/(f"resolved-{record['tid']}-{record['identifier'].split(':')[-2]}.json")).write_bytes(label_body)
             urls=extract_urls(label_json)
             candidate_urls=[]
@@ -101,10 +103,8 @@ def main():
             # Do not assume API schema: capture locator evidence and fail this product if no files found.
             product={"identifier":lidvid,"tid":record["tid"],"resolver_url":apiurl,"locator_candidates":candidate_urls,"retrieved":[]}
             for url in candidate_urls:
-                parsed=urllib.parse.urlparse(url)
-                if parsed.netloc not in {"atmos.nmsu.edu","pds-atmospheres.nmsu.edu","pds.nasa.gov"}:
-                    continue
                 try:
+                    parsed=urllib.parse.urlparse(resolve_candidate_url(url))
                     body,ctype=get(url)
                     filename=Path(urllib.parse.unquote(parsed.path)).name or "payload.bin"
                     safe=re.sub(r"[^A-Za-z0-9._-]+","_",filename)
