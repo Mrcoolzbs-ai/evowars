@@ -250,13 +250,13 @@ export function evaluateMavenNgimsFlightCalibrationReadiness(
     const validEvidenceId = typeof evidence?.evidenceId === 'string' && evidence.evidenceId.trim() !== '';
     const validatedWithFlightScope = evidence?.status === 'validated' &&
       evidence.applicability === 'flight_event_specific' && validEvidenceId;
-    const validNotApplicable = evidence?.status === 'not_applicable' &&
+    const validNotApplicable = id === 'detector_dead_time' && evidence?.status === 'not_applicable' &&
       typeof evidence.rationale === 'string' && evidence.rationale.trim() !== '';
     if (!validatedWithFlightScope && !validNotApplicable) {
       const reason = evidence?.status === 'missing' ? 'missing evidence' :
         evidence?.status === 'unresolved' ? 'unresolved evidence' :
         evidence?.status === 'validated' ? 'validated status lacks flight scope or evidence ID' :
-        'not-applicable status requires a rationale';
+        'not-applicable status is only permitted for detector_dead_time and requires a rationale';
       blockers.push(id + ': ' + reason);
     }
     return {
