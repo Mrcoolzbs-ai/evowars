@@ -219,7 +219,7 @@ export type MavenNgimsCalibrationGateId =
   | 'detector_dead_time'
   | 'event_configuration_review';
 export type MavenNgimsFlightCalibrationReadinessInput =
-  Readonly<Record<MavenNgimsCalibrationGateId, MavenNgimsCalibrationGateEvidence>>;
+  Record<MavenNgimsCalibrationGateId, MavenNgimsCalibrationGateEvidence>;
 export interface MavenNgimsFlightCalibrationReadiness {
   readonly status: 'ready' | 'blocked';
   readonly densityConversionAllowed: boolean;
