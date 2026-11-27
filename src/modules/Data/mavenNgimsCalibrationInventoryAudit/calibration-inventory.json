@@ -1,0 +1,651 @@
+{
+  "inventory": {
+    "diagnostics": [],
+    "members": [
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010191_20120923t081945::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10191
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010191_20120923t081945::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10191
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      }
+    ],
+    "primaryCount": 50,
+    "recordCount": 50,
+    "secondaryCount": 0,
+    "targetMembers": [
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-hk-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010191_20120923t081945::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10191
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-mkr-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010191_20120923t081945::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10191
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-msg-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010194_20120923t174216::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10194
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010197_20120924t092141::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10197
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010198_20120924t233413::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10198
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010199_20120925t002126::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10199
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010201_20120925t081444::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10201
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010202_20120925t122210::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10202
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010205_20120926t080733::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10205
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010207_20120926t160225::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10207
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010216_20120928t114624::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10216
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010217_20120928t125655::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10217
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010241_20121003t122823::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10241
+      },
+      {
+        "identifier": "urn:nasa:pds:maven_ngims:calibration:mvn_ngi_l1c_gnd-sci-010242_20121003t125232::1.1",
+        "status": "P",
+        "target": true,
+        "tid": 10242
+      }
+    ],
+    "targetTidCounts": {
+      "10191": 2,
+      "10194": 4,
+      "10197": 4,
+      "10198": 4,
+      "10199": 4,
+      "10201": 4,
+      "10202": 4,
+      "10205": 4,
+      "10207": 4,
+      "10216": 4,
+      "10217": 4,
+      "10241": 4,
+      "10242": 4
+    },
+    "unparsedTidCount": 0
+  },
+  "limitations": [
+    "Inventory identifiers are not proof that payloads were retrieved or validated.",
+    "No science spectra, calibration values, chamber pressure, external gauge, C_EN, flight applicability, or CPS-to-density conversion is derived."
+  ],
+  "retrievedAtUtc": "2026-11-27T10:38:46.876967+00:00",
+  "schemaVersion": 1,
+  "scope": "inventory_only_not_calibration",
+  "sources": {
+    "collection_label": {
+      "bytes": 4441,
+      "contentType": "text/xml",
+      "sha256": "0cb3cc61622a67e3b6a05056d1ad0f1bb10bb5cfb91a29ed1b16adc2c7a82f6e",
+      "status": 200,
+      "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/collection_ngims_calibration_inventory.xml"
+    },
+    "inventory_csv": {
+      "bytes": 4338,
+      "contentType": "text/csv",
+      "sha256": "928fefaec5c32e31d31c2cdc39a1fd190578d3cf9cc43d43569158de1c7e0120",
+      "status": 200,
+      "url": "https://atmos.nmsu.edu/PDS/data/PDS4/MAVEN/ngims_bundle/calibration/collection_ngims_calibration_inventory.csv"
+    }
+  }
+}
