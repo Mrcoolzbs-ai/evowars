@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
       - name: Validate script
         run: |
-          python -m py_compile scripts/science/retrieve-ngims-calibration-evidence.py scripts/science/test_retrieve_ngims-calibration-evidence.py
+          python -m py_compile scripts/science/retrieve-ngims-calibration-evidence.py scripts/science/test_retrieve_ngims_calibration_evidence.py
           python -m unittest scripts/science/test_retrieve_ngims_calibration_evidence.py
       - name: Resolve PDS product IDs and retrieve evidence
         run: python scripts/science/retrieve-ngims-calibration-evidence.py --tids "${{ inputs.tids }}"
