@@ -1,0 +1,35 @@
+name: Retrieve targeted NGIMS calibration evidence payloads
+
+on:
+  workflow_dispatch:
+    inputs:
+      tids:
+        description: Comma-separated TIDs (default: all complete inventory events)
+        required: false
+        default: "10194,10197,10198,10199,10201,10202,10205,10207,10216,10217,10241,10242"
+
+permissions:
+  contents: read
+
+jobs:
+  retrieve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stage-3-planetary-physics
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate script
+        run: python -m py_compile scripts/science/retrieve-ngims-calibration-evidence.py
+      - name: Resolve PDS product IDs and retrieve evidence
+        run: python scripts/science/retrieve-ngims-calibration-evidence.py --tids "${{ inputs.tids }}"
+      - name: Upload evidence bundle (raw products; no calibration derived)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngims-calibration-evidence
+          path: ngims-calibration-payloads/
+          if-no-files-found: warn
+          retention-days: 14
